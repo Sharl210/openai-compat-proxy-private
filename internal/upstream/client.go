@@ -169,8 +169,20 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	if len(req.Messages) > 0 {
 		var input []map[string]any
 		for _, msg := range req.Messages {
+			if msg.Role == "tool" {
+				input = append(input, map[string]any{
+					"type":    "function_call_output",
+					"call_id": msg.ToolCallID,
+					"output":  joinTextParts(msg.Parts),
+				})
+				continue
+			}
+
 			item := map[string]any{"role": msg.Role}
 			var content []map[string]any
+			if msg.ReasoningContent != "" && msg.Role == "assistant" {
+				content = append(content, map[string]any{"type": "output_text", "text": msg.ReasoningContent})
+			}
 			for _, part := range msg.Parts {
 				switch part.Type {
 				case "text":
@@ -179,8 +191,19 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 					content = append(content, map[string]any{"type": "input_image", "image_url": part.ImageURL})
 				}
 			}
-			item["content"] = content
-			input = append(input, item)
+			if len(content) > 0 {
+				item["content"] = content
+				input = append(input, item)
+			}
+
+			for _, toolCall := range msg.ToolCalls {
+				input = append(input, map[string]any{
+					"type":      "function_call",
+					"call_id":   toolCall.ID,
+					"name":      toolCall.Name,
+					"arguments": toolCall.Arguments,
+				})
+			}
 		}
 		payload["input"] = input
 	}
@@ -227,6 +250,16 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func joinTextParts(parts []model.CanonicalContentPart) string {
+	var builder strings.Builder
+	for _, part := range parts {
+		if part.Type == "text" {
+			builder.WriteString(part.Text)
+		}
+	}
+	return builder.String()
 }
 
 func cloneMap(input map[string]any) map[string]any {

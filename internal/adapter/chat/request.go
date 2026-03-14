@@ -31,8 +31,20 @@ type streamOptions struct {
 }
 
 type message struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	Role             string          `json:"role"`
+	Content          json.RawMessage `json:"content"`
+	ToolCalls        []toolCall      `json:"tool_calls"`
+	ToolCallID       string          `json:"tool_call_id"`
+	ReasoningContent string          `json:"reasoning_content"`
+}
+
+type toolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type contentPart struct {
@@ -103,9 +115,22 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			return model.CanonicalRequest{}, fmt.Errorf("decode message content: %w", err)
 		}
 
+		var toolCalls []model.CanonicalToolCall
+		for _, tc := range msg.ToolCalls {
+			toolCalls = append(toolCalls, model.CanonicalToolCall{
+				ID:        tc.ID,
+				Type:      tc.Type,
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			})
+		}
+
 		canon.Messages = append(canon.Messages, model.CanonicalMessage{
-			Role:  msg.Role,
-			Parts: parts,
+			Role:             msg.Role,
+			Parts:            parts,
+			ToolCalls:        toolCalls,
+			ToolCallID:       msg.ToolCallID,
+			ReasoningContent: msg.ReasoningContent,
 		})
 	}
 

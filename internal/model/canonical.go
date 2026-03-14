@@ -18,8 +18,18 @@ type CanonicalRequest struct {
 }
 
 type CanonicalMessage struct {
-	Role  string
-	Parts []CanonicalContentPart
+	Role             string
+	Parts            []CanonicalContentPart
+	ToolCalls        []CanonicalToolCall
+	ToolCallID       string
+	ReasoningContent string
+}
+
+type CanonicalToolCall struct {
+	ID        string
+	Type      string
+	Name      string
+	Arguments string
 }
 
 type CanonicalContentPart struct {
