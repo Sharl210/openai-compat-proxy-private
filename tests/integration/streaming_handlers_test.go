@@ -1,12 +1,14 @@
 package integration_test
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/testutil"
 )
@@ -65,6 +67,101 @@ func TestChatStreamingTranslatesTextDeltasToChunks(t *testing.T) {
 	}
 	if !strings.Contains(text, "\"finish_reason\":\"stop\"") {
 		t.Fatalf("missing finish reason: %s", text)
+	}
+}
+
+func TestChatStreamingStartsBeforeUpstreamCompletion(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hel\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 1500*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	firstLine := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if strings.TrimSpace(line) != "" {
+				firstLine <- line
+				return
+			}
+		}
+	}()
+
+	select {
+	case line := <-firstLine:
+		if !strings.Contains(line, "data: ") {
+			t.Fatalf("expected early SSE data line, got %q", line)
+		}
+	case err := <-errCh:
+		t.Fatalf("failed before receiving first line: %v", err)
+	case <-time.After(600 * time.Millisecond):
+		t.Fatal("timed out waiting for first downstream chunk before upstream completion")
+	}
+}
+
+func TestChatStreamingEmitsSyntheticStatusBeforeText(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+		"event: response.output_item.added\ndata: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"phase\":\"final_answer\",\"role\":\"assistant\"}}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 400*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	deadline := time.After(1200 * time.Millisecond)
+	var lines []string
+	for len(lines) < 4 {
+		select {
+		case <-deadline:
+			joined := strings.Join(lines, "")
+			if !strings.Contains(joined, `"reasoning_content":"分析中…"`) {
+				t.Fatalf("expected synthetic reasoning status before text, got %s", joined)
+			}
+			return
+		default:
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				joined := strings.Join(lines, "")
+				if !strings.Contains(joined, `"reasoning_content":"分析中…"`) {
+					t.Fatalf("expected synthetic reasoning status before text, got %s (err=%v)", joined, err)
+				}
+				return
+			}
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+
+	joined := strings.Join(lines, "")
+	if !strings.Contains(joined, `"reasoning_content":"分析中…"`) {
+		t.Fatalf("expected synthetic reasoning status before text, got %s", joined)
 	}
 }
 
