@@ -63,6 +63,29 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	return nil, lastErr
 }
 
+func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	if authorization != "" {
+		httpReq.Header.Set("Authorization", authorization)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return 0, nil, "", err
+	}
+
+	return resp.StatusCode, body, resp.Header.Get("Content-Type"), nil
+}
+
 func (c *Client) streamOnce(ctx context.Context, body []byte, authorization string) ([]Event, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
 	if err != nil {
@@ -132,7 +155,7 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 				"type":        tool.Type,
 				"name":        tool.Name,
 				"description": tool.Description,
-				"parameters":  tool.Parameters,
+				"parameters":  normalizeJSONSchema(tool.Parameters),
 			}
 			tools = append(tools, entry)
 		}
@@ -157,6 +180,30 @@ func textPartTypeForRole(role string) string {
 		return "output_text"
 	default:
 		return "input_text"
+	}
+}
+
+func normalizeJSONSchema(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		clone := make(map[string]any, len(typed)+1)
+		for key, nested := range typed {
+			clone[key] = normalizeJSONSchema(nested)
+		}
+		if schemaType, _ := typed["type"].(string); schemaType == "array" {
+			if _, ok := clone["items"]; !ok {
+				clone["items"] = map[string]any{}
+			}
+		}
+		return clone
+	case []any:
+		clone := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			clone = append(clone, normalizeJSONSchema(nested))
+		}
+		return clone
+	default:
+		return value
 	}
 }
 
