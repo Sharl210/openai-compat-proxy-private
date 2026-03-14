@@ -122,3 +122,68 @@ func TestUpstreamClientMapsAssistantTextHistoryToOutputText(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpstreamClientOmitsReasoningWhenNotRequested(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := body["reasoning"]; ok {
+			t.Fatalf("expected no reasoning payload, got %#v", body["reasoning"])
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:  "gpt-x",
+		Stream: true,
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hi"}}},
+		},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpstreamClientPassesThroughReasoningObject(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		reasoning, ok := body["reasoning"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected reasoning object, got %#v", body["reasoning"])
+		}
+		if reasoning["effort"] != "high" || reasoning["summary"] != "auto" {
+			t.Fatalf("expected pass-through reasoning object, got %#v", reasoning)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:  "gpt-x",
+		Stream: true,
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hi"}}},
+		},
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+}

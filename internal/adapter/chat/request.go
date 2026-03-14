@@ -17,6 +17,7 @@ type request struct {
 	Tools           []tool          `json:"tools"`
 	ToolChoice      any             `json:"tool_choice"`
 	ReasoningEffort string          `json:"reasoning_effort"`
+	Reasoning       map[string]any  `json:"reasoning"`
 	Temperature     *float64        `json:"temperature"`
 	TopP            *float64        `json:"top_p"`
 	MaxTokens       *int            `json:"max_tokens"`
@@ -69,8 +70,14 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		Stop:            req.Stop,
 	}
 
-	if req.ReasoningEffort != "" {
-		canon.Reasoning = &model.CanonicalReasoning{Effort: req.ReasoningEffort}
+	if len(req.Reasoning) > 0 {
+		canon.Reasoning = &model.CanonicalReasoning{
+			Effort:  stringMapValue(req.Reasoning, "effort"),
+			Summary: stringMapValue(req.Reasoning, "summary"),
+			Raw:     req.Reasoning,
+		}
+	} else if req.ReasoningEffort != "" {
+		canon.Reasoning = &model.CanonicalReasoning{Effort: req.ReasoningEffort, Raw: map[string]any{"effort": req.ReasoningEffort}}
 	}
 
 	for _, t := range req.Tools {
@@ -133,4 +140,9 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 	}
 
 	return result, nil
+}
+
+func stringMapValue(m map[string]any, key string) string {
+	value, _ := m[key].(string)
+	return value
 }

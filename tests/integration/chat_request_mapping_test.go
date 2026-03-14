@@ -24,3 +24,20 @@ func TestChatRequestMapsImageToolsAndReasoning(t *testing.T) {
 		t.Fatal("expected mapped multimodal, tools, and reasoning")
 	}
 }
+
+func TestChatRequestMapsReasoningObject(t *testing.T) {
+	body := `{
+		"model":"gpt-x",
+		"stream":false,
+		"messages":[{"role":"user","content":"hi"}],
+		"reasoning":{"effort":"high","summary":"auto"}
+	}`
+
+	canon, err := chatadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canon.Reasoning == nil || canon.Reasoning.Effort != "high" || canon.Reasoning.Summary != "auto" {
+		t.Fatalf("expected reasoning object to map through, got %#v", canon.Reasoning)
+	}
+}

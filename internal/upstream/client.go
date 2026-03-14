@@ -168,8 +168,21 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 			payload["tool_choice"] = value
 		}
 	}
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		payload["reasoning"] = map[string]any{"effort": req.Reasoning.Effort}
+	if req.Reasoning != nil {
+		if len(req.Reasoning.Raw) > 0 {
+			payload["reasoning"] = req.Reasoning.Raw
+		} else if req.Reasoning.Effort != "" || req.Reasoning.Summary != "" {
+			reasoning := map[string]any{}
+			if req.Reasoning.Effort != "" {
+				reasoning["effort"] = req.Reasoning.Effort
+			}
+			if req.Reasoning.Summary != "" {
+				reasoning["summary"] = req.Reasoning.Summary
+			}
+			if len(reasoning) > 0 {
+				payload["reasoning"] = reasoning
+			}
+		}
 	}
 	return json.Marshal(payload)
 }
