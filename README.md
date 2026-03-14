@@ -4,6 +4,7 @@
 
 当前对外暴露：
 
+- `GET /v1/models`
 - `POST /v1/responses`
 - `POST /v1/chat/completions`
 - `GET /healthz`
@@ -23,11 +24,13 @@
 
 - 文本 `responses`
 - 文本 `chat/completions`
+- `models` 透传
 - 多轮 `chat/completions` assistant 历史消息透传
 - 多模态输入
 - 工具调用
 - `responses` 流式透传
 - `chat` 流式 chunk 输出
+- `chat` 扩展字段 `reasoning_content`
 
 推荐模型：
 
@@ -120,6 +123,36 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 - `assistant` → `output_text`
 
 这可以避免部分上游在重放 assistant 历史消息时返回类似 `Invalid value 'input_text'` 的 400 错误。
+
+### chat reasoning_content 扩展
+
+当前版本在 `chat/completions` 上额外提供一个 **de facto 扩展字段**：
+
+- non-stream: `choices[0].message.reasoning_content`
+- stream: `choices[0].delta.reasoning_content`
+
+它不会把推理内容混进普通 `content`，而是单独暴露，兼容许多主流 OpenAI-compatible 网关/客户端的扩展读取方式。
+
+注意：这不是 OpenAI 官方 `chat/completions` 标准字段，而是兼容生态中的常见扩展。
+
+### models
+
+```bash
+curl http://127.0.0.1:18082/v1/models \
+  -H 'Authorization: Bearer <proxy-key>'
+```
+
+当前实现会把 `GET /v1/models` 透传到上游并回传结果。
+
+### tools schema 兼容
+
+当前版本会在转发工具定义到上游前做一个最小兼容修复：
+
+- 如果某个 JSON Schema 节点声明了 `"type": "array"`
+- 但缺少 `items`
+- 代理会自动补成 `"items": {}`
+
+这用于兼容部分上游对 function/tool 参数 schema 的严格校验。
 
 ### 多模态
 
