@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
 ENV_FILE="$ROOT_DIR/.env"
 BIN_DIR="$ROOT_DIR/bin"
 BIN_PATH="$BIN_DIR/openai-compat-proxy"
