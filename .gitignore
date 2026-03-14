@@ -1,0 +1,4 @@
+.env
+.proxy.log
+.proxy.pid
+bin/

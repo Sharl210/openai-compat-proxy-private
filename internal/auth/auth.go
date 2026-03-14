@@ -1,0 +1,42 @@
+package auth
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"openai-compat-proxy/internal/config"
+)
+
+var ErrUnauthorized = errors.New("unauthorized")
+var ErrMissingUpstreamAuth = errors.New("missing upstream authorization")
+
+func ValidateProxyAuth(r *http.Request, proxyKey string) error {
+	if proxyKey == "" {
+		return nil
+	}
+
+	if r.Header.Get("Authorization") != "Bearer "+proxyKey {
+		return ErrUnauthorized
+	}
+
+	return nil
+}
+
+func ResolveUpstreamAuthorization(r *http.Request, cfg config.Config) (string, error) {
+	if value := strings.TrimSpace(r.Header.Get("X-Upstream-Authorization")); value != "" {
+		return value, nil
+	}
+
+	if cfg.ProxyAPIKey == "" {
+		if value := strings.TrimSpace(r.Header.Get("Authorization")); value != "" {
+			return value, nil
+		}
+	}
+
+	if cfg.UpstreamAPIKey != "" {
+		return "Bearer " + cfg.UpstreamAPIKey, nil
+	}
+
+	return "", ErrMissingUpstreamAuth
+}
