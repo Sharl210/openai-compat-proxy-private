@@ -23,6 +23,7 @@
 
 - 文本 `responses`
 - 文本 `chat/completions`
+- 多轮 `chat/completions` assistant 历史消息透传
 - 多模态输入
 - 工具调用
 - `responses` 流式透传
@@ -110,6 +111,15 @@ curl http://127.0.0.1:18082/v1/chat/completions \
     "stream": false
   }'
 ```
+
+### chat 多轮历史
+
+当前版本会在转发到上游 `/v1/responses` 时按角色重写文本 content type：
+
+- `user` / `system` / `developer` → `input_text`
+- `assistant` → `output_text`
+
+这可以避免部分上游在重放 assistant 历史消息时返回类似 `Invalid value 'input_text'` 的 400 错误。
 
 ### 多模态
 
