@@ -8,6 +8,25 @@ BIN_PATH="$BIN_DIR/openai-compat-proxy"
 PID_FILE="$ROOT_DIR/.proxy.pid"
 LOG_FILE="$ROOT_DIR/.proxy.log"
 
+ensure_go() {
+  if [[ "${DEPLOY_FORCE_INSTALL_GO:-}" != "1" ]] && command -v go >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y golang-go
+  else
+    echo "Go is not installed and no supported package manager was found." >&2
+    exit 1
+  fi
+
+  if ! command -v go >/dev/null 2>&1; then
+    echo "Go installation failed or go is still unavailable in PATH." >&2
+    exit 1
+  fi
+}
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing .env. Copy .env.example to .env and fill required values before running this script." >&2
   exit 1
@@ -22,6 +41,8 @@ set +a
 : "${UPSTREAM_API_KEY:?UPSTREAM_API_KEY is required in .env}"
 
 mkdir -p "$BIN_DIR"
+
+ensure_go
 
 go build -o "$BIN_PATH" ./cmd/proxy
 
