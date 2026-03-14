@@ -68,3 +68,40 @@ func TestChatHandlerIncludesReasoningContentExtension(t *testing.T) {
 		t.Fatalf("expected reasoning_content extension, got %#v", message["reasoning_content"])
 	}
 }
+
+func TestChatHandlerIncludesReasoningContentFromReasoningItemSummary(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.done\ndata: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"brief thinking\"}]}}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30,\"output_tokens_details\":{\"reasoning_tokens\":12}}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	choices := out["choices"].([]any)
+	message := choices[0].(map[string]any)["message"].(map[string]any)
+	if message["reasoning_content"] != "brief thinking" {
+		t.Fatalf("expected reasoning_content from summary item, got %#v", message["reasoning_content"])
+	}
+	usage, ok := out["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected usage object, got %#v", out["usage"])
+	}
+	completionDetails, ok := usage["completion_tokens_details"].(map[string]any)
+	if !ok || completionDetails["reasoning_tokens"] != float64(12) {
+		t.Fatalf("expected reasoning_tokens in usage, got %#v", usage)
+	}
+}

@@ -33,6 +33,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 			"message":       message,
 			"finish_reason": "stop",
 		}},
+		"usage": chatUsage(result.Usage),
 	}
 }
 
@@ -46,4 +47,33 @@ func reasoningContentValue(reasoning map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func chatUsage(usage map[string]any) any {
+	if len(usage) == 0 {
+		return nil
+	}
+	result := map[string]any{}
+	if promptTokens, ok := usage["input_tokens"]; ok {
+		result["prompt_tokens"] = promptTokens
+	}
+	if completionTokens, ok := usage["output_tokens"]; ok {
+		result["completion_tokens"] = completionTokens
+	}
+	if totalTokens, ok := usage["total_tokens"]; ok {
+		result["total_tokens"] = totalTokens
+	}
+	if details, _ := usage["output_tokens_details"].(map[string]any); len(details) > 0 {
+		chatDetails := map[string]any{}
+		if reasoningTokens, ok := details["reasoning_tokens"]; ok {
+			chatDetails["reasoning_tokens"] = reasoningTokens
+		}
+		if len(chatDetails) > 0 {
+			result["completion_tokens_details"] = chatDetails
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

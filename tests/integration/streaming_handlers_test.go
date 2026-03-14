@@ -135,6 +135,63 @@ func TestChatStreamingTranslatesReasoningDeltasToExtensionField(t *testing.T) {
 	}
 }
 
+func TestChatStreamingEmitsReasoningContentFromReasoningItemSummary(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.done\ndata: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"summary visible\"}]}}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"reasoning_content":"summary visible"`) {
+		t.Fatalf("missing reasoning summary content chunk: %s", text)
+	}
+}
+
+func TestChatStreamingIncludesUsageReasoningTokensWhenRequested(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30,\"output_tokens_details\":{\"reasoning_tokens\":12}}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"usage":{"completion_tokens":20,"completion_tokens_details":{"reasoning_tokens":12},"prompt_tokens":10,"total_tokens":30}`) {
+		t.Fatalf("missing final usage chunk: %s", text)
+	}
+	if !strings.Contains(text, `"choices":[]`) {
+		t.Fatalf("expected empty choices usage chunk: %s", text)
+	}
+}
+
 func TestChatStreamingNormalizesToolArraySchemaBeforeUpstream(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"openai-compat-proxy/internal/upstream"
 )
@@ -45,7 +46,7 @@ type chatStreamState struct {
 	nextToolIx int
 }
 
-func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event) error {
+func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event, includeUsage bool) error {
 	state := chatStreamState{
 		toolMeta:  map[string]map[string]string{},
 		toolIndex: map[string]int{},
@@ -55,6 +56,11 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 		switch evt.Event {
 		case "response.output_item.added", "response.output_item.done":
 			item, _ := evt.Data["item"].(map[string]any)
+			if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
+				if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
+					return err
+				}
+			}
 			if itemType, _ := item["type"].(string); itemType == "function_call" {
 				itemID, _ := item["id"].(string)
 				if itemID != "" {
@@ -68,7 +74,7 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 					}
 					if !state.toolSent[itemID] {
 						toolDelta := chatToolDelta(state.toolIndex[itemID], stringValue(item["call_id"]), stringValue(item["name"]), "", true)
-						if err := writeChatChunk(w, flusher, toolDelta, ""); err != nil {
+						if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
 							return err
 						}
 						state.toolSent[itemID] = true
@@ -77,19 +83,19 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 			}
 		case "response.output_text.delta":
 			if !state.roleSent {
-				if err := writeChatChunk(w, flusher, map[string]any{"role": "assistant"}, ""); err != nil {
+				if err := writeChatChunk(w, flusher, map[string]any{"role": "assistant"}, "", nil); err != nil {
 					return err
 				}
 				state.roleSent = true
 			}
 			if delta := stringValue(evt.Data["delta"]); delta != "" {
-				if err := writeChatChunk(w, flusher, map[string]any{"content": delta}, ""); err != nil {
+				if err := writeChatChunk(w, flusher, map[string]any{"content": delta}, "", nil); err != nil {
 					return err
 				}
 			}
 		case "response.reasoning.delta":
 			if delta := reasoningContentValue(evt.Data); delta != "" {
-				if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": delta}, ""); err != nil {
+				if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": delta}, "", nil); err != nil {
 					return err
 				}
 			}
@@ -98,11 +104,18 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 			delta := stringValue(evt.Data["delta"])
 			index := state.toolIndex[itemID]
 			toolDelta := chatToolDelta(index, "", "", delta, false)
-			if err := writeChatChunk(w, flusher, toolDelta, ""); err != nil {
+			if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
 				return err
 			}
 		case "response.completed", "response.done":
-			if err := writeChatChunk(w, flusher, map[string]any{}, "stop"); err != nil {
+			if includeUsage {
+				if usage := chatUsage(usageFromEventData(evt.Data)); usage != nil {
+					if err := writeChatChunk(w, flusher, nil, "", usage); err != nil {
+						return err
+					}
+				}
+			}
+			if err := writeChatChunk(w, flusher, map[string]any{}, "stop", nil); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
@@ -116,16 +129,21 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 	return nil
 }
 
-func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[string]any, finishReason string) error {
-	chunk := map[string]any{
-		"object": "chat.completion.chunk",
-		"choices": []map[string]any{{
+func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[string]any, finishReason string, usage any) error {
+	chunk := map[string]any{"object": "chat.completion.chunk"}
+	if delta == nil {
+		chunk["choices"] = []any{}
+	} else {
+		chunk["choices"] = []map[string]any{{
 			"index": 0,
 			"delta": delta,
-		}},
+		}}
 	}
 	if finishReason != "" {
 		chunk["choices"].([]map[string]any)[0]["finish_reason"] = finishReason
+	}
+	if usage != nil {
+		chunk["usage"] = usage
 	}
 	encoded, err := json.Marshal(chunk)
 	if err != nil {
@@ -167,4 +185,63 @@ func reasoningContentValue(data map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func reasoningSummaryFromItem(item map[string]any) string {
+	parts, _ := item["summary"].([]any)
+	if len(parts) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, rawPart := range parts {
+		part, _ := rawPart.(map[string]any)
+		if part == nil {
+			continue
+		}
+		if text, _ := part["text"].(string); text != "" {
+			builder.WriteString(text)
+		}
+	}
+	return builder.String()
+}
+
+func usageFromEventData(data map[string]any) map[string]any {
+	if usage, _ := data["usage"].(map[string]any); len(usage) > 0 {
+		return usage
+	}
+	if response, _ := data["response"].(map[string]any); response != nil {
+		if usage, _ := response["usage"].(map[string]any); len(usage) > 0 {
+			return usage
+		}
+	}
+	return nil
+}
+
+func chatUsage(usage map[string]any) any {
+	if len(usage) == 0 {
+		return nil
+	}
+	result := map[string]any{}
+	if promptTokens, ok := usage["input_tokens"]; ok {
+		result["prompt_tokens"] = promptTokens
+	}
+	if completionTokens, ok := usage["output_tokens"]; ok {
+		result["completion_tokens"] = completionTokens
+	}
+	if totalTokens, ok := usage["total_tokens"]; ok {
+		result["total_tokens"] = totalTokens
+	}
+	if details, _ := usage["output_tokens_details"].(map[string]any); len(details) > 0 {
+		chatDetails := map[string]any{}
+		if reasoningTokens, ok := details["reasoning_tokens"]; ok {
+			chatDetails["reasoning_tokens"] = reasoningTokens
+		}
+		if len(chatDetails) > 0 {
+			result["completion_tokens_details"] = chatDetails
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
