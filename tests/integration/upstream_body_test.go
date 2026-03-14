@@ -220,3 +220,47 @@ func TestUpstreamClientAddsDefaultReasoningSummaryAuto(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpstreamClientReplaysToolLoopHistory(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		input, ok := body["input"].([]any)
+		if !ok || len(input) != 3 {
+			t.Fatalf("expected three replay items, got %#v", body["input"])
+		}
+		assistant, _ := input[0].(map[string]any)
+		if assistant["role"] != "assistant" {
+			t.Fatalf("expected assistant replay item, got %#v", assistant)
+		}
+		functionCall, _ := input[1].(map[string]any)
+		if functionCall["type"] != "function_call" || functionCall["call_id"] != "call_1" || functionCall["name"] != "search_web" {
+			t.Fatalf("expected function_call replay item, got %#v", functionCall)
+		}
+		functionOutput, _ := input[2].(map[string]any)
+		if functionOutput["type"] != "function_call_output" || functionOutput["call_id"] != "call_1" {
+			t.Fatalf("expected function_call_output replay item, got %#v", functionOutput)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:  "gpt-x",
+		Stream: true,
+		Messages: []model.CanonicalMessage{
+			{Role: "assistant", ReasoningContent: "正在调用工具…\n", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"桂林天气"}`}}},
+			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"result":"晴"}`}}},
+		},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
