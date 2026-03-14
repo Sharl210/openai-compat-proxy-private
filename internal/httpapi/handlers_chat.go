@@ -35,6 +35,14 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 			defer cancel()
 		}
 
+		if canon.Stream {
+			flusher := startSSE(w)
+			if err := writeChatSSELive(ctx, client, w, flusher, canon, authorization); err != nil {
+				return
+			}
+			return
+		}
+
 		events, err := client.Stream(ctx, canon, authorization)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -57,14 +65,6 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 		}
 		if len(result.UnsupportedContentTypes) > 0 {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported chat output content")
-			return
-		}
-
-		if canon.Stream {
-			flusher := startSSE(w)
-			if err := writeChatSSE(w, flusher, events, canon.IncludeUsage); err != nil {
-				errorsx.WriteJSON(w, http.StatusInternalServerError, "stream_write_error", err.Error())
-			}
 			return
 		}
 

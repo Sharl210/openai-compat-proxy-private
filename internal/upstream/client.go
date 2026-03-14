@@ -63,6 +63,14 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	return nil, lastErr
 }
 
+func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {
+	body, err := buildRequestBody(req)
+	if err != nil {
+		return err
+	}
+	return c.streamEventsOnce(ctx, body, authorization, onEvent)
+}
+
 func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
@@ -112,6 +120,34 @@ func (c *Client) streamOnce(ctx context.Context, body []byte, authorization stri
 	}
 
 	return parseSSE(resp)
+}
+
+func (c *Client) streamEventsOnce(ctx context.Context, body []byte, authorization string, onEvent func(Event) error) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if authorization != "" {
+		httpReq.Header.Set("Authorization", authorization)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg := strings.TrimSpace(string(respBody))
+		if msg == "" {
+			msg = http.StatusText(resp.StatusCode)
+		}
+		return &HTTPStatusError{StatusCode: resp.StatusCode, Body: msg}
+	}
+
+	return parseSSEStreaming(resp, onEvent)
 }
 
 func shouldRetry(err error) bool {
@@ -264,6 +300,55 @@ func parseSSE(resp *http.Response) ([]Event, error) {
 	}
 
 	return events, nil
+}
+
+func parseSSEStreaming(resp *http.Response, onEvent func(Event) error) error {
+	var currentEvent string
+	var dataLines []string
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if currentEvent != "" {
+				evt, err := finalizeEvent(currentEvent, dataLines)
+				if err != nil {
+					return err
+				}
+				if err := onEvent(evt); err != nil {
+					return err
+				}
+			}
+			currentEvent = ""
+			dataLines = nil
+			continue
+		}
+
+		if strings.HasPrefix(line, "event: ") {
+			currentEvent = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	if currentEvent != "" {
+		evt, err := finalizeEvent(currentEvent, dataLines)
+		if err != nil {
+			return err
+		}
+		if err := onEvent(evt); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func finalizeEvent(name string, dataLines []string) (Event, error) {
