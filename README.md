@@ -2,36 +2,42 @@
 
 `openai-compat-proxy` 是一个 Go 单二进制 OpenAI 兼容代理，用来把一个不稳定、兼容性不完整的上游 Responses 接口包装成更稳定、对客户端更友好的下游接口。
 
-当前对外暴露：
+当前主推接口：
+
+- `POST /v1/chat/completions`
+
+当前仍保留的兼容/辅助接口：
 
 - `GET /v1/models`
 - `POST /v1/responses`
-- `POST /v1/chat/completions`
 - `GET /healthz`
 
-代理内部统一请求上游 `/v1/responses`，并兼容：
+当前项目的主要维护目标是把上游 `/responses` 包装成更稳定的 `chat/completions` 单端口体验。
+
+代理内部统一请求上游 `/v1/responses`，当前重点兼容：
 
 - non-streaming 聚合
-- responses 流式透传
-- chat 流式 chunk 翻译
+- chat 真正流式 chunk 翻译
 - tools / function calling
 - reasoning
 - 多模态输入
 
 ## 已真实验证的能力
 
-基于真实上游 `https://api-vip.codex-for.me/v1` 联调验证通过：
+基于真实上游 `https://api-vip.codex-for.me/v1` 联调验证通过，当前最主要验证目标集中在 `chat/completions`：
 
-- 文本 `responses`
 - 文本 `chat/completions`
-- `models` 透传
 - 多轮 `chat/completions` assistant 历史消息透传
 - 多模态输入
 - 工具调用
-- `responses` 流式透传
 - `chat` 真正边读边写的流式 chunk 输出
 - `chat` 扩展字段 `reasoning_content`
 - `chat` usage 中的 `reasoning_tokens`
+
+兼容保留但非主线维护能力：
+
+- `GET /v1/models`
+- `POST /v1/responses`
 
 推荐模型：
 
@@ -87,7 +93,7 @@ chmod +x scripts/deploy-linux.sh
 
 ## 请求示例
 
-### responses
+### responses（兼容保留）
 
 ```bash
 curl http://127.0.0.1:18082/v1/responses \
@@ -207,7 +213,7 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 开启后，`chat/completions` 流式响应会在 `data: [DONE]` 之前追加一个 `choices: []` 的 usage chunk。
 
-### models
+### models（兼容保留）
 
 ```bash
 curl http://127.0.0.1:18082/v1/models \
@@ -271,5 +277,6 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 ## 文档
 
+- 当前文档默认以 `chat/completions` 为主线描述
 - 功能报告：`docs/功能报告.md`
 - 部署文档：`docs/部署文档.md`
