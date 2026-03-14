@@ -172,13 +172,13 @@ func parseSSE(resp *http.Response) ([]Event, error) {
 			continue
 		}
 
-		if value, ok := strings.CutPrefix(line, "event: "); ok {
-			currentEvent = value
+		if strings.HasPrefix(line, "event: ") {
+			currentEvent = strings.TrimPrefix(line, "event: ")
 			continue
 		}
 
-		if value, ok := strings.CutPrefix(line, "data: "); ok {
-			dataLines = append(dataLines, value)
+		if strings.HasPrefix(line, "data: ") {
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
 		}
 	}
 
