@@ -18,6 +18,7 @@ type Result struct {
 	Text                    string
 	ToolCalls               []ToolCall
 	Reasoning               map[string]any
+	Usage                   map[string]any
 	ResponseMessageContent  []map[string]any
 	UnsupportedContentTypes []string
 }
@@ -79,6 +80,12 @@ func (c *Collector) Accept(evt upstream.Event) {
 				}
 			}
 		}
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			if summary := reasoningSummaryFromItem(item); summary != "" {
+				c.reasoning["summary"] = stringValue(c.reasoning["summary"]) + summary
+			}
+			return
+		}
 		if itemType, _ := item["type"].(string); itemType != "function_call" {
 			return
 		}
@@ -102,6 +109,9 @@ func (c *Collector) Accept(evt upstream.Event) {
 			call.Arguments = arguments
 		}
 	case "response.completed", "response.done":
+		if usage := usageFromEventData(evt.Data); len(usage) > 0 {
+			c.reasoning["usage"] = usage
+		}
 		c.completed = true
 	case "response.reasoning.delta":
 		for k, v := range evt.Data {
@@ -125,6 +135,9 @@ func (c *Collector) Result() (Result, error) {
 	}
 	if len(c.reasoning) > 0 {
 		result.Reasoning = c.reasoning
+		if usage, _ := c.reasoning["usage"].(map[string]any); len(usage) > 0 {
+			result.Usage = usage
+		}
 	}
 	if len(c.responseMessageContent) > 0 {
 		result.ResponseMessageContent = append(result.ResponseMessageContent, c.responseMessageContent...)
@@ -147,4 +160,34 @@ func shouldAppendReasoningKey(key string) bool {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func reasoningSummaryFromItem(item map[string]any) string {
+	parts, _ := item["summary"].([]any)
+	if len(parts) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, rawPart := range parts {
+		part, _ := rawPart.(map[string]any)
+		if part == nil {
+			continue
+		}
+		if text, _ := part["text"].(string); text != "" {
+			builder.WriteString(text)
+		}
+	}
+	return builder.String()
+}
+
+func usageFromEventData(data map[string]any) map[string]any {
+	if usage, _ := data["usage"].(map[string]any); len(usage) > 0 {
+		return usage
+	}
+	if response, _ := data["response"].(map[string]any); response != nil {
+		if usage, _ := response["usage"].(map[string]any); len(usage) > 0 {
+			return usage
+		}
+	}
+	return nil
 }
