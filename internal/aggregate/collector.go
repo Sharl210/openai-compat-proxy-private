@@ -105,6 +105,10 @@ func (c *Collector) Accept(evt upstream.Event) {
 		c.completed = true
 	case "response.reasoning.delta":
 		for k, v := range evt.Data {
+			if text, ok := v.(string); ok && shouldAppendReasoningKey(k) {
+				c.reasoning[k] = stringValue(c.reasoning[k]) + text
+				continue
+			}
 			c.reasoning[k] = v
 		}
 	}
@@ -129,4 +133,18 @@ func (c *Collector) Result() (Result, error) {
 		result.UnsupportedContentTypes = append(result.UnsupportedContentTypes, c.unsupportedContentTypes...)
 	}
 	return result, nil
+}
+
+func shouldAppendReasoningKey(key string) bool {
+	switch key {
+	case "summary", "reasoning_content", "content", "delta":
+		return true
+	default:
+		return false
+	}
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
 }

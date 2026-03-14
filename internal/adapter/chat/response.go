@@ -7,6 +7,9 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		"role":    "assistant",
 		"content": result.Text,
 	}
+	if reasoningContent := reasoningContentValue(result.Reasoning); reasoningContent != "" {
+		message["reasoning_content"] = reasoningContent
+	}
 
 	if len(result.ToolCalls) > 0 {
 		var toolCalls []map[string]any
@@ -31,4 +34,16 @@ func BuildResponse(result aggregate.Result) map[string]any {
 			"finish_reason": "stop",
 		}},
 	}
+}
+
+func reasoningContentValue(reasoning map[string]any) string {
+	if len(reasoning) == 0 {
+		return ""
+	}
+	for _, key := range []string{"reasoning_content", "summary", "content", "delta"} {
+		if text, _ := reasoning[key].(string); text != "" {
+			return text
+		}
+	}
+	return ""
 }

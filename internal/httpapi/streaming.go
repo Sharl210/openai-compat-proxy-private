@@ -87,6 +87,12 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 					return err
 				}
 			}
+		case "response.reasoning.delta":
+			if delta := reasoningContentValue(evt.Data); delta != "" {
+				if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": delta}, ""); err != nil {
+					return err
+				}
+			}
 		case "response.function_call_arguments.delta":
 			itemID := stringValue(evt.Data["item_id"])
 			delta := stringValue(evt.Data["delta"])
@@ -152,4 +158,13 @@ func chatToolDelta(index int, callID, name, arguments string, includeMetadata bo
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func reasoningContentValue(data map[string]any) string {
+	for _, key := range []string{"reasoning_content", "summary", "content", "delta"} {
+		if text, _ := data[key].(string); text != "" {
+			return text
+		}
+	}
+	return ""
 }

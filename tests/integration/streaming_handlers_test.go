@@ -1,8 +1,10 @@
 package integration_test
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -99,6 +101,95 @@ func TestChatStreamingTranslatesToolCallDeltas(t *testing.T) {
 	}
 	if strings.Count(text, `"name":"get_weather"`) != 1 {
 		t.Fatalf("expected tool name to be sent once, got body: %s", text)
+	}
+}
+
+func TestChatStreamingTranslatesReasoningDeltasToExtensionField(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\ndata: {\"summary\":\"care\"}\n\n",
+		"event: response.reasoning.delta\ndata: {\"summary\":\"ful\"}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"reasoning_content":"care"`) || !strings.Contains(text, `"reasoning_content":"ful"`) {
+		t.Fatalf("missing reasoning_content deltas: %s", text)
+	}
+	if !strings.Contains(text, "[DONE]") {
+		t.Fatalf("missing done marker: %s", text)
+	}
+}
+
+func TestChatStreamingNormalizesToolArraySchemaBeforeUpstream(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("expected one tool, got %#v", body["tools"])
+		}
+
+		tool, ok := tools[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected tool object, got %#v", tools[0])
+		}
+		parameters, ok := tool["parameters"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected parameters object, got %#v", tool["parameters"])
+		}
+		properties, ok := parameters["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected properties object, got %#v", parameters["properties"])
+		}
+		ids, ok := properties["ids"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected ids schema object, got %#v", properties["ids"])
+		}
+		if _, ok := ids["items"]; !ok {
+			t.Fatalf("expected proxy to inject array items schema, got %#v", ids)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.output_text.delta\ndata: {\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"))
+	}))
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"memory_get","parameters":{"type":"object","properties":{"ids":{"type":"array"}}}}}],"stream":true}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "chat.completion.chunk") || !strings.Contains(text, "[DONE]") {
+		t.Fatalf("unexpected normalized stream body: %s", text)
 	}
 }
 
