@@ -43,14 +43,15 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 }
 
 type chatStreamState struct {
-	roleSent     bool
-	textStarted  bool
-	startedSent  bool
-	planningSent bool
-	toolMeta     map[string]map[string]string
-	toolIndex    map[string]int
-	toolSent     map[string]bool
-	nextToolIx   int
+	roleSent          bool
+	textStarted       bool
+	realReasoningSeen bool
+	planningSent      bool
+	toolStatusSent    bool
+	toolMeta          map[string]map[string]string
+	toolIndex         map[string]int
+	toolSent          map[string]bool
+	nextToolIx        int
 }
 
 func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
@@ -81,28 +82,29 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool) error {
 	switch evt.Event {
 	case "response.created":
-		if !state.startedSent && !state.textStarted {
-			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "分析中…"}, "", nil); err != nil {
-				return err
-			}
-			state.startedSent = true
-		}
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
 		if !state.textStarted {
-			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent {
-				if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "正在组织回答…"}, "", nil); err != nil {
+			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realReasoningSeen {
+				if err := writeChatChunk(w, flusher, syntheticReasoningStatus("正在组织回答…"), "", nil); err != nil {
 					return err
 				}
 				state.planningSent = true
 			}
 		}
 		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
+			state.realReasoningSeen = true
 			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
 				return err
 			}
 		}
 		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			if !state.textStarted && !state.realReasoningSeen && !state.toolStatusSent {
+				if err := writeChatChunk(w, flusher, syntheticReasoningStatus("正在调用工具…"), "", nil); err != nil {
+					return err
+				}
+				state.toolStatusSent = true
+			}
 			itemID, _ := item["id"].(string)
 			if itemID != "" {
 				if _, ok := state.toolIndex[itemID]; !ok {
@@ -137,6 +139,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.reasoning.delta":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
+			state.realReasoningSeen = true
 			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": delta}, "", nil); err != nil {
 				return err
 			}
@@ -168,6 +171,13 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	}
 	return nil
+}
+
+func syntheticReasoningStatus(text string) map[string]any {
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return map[string]any{"reasoning_content": text}
 }
 
 func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[string]any, finishReason string, usage any) error {

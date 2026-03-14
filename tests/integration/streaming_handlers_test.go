@@ -117,7 +117,6 @@ func TestChatStreamingStartsBeforeUpstreamCompletion(t *testing.T) {
 
 func TestChatStreamingEmitsSyntheticStatusBeforeText(t *testing.T) {
 	stub := testutil.NewDelayedStreamingUpstream(t, []string{
-		"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
 		"event: response.output_item.added\ndata: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"phase\":\"final_answer\",\"role\":\"assistant\"}}\n\n",
 		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
 		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
@@ -160,8 +159,40 @@ func TestChatStreamingEmitsSyntheticStatusBeforeText(t *testing.T) {
 	}
 
 	joined := strings.Join(lines, "")
-	if !strings.Contains(joined, `"reasoning_content":"分析中…"`) {
+	if !strings.Contains(joined, `"reasoning_content":"正在组织回答…\n"`) {
 		t.Fatalf("expected synthetic reasoning status before text, got %s", joined)
+	}
+}
+
+func TestChatStreamingEmitsToolStatusAndNewlinesWhenNoRealReasoning(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.output_item.done\ndata: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"name\":\"lookup\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n",
+		"event: response.function_call_arguments.delta\ndata: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"q\\\":\\\"x\\\"}\"}\n\n",
+		"event: response.output_item.added\ndata: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"phase\":\"final_answer\",\"role\":\"assistant\"}}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 200*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"reasoning_content":"正在调用工具…\n"`) {
+		t.Fatalf("expected tool status with newline, got %s", text)
+	}
+	if !strings.Contains(text, `"reasoning_content":"正在组织回答…\n"`) {
+		t.Fatalf("expected planning status with newline, got %s", text)
 	}
 }
 
@@ -192,6 +223,42 @@ func TestChatStreamingSkipsSyntheticStatusWhenRealReasoningArrives(t *testing.T)
 	}
 	if !strings.Contains(text, `"reasoning_content":"real"`) {
 		t.Fatalf("expected real reasoning content, got %s", text)
+	}
+}
+
+func TestChatStreamingContinuesRealReasoningAroundToolCalls(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\ndata: {\"summary\":\"先分析\"}\n\n",
+		"event: response.output_item.done\ndata: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"name\":\"lookup\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n",
+		"event: response.function_call_arguments.delta\ndata: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"q\\\":\\\"x\\\"}\"}\n\n",
+		"event: response.reasoning.delta\ndata: {\"summary\":\"再分析\"}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 150*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"reasoning_content":"先分析"`) || !strings.Contains(text, `"reasoning_content":"再分析"`) {
+		t.Fatalf("expected reasoning before and after tool call, got %s", text)
+	}
+	if !strings.Contains(text, `"name":"lookup"`) || !strings.Contains(text, `"arguments":"{\"q\":\"x\"}"`) {
+		t.Fatalf("expected interleaved tool call, got %s", text)
+	}
+	if strings.Contains(text, `"reasoning_content":"正在调用工具…\n"`) || strings.Contains(text, `"reasoning_content":"正在组织回答…\n"`) {
+		t.Fatalf("expected no synthetic statuses when real reasoning exists, got %s", text)
 	}
 }
 
