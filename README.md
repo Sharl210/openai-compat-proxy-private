@@ -29,7 +29,7 @@
 - 多模态输入
 - 工具调用
 - `responses` 流式透传
-- `chat` 流式 chunk 输出
+- `chat` 真正边读边写的流式 chunk 输出
 - `chat` 扩展字段 `reasoning_content`
 - `chat` usage 中的 `reasoning_tokens`
 
@@ -140,6 +140,38 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 - 上游在 reasoning output item 的 `summary[]` 中返回 `summary_text`
 
 注意：这不是 OpenAI 官方 `chat/completions` 标准字段，而是兼容生态中的常见扩展。
+
+### chat 真正流式转发
+
+当前版本的 `chat/completions` 在 `stream=true` 时，不再先把上游 SSE 全部读完再统一输出，而是：
+
+- 上游 event 一到就立刻转成下游 `chat.completion.chunk`
+- 每个 chunk 立即 flush 给客户端
+- 结束时再补 usage chunk（如果 `stream_options.include_usage=true`）和 `[DONE]`
+
+这会显著改善“很久没首字、然后一下子吐很多 token”的体验。
+
+### chat 预正文状态流
+
+为了减少正文开始前的长时间空白，当前版本会在正文 token 出现前，按轻量兼容扩展发送少量状态提示：
+
+- `分析中…`
+- `正在组织回答…`
+
+这些状态通过 `delta.reasoning_content` 发出；一旦正文 `delta.content` 开始输出，就停止伪造状态流。
+
+它们是体验优化信号，不代表模型原始 chain-of-thought。
+
+### chat SSE 反缓冲头
+
+当前 `chat` 流式响应会显式设置：
+
+- `Content-Type: text/event-stream`
+- `Cache-Control: no-cache, no-transform`
+- `Connection: keep-alive`
+- `X-Accel-Buffering: no`
+
+这用于减少代理层 / 网关层的额外缓冲。
 
 ### chat reasoning 请求透传
 
