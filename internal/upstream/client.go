@@ -115,7 +115,7 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 			for _, part := range msg.Parts {
 				switch part.Type {
 				case "text":
-					content = append(content, map[string]any{"type": "input_text", "text": part.Text})
+					content = append(content, map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text})
 				case "image_url", "input_image":
 					content = append(content, map[string]any{"type": "input_image", "image_url": part.ImageURL})
 				}
@@ -149,6 +149,15 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		payload["reasoning"] = map[string]any{"effort": req.Reasoning.Effort}
 	}
 	return json.Marshal(payload)
+}
+
+func textPartTypeForRole(role string) string {
+	switch role {
+	case "assistant":
+		return "output_text"
+	default:
+		return "input_text"
+	}
 }
 
 func parseSSE(resp *http.Response) ([]Event, error) {
