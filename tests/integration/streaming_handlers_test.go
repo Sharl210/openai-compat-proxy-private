@@ -165,6 +165,36 @@ func TestChatStreamingEmitsSyntheticStatusBeforeText(t *testing.T) {
 	}
 }
 
+func TestChatStreamingSkipsSyntheticStatusWhenRealReasoningArrives(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\ndata: {\"summary\":\"real\"}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 300*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, `"reasoning_content":"分析中…"`) {
+		t.Fatalf("expected synthetic status to be suppressed when real reasoning exists, got %s", text)
+	}
+	if !strings.Contains(text, `"reasoning_content":"real"`) {
+		t.Fatalf("expected real reasoning content, got %s", text)
+	}
+}
+
 func TestChatStreamingTranslatesToolCallDeltas(t *testing.T) {
 	stub := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.done\ndata: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"name\":\"get_weather\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n",
