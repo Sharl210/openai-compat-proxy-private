@@ -141,6 +141,18 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 注意：这不是 OpenAI 官方 `chat/completions` 标准字段，而是兼容生态中的常见扩展。
 
+### chat reasoning 请求透传
+
+当前版本**不会代理层强行指定必须推理**。
+
+它的行为是：
+
+- 如果调用方没有传 `reasoning` / `reasoning_effort`，代理不会主动注入 reasoning 请求设置
+- 如果调用方传了 `reasoning_effort`，代理会把它等价映射到上游 `reasoning.effort`
+- 如果调用方直接传了 `reasoning` 对象，代理会尽量按原样透传到上游
+
+这意味着“是否启用推理、是否请求 summary”等策略，应该由客户端请求决定，而不是由代理私自替你指定。
+
 ### chat reasoning_tokens
 
 如果上游没有给可见 reasoning 文本，但在完成事件里给了 token 统计，当前版本会把它映射到 chat usage：
