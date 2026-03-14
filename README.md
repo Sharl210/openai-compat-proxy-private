@@ -31,6 +31,7 @@
 - `responses` 流式透传
 - `chat` 流式 chunk 输出
 - `chat` 扩展字段 `reasoning_content`
+- `chat` usage 中的 `reasoning_tokens`
 
 推荐模型：
 
@@ -133,7 +134,31 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 它不会把推理内容混进普通 `content`，而是单独暴露，兼容许多主流 OpenAI-compatible 网关/客户端的扩展读取方式。
 
+当前可见 reasoning 来源有两类：
+
+- 上游直接发 `response.reasoning.delta`
+- 上游在 reasoning output item 的 `summary[]` 中返回 `summary_text`
+
 注意：这不是 OpenAI 官方 `chat/completions` 标准字段，而是兼容生态中的常见扩展。
+
+### chat reasoning_tokens
+
+如果上游没有给可见 reasoning 文本，但在完成事件里给了 token 统计，当前版本会把它映射到 chat usage：
+
+- non-stream: `usage.completion_tokens_details.reasoning_tokens`
+- stream: 当请求带 `stream_options.include_usage: true` 时，在最后一个 usage chunk 中返回
+
+这可以让客户端至少知道本次请求确实发生了推理，即使上游只返回加密 reasoning。
+
+### chat stream_options.include_usage
+
+当前版本支持透传并消费：
+
+```json
+{"stream_options":{"include_usage":true}}
+```
+
+开启后，`chat/completions` 流式响应会在 `data: [DONE]` 之前追加一个 `choices: []` 的 usage chunk。
 
 ### models
 
