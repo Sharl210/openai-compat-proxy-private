@@ -160,6 +160,8 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 这些状态通过 `delta.reasoning_content` 发出；一旦正文 `delta.content` 开始输出，就停止伪造状态流。
 
+只有在上游**没有返回真实可见 reasoning** 时，代理才会发送这些状态提示；如果上游已经返回了真实 reasoning delta 或 reasoning summary，代理不会覆盖它。
+
 它们是体验优化信号，不代表模型原始 chain-of-thought。
 
 ### chat SSE 反缓冲头
@@ -175,15 +177,16 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 ### chat reasoning 请求透传
 
-当前版本**不会代理层强行指定必须推理**。
+当前版本**不会代理层强行指定必须推理**，但会把 chat 兼容请求转换成更适合上游 `/responses` 的 reasoning 形态。
 
 它的行为是：
 
-- 如果调用方没有传 `reasoning` / `reasoning_effort`，代理不会主动注入 reasoning 请求设置
-- 如果调用方传了 `reasoning_effort`，代理会把它等价映射到上游 `reasoning.effort`
-- 如果调用方直接传了 `reasoning` 对象，代理会尽量按原样透传到上游
+- 如果调用方没有传 `reasoning` / `reasoning_effort`，代理不会主动打开推理
+- 如果调用方传了 `reasoning_effort`，代理会把它转换成上游 `reasoning.effort`
+- chat 兼容请求默认补 `reasoning.summary: "auto"`
+- 如果调用方直接传了 `reasoning` 对象，代理会尽量按原样透传；若缺少 `summary`，代理会补 `summary: "auto"`
 
-这意味着“是否启用推理、是否请求 summary”等策略，应该由客户端请求决定，而不是由代理私自替你指定。
+这意味着“是否启用推理”仍由客户端请求决定，而“是否请求 summary”在 chat 兼容层会被代理自动补齐，以便更稳定地从上游拿到可展示的摘要。
 
 ### chat reasoning_tokens
 
