@@ -206,7 +206,11 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	}
 	if req.Reasoning != nil {
 		if len(req.Reasoning.Raw) > 0 {
-			payload["reasoning"] = req.Reasoning.Raw
+			reasoning := cloneMap(req.Reasoning.Raw)
+			if _, ok := reasoning["summary"]; !ok {
+				reasoning["summary"] = "auto"
+			}
+			payload["reasoning"] = reasoning
 		} else if req.Reasoning.Effort != "" || req.Reasoning.Summary != "" {
 			reasoning := map[string]any{}
 			if req.Reasoning.Effort != "" {
@@ -214,6 +218,8 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 			}
 			if req.Reasoning.Summary != "" {
 				reasoning["summary"] = req.Reasoning.Summary
+			} else {
+				reasoning["summary"] = "auto"
 			}
 			if len(reasoning) > 0 {
 				payload["reasoning"] = reasoning
@@ -221,6 +227,17 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func textPartTypeForRole(role string) string {

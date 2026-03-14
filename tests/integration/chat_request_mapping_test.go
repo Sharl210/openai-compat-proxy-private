@@ -41,3 +41,20 @@ func TestChatRequestMapsReasoningObject(t *testing.T) {
 		t.Fatalf("expected reasoning object to map through, got %#v", canon.Reasoning)
 	}
 }
+
+func TestChatRequestMapsReasoningEffortToDefaultSummaryAuto(t *testing.T) {
+	body := `{
+		"model":"gpt-x",
+		"stream":false,
+		"messages":[{"role":"user","content":"hi"}],
+		"reasoning_effort":"high"
+	}`
+
+	canon, err := chatadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canon.Reasoning == nil || canon.Reasoning.Effort != "high" || canon.Reasoning.Summary != "auto" {
+		t.Fatalf("expected reasoning_effort to map to effort+default summary auto, got %#v", canon.Reasoning)
+	}
+}

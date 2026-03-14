@@ -71,13 +71,17 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	if len(req.Reasoning) > 0 {
+		reasoningRaw := cloneMap(req.Reasoning)
+		if _, ok := reasoningRaw["summary"]; !ok {
+			reasoningRaw["summary"] = "auto"
+		}
 		canon.Reasoning = &model.CanonicalReasoning{
-			Effort:  stringMapValue(req.Reasoning, "effort"),
-			Summary: stringMapValue(req.Reasoning, "summary"),
-			Raw:     req.Reasoning,
+			Effort:  stringMapValue(reasoningRaw, "effort"),
+			Summary: stringMapValue(reasoningRaw, "summary"),
+			Raw:     reasoningRaw,
 		}
 	} else if req.ReasoningEffort != "" {
-		canon.Reasoning = &model.CanonicalReasoning{Effort: req.ReasoningEffort, Raw: map[string]any{"effort": req.ReasoningEffort}}
+		canon.Reasoning = &model.CanonicalReasoning{Effort: req.ReasoningEffort, Summary: "auto", Raw: map[string]any{"effort": req.ReasoningEffort, "summary": "auto"}}
 	}
 
 	for _, t := range req.Tools {
@@ -145,4 +149,15 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 func stringMapValue(m map[string]any, key string) string {
 	value, _ := m[key].(string)
 	return value
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
 }

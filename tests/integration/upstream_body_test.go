@@ -187,3 +187,36 @@ func TestUpstreamClientPassesThroughReasoningObject(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpstreamClientAddsDefaultReasoningSummaryAuto(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		reasoning, ok := body["reasoning"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected reasoning object, got %#v", body["reasoning"])
+		}
+		if reasoning["effort"] != "high" || reasoning["summary"] != "auto" {
+			t.Fatalf("expected default summary auto, got %#v", reasoning)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:     "gpt-x",
+		Stream:    true,
+		Messages:  []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hi"}}}},
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Raw: map[string]any{"effort": "high"}},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
