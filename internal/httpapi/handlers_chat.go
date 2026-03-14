@@ -62,7 +62,7 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 
 		if canon.Stream {
 			flusher := startSSE(w)
-			if err := writeChatSSE(w, flusher, events); err != nil {
+			if err := writeChatSSE(w, flusher, events, canon.IncludeUsage); err != nil {
 				errorsx.WriteJSON(w, http.StatusInternalServerError, "stream_write_error", err.Error())
 			}
 			return

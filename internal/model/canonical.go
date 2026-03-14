@@ -3,6 +3,7 @@ package model
 type CanonicalRequest struct {
 	Model           string
 	Stream          bool
+	IncludeUsage    bool
 	Instructions    string
 	Messages        []CanonicalMessage
 	Temperature     *float64

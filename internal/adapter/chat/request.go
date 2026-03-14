@@ -12,6 +12,7 @@ import (
 type request struct {
 	Model           string          `json:"model"`
 	Stream          bool            `json:"stream"`
+	StreamOptions   *streamOptions  `json:"stream_options"`
 	Messages        []message       `json:"messages"`
 	Tools           []tool          `json:"tools"`
 	ToolChoice      any             `json:"tool_choice"`
@@ -22,6 +23,10 @@ type request struct {
 	Stop            []string        `json:"stop"`
 	N               *int            `json:"n"`
 	Raw             json.RawMessage `json:"-"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type message struct {
@@ -57,6 +62,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	canon := model.CanonicalRequest{
 		Model:           req.Model,
 		Stream:          req.Stream,
+		IncludeUsage:    req.StreamOptions != nil && req.StreamOptions.IncludeUsage,
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
 		MaxOutputTokens: req.MaxTokens,
