@@ -42,3 +42,39 @@ func TestUpstreamKeyFallsBackToServerDefault(t *testing.T) {
 		t.Fatalf("unexpected auth header: %q", resolved)
 	}
 }
+
+func TestChatRouteEmitsNormalizationVersionHeader(t *testing.T) {
+	server := newServerWithStubbedUpstream(t, httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	})).URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("X-Proxy-Normalization-Version"); got != "v1" {
+		t.Fatalf("expected normalization version v1, got %q", got)
+	}
+}
+
+func TestResponsesRouteEmitsNormalizationVersionHeader(t *testing.T) {
+	server := newServerWithStubbedUpstream(t, httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	})).URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"x","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("X-Proxy-Normalization-Version"); got != "v1" {
+		t.Fatalf("expected normalization version v1, got %q", got)
+	}
+}

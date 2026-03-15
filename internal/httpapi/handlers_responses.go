@@ -16,6 +16,7 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 	client := upstream.NewClient(cfg.UpstreamBaseURL)
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		setNormalizationVersionHeader(w)
 		authorization, err := authHeaderForUpstream(r, cfg)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
