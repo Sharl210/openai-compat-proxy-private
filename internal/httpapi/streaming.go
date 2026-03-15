@@ -282,17 +282,25 @@ func chatUsage(usage map[string]any) any {
 	if totalTokens, ok := usage["total_tokens"]; ok {
 		result["total_tokens"] = totalTokens
 	}
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		result["prompt_tokens_details"] = cloneMap(details)
+	}
 	if details, _ := usage["output_tokens_details"].(map[string]any); len(details) > 0 {
-		chatDetails := map[string]any{}
-		if reasoningTokens, ok := details["reasoning_tokens"]; ok {
-			chatDetails["reasoning_tokens"] = reasoningTokens
-		}
-		if len(chatDetails) > 0 {
-			result["completion_tokens_details"] = chatDetails
-		}
+		result["completion_tokens_details"] = cloneMap(details)
 	}
 	if len(result) == 0 {
 		return nil
 	}
 	return result
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
 }
