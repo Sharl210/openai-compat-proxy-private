@@ -34,5 +34,17 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		"status":    "completed",
 		"output":    []map[string]any{outputItem},
 		"reasoning": result.Reasoning,
+		"usage":     cloneMap(result.Usage),
 	}
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
 }
