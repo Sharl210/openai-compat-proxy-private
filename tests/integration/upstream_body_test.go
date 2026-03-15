@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"openai-compat-proxy/internal/model"
@@ -262,5 +263,80 @@ func TestUpstreamClientReplaysToolLoopHistory(t *testing.T) {
 	_, err := client.Stream(context.Background(), req, "Bearer server-key")
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpstreamClientBuildsStableBodiesForEquivalentRequests(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		bodies []map[string]any
+	)
+
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:  "gpt-x",
+		Stream: true,
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hi"}}},
+			{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}},
+		},
+		Tools: []model.CanonicalTool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object", "properties": map[string]any{"ids": map[string]any{"type": "array"}}},
+		}},
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Raw: map[string]any{"effort": "high"}},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	for i := 0; i < 2; i++ {
+		_, err := client.Stream(context.Background(), req, "Bearer server-key")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("expected two captured bodies, got %d", len(bodies))
+	}
+	first, err := json.Marshal(bodies[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := json.Marshal(bodies[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("expected stable upstream body, got %s vs %s", first, second)
+	}
+
+	reasoning, ok := bodies[0]["reasoning"].(map[string]any)
+	if !ok || reasoning["summary"] != "auto" {
+		t.Fatalf("expected stable reasoning summary auto, got %#v", bodies[0]["reasoning"])
+	}
+	tools, ok := bodies[0]["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected one tool, got %#v", bodies[0]["tools"])
+	}
+	tool, _ := tools[0].(map[string]any)
+	parameters, _ := tool["parameters"].(map[string]any)
+	properties, _ := parameters["properties"].(map[string]any)
+	ids, _ := properties["ids"].(map[string]any)
+	if _, ok := ids["items"]; !ok {
+		t.Fatalf("expected normalized array schema items, got %#v", ids)
 	}
 }
