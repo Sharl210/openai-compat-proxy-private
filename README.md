@@ -213,6 +213,27 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 开启后，`chat/completions` 流式响应会在 `data: [DONE]` 之前追加一个 `choices: []` 的 usage chunk。
 
+当前版本还会尽量保留上游 cache 相关 usage 明细；例如当上游返回 `input_tokens_details.cached_tokens` 时，代理会映射到：
+
+- non-stream: `usage.prompt_tokens_details.cached_tokens`
+- stream: 最后一个 usage chunk 中的 `usage.prompt_tokens_details.cached_tokens`
+
+### normalization version 契约
+
+为了把代理层的缓存前缀规则固定成显式契约，当前版本对会参与规范化的主线路由返回：
+
+- `X-Proxy-Normalization-Version: v1`
+
+当前 `v1` 代表的规范化规则包括：
+
+- 上游统一走 `/responses`
+- 上游统一发送 `stream: true`
+- `assistant` 文本历史映射为 `output_text`
+- chat reasoning 缺少 `summary` 时补 `summary: "auto"`
+- tool schema 中缺少 `items` 的 array 节点自动补 `items: {}`
+
+这不是直连兼容承诺，而是“始终走代理时缓存前缀稳定”的版本承诺。未来如果这些规则需要变更，应升级 normalization version，而不是静默修改现有 `v1` 语义。
+
 ### models（兼容保留）
 
 ```bash
