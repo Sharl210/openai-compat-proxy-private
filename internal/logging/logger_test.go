@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
@@ -83,5 +84,48 @@ func TestLoggerCanIncludeBodiesWhenEnabled(t *testing.T) {
 	}
 	if record["body_hash"] != "def456" {
 		t.Fatalf("expected body hash to remain, got %#v", record["body_hash"])
+	}
+}
+
+func TestLoggerRotatesAndKeepsRecentBackups(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "proxy.jsonl")
+	stdout := &bytes.Buffer{}
+
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      logPath,
+		LogMaxSizeMB:     1,
+		LogMaxBackups:    2,
+		LogIncludeBodies: false,
+	}, stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFn()
+
+	largeBody := strings.Repeat("x", 600*1024)
+	for i := 0; i < 4; i++ {
+		logger.Event("rotation_test", map[string]any{
+			"body":      largeBody,
+			"body_hash": i,
+		})
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated int
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "proxy-") && strings.HasSuffix(name, ".jsonl") {
+			rotated++
+		}
+	}
+	if rotated > 2 {
+		t.Fatalf("expected at most 2 rotated backups, got %d", rotated)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("expected active log file to exist: %v", err)
 	}
 }
