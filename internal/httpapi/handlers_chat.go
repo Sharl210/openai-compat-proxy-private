@@ -9,6 +9,7 @@ import (
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
+	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -28,6 +29,20 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		canon.RequestID = w.Header().Get("X-Request-Id")
+		canon.AuthMode = authModeForUpstream(r, cfg)
+		logging.Event("canonical_request_built", map[string]any{
+			"request_id":            canon.RequestID,
+			"route":                 "/v1/chat/completions",
+			"auth_mode":             canon.AuthMode,
+			"model":                 canon.Model,
+			"stream":                canon.Stream,
+			"include_usage":         canon.IncludeUsage,
+			"message_count":         len(canon.Messages),
+			"tool_count":            len(canon.Tools),
+			"has_reasoning":         canon.Reasoning != nil,
+			"normalization_version": normalizationVersion,
+		})
 
 		ctx := r.Context()
 		var cancel context.CancelFunc
@@ -74,5 +89,10 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
 		}
+		logging.Event("downstream_chat_usage_mapped", map[string]any{
+			"request_id":    canon.RequestID,
+			"cached_tokens": nestedCachedTokens(result.Usage),
+			"usage_present": len(result.Usage) > 0,
+		})
 	}
 }
