@@ -6,10 +6,9 @@
 
 - `POST /v1/chat/completions`
 
-当前仍保留的兼容/辅助接口：
+辅助接口：
 
 - `GET /v1/models`
-- `POST /v1/responses`
 - `GET /healthz`
 
 当前项目的主要维护目标是把上游 `/responses` 包装成更稳定的 `chat/completions` 单端口体验。
