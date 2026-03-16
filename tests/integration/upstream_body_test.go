@@ -230,18 +230,14 @@ func TestUpstreamClientReplaysToolLoopHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		input, ok := body["input"].([]any)
-		if !ok || len(input) != 3 {
-			t.Fatalf("expected three replay items, got %#v", body["input"])
+		if !ok || len(input) != 2 {
+			t.Fatalf("expected two replay items, got %#v", body["input"])
 		}
-		assistant, _ := input[0].(map[string]any)
-		if assistant["role"] != "assistant" {
-			t.Fatalf("expected assistant replay item, got %#v", assistant)
-		}
-		functionCall, _ := input[1].(map[string]any)
+		functionCall, _ := input[0].(map[string]any)
 		if functionCall["type"] != "function_call" || functionCall["call_id"] != "call_1" || functionCall["name"] != "search_web" {
 			t.Fatalf("expected function_call replay item, got %#v", functionCall)
 		}
-		functionOutput, _ := input[2].(map[string]any)
+		functionOutput, _ := input[1].(map[string]any)
 		if functionOutput["type"] != "function_call_output" || functionOutput["call_id"] != "call_1" {
 			t.Fatalf("expected function_call_output replay item, got %#v", functionOutput)
 		}
@@ -338,5 +334,55 @@ func TestUpstreamClientBuildsStableBodiesForEquivalentRequests(t *testing.T) {
 	ids, _ := properties["ids"].(map[string]any)
 	if _, ok := ids["items"]; !ok {
 		t.Fatalf("expected normalized array schema items, got %#v", ids)
+	}
+}
+
+func TestUpstreamClientDoesNotReplayReasoningContentAsAssistantPrompt(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+
+		input, ok := body["input"].([]any)
+		if !ok || len(input) != 1 {
+			t.Fatalf("expected one assistant replay item, got %#v", body["input"])
+		}
+		assistant, ok := input[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected assistant object, got %#v", input[0])
+		}
+		content, ok := assistant["content"].([]any)
+		if !ok || len(content) != 1 {
+			t.Fatalf("expected only assistant text content, got %#v", assistant["content"])
+		}
+		part, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("expected content object, got %#v", content[0])
+		}
+		if part["text"] != "final answer" {
+			t.Fatalf("expected reasoning_content to be excluded from upstream replay, got %#v", assistant["content"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:  "gpt-x",
+		Stream: true,
+		Messages: []model.CanonicalMessage{{
+			Role:             "assistant",
+			ReasoningContent: "正在组织回答…\n",
+			Parts:            []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+		}},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -40,11 +42,28 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	if err != nil {
 		return nil, err
 	}
+	logging.Event("upstream_request_built", map[string]any{
+		"request_id":    req.RequestID,
+		"auth_mode":     req.AuthMode,
+		"model":         req.Model,
+		"stream":        true,
+		"body_hash":     hashBytes(body),
+		"body_size":     len(body),
+		"message_count": len(req.Messages),
+		"tool_count":    len(req.Tools),
+		"body":          string(body),
+	})
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		events, err := c.streamOnce(ctx, body, authorization)
 		if err == nil {
+			logging.Event("upstream_response_completed", map[string]any{
+				"request_id":    req.RequestID,
+				"attempt":       attempt,
+				"event_count":   len(events),
+				"cached_tokens": cachedTokensFromEvents(events),
+			})
 			return events, nil
 		}
 		lastErr = err
@@ -68,6 +87,17 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 	if err != nil {
 		return err
 	}
+	logging.Event("upstream_request_built", map[string]any{
+		"request_id":    req.RequestID,
+		"auth_mode":     req.AuthMode,
+		"model":         req.Model,
+		"stream":        true,
+		"body_hash":     hashBytes(body),
+		"body_size":     len(body),
+		"message_count": len(req.Messages),
+		"tool_count":    len(req.Tools),
+		"body":          string(body),
+	})
 	return c.streamEventsOnce(ctx, body, authorization, onEvent)
 }
 
@@ -180,9 +210,6 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 
 			item := map[string]any{"role": msg.Role}
 			var content []map[string]any
-			if msg.ReasoningContent != "" && msg.Role == "assistant" {
-				content = append(content, map[string]any{"type": "output_text", "text": msg.ReasoningContent})
-			}
 			for _, part := range msg.Parts {
 				switch part.Type {
 				case "text":
@@ -304,6 +331,34 @@ func normalizeJSONSchema(value any) any {
 	default:
 		return value
 	}
+}
+
+func hashBytes(body []byte) string {
+	sum := sha256.Sum256(body)
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+func cachedTokensFromEvents(events []Event) any {
+	for i := len(events) - 1; i >= 0; i-- {
+		data := events[i].Data
+		if usage, _ := data["usage"].(map[string]any); len(usage) > 0 {
+			if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+				if cachedTokens, ok := details["cached_tokens"]; ok {
+					return cachedTokens
+				}
+			}
+		}
+		if response, _ := data["response"].(map[string]any); response != nil {
+			if usage, _ := response["usage"].(map[string]any); len(usage) > 0 {
+				if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+					if cachedTokens, ok := details["cached_tokens"]; ok {
+						return cachedTokens
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func parseSSE(resp *http.Response) ([]Event, error) {
