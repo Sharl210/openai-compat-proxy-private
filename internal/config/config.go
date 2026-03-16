@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +18,8 @@ type Config struct {
 	TotalTimeout     time.Duration
 	LogFilePath      string
 	LogIncludeBodies bool
+	LogMaxSizeMB     int
+	LogMaxBackups    int
 }
 
 func Default() Config {
@@ -27,6 +30,8 @@ func Default() Config {
 		IdleTimeout:      30 * time.Second,
 		TotalTimeout:     2 * time.Minute,
 		LogFilePath:      ".proxy.requests.jsonl",
+		LogMaxSizeMB:     100,
+		LogMaxBackups:    10,
 	}
 }
 
@@ -49,6 +54,16 @@ func LoadFromEnv() Config {
 	}
 	if value := os.Getenv("LOG_INCLUDE_BODIES"); value != "" {
 		cfg.LogIncludeBodies = strings.EqualFold(value, "true") || value == "1"
+	}
+	if value := os.Getenv("LOG_MAX_SIZE_MB"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			cfg.LogMaxSizeMB = parsed
+		}
+	}
+	if value := os.Getenv("LOG_MAX_BACKUPS"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
+			cfg.LogMaxBackups = parsed
+		}
 	}
 	return cfg
 }

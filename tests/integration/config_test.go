@@ -13,6 +13,8 @@ func TestLoadFromEnvOverridesDefaults(t *testing.T) {
 	t.Setenv("LISTEN_ADDR", ":9090")
 	t.Setenv("LOG_FILE_PATH", "/tmp/proxy.jsonl")
 	t.Setenv("LOG_INCLUDE_BODIES", "true")
+	t.Setenv("LOG_MAX_SIZE_MB", "12")
+	t.Setenv("LOG_MAX_BACKUPS", "7")
 
 	cfg := config.LoadFromEnv()
 
@@ -30,6 +32,12 @@ func TestLoadFromEnvOverridesDefaults(t *testing.T) {
 	}
 	if !cfg.LogIncludeBodies {
 		t.Fatal("expected log include bodies flag to be true")
+	}
+	if cfg.LogMaxSizeMB != 12 {
+		t.Fatalf("unexpected log max size: %d", cfg.LogMaxSizeMB)
+	}
+	if cfg.LogMaxBackups != 7 {
+		t.Fatalf("unexpected log max backups: %d", cfg.LogMaxBackups)
 	}
 	_ = os.Getenv("LISTEN_ADDR")
 }
