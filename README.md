@@ -253,6 +253,8 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 
 - `LOG_FILE_PATH`：日志文件路径，默认 `.proxy.requests.jsonl`
 - `LOG_INCLUDE_BODIES`：是否记录原文 body；默认关闭，支持 `true` / `1`
+- `LOG_MAX_SIZE_MB`：单个日志文件最大大小（MB），默认 `100`
+- `LOG_MAX_BACKUPS`：最多保留多少个轮转归档文件，默认 `10`
 
 默认会记录：
 
@@ -262,6 +264,8 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 - 上游响应 usage / cached_tokens
 - 下游响应摘要
 - request id / 路由 / 耗时 / normalization version
+- message hash / prefix hash / item hash 等可比对摘要字段
+- stream 与 non-stream 两条路径的 usage 观测事件
 
 默认不会明文记录：
 
@@ -269,6 +273,12 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 - 请求/响应 body
 
 如果显式打开 `LOG_INCLUDE_BODIES=true`，才会把 body 一并写入 JSON 日志。
+
+当前日志文件会自动轮转：
+
+- 超过 `LOG_MAX_SIZE_MB` 后切分为带时间戳的归档文件
+- 仅保留最近 `LOG_MAX_BACKUPS` 个归档
+- 当前活跃文件始终仍是 `LOG_FILE_PATH`
 
 ### restart 脚本
 
