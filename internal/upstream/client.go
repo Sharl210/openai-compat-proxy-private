@@ -22,6 +22,9 @@ type Client struct {
 	httpClient *http.Client
 }
 
+var TestOnlyRetryAttempts = 5
+var TestOnlyRetryDelay = 3 * time.Second
+
 type HTTPStatusError struct {
 	StatusCode int
 	Body       string
@@ -60,7 +63,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	logging.Event("upstream_request_built", attrs)
 
 	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= TestOnlyRetryAttempts; attempt++ {
 		events, err := c.streamOnce(ctx, body, authorization)
 		if err == nil {
 			cachedTokens := cachedTokensFromEvents(events)
@@ -80,14 +83,14 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		}
 		lastErr = err
 
-		if !shouldRetry(lastErr) || attempt == 3 {
+		if !shouldRetry(lastErr) || attempt == TestOnlyRetryAttempts {
 			break
 		}
 
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(time.Duration(attempt) * 300 * time.Millisecond):
+		case <-time.After(TestOnlyRetryDelay):
 		}
 	}
 
@@ -234,6 +237,9 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	payload := map[string]any{
 		"model":  req.Model,
 		"stream": true,
+	}
+	if req.Instructions != "" {
+		payload["instructions"] = req.Instructions
 	}
 	if len(req.Messages) > 0 {
 		var input []map[string]any

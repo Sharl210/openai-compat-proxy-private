@@ -222,6 +222,35 @@ func TestUpstreamClientAddsDefaultReasoningSummaryAuto(t *testing.T) {
 	}
 }
 
+func TestUpstreamClientEmitsInstructionsField(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["instructions"] != "Be concise" {
+			t.Fatalf("expected instructions passthrough, got %#v", body["instructions"])
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:        "gpt-x",
+		Stream:       true,
+		Instructions: "Be concise",
+		Messages:     []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hi"}}}},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUpstreamClientReplaysToolLoopHistory(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()

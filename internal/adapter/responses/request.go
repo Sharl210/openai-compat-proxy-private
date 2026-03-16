@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 
 	"openai-compat-proxy/internal/model"
 )
@@ -41,8 +42,9 @@ type tool struct {
 }
 
 type reasoning struct {
-	Effort string `json:"effort"`
-	Raw    any    `json:"-"`
+	Effort  string         `json:"effort"`
+	Summary string         `json:"summary"`
+	Raw     map[string]any `json:"-"`
 }
 
 func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
@@ -62,7 +64,24 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	if req.Reasoning != nil {
-		canon.Reasoning = &model.CanonicalReasoning{Effort: req.Reasoning.Effort}
+		reasoningRaw := cloneReasoningMap(req.Reasoning.Raw)
+		if len(reasoningRaw) == 0 {
+			reasoningRaw = map[string]any{}
+			if req.Reasoning.Effort != "" {
+				reasoningRaw["effort"] = req.Reasoning.Effort
+			}
+			if req.Reasoning.Summary != "" {
+				reasoningRaw["summary"] = req.Reasoning.Summary
+			}
+		}
+		if _, ok := reasoningRaw["summary"]; !ok {
+			reasoningRaw["summary"] = "auto"
+		}
+		canon.Reasoning = &model.CanonicalReasoning{
+			Effort:  stringMapValue(reasoningRaw, "effort"),
+			Summary: stringMapValue(reasoningRaw, "summary"),
+			Raw:     reasoningRaw,
+		}
 	}
 
 	for _, t := range req.Tools {
@@ -73,6 +92,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			Parameters:  t.Parameters,
 		})
 	}
+	sort.SliceStable(canon.Tools, func(i, j int) bool {
+		if canon.Tools[i].Name == canon.Tools[j].Name {
+			return canon.Tools[i].Type < canon.Tools[j].Type
+		}
+		return canon.Tools[i].Name < canon.Tools[j].Name
+	})
 
 	if req.ToolChoice != nil {
 		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
@@ -95,4 +120,36 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	return canon, nil
+}
+
+func (r *reasoning) UnmarshalJSON(data []byte) error {
+	type alias reasoning
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Raw = raw
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	r.Effort = decoded.Effort
+	r.Summary = decoded.Summary
+	return nil
+}
+
+func cloneReasoningMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func stringMapValue(m map[string]any, key string) string {
+	value, _ := m[key].(string)
+	return value
 }
