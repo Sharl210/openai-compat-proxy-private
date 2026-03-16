@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,8 @@ type Config struct {
 	FirstByteTimeout time.Duration
 	IdleTimeout      time.Duration
 	TotalTimeout     time.Duration
+	LogFilePath      string
+	LogIncludeBodies bool
 }
 
 func Default() Config {
@@ -23,6 +26,7 @@ func Default() Config {
 		FirstByteTimeout: 30 * time.Second,
 		IdleTimeout:      30 * time.Second,
 		TotalTimeout:     2 * time.Minute,
+		LogFilePath:      ".proxy.requests.jsonl",
 	}
 }
 
@@ -39,6 +43,12 @@ func LoadFromEnv() Config {
 	}
 	if value := os.Getenv("UPSTREAM_API_KEY"); value != "" {
 		cfg.UpstreamAPIKey = value
+	}
+	if value := os.Getenv("LOG_FILE_PATH"); value != "" {
+		cfg.LogFilePath = value
+	}
+	if value := os.Getenv("LOG_INCLUDE_BODIES"); value != "" {
+		cfg.LogIncludeBodies = strings.EqualFold(value, "true") || value == "1"
 	}
 	return cfg
 }
