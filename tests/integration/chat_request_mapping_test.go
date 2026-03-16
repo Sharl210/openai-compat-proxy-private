@@ -86,3 +86,26 @@ func TestChatRequestPreservesToolLoopHistory(t *testing.T) {
 		t.Fatalf("expected tool_call_id on tool message, got %#v", canon.Messages[1])
 	}
 }
+
+func TestChatRequestSortsToolsByNameForStableReplay(t *testing.T) {
+	body := `{
+		"model":"gpt-x",
+		"stream":false,
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[
+			{"type":"function","function":{"name":"zeta","parameters":{"type":"object"}}},
+			{"type":"function","function":{"name":"alpha","parameters":{"type":"object"}}}
+		]
+	}`
+
+	canon, err := chatadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(canon.Tools) != 2 {
+		t.Fatalf("expected two tools, got %#v", canon.Tools)
+	}
+	if canon.Tools[0].Name != "alpha" || canon.Tools[1].Name != "zeta" {
+		t.Fatalf("expected tools sorted by name, got %#v", canon.Tools)
+	}
+}

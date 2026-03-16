@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"openai-compat-proxy/internal/model"
 )
@@ -104,6 +105,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			Parameters:  t.Function.Parameters,
 		})
 	}
+	sort.SliceStable(canon.Tools, func(i, j int) bool {
+		if canon.Tools[i].Name == canon.Tools[j].Name {
+			return canon.Tools[i].Type < canon.Tools[j].Type
+		}
+		return canon.Tools[i].Name < canon.Tools[j].Name
+	})
 
 	if req.ToolChoice != nil {
 		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
