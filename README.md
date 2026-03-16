@@ -228,10 +228,58 @@ curl http://127.0.0.1:18082/v1/chat/completions \
 - 上游统一走 `/responses`
 - 上游统一发送 `stream: true`
 - `assistant` 文本历史映射为 `output_text`
+- `reasoning_content` 仅作为下游展示扩展字段，不会回灌到上游 assistant prompt
 - chat reasoning 缺少 `summary` 时补 `summary: "auto"`
 - tool schema 中缺少 `items` 的 array 节点自动补 `items: {}`
 
 这不是直连兼容承诺，而是“始终走代理时缓存前缀稳定”的版本承诺。未来如果这些规则需要变更，应升级 normalization version，而不是静默修改现有 `v1` 语义。
+
+### chat 增量缓存稳定性
+
+当前版本专门修正了一类真实场景下的缓存干扰：
+
+- 多轮对话逐条追加时，`reasoning_content` 不再被重放进上游 assistant prompt
+
+这是因为 `reasoning_content` 在代理里是面向客户端/UI 的展示扩展字段，不属于应该参与上游缓存前缀的稳定历史内容。保留它给下游显示，但把它重新塞回上游 assistant `output_text`，会让真实多轮对话的共享前缀更容易漂移。
+
+### 日志系统
+
+当前版本新增了默认脱敏的双通道日志：
+
+- stdout：摘要日志
+- 本地 JSON 文件：结构化日志
+
+新增环境变量：
+
+- `LOG_FILE_PATH`：日志文件路径，默认 `.proxy.requests.jsonl`
+- `LOG_INCLUDE_BODIES`：是否记录原文 body；默认关闭，支持 `true` / `1`
+
+默认会记录：
+
+- 下游请求摘要
+- canonical 请求摘要
+- 上游请求摘要
+- 上游响应 usage / cached_tokens
+- 下游响应摘要
+- request id / 路由 / 耗时 / normalization version
+
+默认不会明文记录：
+
+- Authorization
+- 请求/响应 body
+
+如果显式打开 `LOG_INCLUDE_BODIES=true`，才会把 body 一并写入 JSON 日志。
+
+### restart 脚本
+
+当前版本新增：
+
+- `scripts/restart-linux.sh`
+
+它的行为保持最小：
+
+1. 调用 `scripts/uninstall-linux.sh`
+2. 调用 `scripts/deploy-linux.sh`
 
 ### models（兼容保留）
 
