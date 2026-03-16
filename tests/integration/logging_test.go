@@ -48,6 +48,8 @@ func TestLoggingCapturesDownstreamAndUpstreamMetadata(t *testing.T) {
 	var events []string
 	var sawRedactedAuth bool
 	var sawCachedTokens bool
+	var sawMessageHashes bool
+	var sawStreamUsageLog bool
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		var record map[string]any
@@ -63,6 +65,12 @@ func TestLoggingCapturesDownstreamAndUpstreamMetadata(t *testing.T) {
 		if record["cached_tokens"] == float64(8) {
 			sawCachedTokens = true
 		}
+		if _, ok := record["message_hashes"]; ok {
+			sawMessageHashes = true
+		}
+		if event, _ := record["event"].(string); event == "upstream_stream_usage_observed" {
+			sawStreamUsageLog = true
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
@@ -76,5 +84,11 @@ func TestLoggingCapturesDownstreamAndUpstreamMetadata(t *testing.T) {
 	}
 	if !sawCachedTokens {
 		t.Fatalf("expected cached_tokens to be logged, got events %s", joined)
+	}
+	if !sawMessageHashes {
+		t.Fatalf("expected message hashes to be logged, got events %s", joined)
+	}
+	if !sawStreamUsageLog {
+		t.Fatalf("expected stream usage observation log, got events %s", joined)
 	}
 }

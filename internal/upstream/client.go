@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,7 +43,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	if err != nil {
 		return nil, err
 	}
-	logging.Event("upstream_request_built", map[string]any{
+	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
 		"model":         req.Model,
@@ -52,17 +53,28 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		"message_count": len(req.Messages),
 		"tool_count":    len(req.Tools),
 		"body":          string(body),
-	})
+	}
+	for k, v := range upstreamBodyLogAttrs(body) {
+		attrs[k] = v
+	}
+	logging.Event("upstream_request_built", attrs)
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		events, err := c.streamOnce(ctx, body, authorization)
 		if err == nil {
+			cachedTokens := cachedTokensFromEvents(events)
+			logging.Event("upstream_stream_usage_observed", map[string]any{
+				"request_id":     req.RequestID,
+				"upstream_event": "response.completed",
+				"cached_tokens":  cachedTokens,
+				"streaming":      false,
+			})
 			logging.Event("upstream_response_completed", map[string]any{
 				"request_id":    req.RequestID,
 				"attempt":       attempt,
 				"event_count":   len(events),
-				"cached_tokens": cachedTokensFromEvents(events),
+				"cached_tokens": cachedTokens,
 			})
 			return events, nil
 		}
@@ -87,7 +99,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 	if err != nil {
 		return err
 	}
-	logging.Event("upstream_request_built", map[string]any{
+	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
 		"model":         req.Model,
@@ -97,8 +109,35 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 		"message_count": len(req.Messages),
 		"tool_count":    len(req.Tools),
 		"body":          string(body),
+	}
+	for k, v := range upstreamBodyLogAttrs(body) {
+		attrs[k] = v
+	}
+	logging.Event("upstream_request_built", attrs)
+	var eventCount int
+	var cachedTokens any
+	err = c.streamEventsOnce(ctx, body, authorization, func(evt Event) error {
+		eventCount++
+		if tokens := cachedTokensFromEvent(evt); tokens != nil {
+			cachedTokens = tokens
+			logging.Event("upstream_stream_usage_observed", map[string]any{
+				"request_id":     req.RequestID,
+				"upstream_event": evt.Event,
+				"cached_tokens":  tokens,
+			})
+		}
+		return onEvent(evt)
 	})
-	return c.streamEventsOnce(ctx, body, authorization, onEvent)
+	if err == nil {
+		logging.Event("upstream_response_completed", map[string]any{
+			"request_id":    req.RequestID,
+			"attempt":       1,
+			"event_count":   eventCount,
+			"cached_tokens": cachedTokens,
+			"streaming":     true,
+		})
+	}
+	return err
 }
 
 func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {
@@ -340,25 +379,93 @@ func hashBytes(body []byte) string {
 
 func cachedTokensFromEvents(events []Event) any {
 	for i := len(events) - 1; i >= 0; i-- {
-		data := events[i].Data
-		if usage, _ := data["usage"].(map[string]any); len(usage) > 0 {
+		if cachedTokens := cachedTokensFromEvent(events[i]); cachedTokens != nil {
+			return cachedTokens
+		}
+	}
+	return nil
+}
+
+func cachedTokensFromEvent(evt Event) any {
+	data := evt.Data
+	if usage, _ := data["usage"].(map[string]any); len(usage) > 0 {
+		if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+			if cachedTokens, ok := details["cached_tokens"]; ok {
+				return cachedTokens
+			}
+		}
+	}
+	if response, _ := data["response"].(map[string]any); response != nil {
+		if usage, _ := response["usage"].(map[string]any); len(usage) > 0 {
 			if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
 				if cachedTokens, ok := details["cached_tokens"]; ok {
 					return cachedTokens
 				}
 			}
 		}
-		if response, _ := data["response"].(map[string]any); response != nil {
-			if usage, _ := response["usage"].(map[string]any); len(usage) > 0 {
-				if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-					if cachedTokens, ok := details["cached_tokens"]; ok {
-						return cachedTokens
-					}
+	}
+	return nil
+}
+
+func upstreamBodyLogAttrs(body []byte) map[string]any {
+	attrs := map[string]any{}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		attrs["body_decode_error"] = err.Error()
+		return attrs
+	}
+	if input, _ := payload["input"].([]any); len(input) > 0 {
+		attrs["input_item_count"] = len(input)
+		itemHashes := make([]string, 0, len(input))
+		prefixHashes := make([]string, 0, len(input))
+		itemKinds := make([]string, 0, len(input))
+		for i := range input {
+			itemHashes = append(itemHashes, hashAny(input[i]))
+			prefixHashes = append(prefixHashes, hashAny(input[:i+1]))
+			if item, _ := input[i].(map[string]any); item != nil {
+				if role, _ := item["role"].(string); role != "" {
+					itemKinds = append(itemKinds, "role:"+role)
+				} else if itemType, _ := item["type"].(string); itemType != "" {
+					itemKinds = append(itemKinds, "type:"+itemType)
 				}
 			}
 		}
+		attrs["input_item_hashes"] = itemHashes
+		attrs["input_prefix_hashes"] = prefixHashes
+		attrs["input_item_kinds"] = itemKinds
 	}
-	return nil
+	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
+		attrs["reasoning_keys"] = sortedMapKeys(reasoning)
+	}
+	if tools, _ := payload["tools"].([]any); len(tools) > 0 {
+		toolNames := make([]string, 0, len(tools))
+		for _, raw := range tools {
+			if tool, _ := raw.(map[string]any); tool != nil {
+				if name, _ := tool["name"].(string); name != "" {
+					toolNames = append(toolNames, name)
+				}
+			}
+		}
+		attrs["tool_names"] = toolNames
+	}
+	return attrs
+}
+
+func hashAny(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "marshal_error"
+	}
+	return hashBytes(b)
+}
+
+func sortedMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func parseSSE(resp *http.Response) ([]Event, error) {

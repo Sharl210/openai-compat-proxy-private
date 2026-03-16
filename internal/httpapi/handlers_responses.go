@@ -31,7 +31,7 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 		}
 		canon.RequestID = w.Header().Get("X-Request-Id")
 		canon.AuthMode = authModeForUpstream(r, cfg)
-		logging.Event("canonical_request_built", map[string]any{
+		attrs := map[string]any{
 			"request_id":            canon.RequestID,
 			"route":                 "/v1/responses",
 			"auth_mode":             canon.AuthMode,
@@ -42,7 +42,11 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 			"tool_count":            len(canon.Tools),
 			"has_reasoning":         canon.Reasoning != nil,
 			"normalization_version": normalizationVersion,
-		})
+		}
+		for k, v := range canonicalLogAttrs(canon) {
+			attrs[k] = v
+		}
+		logging.Event("canonical_request_built", attrs)
 
 		ctx := r.Context()
 		var cancel context.CancelFunc

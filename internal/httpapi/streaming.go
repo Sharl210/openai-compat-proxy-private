@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -153,8 +154,18 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 	case "response.completed", "response.done":
+		cachedTokens := nestedCachedTokens(usageFromEventData(evt.Data))
+		logging.Event("upstream_stream_usage_observed", map[string]any{
+			"upstream_event":       evt.Event,
+			"cached_tokens":        cachedTokens,
+			"stream_include_usage": includeUsage,
+		})
 		if includeUsage {
 			if usage := chatUsage(usageFromEventData(evt.Data)); usage != nil {
+				logging.Event("downstream_stream_usage_mapped", map[string]any{
+					"upstream_event": evt.Event,
+					"cached_tokens":  nestedCachedTokens(mapUsageForLogging(usage)),
+				})
 				if err := writeChatChunk(w, flusher, nil, "", usage); err != nil {
 					return err
 				}
@@ -171,6 +182,11 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	}
 	return nil
+}
+
+func mapUsageForLogging(usage any) map[string]any {
+	mapped, _ := usage.(map[string]any)
+	return mapped
 }
 
 func syntheticReasoningStatus(text string) map[string]any {
