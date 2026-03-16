@@ -36,7 +36,6 @@
 兼容保留但非主线维护能力：
 
 - `GET /v1/models`
-- `POST /v1/responses`
 
 推荐模型：
 
@@ -91,21 +90,6 @@ chmod +x scripts/deploy-linux.sh
 - 若未提供 `X-Upstream-Authorization`，则回退到 `UPSTREAM_API_KEY`
 
 ## 请求示例
-
-### responses（兼容保留）
-
-```bash
-curl http://127.0.0.1:18082/v1/responses \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "gpt-5",
-    "input": [{
-      "role":"user",
-      "content":[{"type":"input_text","text":"Say hello in one word."}]
-    }],
-    "stream": false
-  }'
-```
 
 ### chat
 
