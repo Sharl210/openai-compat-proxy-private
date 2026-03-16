@@ -416,6 +416,93 @@ func TestChatStreamingIncludesCachedTokensWhenRequested(t *testing.T) {
 	}
 }
 
+func TestChatStreamingIncludesZeroCachedTokensOnlyInFinalUsageChunk(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Count(text, `"prompt_tokens_details":{"cached_tokens":0}`) != 1 {
+		t.Fatalf("expected cached_tokens=0 exactly once in final usage chunk, got %s", text)
+	}
+	if !strings.Contains(text, `"choices":[]`) {
+		t.Fatalf("expected final empty choices usage chunk, got %s", text)
+	}
+}
+
+func TestChatStreamingOmitsUsageChunkWhenUpstreamOmitsUsage(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, `"usage":`) {
+		t.Fatalf("expected no usage chunk when upstream omits usage, got %s", text)
+	}
+}
+
+func TestChatStreamingDoesNotInventCachedTokensWhenUpstreamOmitsThem(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, `"prompt_tokens_details":`) {
+		t.Fatalf("expected no prompt_tokens_details when upstream omits cached_tokens, got %s", text)
+	}
+	if !strings.Contains(text, `"usage":{"completion_tokens":20,"prompt_tokens":10,"total_tokens":30}`) {
+		t.Fatalf("expected final usage chunk without invented cached_tokens, got %s", text)
+	}
+}
+
 func TestChatStreamingNormalizesToolArraySchemaBeforeUpstream(t *testing.T) {
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()

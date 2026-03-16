@@ -140,3 +140,90 @@ func TestChatHandlerPreservesCachedTokensInUsage(t *testing.T) {
 		t.Fatalf("expected reasoning_tokens in completion details, got %#v", usage)
 	}
 }
+
+func TestChatHandlerPreservesZeroCachedTokensInUsage(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	usage, ok := out["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected usage object, got %#v", out["usage"])
+	}
+	promptDetails, ok := usage["prompt_tokens_details"].(map[string]any)
+	if !ok || promptDetails["cached_tokens"] != float64(0) {
+		t.Fatalf("expected cached_tokens=0 in prompt details, got %#v", usage)
+	}
+}
+
+func TestChatHandlerOmitsUsageWhenUpstreamOmitsUsage(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\ndata: {}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if usage, ok := out["usage"]; ok && usage != nil {
+		t.Fatalf("expected no usage object, got %#v", usage)
+	}
+}
+
+func TestChatHandlerDoesNotInventCachedTokensWhenUpstreamOmitsThem(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	body := `{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":false}`
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	usage, ok := out["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected usage object, got %#v", out["usage"])
+	}
+	if details, ok := usage["prompt_tokens_details"]; ok && details != nil {
+		t.Fatalf("expected no prompt_tokens_details, got %#v", details)
+	}
+}
