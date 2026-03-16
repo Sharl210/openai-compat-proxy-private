@@ -17,7 +17,7 @@ import (
 func TestLoggingCapturesDownstreamAndUpstreamMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "proxy.jsonl")
-	closeFn, err := logging.Init(config.Config{LogFilePath: logPath}, nil)
+	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logPath}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

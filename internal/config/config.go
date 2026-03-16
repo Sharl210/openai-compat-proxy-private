@@ -12,6 +12,7 @@ type Config struct {
 	ProxyAPIKey      string
 	UpstreamBaseURL  string
 	UpstreamAPIKey   string
+	LogEnable        bool
 	ConnectTimeout   time.Duration
 	FirstByteTimeout time.Duration
 	IdleTimeout      time.Duration
@@ -25,6 +26,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		ListenAddr:       ":8080",
+		LogEnable:        false,
 		ConnectTimeout:   10 * time.Second,
 		FirstByteTimeout: 30 * time.Second,
 		IdleTimeout:      30 * time.Second,
@@ -48,6 +50,9 @@ func LoadFromEnv() Config {
 	}
 	if value := os.Getenv("UPSTREAM_API_KEY"); value != "" {
 		cfg.UpstreamAPIKey = value
+	}
+	if value := os.Getenv("LOG_ENABLE"); value != "" {
+		cfg.LogEnable = strings.EqualFold(value, "true") || value == "1"
 	}
 	if value := os.Getenv("LOG_FILE_PATH"); value != "" {
 		cfg.LogFilePath = value

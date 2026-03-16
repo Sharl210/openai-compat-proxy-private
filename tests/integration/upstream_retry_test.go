@@ -7,15 +7,25 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/upstream"
 )
 
 func TestUpstreamClientRetriesTransient5xx(t *testing.T) {
+	oldAttempts := upstream.TestOnlyRetryAttempts
+	oldDelay := upstream.TestOnlyRetryDelay
+	upstream.TestOnlyRetryAttempts = 5
+	upstream.TestOnlyRetryDelay = 10 * time.Millisecond
+	defer func() {
+		upstream.TestOnlyRetryAttempts = oldAttempts
+		upstream.TestOnlyRetryDelay = oldDelay
+	}()
+
 	var calls int32
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&calls, 1)
-		if n < 3 {
+		if n < 5 {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte("no clients available"))
@@ -31,7 +41,7 @@ func TestUpstreamClientRetriesTransient5xx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if atomic.LoadInt32(&calls) != 3 {
-		t.Fatalf("expected 3 calls, got %d", atomic.LoadInt32(&calls))
+	if atomic.LoadInt32(&calls) != 5 {
+		t.Fatalf("expected 5 calls, got %d", atomic.LoadInt32(&calls))
 	}
 }

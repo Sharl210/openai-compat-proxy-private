@@ -129,3 +129,24 @@ func TestLoggerRotatesAndKeepsRecentBackups(t *testing.T) {
 		t.Fatalf("expected active log file to exist: %v", err)
 	}
 }
+
+func TestInitDisablesLoggingWhenLogEnableIsFalse(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "proxy.jsonl")
+	stdout := &bytes.Buffer{}
+
+	closeFn, err := logging.Init(config.Config{LogEnable: false, LogFilePath: logPath}, stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFn()
+
+	logging.Event("disabled_test", map[string]any{"body": "hidden"})
+
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no log file when logging disabled, got err=%v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output when logging disabled, got %q", stdout.String())
+	}
+}

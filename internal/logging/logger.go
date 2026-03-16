@@ -46,6 +46,12 @@ func New(cfg config.Config, stdout io.Writer) (*Logger, func() error, error) {
 }
 
 func Init(cfg config.Config, stdout io.Writer) (func() error, error) {
+	if !cfg.LogEnable {
+		globalMu.Lock()
+		global = nil
+		globalMu.Unlock()
+		return func() error { return nil }, nil
+	}
 	logger, closeFn, err := New(cfg, stdout)
 	if err != nil {
 		return nil, err

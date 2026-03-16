@@ -12,6 +12,7 @@ func TestLoadFromEnvOverridesDefaults(t *testing.T) {
 	t.Setenv("UPSTREAM_API_KEY", "server-key")
 	t.Setenv("LISTEN_ADDR", ":9090")
 	t.Setenv("LOG_FILE_PATH", "/tmp/proxy.jsonl")
+	t.Setenv("LOG_ENABLE", "false")
 	t.Setenv("LOG_INCLUDE_BODIES", "true")
 	t.Setenv("LOG_MAX_SIZE_MB", "12")
 	t.Setenv("LOG_MAX_BACKUPS", "7")
@@ -30,6 +31,9 @@ func TestLoadFromEnvOverridesDefaults(t *testing.T) {
 	if cfg.LogFilePath != "/tmp/proxy.jsonl" {
 		t.Fatalf("unexpected log file path: %q", cfg.LogFilePath)
 	}
+	if cfg.LogEnable {
+		t.Fatal("expected log enable flag to be false")
+	}
 	if !cfg.LogIncludeBodies {
 		t.Fatal("expected log include bodies flag to be true")
 	}
@@ -40,4 +44,11 @@ func TestLoadFromEnvOverridesDefaults(t *testing.T) {
 		t.Fatalf("unexpected log max backups: %d", cfg.LogMaxBackups)
 	}
 	_ = os.Getenv("LISTEN_ADDR")
+}
+
+func TestDefaultConfigDisablesLoggingByDefault(t *testing.T) {
+	cfg := config.Default()
+	if cfg.LogEnable {
+		t.Fatal("expected logging disabled by default")
+	}
 }
