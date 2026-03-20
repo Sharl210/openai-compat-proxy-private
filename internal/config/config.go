@@ -29,7 +29,7 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		ListenAddr:       ":8080",
+		ListenAddr:       ":21021",
 		LogEnable:        false,
 		ConnectTimeout:   10 * time.Second,
 		FirstByteTimeout: 30 * time.Second,

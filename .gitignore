@@ -3,3 +3,5 @@
 .proxy.pid
 bin/
 providers/*.env
+docs/
+tests/

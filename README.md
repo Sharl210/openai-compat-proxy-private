@@ -57,13 +57,17 @@ cd openai-compat-proxy-private
 
 ### 2. 准备全局配置 `.env`
 
-仓库当前没有内置根级 `.env.example`，请手动创建 `.env`。
+先复制根级模板：
+
+```bash
+cp .env.example .env
+```
 
 最小示例：
 
 ```bash
 APP_NAME=openai-compat-proxy
-LISTEN_ADDR=:18082
+LISTEN_ADDR=:21021
 PROVIDERS_DIR=./providers
 DEFAULT_PROVIDER=openai
 ENABLE_LEGACY_V1_ROUTES=true
@@ -81,17 +85,17 @@ LOG_MAX_BACKUPS=10
 
 ### 3. 准备 provider 配置
 
-从样例复制一份真实配置，文件名必须是 `.env`，不能只留 `.env.example`：
+从通用 provider 模板复制一份真实配置，文件名必须是 `.env`，不能只留 `.env.example`：
 
 ```bash
-cp providers/openai.env.example providers/openai.env
+cp providers/provider.env.example providers/openai.env
 ```
 
-或者：
+如果你要配置多个 provider，就重复复制这一份模板，按需要改文件名、`PROVIDER_ID` 和能力开关：
 
 ```bash
-cp providers/anthropic.env.example providers/anthropic.env
-cp providers/custom.env.example providers/custom.env
+cp providers/provider.env.example providers/openai.env
+cp providers/provider.env.example providers/anthropic.env
 ```
 
 程序只会读取 `providers/*.env`，会忽略 `providers/*.env.example`。
@@ -170,10 +174,10 @@ http(s)://<host>/v1/<providerId>/xxx
 
 例如：
 
-- 正确：`http://127.0.0.1:18082/openai/v1/chat/completions`
-- 正确：`http://127.0.0.1:18082/openai/v1/responses`
-- 正确：`http://127.0.0.1:18082/openai/v1/models`
-- 错误：`http://127.0.0.1:18082/v1/openai/chat/completions`
+- 正确：`http://127.0.0.1:21021/openai/v1/chat/completions`
+- 正确：`http://127.0.0.1:21021/openai/v1/responses`
+- 正确：`http://127.0.0.1:21021/openai/v1/models`
+- 错误：`http://127.0.0.1:21021/v1/openai/chat/completions`
 
 ### provider 路由
 
@@ -213,7 +217,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 基础字段
 
 - `APP_NAME`：应用名，可选
-- `LISTEN_ADDR`：监听地址，例如 `:18082`
+- `LISTEN_ADDR`：监听地址，例如 `:21021`
 - `PROXY_API_KEY`：代理自身访问 key，可选；设置后调用方必须带代理鉴权
 
 ### 默认上游字段
@@ -292,7 +296,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ## 健康检查
 
 ```bash
-curl http://127.0.0.1:18082/healthz
+curl http://127.0.0.1:21021/healthz
 ```
 
 ## 许可证
