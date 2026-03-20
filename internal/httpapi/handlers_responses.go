@@ -10,15 +10,16 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
+	"openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/upstream"
 )
 
 func handleResponses(cfg config.Config) http.HandlerFunc {
-	client := upstream.NewClient(cfg.UpstreamBaseURL)
-
 	return func(w http.ResponseWriter, r *http.Request) {
+		providerCfg := providerConfigForRequest(r, cfg)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL)
 		setNormalizationVersionHeader(w)
-		authorization, err := authHeaderForUpstream(r, cfg)
+		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
@@ -29,8 +30,12 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		if provider, ok := providerForRequest(r, cfg); ok {
+			canon = reasoning.ApplyModelSuffix(canon, provider.EnableReasoningEffortSuffix)
+			canon.Model = provider.ResolveModel(canon.Model)
+		}
 		canon.RequestID = w.Header().Get("X-Request-Id")
-		canon.AuthMode = authModeForUpstream(r, cfg)
+		canon.AuthMode = authModeForUpstream(r, providerCfg)
 		attrs := map[string]any{
 			"request_id":            canon.RequestID,
 			"route":                 "/v1/responses",
@@ -50,8 +55,8 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 
 		ctx := r.Context()
 		var cancel context.CancelFunc
-		if cfg.TotalTimeout > 0 {
-			ctx, cancel = context.WithTimeout(ctx, cfg.TotalTimeout)
+		if providerCfg.TotalTimeout > 0 {
+			ctx, cancel = context.WithTimeout(ctx, providerCfg.TotalTimeout)
 			defer cancel()
 		}
 
