@@ -140,12 +140,71 @@ func parseBool(value string) bool {
 	return strings.EqualFold(value, "true") || value == "1"
 }
 
-func (p ProviderConfig) ResolveModel(model string) string {
+func (p ProviderConfig) ResolveModel(model string, enableSuffix bool) string {
 	if mapped, ok := p.ModelMap[model]; ok && mapped != "" {
 		return mapped
 	}
 	if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
 		return mapped
 	}
+	if enableSuffix {
+		baseModel, _, ok := splitReasoningSuffix(model)
+		if ok && baseModel != model {
+			if mapped, ok := p.ModelMap[baseModel]; ok && mapped != "" {
+				return mapped
+			}
+			if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
+				return mapped
+			}
+		}
+	}
 	return model
+}
+
+func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (string, string) {
+	for key, mapped := range p.ModelMap {
+		if strings.HasPrefix(key, "*-") {
+			if strings.HasSuffix(model, key[1:]) {
+				if enableSuffix {
+					_, valEff, _ := splitReasoningSuffix(mapped)
+					return mapped, valEff
+				}
+				return mapped, ""
+			}
+		}
+	}
+	if mapped, ok := p.ModelMap[model]; ok && mapped != "" {
+		if enableSuffix {
+			_, valEff, _ := splitReasoningSuffix(mapped)
+			return mapped, valEff
+		}
+		return mapped, ""
+	}
+	if enableSuffix {
+		base, _, ok := splitReasoningSuffix(model)
+		if ok && base != model {
+			if mapped, ok := p.ModelMap[base]; ok && mapped != "" {
+				_, valEff, _ := splitReasoningSuffix(mapped)
+				return mapped, valEff
+			}
+		}
+	}
+	if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
+		if enableSuffix {
+			_, eff, _ := splitReasoningSuffix(mapped)
+			return mapped, eff
+		}
+		return mapped, ""
+	}
+	return model, ""
+}
+
+func splitReasoningSuffix(modelName string) (string, string, bool) {
+	supportedSuffixes := []string{"-xhigh", "-medium", "-high", "-low"}
+	for _, suffix := range supportedSuffixes {
+		if len(modelName) > len(suffix) && modelName[len(modelName)-len(suffix):] == suffix {
+			return modelName[:len(modelName)-len(suffix)], suffix[1:], true
+		}
+	}
+	return modelName, "", false
 }

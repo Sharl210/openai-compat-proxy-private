@@ -35,9 +35,11 @@
 ### 4. 模型映射与 reasoning 后缀
 
 - 支持 provider 级 `MODEL_MAP_JSON`
-- 支持精确模型映射和 `*` 通配符映射
-- 支持 `-low / -medium / -high / -xhigh` 后缀自动转 reasoning effort
-- 支持在 `/models` 中暴露映射模型名和扩展后的后缀模型名
+- `ENABLE_REASONING_EFFORT_SUFFIX=true` 开启后，key 和 value 都支持 `-low/-medium/-high/-xhigh` 后缀
+- `*-suffix` 通配 key：匹配所有以该后缀结尾的请求模型
+- effort 以 **value 的后缀**为准（value 有后缀则用，无则空）
+- 开关关闭时：后缀只做字符串替换，不解析 effort
+- 匹配顺序：`*-suffix` 通配 key（优先） → 精确 key → strip 后缀后精确 key → `*` 通配 key
 
 ### 5. 错误透传与运行日志
 

@@ -10,7 +10,7 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
-	"openai-compat-proxy/internal/reasoning"
+	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -31,8 +31,16 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 			return
 		}
 		if provider, ok := providerForRequest(r, cfg); ok {
-			canon = reasoning.ApplyModelSuffix(canon, provider.EnableReasoningEffortSuffix)
-			canon.Model = provider.ResolveModel(canon.Model)
+			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
+			canon.Model = mappedModel
+			if effort != "" {
+				if canon.Reasoning == nil {
+					canon.Reasoning = &modelpkg.CanonicalReasoning{}
+				}
+				canon.Reasoning.Effort = effort
+				canon.Reasoning.Raw = map[string]any{"effort": effort, "summary": "auto"}
+				canon.Reasoning.Summary = "auto"
+			}
 		}
 		canon.RequestID = w.Header().Get("X-Request-Id")
 		canon.AuthMode = authModeForUpstream(r, providerCfg)

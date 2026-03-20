@@ -70,7 +70,11 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	expanded := baseIDs
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
-		expanded = reasoning.ExpandModelIDs(baseIDs, true)
+		modelMapKeys := make([]string, 0, len(provider.ModelMap))
+		for k := range provider.ModelMap {
+			modelMapKeys = append(modelMapKeys, k)
+		}
+		expanded = reasoning.ExpandModelIDs(baseIDs, modelMapKeys, true)
 	}
 	entries := make([]map[string]any, 0, len(expanded))
 	for _, id := range expanded {

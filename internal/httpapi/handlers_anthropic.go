@@ -9,7 +9,7 @@ import (
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
-	"openai-compat-proxy/internal/reasoning"
+	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -33,8 +33,16 @@ func handleAnthropicMessages(cfg config.Config) http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		canon = reasoning.ApplyModelSuffix(canon, provider.EnableReasoningEffortSuffix)
-		canon.Model = provider.ResolveModel(canon.Model)
+		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
+		canon.Model = mappedModel
+		if effort != "" {
+			if canon.Reasoning == nil {
+				canon.Reasoning = &modelpkg.CanonicalReasoning{}
+			}
+			canon.Reasoning.Effort = effort
+			canon.Reasoning.Raw = map[string]any{"effort": effort, "summary": "auto"}
+			canon.Reasoning.Summary = "auto"
+		}
 		ctx := r.Context()
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {

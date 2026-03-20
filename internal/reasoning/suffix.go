@@ -12,7 +12,7 @@ func ApplyModelSuffix(req model.CanonicalRequest, enabled bool) model.CanonicalR
 	if !enabled {
 		return req
 	}
-	baseModel, effort, ok := splitReasoningSuffix(req.Model)
+	baseModel, effort, ok := SplitSuffix(req.Model)
 	if !ok {
 		return req
 	}
@@ -39,7 +39,7 @@ func ApplyModelSuffix(req model.CanonicalRequest, enabled bool) model.CanonicalR
 	return req
 }
 
-func splitReasoningSuffix(modelName string) (string, string, bool) {
+func SplitSuffix(modelName string) (string, string, bool) {
 	for _, suffix := range supportedSuffixes {
 		if strings.HasSuffix(modelName, suffix) && len(modelName) > len(suffix) {
 			return strings.TrimSuffix(modelName, suffix), strings.TrimPrefix(suffix, "-"), true
@@ -48,11 +48,15 @@ func splitReasoningSuffix(modelName string) (string, string, bool) {
 	return modelName, "", false
 }
 
-func ExpandModelIDs(baseIDs []string, enabled bool) []string {
+func ExpandModelIDs(baseIDs []string, modelMapKeys []string, enabled bool) []string {
+	alreadyHas := map[string]bool{}
+	for _, k := range modelMapKeys {
+		alreadyHas[k] = true
+	}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(baseIDs)*5)
 	for _, id := range baseIDs {
-		if id == "" || seen[id] {
+		if id == "" || seen[id] || alreadyHas[id] {
 			continue
 		}
 		seen[id] = true
@@ -60,7 +64,7 @@ func ExpandModelIDs(baseIDs []string, enabled bool) []string {
 		if enabled && id != "*" {
 			for _, suffix := range supportedSuffixes {
 				expanded := id + suffix
-				if !seen[expanded] {
+				if !seen[expanded] && !alreadyHas[expanded] {
 					seen[expanded] = true
 					out = append(out, expanded)
 				}
