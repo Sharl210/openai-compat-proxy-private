@@ -12,6 +12,11 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
+type anthropicStreamState struct {
+	messageStarted bool
+	blockStarted   bool
+}
+
 func startSSE(w http.ResponseWriter) http.Flusher {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -39,6 +44,96 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 		if flusher != nil {
 			flusher.Flush()
 		}
+	}
+	return nil
+}
+
+func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
+	state := anthropicStreamState{}
+	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
+		return writeAnthropicEvent(w, flusher, &state, evt)
+	})
+}
+
+func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event) error {
+	startMessage := func() error {
+		if state.messageStarted {
+			return nil
+		}
+		state.messageStarted = true
+		return writeAnthropicSSEEvent(w, flusher, "message_start", map[string]any{
+			"type": "message_start",
+			"message": map[string]any{
+				"id":            "msg_proxy",
+				"type":          "message",
+				"role":          "assistant",
+				"model":         "responses-upstream",
+				"content":       []any{},
+				"stop_reason":   nil,
+				"stop_sequence": nil,
+				"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
+			},
+		})
+	}
+	startBlock := func() error {
+		if state.blockStarted {
+			return nil
+		}
+		if err := startMessage(); err != nil {
+			return err
+		}
+		state.blockStarted = true
+		return writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
+			"type":  "content_block_start",
+			"index": 0,
+			"content_block": map[string]any{
+				"type": "text",
+				"text": "",
+			},
+		})
+	}
+
+	switch evt.Event {
+	case "response.output_text.delta":
+		if err := startBlock(); err != nil {
+			return err
+		}
+		delta := stringValue(evt.Data["delta"])
+		if delta == "" {
+			return nil
+		}
+		return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": 0,
+			"delta": map[string]any{"type": "text_delta", "text": delta},
+		})
+	case "response.completed", "response.done":
+		if err := startBlock(); err != nil {
+			return err
+		}
+		if err := writeAnthropicSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}); err != nil {
+			return err
+		}
+		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeAnthropicSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, payload map[string]any) error {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", encoded); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
 	}
 	return nil
 }
