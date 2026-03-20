@@ -1,6 +1,6 @@
 # openai-compat-proxy
 
-一个 Go 单二进制的 OpenAI 兼容代理，用来把上游 `Responses` 接口统一包装成更稳定、对客户端更友好的下游接口。项目当前支持多提供商配置，面向 `chat/completions`、`responses`、`messages` 和模型列表等常见接入场景。
+一个 Go 单二进制的 OpenAI 兼容代理。**这个项目上游只对接 `Responses` 接口**，代理内部统一把请求转给上游 `/responses`，然后再对外导出兼容端点，给不同客户端和协议风格使用。项目当前支持多提供商配置，面向 `chat/completions`、`responses`、`messages` 和模型列表等常见接入场景。
 
 ## 项目实现的几个大功能
 
@@ -14,10 +14,11 @@
 ### 2. 统一包装上游 Responses
 
 - 代理内部统一请求上游 `/responses`
-- 对外兼容这些入口：
+- **项目对外主线导出三个端点族**：
   - `POST /v1/chat/completions`
   - `POST /v1/responses`
   - `POST /v1/messages`
+- 同时兼容 Anthropic 风格入口：
   - `POST /anthropic/v1/messages`
   - `GET /v1/models`
 - 支持 tool / function calling、多轮消息、部分多模态输入
@@ -151,6 +152,27 @@ chmod +x scripts/*.sh
 
 ## 路由说明
 
+### base URL 规则
+
+多 provider 模式下，provider id 必须紧跟在域名后面，然后才是协议路径。也就是说，请求路径规则是：
+
+```text
+http(s)://<host>/<providerId>/v1/xxx
+```
+
+而不是：
+
+```text
+http(s)://<host>/v1/<providerId>/xxx
+```
+
+例如：
+
+- 正确：`http://127.0.0.1:18082/openai/v1/chat/completions`
+- 正确：`http://127.0.0.1:18082/openai/v1/responses`
+- 正确：`http://127.0.0.1:18082/openai/v1/models`
+- 错误：`http://127.0.0.1:18082/v1/openai/chat/completions`
+
 ### provider 路由
 
 推荐使用显式 provider 路由：
@@ -164,7 +186,14 @@ chmod +x scripts/*.sh
 例如：
 
 - `/openai/v1/chat/completions`
+- `/openai/v1/messages`
 - `/anthropic/anthropic/v1/messages`
+
+如果你接的是 Anthropic 风格接口，provider id 也同样要放在域名后面，完整形式是：
+
+```text
+http(s)://<host>/<providerId>/anthropic/v1/messages
+```
 
 ### 默认 provider 路由
 
