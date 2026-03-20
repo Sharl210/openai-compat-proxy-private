@@ -39,8 +39,7 @@ source "$ENV_FILE"
 set +a
 
 : "${LISTEN_ADDR:?LISTEN_ADDR is required in .env}"
-: "${UPSTREAM_BASE_URL:?UPSTREAM_BASE_URL is required in .env}"
-: "${UPSTREAM_API_KEY:?UPSTREAM_API_KEY is required in .env}"
+: "${PROVIDERS_DIR:?PROVIDERS_DIR is required in .env}"
 
 mkdir -p "$BIN_DIR"
 
@@ -58,8 +57,6 @@ fi
 
 nohup env \
   LISTEN_ADDR="$LISTEN_ADDR" \
-  UPSTREAM_BASE_URL="$UPSTREAM_BASE_URL" \
-  UPSTREAM_API_KEY="$UPSTREAM_API_KEY" \
   PROXY_API_KEY="${PROXY_API_KEY:-}" \
   PROVIDERS_DIR="${PROVIDERS_DIR:-}" \
   DEFAULT_PROVIDER="${DEFAULT_PROVIDER:-}" \

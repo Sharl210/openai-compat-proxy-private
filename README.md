@@ -73,9 +73,6 @@ DEFAULT_PROVIDER=openai
 ENABLE_LEGACY_V1_ROUTES=true
 PROXY_API_KEY=
 
-UPSTREAM_BASE_URL=https://api.example.com/v1
-UPSTREAM_API_KEY=your-upstream-key
-
 LOG_ENABLE=false
 LOG_FILE_PATH=.proxy.requests.jsonl
 LOG_INCLUDE_BODIES=false
@@ -88,14 +85,14 @@ LOG_MAX_BACKUPS=10
 从通用 provider 模板复制一份真实配置，文件名必须是 `.env`，不能只留 `.env.example`：
 
 ```bash
-cp providers/provider.env.example providers/openai.env
+cp providers/openai.env.example providers/openai.env
 ```
 
 如果你要配置多个 provider，就重复复制这一份模板，按需要改文件名、`PROVIDER_ID` 和能力开关：
 
 ```bash
-cp providers/provider.env.example providers/openai.env
-cp providers/provider.env.example providers/anthropic.env
+cp providers/openai.env.example providers/openai.env
+cp providers/openai.env.example providers/anthropic.env
 ```
 
 程序只会读取 `providers/*.env`，会忽略 `providers/*.env.example`。
@@ -198,19 +195,16 @@ http(s)://<host>/v1/<providerId>/xxx
 
 如果你要兼容历史客户端，使用裸 `/v1/*` 路由时应保证存在默认 provider。
 
-默认 provider 可以通过任一方式确定：
+默认 provider 只通过全局 `.env` 中的 `DEFAULT_PROVIDER` 指定。
 
-- 全局 `.env` 中设置 `DEFAULT_PROVIDER`
-- 某个 provider 文件中设置 `PROVIDER_IS_DEFAULT=true`
-
-注意：同一实例最多只能有一个默认 provider。
+注意：`DEFAULT_PROVIDER` 必须对应一个已存在且启用的 provider。
 
 ## 鉴权约定
 
 - 代理鉴权：`Authorization: Bearer <proxy-key>`
 - 也支持：`X-API-Key` / `Api-Key`
 - 上游鉴权透传：`X-Upstream-Authorization: Bearer <upstream-key>`
-- 如果请求里没有传 `X-Upstream-Authorization`，则回退到配置中的 `UPSTREAM_API_KEY`
+- 如果请求里没有传 `X-Upstream-Authorization`，则回退到当前选中 provider 的 `UPSTREAM_API_KEY`
 
 ## 全局配置 `.env` 字段说明
 
@@ -219,13 +213,6 @@ http(s)://<host>/v1/<providerId>/xxx
 - `APP_NAME`：应用名，可选
 - `LISTEN_ADDR`：监听地址，例如 `:21021`
 - `PROXY_API_KEY`：代理自身访问 key，可选；设置后调用方必须带代理鉴权
-
-### 默认上游字段
-
-这些字段主要给单上游场景或某些脚本校验使用：
-
-- `UPSTREAM_BASE_URL`：默认上游基础地址
-- `UPSTREAM_API_KEY`：默认上游 key
 
 ### 多 provider 相关字段
 
@@ -247,7 +234,6 @@ http(s)://<host>/v1/<providerId>/xxx
 
 - `PROVIDER_ID`：provider 唯一标识，会出现在路由里
 - `PROVIDER_ENABLED`：是否启用该 provider
-- `PROVIDER_IS_DEFAULT`：是否把该 provider 标记为默认 provider
 - `UPSTREAM_BASE_URL`：这个 provider 对应的上游基础地址
 - `UPSTREAM_API_KEY`：这个 provider 对应的上游 key
 

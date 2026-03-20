@@ -49,12 +49,6 @@ func LoadFromEnv() Config {
 	if value := os.Getenv("PROXY_API_KEY"); value != "" {
 		cfg.ProxyAPIKey = value
 	}
-	if value := os.Getenv("UPSTREAM_BASE_URL"); value != "" {
-		cfg.UpstreamBaseURL = value
-	}
-	if value := os.Getenv("UPSTREAM_API_KEY"); value != "" {
-		cfg.UpstreamAPIKey = value
-	}
 	if value := os.Getenv("PROVIDERS_DIR"); value != "" {
 		cfg.ProvidersDir = value
 	}
@@ -87,19 +81,16 @@ func LoadFromEnv() Config {
 }
 
 func (c Config) Validate() error {
+	if strings.TrimSpace(c.ProvidersDir) == "" {
+		return ErrInvalidConfig("providers dir is required")
+	}
+	if len(c.Providers) == 0 {
+		return ErrInvalidConfig("at least one provider must be configured")
+	}
 	if c.EnableLegacyV1Routes && strings.TrimSpace(c.DefaultProvider) == "" {
 		return ErrInvalidConfig("default provider is required when legacy v1 routes are enabled")
 	}
-	defaultCount := 0
-	for _, provider := range c.Providers {
-		if provider.IsDefault {
-			defaultCount++
-		}
-	}
-	if defaultCount > 1 {
-		return ErrInvalidConfig("multiple default providers configured")
-	}
-	if c.EnableLegacyV1Routes && len(c.Providers) > 0 && defaultCount == 0 && strings.TrimSpace(c.DefaultProvider) == "" {
+	if c.EnableLegacyV1Routes && len(c.Providers) > 0 && strings.TrimSpace(c.DefaultProvider) == "" {
 		return ErrInvalidConfig("legacy v1 routes require a default provider")
 	}
 	return nil

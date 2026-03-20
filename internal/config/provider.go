@@ -14,7 +14,6 @@ import (
 type ProviderConfig struct {
 	ID                          string
 	Enabled                     bool
-	IsDefault                   bool
 	UpstreamBaseURL             string
 	UpstreamAPIKey              string
 	SupportsChat                bool
@@ -40,7 +39,6 @@ func LoadProvidersFromDir(dir string) ([]ProviderConfig, error) {
 
 	providers := make([]ProviderConfig, 0, len(entries))
 	seen := map[string]struct{}{}
-	defaultCount := 0
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -60,13 +58,7 @@ func LoadProvidersFromDir(dir string) ([]ProviderConfig, error) {
 			return nil, ErrInvalidConfig(fmt.Sprintf("duplicate provider id: %s", provider.ID))
 		}
 		seen[provider.ID] = struct{}{}
-		if provider.IsDefault {
-			defaultCount++
-		}
 		providers = append(providers, provider)
-	}
-	if defaultCount > 1 {
-		return nil, ErrInvalidConfig("multiple default providers configured")
 	}
 	sort.Slice(providers, func(i, j int) bool { return providers[i].ID < providers[j].ID })
 	return providers, nil
@@ -97,8 +89,6 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.ID = value
 		case "PROVIDER_ENABLED":
 			provider.Enabled = parseBool(value)
-		case "PROVIDER_IS_DEFAULT":
-			provider.IsDefault = parseBool(value)
 		case "UPSTREAM_BASE_URL":
 			provider.UpstreamBaseURL = value
 		case "UPSTREAM_API_KEY":
@@ -142,11 +132,6 @@ func (c Config) ProviderByID(id string) (ProviderConfig, error) {
 func (c Config) DefaultProviderConfig() (ProviderConfig, error) {
 	if c.DefaultProvider != "" {
 		return c.ProviderByID(c.DefaultProvider)
-	}
-	for _, provider := range c.Providers {
-		if provider.IsDefault {
-			return provider, nil
-		}
 	}
 	return ProviderConfig{}, errors.New("default provider not found")
 }
