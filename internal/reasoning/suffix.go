@@ -57,7 +57,7 @@ func ExpandModelIDs(baseIDs []string, enabled bool) []string {
 		}
 		seen[id] = true
 		out = append(out, id)
-		if enabled {
+		if enabled && id != "*" {
 			for _, suffix := range supportedSuffixes {
 				expanded := id + suffix
 				if !seen[expanded] {

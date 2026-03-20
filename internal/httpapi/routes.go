@@ -20,7 +20,7 @@ type routeContextKey string
 const routeInfoKey routeContextKey = "route-info"
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
-	if path == "/v1/models" || path == "/v1/responses" || path == "/v1/chat/completions" {
+	if path == "/v1/models" || path == "/v1/responses" || path == "/v1/chat/completions" || path == "/v1/messages" {
 		if len(cfg.Providers) == 0 {
 			return routeInfo{Legacy: true, CanonicalPath: path}, nil
 		}
@@ -38,7 +38,7 @@ func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 	}
 	providerID := parts[0]
 	canonicalPath := "/" + strings.Join(parts[1:], "/")
-	if canonicalPath != "/v1/models" && canonicalPath != "/v1/responses" && canonicalPath != "/v1/chat/completions" && canonicalPath != "/anthropic/v1/messages" {
+	if canonicalPath != "/v1/models" && canonicalPath != "/v1/responses" && canonicalPath != "/v1/chat/completions" && canonicalPath != "/v1/messages" && canonicalPath != "/anthropic/v1/messages" {
 		return routeInfo{}, errors.New("route not found")
 	}
 	provider, err := cfg.ProviderByID(providerID)

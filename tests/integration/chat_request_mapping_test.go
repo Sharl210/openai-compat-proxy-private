@@ -87,6 +87,33 @@ func TestChatRequestPreservesToolLoopHistory(t *testing.T) {
 	}
 }
 
+func TestChatRequestPreservesAssistantTextAlongsideToolCalls(t *testing.T) {
+	body := `{
+		"model":"gpt-5",
+		"messages":[
+			{
+				"role":"assistant",
+				"content":"我先查一下。",
+				"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_web","arguments":"{\"query\":\"上海天气\"}"}}]
+			}
+		]
+	}`
+
+	canon, err := chatadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("expected request to decode, got error: %v", err)
+	}
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one message, got %#v", canon.Messages)
+	}
+	if canon.Messages[0].Parts[0].Text != "我先查一下。" {
+		t.Fatalf("expected assistant text preserved, got %#v", canon.Messages[0])
+	}
+	if len(canon.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected tool call preserved, got %#v", canon.Messages[0])
+	}
+}
+
 func TestChatRequestSortsToolsByNameForStableReplay(t *testing.T) {
 	body := `{
 		"model":"gpt-x",

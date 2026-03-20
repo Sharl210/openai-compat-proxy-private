@@ -28,6 +28,31 @@ func TestProxyAPIKeyRequiredWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestProxyAPIKeyAlsoAcceptsXAPIKeyHeader(t *testing.T) {
+	cfg := config.Default()
+	cfg.ProxyAPIKey = "proxy-secret"
+
+	server := newTestServerWithConfig(t, cfg)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/messages", strings.NewReader(`{"model":"claude-sonnet","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "proxy-secret")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("expected x-api-key to satisfy proxy auth, got %d", resp.StatusCode)
+	}
+}
+
 func TestUpstreamKeyFallsBackToServerDefault(t *testing.T) {
 	cfg := config.Default()
 	cfg.UpstreamAPIKey = "server-key"

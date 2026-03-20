@@ -2,3 +2,4 @@
 .proxy.log
 .proxy.pid
 bin/
+providers/*.env

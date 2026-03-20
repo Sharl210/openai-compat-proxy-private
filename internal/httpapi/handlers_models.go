@@ -52,9 +52,6 @@ func handleModels(cfg config.Config) http.HandlerFunc {
 }
 
 func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
-	if !provider.ExposeReasoningSuffixModels || !provider.EnableReasoningEffortSuffix {
-		return body
-	}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body
@@ -71,7 +68,10 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 			baseIDs = append(baseIDs, id)
 		}
 	}
-	expanded := reasoning.ExpandModelIDs(baseIDs, true)
+	expanded := baseIDs
+	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
+		expanded = reasoning.ExpandModelIDs(baseIDs, true)
+	}
 	entries := make([]map[string]any, 0, len(expanded))
 	for _, id := range expanded {
 		entries = append(entries, map[string]any{"id": id})

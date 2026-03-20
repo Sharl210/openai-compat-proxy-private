@@ -16,6 +16,7 @@ import (
 func handleAnthropicMessages(cfg config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		providerCfg := providerConfigForRequest(r, cfg)
+		setNormalizationVersionHeader(w)
 		provider, ok := providerForRequest(r, cfg)
 		if !ok || !provider.SupportsAnthropicMessages {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
@@ -51,6 +52,9 @@ func handleAnthropicMessages(cfg config.Config) http.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+				return
+			}
+			if writeUpstreamError(w, err) {
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())

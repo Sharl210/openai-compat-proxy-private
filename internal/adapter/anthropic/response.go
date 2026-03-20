@@ -1,18 +1,38 @@
 package anthropic
 
-import "openai-compat-proxy/internal/aggregate"
+import (
+	"encoding/json"
+
+	"openai-compat-proxy/internal/aggregate"
+)
 
 func BuildResponse(result aggregate.Result, modelName string) map[string]any {
-	content := []map[string]any{{
-		"type": "text",
-		"text": result.Text,
-	}}
+	content := make([]map[string]any, 0, len(result.ToolCalls)+1)
+	if len(result.ToolCalls) > 0 {
+		for _, call := range result.ToolCalls {
+			content = append(content, map[string]any{
+				"type":  "tool_use",
+				"id":    call.CallID,
+				"name":  call.Name,
+				"input": parseArguments(call.Arguments),
+			})
+		}
+	} else {
+		content = append(content, map[string]any{
+			"type": "text",
+			"text": result.Text,
+		})
+	}
+	stopReason := "end_turn"
+	if len(result.ToolCalls) > 0 {
+		stopReason = "tool_use"
+	}
 	return map[string]any{
 		"type":          "message",
 		"role":          "assistant",
 		"model":         modelName,
 		"content":       content,
-		"stop_reason":   "end_turn",
+		"stop_reason":   stopReason,
 		"stop_sequence": nil,
 		"usage":         mapUsage(result.Usage),
 	}
@@ -26,8 +46,24 @@ func mapUsage(usage map[string]any) map[string]any {
 	if output, ok := usage["output_tokens"]; ok {
 		out["output_tokens"] = output
 	}
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if cached, ok := details["cached_tokens"]; ok {
+			out["cache_read_input_tokens"] = cached
+		}
+	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func parseArguments(arguments string) any {
+	if arguments == "" {
+		return map[string]any{}
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
+		return map[string]any{"raw": arguments}
+	}
+	return decoded
 }

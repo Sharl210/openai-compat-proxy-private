@@ -16,6 +16,26 @@ func ValidateProxyAuth(r *http.Request, proxyKey string) error {
 		return nil
 	}
 
+	if r.Header.Get("Authorization") == "Bearer "+proxyKey {
+		return nil
+	}
+
+	if strings.TrimSpace(r.Header.Get("X-API-Key")) == proxyKey {
+		return nil
+	}
+
+	if strings.TrimSpace(r.Header.Get("Api-Key")) == proxyKey {
+		return nil
+	}
+
+	if strings.TrimSpace(r.Header.Get("x-api-key")) == proxyKey {
+		return nil
+	}
+
+	if strings.TrimSpace(r.Header.Get("api-key")) == proxyKey {
+		return nil
+	}
+
 	if r.Header.Get("Authorization") != "Bearer "+proxyKey {
 		return ErrUnauthorized
 	}

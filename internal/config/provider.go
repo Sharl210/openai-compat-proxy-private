@@ -159,5 +159,8 @@ func (p ProviderConfig) ResolveModel(model string) string {
 	if mapped, ok := p.ModelMap[model]; ok && mapped != "" {
 		return mapped
 	}
+	if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
+		return mapped
+	}
 	return model
 }

@@ -6,15 +6,35 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
+const initialSyntheticReasoningLeadTime = 120 * time.Millisecond
+
 type anthropicStreamState struct {
-	messageStarted bool
-	blockStarted   bool
+	messageStarted   bool
+	textStarted      bool
+	textIndex        int
+	thinkingStarted  bool
+	thinkingIndex    int
+	toolStarted      bool
+	toolIndex        int
+	stopReason       string
+	nextIndex        int
+	realThinkingSeen bool
+	planningSent     bool
+	toolStatusSent   bool
+}
+
+type responsesStreamState struct {
+	textStarted       bool
+	realReasoningSeen bool
+	planningSent      bool
+	toolStatusSent    bool
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -48,10 +68,139 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 	return nil
 }
 
+func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
+	state := responsesStreamState{}
+	if err := writeSyntheticResponsesReasoning(w, flusher, "推理中…"); err != nil {
+		return err
+	}
+	if err := waitSyntheticLeadTime(ctx); err != nil {
+		return err
+	}
+	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
+		return writeResponsesEvent(w, flusher, &state, evt)
+	})
+}
+
+func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event) error {
+	item, _ := evt.Data["item"].(map[string]any)
+	switch evt.Event {
+	case "response.output_item.added", "response.output_item.done":
+		if !state.textStarted {
+			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realReasoningSeen {
+				if err := writeSyntheticResponsesReasoning(w, flusher, "分析中…"); err != nil {
+					return err
+				}
+				if err := writeSyntheticResponsesReasoning(w, flusher, "正在组织回答…"); err != nil {
+					return err
+				}
+				state.planningSent = true
+			}
+		}
+		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
+			state.realReasoningSeen = true
+		}
+		if itemType, _ := item["type"].(string); itemType == "function_call" && !state.textStarted && !state.realReasoningSeen && !state.toolStatusSent {
+			if err := writeSyntheticResponsesReasoning(w, flusher, "正在调用工具…"); err != nil {
+				return err
+			}
+			state.toolStatusSent = true
+		}
+	case "response.output_text.delta":
+		state.textStarted = true
+	case "response.reasoning.delta":
+		if delta := reasoningContentValue(evt.Data); delta != "" {
+			state.realReasoningSeen = true
+		}
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\n", evt.Event); err != nil {
+		return err
+	}
+	if len(evt.Raw) > 0 {
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", evt.Raw); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprint(w, "data: {}\n\n"); err != nil {
+			return err
+		}
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flusher, text string) error {
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	payload := map[string]any{"summary": text}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, "event: response.reasoning.delta\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", encoded); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
 func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
 	state := anthropicStreamState{}
+	if err := startAnthropicUnreasonedPlaceholder(w, flusher, &state); err != nil {
+		return err
+	}
+	if err := waitSyntheticLeadTime(ctx); err != nil {
+		return err
+	}
 	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
 		return writeAnthropicEvent(w, flusher, &state, evt)
+	})
+}
+
+func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState) error {
+	if state.messageStarted {
+		return nil
+	}
+	if err := writeAnthropicSSEEvent(w, flusher, "message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id":            "msg_proxy",
+			"type":          "message",
+			"role":          "assistant",
+			"model":         "responses-upstream",
+			"content":       []any{},
+			"stop_reason":   nil,
+			"stop_sequence": nil,
+			"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
+		},
+	}); err != nil {
+		return err
+	}
+	state.messageStarted = true
+	state.thinkingStarted = true
+	state.thinkingIndex = state.nextIndex
+	state.nextIndex++
+	if err := writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
+		"type":  "content_block_start",
+		"index": state.thinkingIndex,
+		"content_block": map[string]any{
+			"type":     "thinking",
+			"thinking": "",
+		},
+	}); err != nil {
+		return err
+	}
+	return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+		"type":  "content_block_delta",
+		"index": state.thinkingIndex,
+		"delta": map[string]any{"type": "thinking_delta", "thinking": "推理中…\n"},
 	})
 }
 
@@ -75,43 +224,183 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			},
 		})
 	}
-	startBlock := func() error {
-		if state.blockStarted {
+	startTextBlock := func() error {
+		if state.textStarted {
 			return nil
 		}
 		if err := startMessage(); err != nil {
 			return err
 		}
-		state.blockStarted = true
+		state.textStarted = true
+		state.textIndex = state.nextIndex
+		state.nextIndex++
 		return writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
 			"type":  "content_block_start",
-			"index": 0,
+			"index": state.textIndex,
 			"content_block": map[string]any{
 				"type": "text",
 				"text": "",
 			},
 		})
 	}
-
-	switch evt.Event {
-	case "response.output_text.delta":
-		if err := startBlock(); err != nil {
+	startThinkingBlock := func() error {
+		if state.thinkingStarted {
+			return nil
+		}
+		if err := startMessage(); err != nil {
 			return err
 		}
+		state.thinkingStarted = true
+		state.thinkingIndex = state.nextIndex
+		state.nextIndex++
+		return writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
+			"type":  "content_block_start",
+			"index": state.thinkingIndex,
+			"content_block": map[string]any{
+				"type":     "thinking",
+				"thinking": "",
+			},
+		})
+	}
+	startToolBlock := func(item map[string]any) error {
+		if state.toolStarted {
+			return nil
+		}
+		if err := startMessage(); err != nil {
+			return err
+		}
+		state.toolStarted = true
+		state.stopReason = "tool_use"
+		state.toolIndex = state.nextIndex
+		state.nextIndex++
+		if err := writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
+			"type":  "content_block_start",
+			"index": state.toolIndex,
+			"content_block": map[string]any{
+				"type":  "tool_use",
+				"id":    stringValue(item["call_id"]),
+				"name":  stringValue(item["name"]),
+				"input": map[string]any{},
+			},
+		}); err != nil {
+			return err
+		}
+		arguments := stringValue(item["arguments"])
+		if arguments != "" {
+			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": state.toolIndex,
+				"delta": map[string]any{"type": "input_json_delta", "partial_json": arguments},
+			})
+		}
+		return nil
+	}
+
+	switch evt.Event {
+	case "response.output_item.added", "response.output_item.done":
+		item, _ := evt.Data["item"].(map[string]any)
+		if !state.textStarted {
+			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realThinkingSeen {
+				if err := startThinkingBlock(); err != nil {
+					return err
+				}
+				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+					"type":  "content_block_delta",
+					"index": state.thinkingIndex,
+					"delta": map[string]any{"type": "thinking_delta", "thinking": "分析中…\n"},
+				}); err != nil {
+					return err
+				}
+				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+					"type":  "content_block_delta",
+					"index": state.thinkingIndex,
+					"delta": map[string]any{"type": "thinking_delta", "thinking": "正在组织回答…\n"},
+				}); err != nil {
+					return err
+				}
+				state.planningSent = true
+			}
+		}
+		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			if !state.textStarted && !state.realThinkingSeen && !state.toolStatusSent {
+				if err := startThinkingBlock(); err != nil {
+					return err
+				}
+				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+					"type":  "content_block_delta",
+					"index": state.thinkingIndex,
+					"delta": map[string]any{"type": "thinking_delta", "thinking": "正在调用工具…\n"},
+				}); err != nil {
+					return err
+				}
+				state.toolStatusSent = true
+			}
+			return startToolBlock(item)
+		}
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			if summary := reasoningSummaryFromItem(item); summary != "" {
+				state.realThinkingSeen = true
+				if err := startThinkingBlock(); err != nil {
+					return err
+				}
+				return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+					"type":  "content_block_delta",
+					"index": state.thinkingIndex,
+					"delta": map[string]any{"type": "thinking_delta", "thinking": summary},
+				})
+			}
+		}
+	case "response.output_text.delta":
+		if err := startTextBlock(); err != nil {
+			return err
+		}
+		state.textStarted = true
 		delta := stringValue(evt.Data["delta"])
 		if delta == "" {
 			return nil
 		}
 		return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 			"type":  "content_block_delta",
-			"index": 0,
+			"index": state.textIndex,
 			"delta": map[string]any{"type": "text_delta", "text": delta},
 		})
-	case "response.completed", "response.done":
-		if err := startBlock(); err != nil {
-			return err
+	case "response.reasoning.delta":
+		if delta := reasoningContentValue(evt.Data); delta != "" {
+			state.realThinkingSeen = true
+			if err := startThinkingBlock(); err != nil {
+				return err
+			}
+			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": state.thinkingIndex,
+				"delta": map[string]any{"type": "thinking_delta", "thinking": delta},
+			})
 		}
-		if err := writeAnthropicSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}); err != nil {
+	case "response.completed", "response.done":
+		for _, block := range []struct {
+			started bool
+			index   int
+		}{
+			{state.thinkingStarted, state.thinkingIndex},
+			{state.textStarted, state.textIndex},
+			{state.toolStarted, state.toolIndex},
+		} {
+			if !block.started {
+				continue
+			}
+			if err := writeAnthropicSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": block.index}); err != nil {
+				return err
+			}
+		}
+		stopReason := "end_turn"
+		if state.stopReason != "" {
+			stopReason = state.stopReason
+		}
+		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
+			"type":  "message_delta",
+			"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil},
+			"usage": anthropicUsageFromEvent(evt.Data),
+		}); err != nil {
 			return err
 		}
 		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
@@ -138,6 +427,37 @@ func writeAnthropicSSEEvent(w http.ResponseWriter, flusher http.Flusher, event s
 	return nil
 }
 
+func parseAnthropicToolArguments(arguments string) any {
+	if arguments == "" {
+		return map[string]any{}
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
+		return map[string]any{"raw": arguments}
+	}
+	return decoded
+}
+
+func anthropicUsageFromEvent(data map[string]any) map[string]any {
+	usage := usageFromEventData(data)
+	out := map[string]any{}
+	if input, ok := usage["input_tokens"]; ok {
+		out["input_tokens"] = input
+	}
+	if output, ok := usage["output_tokens"]; ok {
+		out["output_tokens"] = output
+	}
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if cached, ok := details["cached_tokens"]; ok {
+			out["cache_read_input_tokens"] = cached
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 type chatStreamState struct {
 	roleSent          bool
 	textStarted       bool
@@ -156,9 +476,24 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 		toolIndex: map[string]int{},
 		toolSent:  map[string]bool{},
 	}
+	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "推理中…\n"}, "", nil); err != nil {
+		return err
+	}
+	if err := waitSyntheticLeadTime(ctx); err != nil {
+		return err
+	}
 	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
 		return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage)
 	})
+}
+
+func waitSyntheticLeadTime(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(initialSyntheticReasoningLeadTime):
+		return nil
+	}
 }
 
 func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event, includeUsage bool) error {

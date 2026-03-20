@@ -1,6 +1,10 @@
 package responses
 
-import "openai-compat-proxy/internal/aggregate"
+import (
+	"fmt"
+
+	"openai-compat-proxy/internal/aggregate"
+)
 
 func BuildResponse(result aggregate.Result) map[string]any {
 	content := result.ResponseMessageContent
@@ -12,7 +16,9 @@ func BuildResponse(result aggregate.Result) map[string]any {
 	}
 
 	outputItem := map[string]any{
+		"id":      buildOutputItemID(result),
 		"type":    "message",
+		"status":  "completed",
 		"role":    "assistant",
 		"content": content,
 	}
@@ -30,12 +36,30 @@ func BuildResponse(result aggregate.Result) map[string]any {
 	}
 
 	return map[string]any{
+		"id":        buildResponseID(result),
 		"object":    "response",
 		"status":    "completed",
 		"output":    []map[string]any{outputItem},
 		"reasoning": result.Reasoning,
 		"usage":     cloneMap(result.Usage),
 	}
+}
+
+func buildResponseID(result aggregate.Result) string {
+	if len(result.ToolCalls) > 0 && result.ToolCalls[0].CallID != "" {
+		return fmt.Sprintf("resp_%s", result.ToolCalls[0].CallID)
+	}
+	return "resp_proxy"
+}
+
+func buildOutputItemID(result aggregate.Result) string {
+	if len(result.ToolCalls) > 0 && result.ToolCalls[0].ID != "" {
+		return fmt.Sprintf("msg_%s", result.ToolCalls[0].ID)
+	}
+	if result.Text != "" {
+		return "msg_proxy"
+	}
+	return "msg_output"
 }
 
 func cloneMap(input map[string]any) map[string]any {

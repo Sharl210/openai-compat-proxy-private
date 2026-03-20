@@ -40,6 +40,139 @@ func TestResponsesStreamingRelaysSSEEvents(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamingStartsBeforeUpstreamCompletion(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hel\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 1500*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	firstLine := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if strings.TrimSpace(line) != "" {
+				firstLine <- line
+				return
+			}
+		}
+	}()
+
+	select {
+	case line := <-firstLine:
+		if !strings.Contains(line, "event: response.reasoning.delta") && !strings.Contains(line, "event: response.output_text.delta") && !strings.Contains(line, "event: response.created") {
+			t.Fatalf("expected early SSE line, got %q", line)
+		}
+	case err := <-errCh:
+		t.Fatalf("failed before receiving first line: %v", err)
+	case <-time.After(600 * time.Millisecond):
+		t.Fatal("timed out waiting for first downstream SSE line before upstream completion")
+	}
+}
+
+func TestResponsesStreamingImmediatelyEmitsUnreasonedPlaceholder(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 1500*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := line + second
+	if !strings.Contains(joined, `event: response.reasoning.delta`) || !strings.Contains(joined, `"summary":"推理中…\n"`) {
+		t.Fatalf("expected immediate unreasoned placeholder, got %s", joined)
+	}
+}
+
+func TestResponsesStreamingEmitsSyntheticReasoningBeforeText(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.output_item.added\ndata: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"phase\":\"final_answer\",\"role\":\"assistant\"}}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 300*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `event: response.reasoning.delta`) || !strings.Contains(text, `"summary":"分析中…`) {
+		t.Fatalf("expected synthetic reasoning delta before text, got %s", text)
+	}
+}
+
+func TestResponsesStreamingSuppressesSyntheticReasoningWhenRealReasoningExists(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\ndata: {\"summary\":\"real\"}\n\n",
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 300*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, `"summary":"分析中…`) {
+		t.Fatalf("expected synthetic reasoning to be suppressed, got %s", text)
+	}
+	if !strings.Contains(text, `"summary":"real"`) {
+		t.Fatalf("expected real reasoning delta to pass through, got %s", text)
+	}
+}
+
 func TestChatStreamingTranslatesTextDeltasToChunks(t *testing.T) {
 	stub := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\ndata: {\"delta\":\"Hel\"}\n\n",
@@ -112,6 +245,37 @@ func TestChatStreamingStartsBeforeUpstreamCompletion(t *testing.T) {
 		t.Fatalf("failed before receiving first line: %v", err)
 	case <-time.After(600 * time.Millisecond):
 		t.Fatal("timed out waiting for first downstream chunk before upstream completion")
+	}
+}
+
+func TestChatStreamingImmediatelyEmitsUnreasonedPlaceholder(t *testing.T) {
+	stub := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n",
+		"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+	}, 1500*time.Millisecond)
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := line + second
+	if !strings.Contains(joined, `"reasoning_content":"推理中…\n"`) {
+		t.Fatalf("expected immediate unreasoned placeholder, got %s", joined)
 	}
 }
 

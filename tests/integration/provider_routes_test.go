@@ -101,3 +101,36 @@ func TestProviderScopedRouteRejectsUnknownProvider(t *testing.T) {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
+
+func TestProviderScopedAnthropicAliasRouteUsesMessagesHandler(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n")
+		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := newTestServerWithConfig(t, config.Config{
+		ListenAddr: ":0",
+		Providers:  []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "server-key", SupportsAnthropicMessages: true}},
+	})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/openai/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	body := readBodyString(t, resp)
+	if !strings.Contains(body, `"type":"message"`) {
+		t.Fatalf("expected anthropic message response, got %s", body)
+	}
+}

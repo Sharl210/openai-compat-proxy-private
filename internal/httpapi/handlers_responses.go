@@ -60,10 +60,24 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 			defer cancel()
 		}
 
+		if canon.Stream {
+			flusher := startSSE(w)
+			if err := writeResponsesSSELive(ctx, client, w, flusher, canon, authorization); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return
+				}
+				return
+			}
+			return
+		}
+
 		events, err := client.Stream(ctx, canon, authorization)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+				return
+			}
+			if writeUpstreamError(w, err) {
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -78,14 +92,6 @@ func handleResponses(cfg config.Config) http.HandlerFunc {
 		result, err := collector.Result()
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
-			return
-		}
-
-		if canon.Stream {
-			flusher := startSSE(w)
-			if err := writeResponsesSSE(w, flusher, events); err != nil {
-				errorsx.WriteJSON(w, http.StatusInternalServerError, "stream_write_error", err.Error())
-			}
 			return
 		}
 

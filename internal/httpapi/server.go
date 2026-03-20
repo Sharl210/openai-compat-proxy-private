@@ -14,6 +14,7 @@ func NewServer(cfg config.Config) http.Handler {
 	mux.HandleFunc("/v1/models", handleModels(cfg))
 	mux.HandleFunc("/v1/responses", handleResponses(cfg))
 	mux.HandleFunc("/v1/chat/completions", handleChat(cfg))
+	mux.HandleFunc("/v1/messages", handleAnthropicMessages(cfg))
 	mux.HandleFunc("/anthropic/v1/messages", handleAnthropicMessages(cfg))
 
 	return withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

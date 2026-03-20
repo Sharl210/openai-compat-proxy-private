@@ -71,3 +71,42 @@ func TestResponsesHandlerPreservesUsageIncludingCachedTokens(t *testing.T) {
 		t.Fatalf("expected reasoning_tokens in usage, got %#v", usage)
 	}
 }
+
+func TestResponsesHandlerBuildsStableOutputItemShape(t *testing.T) {
+	stub := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\ndata: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\ndata: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n",
+	})
+	defer stub.Close()
+
+	server := newServerWithStubbedUpstream(t, stub.URL)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]}],"stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	output, ok := body["output"].([]any)
+	if !ok || len(output) != 1 {
+		t.Fatalf("expected one output item, got %#v", body["output"])
+	}
+	item, _ := output[0].(map[string]any)
+	if id, _ := body["id"].(string); id == "" {
+		t.Fatalf("expected top-level response id, got %#v", body)
+	}
+	if id, _ := item["id"].(string); id == "" {
+		t.Fatalf("expected output item id, got %#v", item)
+	}
+	if item["type"] != "message" {
+		t.Fatalf("expected output item type message, got %#v", item["type"])
+	}
+	if status, _ := item["status"].(string); status == "" {
+		t.Fatalf("expected output item status, got %#v", item)
+	}
+}

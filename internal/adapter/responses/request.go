@@ -10,22 +10,33 @@ import (
 )
 
 type request struct {
-	Model           string     `json:"model"`
-	Stream          bool       `json:"stream"`
-	Instructions    string     `json:"instructions"`
-	Input           []message  `json:"input"`
-	Tools           []tool     `json:"tools"`
-	ToolChoice      any        `json:"tool_choice"`
-	Reasoning       *reasoning `json:"reasoning"`
-	Temperature     *float64   `json:"temperature"`
-	TopP            *float64   `json:"top_p"`
-	MaxOutputTokens *int       `json:"max_output_tokens"`
-	Stop            []string   `json:"stop"`
+	Model              string          `json:"model"`
+	Stream             bool            `json:"stream"`
+	Instructions       json.RawMessage `json:"instructions"`
+	Input              []message       `json:"input"`
+	Tools              []tool          `json:"tools"`
+	ToolChoice         any             `json:"tool_choice"`
+	Reasoning          *reasoning      `json:"reasoning"`
+	Temperature        json.RawMessage `json:"temperature"`
+	TopP               json.RawMessage `json:"top_p"`
+	MaxOutputTokensRaw json.RawMessage `json:"max_output_tokens"`
+	Stop               []string        `json:"stop"`
 }
 
 type message struct {
-	Role    string        `json:"role"`
-	Content []contentPart `json:"content"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
+	ToolCalls  []toolCall      `json:"tool_calls"`
+	ToolCallID string          `json:"tool_call_id"`
+}
+
+type toolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type contentPart struct {
@@ -56,10 +67,10 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	canon := model.CanonicalRequest{
 		Model:           req.Model,
 		Stream:          req.Stream,
-		Instructions:    req.Instructions,
-		Temperature:     req.Temperature,
-		TopP:            req.TopP,
-		MaxOutputTokens: req.MaxOutputTokens,
+		Instructions:    decodeOptionalString(req.Instructions),
+		Temperature:     decodeOptionalFloat(req.Temperature),
+		TopP:            decodeOptionalFloat(req.TopP),
+		MaxOutputTokens: decodeOptionalInt(req.MaxOutputTokensRaw),
 		Stop:            req.Stop,
 	}
 
@@ -104,8 +115,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	for _, msg := range req.Input {
-		parts := make([]model.CanonicalContentPart, 0, len(msg.Content))
-		for _, part := range msg.Content {
+		decodedContent, err := decodeMessageContent(msg.Content)
+		if err != nil {
+			return model.CanonicalRequest{}, err
+		}
+		parts := make([]model.CanonicalContentPart, 0, len(decodedContent))
+		for _, part := range decodedContent {
 			switch part.Type {
 			case "input_text":
 				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: part.Text})
@@ -116,10 +131,37 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			}
 		}
 
-		canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, Parts: parts})
+		var toolCalls []model.CanonicalToolCall
+		for _, tc := range msg.ToolCalls {
+			toolCalls = append(toolCalls, model.CanonicalToolCall{
+				ID:        tc.ID,
+				Type:      tc.Type,
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			})
+		}
+		canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID})
 	}
 
 	return canon, nil
+}
+
+func decodeMessageContent(raw json.RawMessage) ([]contentPart, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		if isUndefinedString(single) {
+			return nil, nil
+		}
+		return []contentPart{{Type: "input_text", Text: single}}, nil
+	}
+	var parts []contentPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, err
+	}
+	return parts, nil
 }
 
 func (r *reasoning) UnmarshalJSON(data []byte) error {
@@ -152,4 +194,49 @@ func cloneReasoningMap(input map[string]any) map[string]any {
 func stringMapValue(m map[string]any, key string) string {
 	value, _ := m[key].(string)
 	return value
+}
+
+func decodeOptionalString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil || isUndefinedString(value) {
+		return ""
+	}
+	return value
+}
+
+func decodeOptionalFloat(raw json.RawMessage) *float64 {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err == nil {
+		return &value
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil && isUndefinedString(text) {
+		return nil
+	}
+	return nil
+}
+
+func decodeOptionalInt(raw json.RawMessage) *int {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value int
+	if err := json.Unmarshal(raw, &value); err == nil {
+		return &value
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil && isUndefinedString(text) {
+		return nil
+	}
+	return nil
+}
+
+func isUndefinedString(value string) bool {
+	return value == "[undefined]" || value == "undefined" || value == ""
 }

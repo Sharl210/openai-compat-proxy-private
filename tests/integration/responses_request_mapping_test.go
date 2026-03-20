@@ -67,3 +67,103 @@ func TestResponsesRequestPreservesReasoningRawAndDefaultSummary(t *testing.T) {
 		t.Fatalf("expected raw reasoning fields preserved, got %#v", canon.Reasoning.Raw)
 	}
 }
+
+func TestResponsesRequestAcceptsStringContentAndUndefinedOptionals(t *testing.T) {
+	body := `{
+		"model":"gpt-5.4",
+		"input":[
+			{"role":"developer","content":"You are helpful."},
+			{"role":"user","content":[{"type":"input_text","text":"hi"}]}
+		],
+		"temperature":"[undefined]",
+		"top_p":"[undefined]",
+		"max_output_tokens":"[undefined]",
+		"instructions":"[undefined]",
+		"user":"[undefined]",
+		"stream":true
+	}`
+
+	canon, err := responsesadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("expected request to decode, got error: %v", err)
+	}
+
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(canon.Messages))
+	}
+	if canon.Messages[0].Role != "developer" {
+		t.Fatalf("expected first role developer, got %q", canon.Messages[0].Role)
+	}
+	if len(canon.Messages[0].Parts) != 1 || canon.Messages[0].Parts[0].Text != "You are helpful." {
+		t.Fatalf("expected developer string content to map to one text part, got %#v", canon.Messages[0].Parts)
+	}
+	if canon.Temperature != nil || canon.TopP != nil || canon.MaxOutputTokens != nil {
+		t.Fatalf("expected undefined optional numeric fields to be ignored, got temp=%v top_p=%v max_output=%v", canon.Temperature, canon.TopP, canon.MaxOutputTokens)
+	}
+	if canon.Instructions != "" {
+		t.Fatalf("expected undefined instructions to be ignored, got %q", canon.Instructions)
+	}
+}
+
+func TestResponsesRequestPreservesToolLoopHistory(t *testing.T) {
+	body := `{
+		"model":"gpt-5.4",
+		"input":[
+			{
+				"role":"assistant",
+				"content":"",
+				"tool_calls":[
+					{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Shanghai\"}"}}
+				]
+			},
+			{
+				"role":"tool",
+				"tool_call_id":"call_1",
+				"content":"{\"temp\":25}"
+			}
+		],
+		"stream":false
+	}`
+
+	canon, err := responsesadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("expected request to decode, got error: %v", err)
+	}
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(canon.Messages))
+	}
+	if len(canon.Messages[0].ToolCalls) != 1 || canon.Messages[0].ToolCalls[0].Name != "get_weather" {
+		t.Fatalf("expected assistant tool call history preserved, got %#v", canon.Messages[0].ToolCalls)
+	}
+	if canon.Messages[1].Role != "tool" || canon.Messages[1].ToolCallID != "call_1" {
+		t.Fatalf("expected tool message replay preserved, got %#v", canon.Messages[1])
+	}
+}
+
+func TestResponsesRequestPreservesAssistantTextAlongsideToolCalls(t *testing.T) {
+	body := `{
+		"model":"gpt-5.4",
+		"input":[
+			{
+				"role":"assistant",
+				"content":"我先查一下。",
+				"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_web","arguments":"{\"query\":\"上海天气\"}"}}]
+			}
+		],
+		"stream":false
+	}`
+
+	canon, err := responsesadapter.DecodeRequest(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("expected request to decode, got error: %v", err)
+	}
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one message, got %#v", canon.Messages)
+	}
+	if len(canon.Messages[0].Parts) != 1 || canon.Messages[0].Parts[0].Text != "我先查一下。" {
+		t.Fatalf("expected assistant text preserved, got %#v", canon.Messages[0])
+	}
+	if len(canon.Messages[0].ToolCalls) != 1 || canon.Messages[0].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected assistant tool call preserved, got %#v", canon.Messages[0])
+	}
+}

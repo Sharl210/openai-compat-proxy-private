@@ -291,6 +291,78 @@ func TestUpstreamClientReplaysToolLoopHistory(t *testing.T) {
 	}
 }
 
+func TestUpstreamClientPreservesInterleavedToolAndMessageHistoryOrder(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		input, ok := body["input"].([]any)
+		if !ok || len(input) != 7 {
+			t.Fatalf("expected 7 replay items, got %#v", body["input"])
+		}
+		assertRoleMessage := func(index int, wantRole string) map[string]any {
+			item, _ := input[index].(map[string]any)
+			if role, _ := item["role"].(string); role != wantRole {
+				t.Fatalf("expected input[%d] role %s, got %#v", index, wantRole, item)
+			}
+			return item
+		}
+		assertType := func(index int, want string) map[string]any {
+			item, _ := input[index].(map[string]any)
+			if item["type"] != want {
+				t.Fatalf("expected input[%d] type %s, got %#v", index, want, item)
+			}
+			return item
+		}
+		msg1 := assertRoleMessage(0, "assistant")
+		call1 := assertType(1, "function_call")
+		if call1["call_id"] != "call_1" {
+			t.Fatalf("expected first call id call_1, got %#v", call1)
+		}
+		out1 := assertType(2, "function_call_output")
+		if out1["call_id"] != "call_1" {
+			t.Fatalf("expected first tool output for call_1, got %#v", out1)
+		}
+		msg2 := assertRoleMessage(3, "assistant")
+		userMsg := assertRoleMessage(4, "user")
+		_ = msg1
+		_ = msg2
+		_ = userMsg
+		call2 := assertType(5, "function_call")
+		if call2["call_id"] != "call_2" {
+			t.Fatalf("expected second call id call_2, got %#v", call2)
+		}
+		out2 := assertType(6, "function_call_output")
+		if out2["call_id"] != "call_2" {
+			t.Fatalf("expected second tool output for call_2, got %#v", out2)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\ndata: {}\n\n"))
+	}))
+	defer stub.Close()
+
+	req := model.CanonicalRequest{
+		Model:  "gpt-x",
+		Stream: true,
+		Messages: []model.CanonicalMessage{
+			{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先查天气"}}, ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_weather", Arguments: `{"city":"上海"}`}}},
+			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"temp":25}`}}},
+			{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "天气已拿到"}}},
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "再查广州"}}},
+			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_2", Type: "function", Name: "search_weather", Arguments: `{"city":"广州"}`}}},
+			{Role: "tool", ToolCallID: "call_2", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"temp":28}`}}},
+		},
+	}
+
+	client := upstream.NewClient(stub.URL)
+	_, err := client.Stream(context.Background(), req, "Bearer server-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUpstreamClientBuildsStableBodiesForEquivalentRequests(t *testing.T) {
 	var (
 		mu     sync.Mutex
