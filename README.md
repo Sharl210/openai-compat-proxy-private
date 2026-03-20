@@ -48,10 +48,11 @@
 
 ### 6. Claude 提示缓存兼容
 
-- 支持 Anthropic / Claude 兼容请求中的 `cache_control`
-- 支持顶层 `cache_control` 透传
-- 支持文本内容块上的 `cache_control` 透传
-- 适配 Claude 客户端里的“提示缓存（cache_control）”开关
+- 兼容 Anthropic / Claude 兼容请求中的 `cache_control`
+- 允许 Claude 客户端勾选“提示缓存（cache_control）”后继续正常请求
+- 代理层会接收并过滤该字段，避免当前 OpenAI Responses 上游因不支持 `cache_control` 而返回 400
+- 这不是对 Anthropic prompt caching 的真实上游支持，而是兼容输入、避免失败
+- 少了这个功能也不代表项目有缺陷。对于本项目这种“上游是 OpenAI Responses 格式”的设计来说，Claude 侧的 `cache_control` 本身就不是核心必需能力，因为上游本身已有自己的缓存机制
 
 ## 安装与启动
 

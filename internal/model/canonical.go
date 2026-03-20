@@ -4,7 +4,6 @@ type CanonicalRequest struct {
 	Model           string
 	Stream          bool
 	IncludeUsage    bool
-	CacheControl    map[string]any
 	Instructions    string
 	Messages        []CanonicalMessage
 	Temperature     *float64

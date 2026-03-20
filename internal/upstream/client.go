@@ -238,9 +238,6 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		"model":  req.Model,
 		"stream": true,
 	}
-	if len(req.CacheControl) > 0 {
-		payload["cache_control"] = cloneMap(req.CacheControl)
-	}
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
@@ -261,13 +258,9 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 			for _, part := range msg.Parts {
 				switch part.Type {
 				case "text":
-					entry := map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text}
-					mergeRawPartFields(entry, part.Raw)
-					content = append(content, entry)
+					content = append(content, map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text})
 				case "image_url", "input_image":
-					entry := map[string]any{"type": "input_image", "image_url": part.ImageURL}
-					mergeRawPartFields(entry, part.Raw)
-					content = append(content, entry)
+					content = append(content, map[string]any{"type": "input_image", "image_url": part.ImageURL})
 				}
 			}
 			if len(content) > 0 {
@@ -350,18 +343,6 @@ func cloneMap(input map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
-}
-
-func mergeRawPartFields(dst map[string]any, raw map[string]any) {
-	if len(raw) == 0 {
-		return
-	}
-	for key, value := range raw {
-		if _, exists := dst[key]; exists {
-			continue
-		}
-		dst[key] = value
-	}
 }
 
 func textPartTypeForRole(role string) string {

@@ -13,7 +13,6 @@ type request struct {
 	Messages      []message       `json:"messages"`
 	System        json.RawMessage `json:"system"`
 	MaxTokens     *int            `json:"max_tokens"`
-	CacheControl  json.RawMessage `json:"cache_control"`
 	StreamRaw     json.RawMessage `json:"stream"`
 	Tools         []tool          `json:"tools"`
 	ToolChoiceRaw json.RawMessage `json:"tool_choice"`
@@ -49,7 +48,6 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	canon := model.CanonicalRequest{
 		Model:           req.Model,
 		Stream:          decodeAnthropicOptionalBool(req.StreamRaw),
-		CacheControl:    decodeCacheControl(req.CacheControl),
 		Instructions:    decodeAnthropicSystem(req.System),
 		MaxOutputTokens: req.MaxTokens,
 	}
@@ -99,12 +97,12 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 	for _, part := range parts {
 		switch part.Type {
 		case "text":
-			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text, Raw: decodePartRaw(part.CacheControl)})
+			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text})
 		case "tool_use", "tool_result":
 			continue
 		case "":
 			if part.Text != "" {
-				out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text, Raw: decodePartRaw(part.CacheControl)})
+				out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text})
 				continue
 			}
 		default:
@@ -218,25 +216,6 @@ func decodeAnthropicToolChoice(raw json.RawMessage) model.CanonicalToolChoice {
 		}
 	}
 	return model.CanonicalToolChoice{}
-}
-
-func decodeCacheControl(raw json.RawMessage) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err == nil && len(out) > 0 {
-		return out
-	}
-	return nil
-}
-
-func decodePartRaw(cacheControl json.RawMessage) map[string]any {
-	cc := decodeCacheControl(cacheControl)
-	if cc == nil {
-		return nil
-	}
-	return map[string]any{"cache_control": cc}
 }
 
 func isUndefinedString(value string) bool {
