@@ -14,6 +14,7 @@ func NewServer(cfg config.Config) http.Handler {
 	mux.HandleFunc("/v1/models", handleModels(cfg))
 	mux.HandleFunc("/v1/responses", handleResponses(cfg))
 	mux.HandleFunc("/v1/chat/completions", handleChat(cfg))
+	mux.HandleFunc("/anthropic/v1/messages", handleAnthropicMessages(cfg))
 
 	return withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
@@ -21,13 +22,11 @@ func NewServer(cfg config.Config) http.Handler {
 			return
 		}
 
-		if r.URL.Path == "/v1/models" || r.URL.Path == "/v1/responses" || r.URL.Path == "/v1/chat/completions" {
+		if info, err := resolveRouteInfo(r.URL.Path, cfg); err == nil {
+			r = r.Clone(withRouteInfo(r.Context(), info))
+			r.URL.Path = info.CanonicalPath
 			if err := auth.ValidateProxyAuth(r, cfg.ProxyAPIKey); err != nil {
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
-				return
-			}
-			if _, err := auth.ResolveUpstreamAuthorization(r, cfg); err != nil {
-				errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 				return
 			}
 

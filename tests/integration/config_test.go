@@ -52,3 +52,73 @@ func TestDefaultConfigDisablesLoggingByDefault(t *testing.T) {
 		t.Fatal("expected logging disabled by default")
 	}
 }
+
+func TestLoadFromEnvLoadsProviderGlobals(t *testing.T) {
+	t.Setenv("PROVIDERS_DIR", "/tmp/providers")
+	t.Setenv("DEFAULT_PROVIDER", "openai")
+	t.Setenv("ENABLE_LEGACY_V1_ROUTES", "true")
+
+	cfg := config.LoadFromEnv()
+
+	if cfg.ProvidersDir != "/tmp/providers" {
+		t.Fatalf("unexpected providers dir: %q", cfg.ProvidersDir)
+	}
+	if cfg.DefaultProvider != "openai" {
+		t.Fatalf("unexpected default provider: %q", cfg.DefaultProvider)
+	}
+	if !cfg.EnableLegacyV1Routes {
+		t.Fatal("expected legacy v1 routes to be enabled")
+	}
+}
+
+func TestValidateRequiresDefaultProviderWhenLegacyRoutesEnabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.EnableLegacyV1Routes = true
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error when legacy routes are enabled without default provider")
+	}
+}
+
+func TestLoadProvidersFromDir(t *testing.T) {
+	dir := t.TempDir()
+	writeProviderFile(t, dir, "openai.env", "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nPROVIDER_IS_DEFAULT=true\nUPSTREAM_BASE_URL=http://127.0.0.1:18081/v1\nUPSTREAM_API_KEY=key-openai\nSUPPORTS_CHAT=true\nSUPPORTS_RESPONSES=true\nSUPPORTS_MODELS=true\n")
+	writeProviderFile(t, dir, "anthropic.env", "PROVIDER_ID=anthropic\nPROVIDER_ENABLED=false\nUPSTREAM_BASE_URL=http://127.0.0.1:18082/v1\nUPSTREAM_API_KEY=key-anthropic\nSUPPORTS_CHAT=true\nSUPPORTS_RESPONSES=true\nSUPPORTS_MODELS=true\n")
+	writeProviderFile(t, dir, "ignored.env.example", "PROVIDER_ID=ignored\n")
+
+	providers, err := config.LoadProvidersFromDir(dir)
+	if err != nil {
+		t.Fatalf("expected providers to load, got error: %v", err)
+	}
+
+	if len(providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(providers))
+	}
+	if providers[0].ID != "anthropic" && providers[1].ID != "anthropic" {
+		t.Fatalf("expected anthropic provider to be loaded, got %#v", providers)
+	}
+	for _, provider := range providers {
+		if provider.ID == "openai" && !provider.IsDefault {
+			t.Fatal("expected openai to be default provider")
+		}
+	}
+}
+
+func TestLoadProvidersRejectsDuplicateDefaultProviders(t *testing.T) {
+	dir := t.TempDir()
+	writeProviderFile(t, dir, "a.env", "PROVIDER_ID=a\nPROVIDER_ENABLED=true\nPROVIDER_IS_DEFAULT=true\nUPSTREAM_BASE_URL=http://127.0.0.1:18081/v1\n")
+	writeProviderFile(t, dir, "b.env", "PROVIDER_ID=b\nPROVIDER_ENABLED=true\nPROVIDER_IS_DEFAULT=true\nUPSTREAM_BASE_URL=http://127.0.0.1:18082/v1\n")
+
+	_, err := config.LoadProvidersFromDir(dir)
+	if err == nil {
+		t.Fatal("expected duplicate default providers to fail")
+	}
+}
+
+func writeProviderFile(t *testing.T, dir, name, body string) {
+	t.Helper()
+	path := dir + string(os.PathSeparator) + name
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write provider file: %v", err)
+	}
+}

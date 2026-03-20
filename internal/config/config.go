@@ -8,19 +8,23 @@ import (
 )
 
 type Config struct {
-	ListenAddr       string
-	ProxyAPIKey      string
-	UpstreamBaseURL  string
-	UpstreamAPIKey   string
-	LogEnable        bool
-	ConnectTimeout   time.Duration
-	FirstByteTimeout time.Duration
-	IdleTimeout      time.Duration
-	TotalTimeout     time.Duration
-	LogFilePath      string
-	LogIncludeBodies bool
-	LogMaxSizeMB     int
-	LogMaxBackups    int
+	ListenAddr           string
+	ProxyAPIKey          string
+	UpstreamBaseURL      string
+	UpstreamAPIKey       string
+	ProvidersDir         string
+	DefaultProvider      string
+	EnableLegacyV1Routes bool
+	Providers            []ProviderConfig
+	LogEnable            bool
+	ConnectTimeout       time.Duration
+	FirstByteTimeout     time.Duration
+	IdleTimeout          time.Duration
+	TotalTimeout         time.Duration
+	LogFilePath          string
+	LogIncludeBodies     bool
+	LogMaxSizeMB         int
+	LogMaxBackups        int
 }
 
 func Default() Config {
@@ -51,6 +55,15 @@ func LoadFromEnv() Config {
 	if value := os.Getenv("UPSTREAM_API_KEY"); value != "" {
 		cfg.UpstreamAPIKey = value
 	}
+	if value := os.Getenv("PROVIDERS_DIR"); value != "" {
+		cfg.ProvidersDir = value
+	}
+	if value := os.Getenv("DEFAULT_PROVIDER"); value != "" {
+		cfg.DefaultProvider = value
+	}
+	if value := os.Getenv("ENABLE_LEGACY_V1_ROUTES"); value != "" {
+		cfg.EnableLegacyV1Routes = strings.EqualFold(value, "true") || value == "1"
+	}
 	if value := os.Getenv("LOG_ENABLE"); value != "" {
 		cfg.LogEnable = strings.EqualFold(value, "true") || value == "1"
 	}
@@ -71,4 +84,23 @@ func LoadFromEnv() Config {
 		}
 	}
 	return cfg
+}
+
+func (c Config) Validate() error {
+	if c.EnableLegacyV1Routes && strings.TrimSpace(c.DefaultProvider) == "" {
+		return ErrInvalidConfig("default provider is required when legacy v1 routes are enabled")
+	}
+	defaultCount := 0
+	for _, provider := range c.Providers {
+		if provider.IsDefault {
+			defaultCount++
+		}
+	}
+	if defaultCount > 1 {
+		return ErrInvalidConfig("multiple default providers configured")
+	}
+	if c.EnableLegacyV1Routes && len(c.Providers) > 0 && defaultCount == 0 && strings.TrimSpace(c.DefaultProvider) == "" {
+		return ErrInvalidConfig("legacy v1 routes require a default provider")
+	}
+	return nil
 }
