@@ -24,7 +24,7 @@ func TestAnthropicMessagesStreamingEmitsAnthropicStyleEvents(t *testing.T) {
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestAnthropicMessagesStreamingStartsBeforeUpstreamCompletion(t *testing.T) 
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestAnthropicMessagesStreamingImmediatelyEmitsUnreasonedPlaceholder(t *test
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestAnthropicMessagesStreamingEmitsToolUseBlock(t *testing.T) {
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"use the tool"}],"tools":[{"name":"get_weather","description":"Get weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"use the tool"}],"tools":[{"name":"get_weather","description":"Get weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestAnthropicMessagesStreamingEmitsThinkingBlock(t *testing.T) {
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestAnthropicMessagesStreamingEmitsSyntheticThinkingBeforeText(t *testing.T
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestAnthropicMessagesStreamingSuppressesSyntheticThinkingWhenRealThinkingEx
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}

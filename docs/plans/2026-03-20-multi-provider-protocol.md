@@ -124,7 +124,7 @@ Add tests covering:
 - `/{providerId}/v1/chat/completions` resolves provider correctly
 - `/{providerId}/v1/responses` resolves provider correctly
 - `/{providerId}/v1/models` resolves provider correctly
-- `/{providerId}/anthropic/v1/messages` resolves provider correctly
+- `/{providerId}/v1/messages` resolves provider correctly
 - `/v1/*` uses exactly the configured default provider
 - unknown provider returns structured error
 
@@ -398,7 +398,7 @@ git commit -m "feat: add anthropic messages output over responses upstream"
 
 **Step 1: Write the failing test**
 
-Add a router test proving `POST /{providerId}/anthropic/v1/messages` reaches the Anthropic handler and bare `/v1/*` still only aliases the OpenAI-style legacy routes.
+Add a router test proving `POST /{providerId}/v1/messages` reaches the Anthropic handler and bare `/v1/*` still only aliases the OpenAI-style legacy routes.
 
 **Step 2: Run test to verify it fails**
 

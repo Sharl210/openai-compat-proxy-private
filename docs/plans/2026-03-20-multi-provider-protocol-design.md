@@ -70,7 +70,7 @@ Rules:
 
 ### Claude-native provider-scoped route
 
-- `POST /{providerId}/anthropic/v1/messages`
+- `POST /{providerId}/v1/messages`
 
 This route exposes Anthropic-style request and response semantics directly **to downstream callers**, while the proxy may still normalize that request into its internal canonical form and dispatch upstream using the Responses transport.
 
@@ -103,7 +103,7 @@ For `/{providerId}/v1/*` and legacy `/v1/*` routes:
 
 ### Anthropic public contract
 
-For `/{providerId}/anthropic/v1/messages`:
+For `/{providerId}/v1/messages`:
 
 - preserve Anthropic Messages request shape
 - preserve Anthropic SSE event names and sequencing
@@ -122,7 +122,7 @@ Examples:
 
 - `/openai/v1/chat/completions` → provider `openai`, contract `openai-chat`
 - `/openai/v1/responses` → provider `openai`, contract `openai-responses`
-- `/anthropic/anthropic/v1/messages` → provider `anthropic`, contract `anthropic-messages`
+- `/anthropic/v1/messages` → provider `anthropic`, contract `anthropic-messages`
 
 Legacy routes skip explicit provider lookup and instead use the configured default provider.
 

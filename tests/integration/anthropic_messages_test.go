@@ -23,7 +23,7 @@ func TestAnthropicMessagesHandlerReturnsMessageObject(t *testing.T) {
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestAnthropicMessagesHandlerRejectsUnsupportedProvider(t *testing.T) {
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/openai/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	resp, err := http.Post(server.URL+"/openai/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +61,24 @@ func TestAnthropicMessagesHandlerRejectsUnsupportedProvider(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestAnthropicCompatNamespaceRouteIsNotExposed(t *testing.T) {
+	server := newTestServerWithConfig(t, config.Config{
+		ListenAddr: ":0",
+		Providers:  []config.ProviderConfig{{ID: "openai", Enabled: true, SupportsAnthropicMessages: true}},
+	})
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/openai/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hi"}],"stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for removed anthropic namespace route, got %d", resp.StatusCode)
 	}
 }
 
@@ -77,7 +95,7 @@ func TestAnthropicMessagesHandlerReturnsToolUseBlock(t *testing.T) {
 	})
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/anthropic/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"use the tool"}],"tools":[{"name":"get_weather","description":"Get weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"stream":false}`))
+	resp, err := http.Post(server.URL+"/anthropic/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet","max_tokens":128,"messages":[{"role":"user","content":"use the tool"}],"tools":[{"name":"get_weather","description":"Get weather","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"stream":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}

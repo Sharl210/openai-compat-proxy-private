@@ -1,6 +1,6 @@
 # openai-compat-proxy
 
-一个 Go 单二进制的 OpenAI 兼容代理。**这个项目上游只对接 `Responses` 接口**，代理内部统一把请求转给上游 `/responses`，然后再对外导出兼容端点，给不同客户端和协议风格使用。项目当前支持多提供商配置，面向 `chat/completions`、`responses`、`messages` 和模型列表等常见接入场景。
+一个 Go 单二进制的 OpenAI 兼容代理。**这个项目上游只对接 `Responses` 接口**，代理内部统一把请求转给上游 `/responses`，然后再对外导出兼容端点，给不同客户端和协议风格使用。项目当前支持多提供商配置，主要导出三类接口：**Anthropic**、**OpenAI Responses**、**OpenAI Chat Completions（兼容接口）**，并附带模型列表接口。
 
 ## 项目实现的几个大功能
 
@@ -15,11 +15,13 @@
 
 - 代理内部统一请求上游 `/responses`
 - **项目对外主线导出三个端点族**：
+  - **Anthropic**：`POST /v1/messages`
+  - **OpenAI Responses**：`POST /v1/responses`
+  - **OpenAI Chat Completions（兼容接口）**：`POST /v1/chat/completions`
+- 对应的实际路径分别是：
   - `POST /v1/chat/completions`
   - `POST /v1/responses`
   - `POST /v1/messages`
-- 同时兼容 Anthropic 风格入口：
-  - `POST /anthropic/v1/messages`
   - `GET /v1/models`
 - 支持 tool / function calling、多轮消息、部分多模态输入
 
@@ -181,19 +183,12 @@ http(s)://<host>/v1/<providerId>/xxx
 - `/{providerId}/v1/responses`
 - `/{providerId}/v1/models`
 - `/{providerId}/v1/messages`
-- `/{providerId}/anthropic/v1/messages`
 
 例如：
 
 - `/openai/v1/chat/completions`
-- `/openai/v1/messages`
-- `/anthropic/anthropic/v1/messages`
-
-如果你接的是 Anthropic 风格接口，provider id 也同样要放在域名后面，完整形式是：
-
-```text
-http(s)://<host>/<providerId>/anthropic/v1/messages
-```
+- `/openai/v1/responses`
+- `/claude/v1/messages`
 
 ### 默认 provider 路由
 
@@ -254,10 +249,10 @@ http(s)://<host>/<providerId>/anthropic/v1/messages
 
 ### 能力开关
 
-- `SUPPORTS_CHAT`：是否支持 `chat/completions`
-- `SUPPORTS_RESPONSES`：是否支持 `responses`
+- `SUPPORTS_CHAT`：是否支持 OpenAI Chat Completions（兼容接口）
+- `SUPPORTS_RESPONSES`：是否支持 OpenAI Responses
 - `SUPPORTS_MODELS`：是否支持 `models`
-- `SUPPORTS_ANTHROPIC_MESSAGES`：是否支持 `messages` / Anthropic messages
+- `SUPPORTS_ANTHROPIC_MESSAGES`：是否支持 Anthropic `messages`
 
 ### 模型映射字段
 
@@ -292,7 +287,7 @@ http(s)://<host>/<providerId>/anthropic/v1/messages
 
 - 对 OpenAI 生态客户端：优先 `chat/completions`
 - 对 provider 级管理：优先 `/{providerId}/v1/*`
-- 对 Anthropic 风格客户端：使用 `/v1/messages` 或 `/{providerId}/anthropic/v1/messages`
+- 对 Anthropic 风格客户端：使用 `/v1/messages` 或 `/{providerId}/v1/messages`
 
 ## 健康检查
 
