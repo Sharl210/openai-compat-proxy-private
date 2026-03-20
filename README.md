@@ -46,6 +46,13 @@
 - 支持结构化日志、日志轮转、可选 body 记录
 - 提供 `healthz`、部署脚本、重启脚本、卸载脚本
 
+### 6. Claude 提示缓存兼容
+
+- 支持 Anthropic / Claude 兼容请求中的 `cache_control`
+- 支持顶层 `cache_control` 透传
+- 支持文本内容块上的 `cache_control` 透传
+- 适配 Claude 客户端里的“提示缓存（cache_control）”开关
+
 ## 安装与启动
 
 ### 1. 拉取项目
