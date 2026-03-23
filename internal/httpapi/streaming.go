@@ -15,6 +15,8 @@ import (
 
 const initialSyntheticReasoningLeadTime = 350 * time.Millisecond
 
+var syntheticReasoningTickInterval = 250 * time.Millisecond
+
 type anthropicStreamState struct {
 	messageStarted   bool
 	textStarted      bool
@@ -211,9 +213,25 @@ func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
-		return writeAnthropicEvent(w, flusher, &state, evt)
-	})
+	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
+		func() bool { return state.textStarted },
+		func() error {
+			if state.textStarted {
+				return nil
+			}
+			if err := startAnthropicUnreasonedPlaceholder(w, flusher, &state); err != nil {
+				return err
+			}
+			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": state.thinkingIndex,
+				"delta": map[string]any{"type": "thinking_delta", "thinking": "\u200b"},
+			})
+		},
+		func(evt upstream.Event) error {
+			return writeAnthropicEvent(w, flusher, &state, evt)
+		},
+	)
 }
 
 func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState) error {
@@ -580,9 +598,18 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
-		return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage)
-	})
+	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
+		func() bool { return state.textStarted },
+		func() error {
+			if state.textStarted {
+				return nil
+			}
+			return writeChatChunk(w, flusher, map[string]any{"reasoning_content": "\u200b"}, "", nil)
+		},
+		func(evt upstream.Event) error {
+			return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage)
+		},
+	)
 }
 
 func waitSyntheticLeadTime(ctx context.Context) error {
@@ -591,6 +618,65 @@ func waitSyntheticLeadTime(ctx context.Context) error {
 		return ctx.Err()
 	case <-time.After(initialSyntheticReasoningLeadTime):
 		return nil
+	}
+}
+
+type streamSignal struct {
+	evt  *upstream.Event
+	err  error
+	done bool
+}
+
+func streamLiveWithSyntheticTicks(
+	ctx context.Context,
+	req model.CanonicalRequest,
+	authorization string,
+	streamFn func(context.Context, model.CanonicalRequest, string, func(upstream.Event) error) error,
+	stopTicks func() bool,
+	onTick func() error,
+	onEvent func(upstream.Event) error,
+) error {
+	signals := make(chan streamSignal, 32)
+	go func() {
+		err := streamFn(ctx, req, authorization, func(evt upstream.Event) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case signals <- streamSignal{evt: &evt}:
+				return nil
+			}
+		})
+		signals <- streamSignal{err: err, done: true}
+		close(signals)
+	}()
+
+	ticker := time.NewTicker(syntheticReasoningTickInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if onTick != nil && !stopTicks() {
+				if err := onTick(); err != nil {
+					return err
+				}
+			}
+		case sig, ok := <-signals:
+			if !ok {
+				return nil
+			}
+			if sig.evt != nil {
+				if err := onEvent(*sig.evt); err != nil {
+					return err
+				}
+				continue
+			}
+			if sig.done {
+				return sig.err
+			}
+		}
 	}
 }
 
