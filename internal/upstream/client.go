@@ -24,6 +24,8 @@ type Client struct {
 
 var TestOnlyRetryAttempts = 5
 var TestOnlyRetryDelay = 3 * time.Second
+var sseScannerInitialBufferSize = 64 * 1024
+var sseScannerMaxTokenSize = 8 * 1024 * 1024
 
 type HTTPStatusError struct {
 	StatusCode int
@@ -491,7 +493,7 @@ func parseSSE(resp *http.Response) ([]Event, error) {
 	var currentEvent string
 	var dataLines []string
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := newSSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -536,7 +538,7 @@ func parseSSEStreaming(resp *http.Response, onEvent func(Event) error) error {
 	var currentEvent string
 	var dataLines []string
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := newSSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -590,4 +592,10 @@ func finalizeEvent(name string, dataLines []string) (Event, error) {
 		}
 	}
 	return Event{Event: name, Data: parsed, Raw: raw}, nil
+}
+
+func newSSEScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, sseScannerInitialBufferSize), sseScannerMaxTokenSize)
+	return scanner
 }

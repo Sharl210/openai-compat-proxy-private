@@ -2,6 +2,9 @@ package upstream
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/model"
@@ -102,5 +105,46 @@ func TestBuildRequestBodyPreservesResponsesMetadataAndTypedInputItems(t *testing
 	toolOutput, _ := input[2].(map[string]any)
 	if got, _ := toolOutput["type"].(string); got != "function_call_output" {
 		t.Fatalf("expected function_call_output passthrough, got %#v", toolOutput)
+	}
+}
+
+func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
+	large := strings.Repeat("x", 128*1024)
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("event: response.output_item.done\n" +
+			"data: {\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + large + "\"}}\n\n")),
+	}
+
+	events, err := parseSSE(resp)
+	if err != nil {
+		t.Fatalf("parseSSE error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one event, got %#v", events)
+	}
+	item, _ := events[0].Data["item"].(map[string]any)
+	if got, _ := item["encrypted_content"].(string); got != large {
+		t.Fatalf("expected encrypted_content length %d, got %d", len(large), len(got))
+	}
+}
+
+func TestParseSSEStreamingAcceptsLargeEventPayload(t *testing.T) {
+	large := strings.Repeat("y", 128*1024)
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("event: response.output_item.done\n" +
+			"data: {\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + large + "\"}}\n\n")),
+	}
+
+	var seen Event
+	err := parseSSEStreaming(resp, func(evt Event) error {
+		seen = evt
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("parseSSEStreaming error: %v", err)
+	}
+	item, _ := seen.Data["item"].(map[string]any)
+	if got, _ := item["encrypted_content"].(string); got != large {
+		t.Fatalf("expected encrypted_content length %d, got %d", len(large), len(got))
 	}
 }
