@@ -212,6 +212,20 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 	if flusher != nil {
 		flusher.Flush()
 	}
+	summaryPayload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": text}
+	encodedSummary, err := json.Marshal(summaryPayload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, "event: response.reasoning_summary_text.delta\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", encodedSummary); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
 	return nil
 }
 

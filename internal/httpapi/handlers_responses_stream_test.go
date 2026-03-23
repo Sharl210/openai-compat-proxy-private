@@ -40,6 +40,9 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	if !strings.Contains(body, `"type":"response.reasoning.delta"`) {
 		t.Fatalf("expected synthetic reasoning chunk type in stream body, got %s", body)
 	}
+	if !strings.Contains(body, `"type":"response.reasoning_summary_text.delta"`) {
+		t.Fatalf("expected synthetic reasoning summary chunk type in stream body, got %s", body)
+	}
 	if !strings.Contains(body, `"type":"response.output_text.delta"`) {
 		t.Fatalf("expected output_text chunk type in stream body, got %s", body)
 	}
