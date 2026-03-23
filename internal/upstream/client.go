@@ -238,10 +238,22 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		"model":  req.Model,
 		"stream": true,
 	}
+	if req.ResponseStore != nil {
+		payload["store"] = *req.ResponseStore
+	}
+	if len(req.ResponseInclude) > 0 {
+		payload["include"] = append([]string(nil), req.ResponseInclude...)
+	}
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
-	if len(req.Messages) > 0 {
+	if len(req.ResponseInputItems) > 0 {
+		input := make([]map[string]any, 0, len(req.ResponseInputItems))
+		for _, item := range req.ResponseInputItems {
+			input = append(input, cloneMap(item))
+		}
+		payload["input"] = input
+	} else if len(req.Messages) > 0 {
 		var input []map[string]any
 		for _, msg := range req.Messages {
 			if msg.Role == "tool" {

@@ -48,3 +48,59 @@ func TestBuildRequestBodyOmitsCacheControlForUpstreamCompatibility(t *testing.T)
 		t.Fatalf("expected content text hello, got %#v", got)
 	}
 }
+
+func TestBuildRequestBodyPreservesResponsesMetadataAndTypedInputItems(t *testing.T) {
+	store := false
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:           "gpt-5",
+		ResponseStore:   &store,
+		ResponseInclude: []string{"reasoning.encrypted_content"},
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "hello",
+				}},
+			},
+			{
+				"type":              "reasoning",
+				"id":                "rs_123",
+				"encrypted_content": "enc_123",
+			},
+			{
+				"type":    "function_call_output",
+				"call_id": "call_123",
+				"output":  "{}",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	if got, ok := payload["store"].(bool); !ok || got {
+		t.Fatalf("expected store=false in upstream payload, got %#v", payload["store"])
+	}
+	include, _ := payload["include"].([]any)
+	if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("expected include reasoning.encrypted_content, got %#v", payload["include"])
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 3 {
+		t.Fatalf("expected 3 input items, got %#v", payload["input"])
+	}
+	typed, _ := input[1].(map[string]any)
+	if got, _ := typed["type"].(string); got != "reasoning" {
+		t.Fatalf("expected reasoning item passthrough, got %#v", typed)
+	}
+	toolOutput, _ := input[2].(map[string]any)
+	if got, _ := toolOutput["type"].(string); got != "function_call_output" {
+		t.Fatalf("expected function_call_output passthrough, got %#v", toolOutput)
+	}
+}
