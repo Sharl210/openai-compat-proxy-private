@@ -45,4 +45,10 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	if strings.Contains(lateTail, `response.output_item.done`) || strings.Contains(lateTail, `已完成思考`) {
 		t.Fatalf("expected no late fallback reasoning text after output text, got %s", body)
 	}
+	if strings.Contains(body, `分析中…`) || strings.Contains(body, `正在组织回答…`) || strings.Contains(body, `正在调用工具…`) {
+		t.Fatalf("expected synthetic fallback reasoning to use only one generic phrase, got %s", body)
+	}
+	if !strings.Contains(body, `"summary":[{"text":"推理中…\n"`) {
+		t.Fatalf("expected synthetic reasoning done item to include non-empty summary text, got %s", body)
+	}
 }

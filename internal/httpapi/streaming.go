@@ -41,6 +41,7 @@ type responsesStreamState struct {
 	toolStatusSent    bool
 	reasoningStarted  bool
 	reasoningClosed   bool
+	syntheticSummary  strings.Builder
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -97,11 +98,15 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		if !state.reasoningStarted || state.realReasoningSeen || state.reasoningClosed {
 			return nil
 		}
+		summary := []any{}
+		if text := state.syntheticSummary.String(); text != "" {
+			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
+		}
 		payload, err := responseStreamPayload("response.output_item.done", map[string]any{
 			"item": map[string]any{
 				"id":      "rs_proxy",
 				"type":    "reasoning",
-				"summary": []any{},
+				"summary": summary,
 			},
 		})
 		if err != nil {
@@ -121,33 +126,14 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 	}
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
-		if !state.textStarted {
-			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realReasoningSeen {
-				if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, "分析中…"); err != nil {
-					return err
-				}
-				if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, "正在组织回答…"); err != nil {
-					return err
-				}
-				state.planningSent = true
-			}
-		}
 		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
 			state.realReasoningSeen = true
-		}
-		if itemType, _ := item["type"].(string); itemType == "function_call" && !state.textStarted && !state.realReasoningSeen && !state.toolStatusSent {
-			if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, "正在调用工具…"); err != nil {
-				return err
-			}
-			state.toolStatusSent = true
 		}
 	case "response.output_text.delta":
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
 		state.textStarted = true
-		state.planningSent = true
-		state.toolStatusSent = true
 	case "response.reasoning.delta":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realReasoningSeen = true
@@ -208,6 +194,9 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 	}
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
+	}
+	if state != nil {
+		state.syntheticSummary.WriteString(text)
 	}
 	payload := map[string]any{"type": "response.reasoning.delta", "summary": text}
 	encoded, err := json.Marshal(payload)
