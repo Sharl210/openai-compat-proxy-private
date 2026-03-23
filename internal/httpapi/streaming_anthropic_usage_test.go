@@ -6,7 +6,7 @@ func TestAnthropicUsageFromEventIncludesCacheCreationAndReadTokens(t *testing.T)
 	usage := anthropicUsageFromEvent(map[string]any{
 		"response": map[string]any{
 			"usage": map[string]any{
-				"input_tokens":  33000,
+				"input_tokens":  66000,
 				"output_tokens": 8,
 				"input_tokens_details": map[string]any{
 					"cached_tokens":         33000,
@@ -15,6 +15,9 @@ func TestAnthropicUsageFromEventIncludesCacheCreationAndReadTokens(t *testing.T)
 			},
 		},
 	})
+	if got := usage["input_tokens"]; got != 0 {
+		t.Fatalf("expected effective input_tokens 0, got %#v", got)
+	}
 
 	if got := usage["cache_read_input_tokens"]; got != 33000 {
 		t.Fatalf("expected cache_read_input_tokens 33000, got %#v", got)
