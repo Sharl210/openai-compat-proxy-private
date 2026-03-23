@@ -19,6 +19,7 @@ type Result struct {
 	ToolCalls               []ToolCall
 	Reasoning               map[string]any
 	Usage                   map[string]any
+	ResponseOutputItems     []map[string]any
 	ResponseMessageContent  []map[string]any
 	UnsupportedContentTypes []string
 }
@@ -29,6 +30,7 @@ type Collector struct {
 	order                   []string
 	reasoning               map[string]any
 	responseMessageContent  []map[string]any
+	outputItems             []map[string]any
 	unsupportedContentTypes []string
 	completed               bool
 }
@@ -61,6 +63,7 @@ func (c *Collector) Accept(evt upstream.Event) {
 		if item == nil {
 			return
 		}
+		c.outputItems = append(c.outputItems, cloneOutputItem(item))
 		if itemType, _ := item["type"].(string); itemType == "message" {
 			if content, ok := item["content"].([]any); ok {
 				c.responseMessageContent = nil
@@ -139,6 +142,9 @@ func (c *Collector) Result() (Result, error) {
 			result.Usage = usage
 		}
 	}
+	if len(c.outputItems) > 0 {
+		result.ResponseOutputItems = append(result.ResponseOutputItems, c.outputItems...)
+	}
 	if len(c.responseMessageContent) > 0 {
 		result.ResponseMessageContent = append(result.ResponseMessageContent, c.responseMessageContent...)
 	}
@@ -146,6 +152,17 @@ func (c *Collector) Result() (Result, error) {
 		result.UnsupportedContentTypes = append(result.UnsupportedContentTypes, c.unsupportedContentTypes...)
 	}
 	return result, nil
+}
+
+func cloneOutputItem(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func shouldAppendReasoningKey(key string) bool {
