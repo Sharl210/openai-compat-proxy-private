@@ -98,7 +98,7 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 		switch part.Type {
 		case "text":
 			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text})
-		case "tool_use", "tool_result":
+		case "tool_use", "tool_result", "thinking", "redacted_thinking":
 			continue
 		case "":
 			if part.Text != "" {

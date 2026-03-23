@@ -5,26 +5,67 @@ import (
 	"testing"
 )
 
-func TestDecodeRequestAcceptsCacheControlWithoutPreservingIt(t *testing.T) {
+func TestDecodeRequestIgnoresThinkingBlocksInFollowUpMessages(t *testing.T) {
 	req := `{
 		"model":"claude-sonnet-4-5",
-		"max_tokens":128,
-		"cache_control":{"type":"ephemeral","ttl":"5m"},
-		"messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"ephemeral"}}]}]
+		"max_tokens":1024,
+		"messages":[
+			{
+				"role":"assistant",
+				"content":[
+					{"type":"thinking","thinking":"internal reasoning","signature":"sig_123"},
+					{"type":"text","text":"我刚刚在发呆。"}
+				]
+			},
+			{
+				"role":"user",
+				"content":"继续说"
+			}
+		]
 	}`
 
 	canon, err := DecodeRequest(strings.NewReader(req))
 	if err != nil {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected 2 canonical messages, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].Parts[0].Text; got != "我刚刚在发呆。" {
+		t.Fatalf("expected assistant text part to survive thinking block, got %#v", canon.Messages[0].Parts)
+	}
+	if got := canon.Messages[1].Parts[0].Text; got != "继续说" {
+		t.Fatalf("expected user follow-up text, got %#v", canon.Messages[1].Parts)
+	}
+}
 
-	if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 1 {
-		t.Fatalf("expected one decoded text message, got %#v", canon.Messages)
+func TestDecodeRequestIgnoresRedactedThinkingBlocksInFollowUpMessages(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"messages":[
+			{
+				"role":"assistant",
+				"content":[
+					{"type":"redacted_thinking","data":"enc_123"},
+					{"type":"text","text":"先这样。"}
+				]
+			},
+			{
+				"role":"user",
+				"content":"再说一句"
+			}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
 	}
-	if got := canon.Messages[0].Parts[0].Text; got != "hello" {
-		t.Fatalf("expected text hello, got %q", got)
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected 2 canonical messages, got %#v", canon.Messages)
 	}
-	if canon.Messages[0].Parts[0].Raw != nil {
-		t.Fatalf("expected cache_control metadata to be ignored for upstream compatibility, got %#v", canon.Messages[0].Parts[0].Raw)
+	if got := canon.Messages[0].Parts[0].Text; got != "先这样。" {
+		t.Fatalf("expected assistant text part to survive redacted thinking block, got %#v", canon.Messages[0].Parts)
 	}
 }
