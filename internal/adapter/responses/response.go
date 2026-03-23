@@ -7,39 +7,39 @@ import (
 )
 
 func BuildResponse(result aggregate.Result) map[string]any {
+	var output []map[string]any
 	content := result.ResponseMessageContent
-	if len(content) == 0 {
+	if len(content) == 0 && (result.Text != "" || len(result.ToolCalls) == 0) {
 		content = []map[string]any{{
 			"type": "output_text",
 			"text": result.Text,
 		}}
 	}
-
-	outputItem := map[string]any{
-		"id":      buildOutputItemID(result),
-		"type":    "message",
-		"status":  "completed",
-		"role":    "assistant",
-		"content": content,
+	if len(content) > 0 {
+		output = append(output, map[string]any{
+			"id":      buildOutputItemID(result),
+			"type":    "message",
+			"status":  "completed",
+			"role":    "assistant",
+			"content": content,
+		})
 	}
-
-	if len(result.ToolCalls) > 0 {
-		var toolCalls []map[string]any
-		for _, call := range result.ToolCalls {
-			toolCalls = append(toolCalls, map[string]any{
-				"id":        call.CallID,
-				"name":      call.Name,
-				"arguments": call.Arguments,
-			})
-		}
-		outputItem["tool_calls"] = toolCalls
+	for _, call := range result.ToolCalls {
+		output = append(output, map[string]any{
+			"id":        call.ID,
+			"type":      "function_call",
+			"status":    "completed",
+			"call_id":   call.CallID,
+			"name":      call.Name,
+			"arguments": call.Arguments,
+		})
 	}
 
 	return map[string]any{
 		"id":        buildResponseID(result),
 		"object":    "response",
 		"status":    "completed",
-		"output":    []map[string]any{outputItem},
+		"output":    output,
 		"reasoning": result.Reasoning,
 		"usage":     cloneMap(result.Usage),
 	}
