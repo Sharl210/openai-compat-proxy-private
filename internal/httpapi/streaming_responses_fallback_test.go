@@ -31,7 +31,6 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	body := rec.Body.String()
 	addedIdx := strings.Index(body, `event: response.output_item.added`)
 	doneIdx := strings.LastIndex(body, `event: response.output_item.done`)
-	reasoningIdx := strings.LastIndex(body, `event: response.reasoning.delta`)
 	textIdx := strings.Index(body, `event: response.output_text.delta`)
 	if addedIdx == -1 || doneIdx == -1 {
 		t.Fatalf("expected synthetic reasoning item to be opened and closed, got %s", body)
@@ -39,10 +38,11 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	if textIdx == -1 {
 		t.Fatalf("expected output text event, got %s", body)
 	}
-	if reasoningIdx == -1 {
-		t.Fatalf("expected fallback reasoning delta before synthetic close, got %s", body)
+	if !(addedIdx < textIdx && textIdx < doneIdx) {
+		t.Fatalf("expected synthetic reasoning item to close after text without extra late reasoning, got %s", body)
 	}
-	if !(addedIdx < textIdx && textIdx < reasoningIdx && reasoningIdx < doneIdx) {
-		t.Fatalf("expected synthetic reasoning to close after text if no real reasoning appears, got %s", body)
+	lateTail := body[textIdx:doneIdx]
+	if strings.Contains(lateTail, `已完成思考`) {
+		t.Fatalf("expected no late fallback reasoning text after output text, got %s", body)
 	}
 }

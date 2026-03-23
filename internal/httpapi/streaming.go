@@ -124,20 +124,6 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		}
 	case "response.completed", "response.done":
 		if state.reasoningStarted && !state.realReasoningSeen {
-			fallbackPayload := map[string]any{"type": "response.reasoning.delta", "summary": "已完成思考。\n"}
-			encodedFallback, err := json.Marshal(fallbackPayload)
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprint(w, "event: response.reasoning.delta\n"); err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", encodedFallback); err != nil {
-				return err
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
 			payload, err := responseStreamPayload("response.output_item.done", map[string]any{
 				"item": map[string]any{
 					"id":      "rs_proxy",
