@@ -52,8 +52,12 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 		if _, err := fmt.Fprintf(w, "event: %s\n", evt.Event); err != nil {
 			return err
 		}
-		if len(evt.Raw) > 0 {
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", evt.Raw); err != nil {
+		payload, err := responseStreamPayload(evt.Event, evt.Data)
+		if err != nil {
+			return err
+		}
+		if len(payload) > 0 {
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 				return err
 			}
 		} else {
@@ -115,8 +119,12 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 	if _, err := fmt.Fprintf(w, "event: %s\n", evt.Event); err != nil {
 		return err
 	}
-	if len(evt.Raw) > 0 {
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", evt.Raw); err != nil {
+	payload, err := responseStreamPayload(evt.Event, evt.Data)
+	if err != nil {
+		return err
+	}
+	if len(payload) > 0 {
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 			return err
 		}
 	} else {
@@ -134,7 +142,7 @@ func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flushe
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
-	payload := map[string]any{"summary": text}
+	payload := map[string]any{"type": "response.reasoning.delta", "summary": text}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -149,6 +157,20 @@ func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flushe
 		flusher.Flush()
 	}
 	return nil
+}
+
+func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
+	if len(data) == 0 {
+		return json.Marshal(map[string]any{"type": event})
+	}
+	clone := make(map[string]any, len(data)+1)
+	for k, v := range data {
+		clone[k] = v
+	}
+	if _, ok := clone["type"]; !ok {
+		clone["type"] = event
+	}
+	return json.Marshal(clone)
 }
 
 func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
