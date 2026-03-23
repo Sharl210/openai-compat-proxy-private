@@ -22,6 +22,8 @@ type anthropicStreamState struct {
 	textStarted      bool
 	textIndex        int
 	thinkingStarted  bool
+	thinkingStopped  bool
+	signatureSent    bool
 	thinkingIndex    int
 	toolStarted      bool
 	toolIndex        int
@@ -117,6 +119,28 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 	case "response.reasoning.delta":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realReasoningSeen = true
+		}
+	case "response.completed", "response.done":
+		if state.reasoningStarted && !state.realReasoningSeen {
+			payload, err := responseStreamPayload("response.output_item.done", map[string]any{
+				"item": map[string]any{
+					"id":      "rs_proxy",
+					"type":    "reasoning",
+					"summary": []any{},
+				},
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := fmt.Fprint(w, "event: response.output_item.done\n"); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+				return err
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
 		}
 	}
 	if _, err := fmt.Fprintf(w, "event: %s\n", evt.Event); err != nil {
@@ -275,6 +299,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 }
 
 func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event) error {
+	var closeThinkingBlock func() error
 	startMessage := func() error {
 		if state.messageStarted {
 			return nil
@@ -298,6 +323,9 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.textStarted {
 			return nil
 		}
+		if err := closeThinkingBlock(); err != nil {
+			return err
+		}
 		if err := startMessage(); err != nil {
 			return err
 		}
@@ -314,13 +342,15 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		})
 	}
 	startThinkingBlock := func() error {
-		if state.thinkingStarted {
+		if state.thinkingStarted && !state.thinkingStopped {
 			return nil
 		}
 		if err := startMessage(); err != nil {
 			return err
 		}
 		state.thinkingStarted = true
+		state.thinkingStopped = false
+		state.signatureSent = false
 		state.thinkingIndex = state.nextIndex
 		state.nextIndex++
 		return writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
@@ -332,9 +362,32 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			},
 		})
 	}
+	closeThinkingBlock = func() error {
+		if !state.thinkingStarted || state.thinkingStopped {
+			return nil
+		}
+		if !state.signatureSent {
+			if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": state.thinkingIndex,
+				"delta": map[string]any{"type": "signature_delta", "signature": "proxy_signature"},
+			}); err != nil {
+				return err
+			}
+			state.signatureSent = true
+		}
+		if err := writeAnthropicSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": state.thinkingIndex}); err != nil {
+			return err
+		}
+		state.thinkingStopped = true
+		return nil
+	}
 	startToolBlock := func(item map[string]any) error {
 		if state.toolStarted {
 			return nil
+		}
+		if err := closeThinkingBlock(); err != nil {
+			return err
 		}
 		if err := startMessage(); err != nil {
 			return err
@@ -447,11 +500,13 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			})
 		}
 	case "response.completed", "response.done":
+		if err := closeThinkingBlock(); err != nil {
+			return err
+		}
 		for _, block := range []struct {
 			started bool
 			index   int
 		}{
-			{state.thinkingStarted, state.thinkingIndex},
 			{state.textStarted, state.textIndex},
 			{state.toolStarted, state.toolIndex},
 		} {
