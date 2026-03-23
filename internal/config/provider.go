@@ -162,39 +162,46 @@ func (p ProviderConfig) ResolveModel(model string, enableSuffix bool) string {
 }
 
 func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (string, string) {
+	requestedModel := model
+	requestedEffort := ""
+	if enableSuffix {
+		if base, effort, ok := splitReasoningSuffix(model); ok {
+			requestedModel = base
+			requestedEffort = effort
+		}
+	}
 	for key, mapped := range p.ModelMap {
 		if strings.HasPrefix(key, "*-") {
 			if strings.HasSuffix(model, key[1:]) {
-				if enableSuffix {
-					_, valEff, _ := splitReasoningSuffix(mapped)
-					return mapped, valEff
-				}
-				return mapped, ""
+				return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
 			}
 		}
 	}
 	if mapped, ok := p.ModelMap[model]; ok && mapped != "" {
-		if enableSuffix {
-			_, valEff, _ := splitReasoningSuffix(mapped)
-			return mapped, valEff
-		}
-		return mapped, ""
+		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
 	}
-	if enableSuffix {
-		base, _, ok := splitReasoningSuffix(model)
-		if ok && base != model {
-			if mapped, ok := p.ModelMap[base]; ok && mapped != "" {
-				_, valEff, _ := splitReasoningSuffix(mapped)
-				return mapped, valEff
-			}
-		}
+	if mapped, ok := p.ModelMap[requestedModel]; ok && mapped != "" {
+		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
 	}
 	if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
-		if enableSuffix {
-			_, eff, _ := splitReasoningSuffix(mapped)
-			return mapped, eff
+		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
+	}
+	return finalizeResolvedModelAndEffort(requestedModel, requestedEffort, enableSuffix)
+}
+
+func finalizeResolvedModelAndEffort(model string, requestedEffort string, enableSuffix bool) (string, string) {
+	if !enableSuffix {
+		return model, ""
+	}
+	baseModel, mappedEffort, ok := splitReasoningSuffix(model)
+	if requestedEffort != "" {
+		if ok {
+			return baseModel, requestedEffort
 		}
-		return mapped, ""
+		return model, requestedEffort
+	}
+	if ok {
+		return baseModel, mappedEffort
 	}
 	return model, ""
 }
