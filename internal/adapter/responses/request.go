@@ -159,7 +159,11 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: part.Text})
 				normalizedType := part.Type
 				if normalizedType == "text" || normalizedType == "" {
-					normalizedType = "input_text"
+					if role == "assistant" {
+						normalizedType = "output_text"
+					} else {
+						normalizedType = "input_text"
+					}
 				}
 				normalizedContent = append(normalizedContent, map[string]any{"type": normalizedType, "text": part.Text})
 			case "input_image", "image_url":

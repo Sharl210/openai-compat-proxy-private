@@ -44,3 +44,30 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 		t.Fatalf("expected canonical user message to still be decoded, got %#v", canon.Messages)
 	}
 }
+
+func TestDecodeRequestPreservesAssistantMessagesAsOutputText(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"第一句"},
+			{"role":"assistant","content":[{"type":"text","text":"第二句"}]},
+			{"role":"user","content":"第三句"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.ResponseInputItems) != 3 {
+		t.Fatalf("expected 3 ResponseInputItems, got %#v", canon.ResponseInputItems)
+	}
+	assistant, _ := canon.ResponseInputItems[1]["content"].([]map[string]any)
+	if len(assistant) != 1 {
+		t.Fatalf("expected assistant content preserved, got %#v", canon.ResponseInputItems[1])
+	}
+	if got, _ := assistant[0]["type"].(string); got != "output_text" {
+		t.Fatalf("expected assistant content type output_text, got %#v", canon.ResponseInputItems[1])
+	}
+}
