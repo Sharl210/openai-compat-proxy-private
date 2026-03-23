@@ -10,17 +10,19 @@ import (
 )
 
 type request struct {
-	Model              string          `json:"model"`
-	Stream             bool            `json:"stream"`
-	Instructions       json.RawMessage `json:"instructions"`
-	Input              []message       `json:"input"`
-	Tools              []tool          `json:"tools"`
-	ToolChoice         any             `json:"tool_choice"`
-	Reasoning          *reasoning      `json:"reasoning"`
-	Temperature        json.RawMessage `json:"temperature"`
-	TopP               json.RawMessage `json:"top_p"`
-	MaxOutputTokensRaw json.RawMessage `json:"max_output_tokens"`
-	Stop               []string        `json:"stop"`
+	Model              string            `json:"model"`
+	Stream             bool              `json:"stream"`
+	Store              *bool             `json:"store"`
+	Include            []string          `json:"include"`
+	Instructions       json.RawMessage   `json:"instructions"`
+	Input              []json.RawMessage `json:"input"`
+	Tools              []tool            `json:"tools"`
+	ToolChoice         any               `json:"tool_choice"`
+	Reasoning          *reasoning        `json:"reasoning"`
+	Temperature        json.RawMessage   `json:"temperature"`
+	TopP               json.RawMessage   `json:"top_p"`
+	MaxOutputTokensRaw json.RawMessage   `json:"max_output_tokens"`
+	Stop               []string          `json:"stop"`
 }
 
 type message struct {
@@ -67,6 +69,8 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	canon := model.CanonicalRequest{
 		Model:           req.Model,
 		Stream:          req.Stream,
+		ResponseStore:   req.Store,
+		ResponseInclude: append([]string(nil), req.Include...),
 		Instructions:    decodeOptionalString(req.Instructions),
 		Temperature:     decodeOptionalFloat(req.Temperature),
 		TopP:            decodeOptionalFloat(req.TopP),
@@ -114,20 +118,55 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
 	}
 
-	for _, msg := range req.Input {
-		decodedContent, err := decodeMessageContent(msg.Content)
+	for _, rawItem := range req.Input {
+		if len(rawItem) == 0 {
+			continue
+		}
+		preserved, msg, ok, err := decodeInputItem(rawItem)
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
+		if len(preserved) > 0 {
+			canon.ResponseInputItems = append(canon.ResponseInputItems, preserved)
+		}
+		if ok {
+			canon.Messages = append(canon.Messages, msg)
+		}
+	}
+
+	return canon, nil
+}
+
+func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, error) {
+	var rawMap map[string]any
+	if err := json.Unmarshal(raw, &rawMap); err != nil {
+		return nil, model.CanonicalMessage{}, false, err
+	}
+	if role, _ := rawMap["role"].(string); role != "" {
+		var msg message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return nil, model.CanonicalMessage{}, false, err
+		}
+		decodedContent, err := decodeMessageContent(msg.Content)
+		if err != nil {
+			return nil, model.CanonicalMessage{}, false, err
+		}
 		parts := make([]model.CanonicalContentPart, 0, len(decodedContent))
+		normalizedContent := make([]map[string]any, 0, len(decodedContent))
 		for _, part := range decodedContent {
 			switch part.Type {
-			case "input_text":
+			case "input_text", "output_text", "text":
 				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: part.Text})
-			case "input_image":
+				normalizedType := part.Type
+				if normalizedType == "text" || normalizedType == "" {
+					normalizedType = "input_text"
+				}
+				normalizedContent = append(normalizedContent, map[string]any{"type": normalizedType, "text": part.Text})
+			case "input_image", "image_url":
 				parts = append(parts, model.CanonicalContentPart{Type: "input_image", ImageURL: part.ImageURL})
+				normalizedContent = append(normalizedContent, map[string]any{"type": "input_image", "image_url": part.ImageURL})
 			default:
-				return model.CanonicalRequest{}, fmt.Errorf("unsupported content type: %s", part.Type)
+				return nil, model.CanonicalMessage{}, false, fmt.Errorf("unsupported content type: %s", part.Type)
 			}
 		}
 
@@ -140,10 +179,21 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 				Arguments: tc.Function.Arguments,
 			})
 		}
-		canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID})
-	}
 
-	return canon, nil
+		preserved := map[string]any{"role": role}
+		if len(normalizedContent) > 0 {
+			preserved["content"] = normalizedContent
+		}
+		if msg.ToolCallID != "" {
+			preserved["tool_call_id"] = msg.ToolCallID
+		}
+		if len(msg.ToolCalls) > 0 {
+			preserved["tool_calls"] = rawMap["tool_calls"]
+		}
+
+		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID}, true, nil
+	}
+	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, nil
 }
 
 func decodeMessageContent(raw json.RawMessage) ([]contentPart, error) {
@@ -181,6 +231,17 @@ func (r *reasoning) UnmarshalJSON(data []byte) error {
 }
 
 func cloneReasoningMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func cloneMapAny(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return map[string]any{}
 	}
