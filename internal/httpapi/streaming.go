@@ -202,6 +202,9 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 
 func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
 	state := anthropicStreamState{}
+	if err := writeSSEPadding(w, flusher); err != nil {
+		return err
+	}
 	if err := startAnthropicUnreasonedPlaceholder(w, flusher, &state); err != nil {
 		return err
 	}
@@ -568,6 +571,9 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 		toolIndex: map[string]int{},
 		toolSent:  map[string]bool{},
 	}
+	if err := writeSSEPadding(w, flusher); err != nil {
+		return err
+	}
 	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "推理中…\n"}, "", nil); err != nil {
 		return err
 	}
@@ -739,6 +745,16 @@ func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[strin
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", encoded); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func writeSSEPadding(w http.ResponseWriter, flusher http.Flusher) error {
+	if _, err := fmt.Fprintf(w, ": %s\n\n", strings.Repeat(" ", 2048)); err != nil {
 		return err
 	}
 	if flusher != nil {
