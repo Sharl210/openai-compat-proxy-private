@@ -40,8 +40,8 @@ func BuildResponse(result aggregate.Result, modelName string) map[string]any {
 
 func mapUsage(usage map[string]any) map[string]any {
 	out := map[string]any{}
-	if input, ok := usage["input_tokens"]; ok {
-		out["input_tokens"] = input
+	if _, ok := usage["input_tokens"]; ok {
+		out["input_tokens"] = effectiveAnthropicInputTokens(usage)
 	}
 	if output, ok := usage["output_tokens"]; ok {
 		out["output_tokens"] = output
@@ -58,6 +58,46 @@ func mapUsage(usage map[string]any) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func effectiveAnthropicInputTokens(usage map[string]any) any {
+	input, ok := usage["input_tokens"]
+	if !ok {
+		return nil
+	}
+	inputFloat, ok := usageNumberAsFloat(input)
+	if !ok {
+		return input
+	}
+	remaining := inputFloat
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if cached, ok := usageNumberAsFloat(details["cached_tokens"]); ok {
+			remaining -= cached
+		}
+		if created, ok := usageNumberAsFloat(details["cache_creation_tokens"]); ok {
+			remaining -= created
+		}
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	return int(remaining)
+}
+
+func usageNumberAsFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func parseArguments(arguments string) any {
