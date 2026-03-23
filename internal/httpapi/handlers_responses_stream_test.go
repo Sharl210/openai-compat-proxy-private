@@ -31,6 +31,12 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
+	if !strings.Contains(body, "event: response.output_item.added") {
+		t.Fatalf("expected synthetic reasoning output item start in stream body, got %s", body)
+	}
+	if !strings.Contains(body, `"id":"rs_proxy"`) || !strings.Contains(body, `"type":"reasoning"`) {
+		t.Fatalf("expected synthetic reasoning item payload in stream body, got %s", body)
+	}
 	if !strings.Contains(body, `"type":"response.reasoning.delta"`) {
 		t.Fatalf("expected synthetic reasoning chunk type in stream body, got %s", body)
 	}

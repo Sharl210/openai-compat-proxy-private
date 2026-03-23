@@ -13,7 +13,7 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
-const initialSyntheticReasoningLeadTime = 120 * time.Millisecond
+const initialSyntheticReasoningLeadTime = 350 * time.Millisecond
 
 type anthropicStreamState struct {
 	messageStarted   bool
@@ -35,6 +35,7 @@ type responsesStreamState struct {
 	realReasoningSeen bool
 	planningSent      bool
 	toolStatusSent    bool
+	reasoningStarted  bool
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -74,7 +75,7 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 
 func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
 	state := responsesStreamState{}
-	if err := writeSyntheticResponsesReasoning(w, flusher, "推理中…"); err != nil {
+	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, "推理中…"); err != nil {
 		return err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
@@ -91,10 +92,10 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 	case "response.output_item.added", "response.output_item.done":
 		if !state.textStarted {
 			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realReasoningSeen {
-				if err := writeSyntheticResponsesReasoning(w, flusher, "分析中…"); err != nil {
+				if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, "分析中…"); err != nil {
 					return err
 				}
-				if err := writeSyntheticResponsesReasoning(w, flusher, "正在组织回答…"); err != nil {
+				if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, "正在组织回答…"); err != nil {
 					return err
 				}
 				state.planningSent = true
@@ -104,7 +105,7 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			state.realReasoningSeen = true
 		}
 		if itemType, _ := item["type"].(string); itemType == "function_call" && !state.textStarted && !state.realReasoningSeen && !state.toolStatusSent {
-			if err := writeSyntheticResponsesReasoning(w, flusher, "正在调用工具…"); err != nil {
+			if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, "正在调用工具…"); err != nil {
 				return err
 			}
 			state.toolStatusSent = true
@@ -139,6 +140,32 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 }
 
 func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flusher, text string) error {
+	return writeSyntheticResponsesReasoningWithState(w, flusher, nil, text)
+}
+
+func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, text string) error {
+	if state != nil && !state.reasoningStarted {
+		payload, err := responseStreamPayload("response.output_item.added", map[string]any{
+			"item": map[string]any{
+				"id":      "rs_proxy",
+				"type":    "reasoning",
+				"summary": []any{},
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprint(w, "event: response.output_item.added\n"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		state.reasoningStarted = true
+	}
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
