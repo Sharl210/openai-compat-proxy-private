@@ -158,6 +158,9 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			case "input_text", "output_text", "text":
 				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: part.Text})
 				normalizedType := part.Type
+				if role == "assistant" && normalizedType == "input_text" {
+					normalizedType = "output_text"
+				}
 				if normalizedType == "text" || normalizedType == "" {
 					if role == "assistant" {
 						normalizedType = "output_text"

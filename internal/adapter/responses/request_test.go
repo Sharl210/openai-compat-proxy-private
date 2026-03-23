@@ -50,7 +50,7 @@ func TestDecodeRequestPreservesAssistantMessagesAsOutputText(t *testing.T) {
 		"model":"gpt-5",
 		"input":[
 			{"role":"user","content":"第一句"},
-			{"role":"assistant","content":[{"type":"text","text":"第二句"}]},
+			{"role":"assistant","content":"第二句"},
 			{"role":"user","content":"第三句"}
 		]
 	}`
@@ -69,5 +69,24 @@ func TestDecodeRequestPreservesAssistantMessagesAsOutputText(t *testing.T) {
 	}
 	if got, _ := assistant[0]["type"].(string); got != "output_text" {
 		t.Fatalf("expected assistant content type output_text, got %#v", canon.ResponseInputItems[1])
+	}
+}
+
+func TestDecodeRequestPreservesAssistantStructuredMessagesAsOutputText(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"assistant","content":[{"type":"text","text":"第二句"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	assistant, _ := canon.ResponseInputItems[0]["content"].([]map[string]any)
+	if got, _ := assistant[0]["type"].(string); got != "output_text" {
+		t.Fatalf("expected assistant structured content type output_text, got %#v", canon.ResponseInputItems[0])
 	}
 }
