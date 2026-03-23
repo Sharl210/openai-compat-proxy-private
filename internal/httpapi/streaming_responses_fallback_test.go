@@ -38,11 +38,11 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	if textIdx == -1 {
 		t.Fatalf("expected output text event, got %s", body)
 	}
-	if !(addedIdx < textIdx && textIdx < doneIdx) {
-		t.Fatalf("expected synthetic reasoning item to close after text without extra late reasoning, got %s", body)
+	if !(addedIdx < doneIdx && doneIdx < textIdx) {
+		t.Fatalf("expected synthetic reasoning item to close before text without extra late reasoning, got %s", body)
 	}
-	lateTail := body[textIdx:doneIdx]
-	if strings.Contains(lateTail, `已完成思考`) {
+	lateTail := body[textIdx:]
+	if strings.Contains(lateTail, `response.output_item.done`) || strings.Contains(lateTail, `已完成思考`) {
 		t.Fatalf("expected no late fallback reasoning text after output text, got %s", body)
 	}
 }

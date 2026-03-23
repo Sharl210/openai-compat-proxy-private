@@ -40,6 +40,7 @@ type responsesStreamState struct {
 	planningSent      bool
 	toolStatusSent    bool
 	reasoningStarted  bool
+	reasoningClosed   bool
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -92,6 +93,32 @@ func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event) error {
 	item, _ := evt.Data["item"].(map[string]any)
+	closeSyntheticReasoning := func() error {
+		if !state.reasoningStarted || state.realReasoningSeen || state.reasoningClosed {
+			return nil
+		}
+		payload, err := responseStreamPayload("response.output_item.done", map[string]any{
+			"item": map[string]any{
+				"id":      "rs_proxy",
+				"type":    "reasoning",
+				"summary": []any{},
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprint(w, "event: response.output_item.done\n"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		state.reasoningClosed = true
+		return nil
+	}
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
 		if !state.textStarted {
@@ -115,6 +142,9 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			state.toolStatusSent = true
 		}
 	case "response.output_text.delta":
+		if err := closeSyntheticReasoning(); err != nil {
+			return err
+		}
 		state.textStarted = true
 		state.planningSent = true
 		state.toolStatusSent = true
@@ -123,26 +153,8 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			state.realReasoningSeen = true
 		}
 	case "response.completed", "response.done":
-		if state.reasoningStarted && !state.realReasoningSeen {
-			payload, err := responseStreamPayload("response.output_item.done", map[string]any{
-				"item": map[string]any{
-					"id":      "rs_proxy",
-					"type":    "reasoning",
-					"summary": []any{},
-				},
-			})
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprint(w, "event: response.output_item.done\n"); err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
-				return err
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
+		if err := closeSyntheticReasoning(); err != nil {
+			return err
 		}
 	}
 	if _, err := fmt.Fprintf(w, "event: %s\n", evt.Event); err != nil {
