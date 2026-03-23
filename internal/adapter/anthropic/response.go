@@ -50,6 +50,9 @@ func mapUsage(usage map[string]any) map[string]any {
 		if cached, ok := details["cached_tokens"]; ok {
 			out["cache_read_input_tokens"] = cached
 		}
+		if created, ok := details["cache_creation_tokens"]; ok {
+			out["cache_creation_input_tokens"] = created
+		}
 	}
 	if len(out) == 0 {
 		return nil
