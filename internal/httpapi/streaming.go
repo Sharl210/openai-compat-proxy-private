@@ -16,6 +16,9 @@ import (
 const initialSyntheticReasoningLeadTime = 350 * time.Millisecond
 
 var syntheticReasoningTickInterval = 250 * time.Millisecond
+var sseHeartbeatInterval = 15 * time.Second
+
+const syntheticReasoningPlaceholder = "## 推理中…"
 
 type anthropicStreamState struct {
 	messageStarted   bool
@@ -81,15 +84,20 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 
 func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
 	state := responsesStreamState{}
-	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, "## 推理中…"); err != nil {
+	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return client.StreamEvents(ctx, req, authorization, func(evt upstream.Event) error {
-		return writeResponsesEvent(w, flusher, &state, evt)
-	})
+	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
+		func() bool { return true },
+		nil,
+		func() error { return writeSSEComment(w, flusher, "keep-alive") },
+		func(evt upstream.Event) error {
+			return writeResponsesEvent(w, flusher, &state, evt)
+		},
+	)
 }
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event) error {
@@ -281,6 +289,7 @@ func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.
 				"delta": map[string]any{"type": "thinking_delta", "thinking": "\u200b"},
 			})
 		},
+		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
 			return writeAnthropicEvent(w, flusher, &state, evt)
 		},
@@ -323,7 +332,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 		"type":  "content_block_delta",
 		"index": state.thinkingIndex,
-		"delta": map[string]any{"type": "thinking_delta", "thinking": "## 推理中…\n"},
+		"delta": map[string]any{"type": "thinking_delta", "thinking": syntheticReasoningPlaceholder + "\n"},
 	})
 }
 
@@ -680,7 +689,7 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "## 推理中…\n"}, "", nil); err != nil {
+	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": syntheticReasoningPlaceholder + "\n"}, "", nil); err != nil {
 		return err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
@@ -694,6 +703,7 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 			}
 			return writeChatChunk(w, flusher, map[string]any{"reasoning_content": "\u200b"}, "", nil)
 		},
+		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
 			return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage)
 		},
@@ -722,6 +732,7 @@ func streamLiveWithSyntheticTicks(
 	streamFn func(context.Context, model.CanonicalRequest, string, func(upstream.Event) error) error,
 	stopTicks func() bool,
 	onTick func() error,
+	onHeartbeat func() error,
 	onEvent func(upstream.Event) error,
 ) error {
 	signals := make(chan streamSignal, 32)
@@ -740,11 +751,19 @@ func streamLiveWithSyntheticTicks(
 
 	ticker := time.NewTicker(syntheticReasoningTickInterval)
 	defer ticker.Stop()
+	heartbeatTicker := time.NewTicker(sseHeartbeatInterval)
+	defer heartbeatTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-heartbeatTicker.C:
+			if onHeartbeat != nil {
+				if err := onHeartbeat(); err != nil {
+					return err
+				}
+			}
 		case <-ticker.C:
 			if onTick != nil && !stopTicks() {
 				if err := onTick(); err != nil {
@@ -928,7 +947,11 @@ func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[strin
 }
 
 func writeSSEPadding(w http.ResponseWriter, flusher http.Flusher) error {
-	if _, err := fmt.Fprintf(w, ": %s\n\n", strings.Repeat(" ", 2048)); err != nil {
+	return writeSSEComment(w, flusher, strings.Repeat(" ", 2048))
+}
+
+func writeSSEComment(w http.ResponseWriter, flusher http.Flusher, text string) error {
+	if _, err := fmt.Fprintf(w, ": %s\n\n", text); err != nil {
 		return err
 	}
 	if flusher != nil {

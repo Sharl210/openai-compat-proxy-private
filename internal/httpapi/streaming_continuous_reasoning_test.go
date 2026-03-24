@@ -16,8 +16,13 @@ import (
 
 func TestStreamLiveWithSyntheticTicksFiresWhileWaitingForFirstText(t *testing.T) {
 	oldInterval := syntheticReasoningTickInterval
+	oldHeartbeatInterval := sseHeartbeatInterval
 	syntheticReasoningTickInterval = 10 * time.Millisecond
-	defer func() { syntheticReasoningTickInterval = oldInterval }()
+	sseHeartbeatInterval = time.Hour
+	defer func() {
+		syntheticReasoningTickInterval = oldInterval
+		sseHeartbeatInterval = oldHeartbeatInterval
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -37,6 +42,7 @@ func TestStreamLiveWithSyntheticTicksFiresWhileWaitingForFirstText(t *testing.T)
 			tickCount++
 			return nil
 		},
+		func() error { return nil },
 		func(evt upstream.Event) error {
 			eventCount++
 			return nil
@@ -53,10 +59,60 @@ func TestStreamLiveWithSyntheticTicksFiresWhileWaitingForFirstText(t *testing.T)
 	}
 }
 
+func TestStreamLiveWithSyntheticTicksSendsHeartbeatWhileWaiting(t *testing.T) {
+	oldTickInterval := syntheticReasoningTickInterval
+	oldHeartbeatInterval := sseHeartbeatInterval
+	syntheticReasoningTickInterval = time.Hour
+	sseHeartbeatInterval = 10 * time.Millisecond
+	defer func() {
+		syntheticReasoningTickInterval = oldTickInterval
+		sseHeartbeatInterval = oldHeartbeatInterval
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	heartbeatCount := 0
+	eventCount := 0
+	err := streamLiveWithSyntheticTicks(
+		ctx,
+		model.CanonicalRequest{},
+		"",
+		func(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(upstream.Event) error) error {
+			time.Sleep(35 * time.Millisecond)
+			return onEvent(upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "hello"}})
+		},
+		func() bool { return true },
+		nil,
+		func() error {
+			heartbeatCount++
+			return nil
+		},
+		func(evt upstream.Event) error {
+			eventCount++
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("streamLiveWithSyntheticTicks error: %v", err)
+	}
+	if heartbeatCount < 2 {
+		t.Fatalf("expected at least 2 heartbeat frames before first event, got %d", heartbeatCount)
+	}
+	if eventCount != 1 {
+		t.Fatalf("expected one upstream event, got %d", eventCount)
+	}
+}
+
 func TestMessagesStreamStopsSyntheticTicksAfterRealReasoningStarts(t *testing.T) {
 	oldInterval := syntheticReasoningTickInterval
+	oldHeartbeatInterval := sseHeartbeatInterval
 	syntheticReasoningTickInterval = 10 * time.Millisecond
-	defer func() { syntheticReasoningTickInterval = oldInterval }()
+	sseHeartbeatInterval = time.Hour
+	defer func() {
+		syntheticReasoningTickInterval = oldInterval
+		sseHeartbeatInterval = oldHeartbeatInterval
+	}()
 
 	upstream := testutil.NewDelayedStreamingUpstream(t, []string{
 		"event: response.reasoning.delta\n" +
