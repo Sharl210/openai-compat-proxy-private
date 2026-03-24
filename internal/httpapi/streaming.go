@@ -42,6 +42,7 @@ type responsesStreamState struct {
 	reasoningStarted  bool
 	reasoningClosed   bool
 	syntheticSummary  strings.Builder
+	realSummary       strings.Builder
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -94,12 +95,54 @@ func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event) error {
 	item, _ := evt.Data["item"].(map[string]any)
+	writeStreamEvent := func(event string, data map[string]any) error {
+		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+			return err
+		}
+		payload, err := responseStreamPayload(event, data)
+		if err != nil {
+			return err
+		}
+		if len(payload) > 0 {
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+				return err
+			}
+		} else {
+			if _, err := fmt.Fprint(w, "data: {}\n\n"); err != nil {
+				return err
+			}
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+	appendRealSummary := func(text string) {
+		if text == "" {
+			return
+		}
+		state.realSummary.WriteString(text)
+	}
+	writeRealReasoningDelta := func(text string) error {
+		if text == "" {
+			return nil
+		}
+		appendRealSummary(text)
+		if err := writeStreamEvent("response.reasoning.delta", map[string]any{"summary": text}); err != nil {
+			return err
+		}
+		return writeStreamEvent("response.reasoning_summary_text.delta", map[string]any{"delta": text})
+	}
 	closeSyntheticReasoning := func() error {
-		if !state.reasoningStarted || state.realReasoningSeen || state.reasoningClosed {
+		if !state.reasoningStarted || state.reasoningClosed {
 			return nil
 		}
 		summary := []any{}
-		if text := state.syntheticSummary.String(); text != "" {
+		text := state.syntheticSummary.String()
+		if state.realReasoningSeen {
+			text = state.realSummary.String()
+		}
+		if text != "" {
 			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
 		}
 		payload, err := responseStreamPayload("response.output_item.done", map[string]any{
@@ -126,43 +169,38 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 	}
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
+				state.realReasoningSeen = true
+				return writeRealReasoningDelta(reasoningContent)
+			}
+			return nil
+		}
 		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
 			state.realReasoningSeen = true
 		}
 	case "response.output_text.delta":
-		if err := closeSyntheticReasoning(); err != nil {
-			return err
+		if !state.realReasoningSeen {
+			if err := closeSyntheticReasoning(); err != nil {
+				return err
+			}
 		}
 		state.textStarted = true
 	case "response.reasoning.delta":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realReasoningSeen = true
+			appendRealSummary(delta)
+			if err := writeStreamEvent(evt.Event, evt.Data); err != nil {
+				return err
+			}
+			return writeStreamEvent("response.reasoning_summary_text.delta", map[string]any{"delta": delta})
 		}
 	case "response.completed", "response.done":
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(w, "event: %s\n", evt.Event); err != nil {
-		return err
-	}
-	payload, err := responseStreamPayload(evt.Event, evt.Data)
-	if err != nil {
-		return err
-	}
-	if len(payload) > 0 {
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
-			return err
-		}
-	} else {
-		if _, err := fmt.Fprint(w, "data: {}\n\n"); err != nil {
-			return err
-		}
-	}
-	if flusher != nil {
-		flusher.Flush()
-	}
-	return nil
+	return writeStreamEvent(evt.Event, evt.Data)
 }
 
 func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flusher, text string) error {
