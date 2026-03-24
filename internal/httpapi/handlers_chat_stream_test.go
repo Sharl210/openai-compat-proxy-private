@@ -10,7 +10,7 @@ import (
 	"openai-compat-proxy/internal/testutil"
 )
 
-func TestChatStreamUsesTitledReasoningPlaceholder(t *testing.T) {
+func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -39,7 +39,7 @@ func TestChatStreamUsesTitledReasoningPlaceholder(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"## 推理中…\n"`) {
+	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n"`) {
 		t.Fatalf("expected chat placeholder reasoning to use titled format, got %s", body)
 	}
 }

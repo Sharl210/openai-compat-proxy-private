@@ -18,7 +18,7 @@ const initialSyntheticReasoningLeadTime = 350 * time.Millisecond
 var syntheticReasoningTickInterval = 250 * time.Millisecond
 var sseHeartbeatInterval = 15 * time.Second
 
-const syntheticReasoningPlaceholder = "## 推理中…"
+const syntheticReasoningPlaceholder = "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"
 
 type anthropicStreamState struct {
 	messageStarted   bool
