@@ -42,7 +42,6 @@ type responsesStreamState struct {
 	reasoningStarted  bool
 	reasoningClosed   bool
 	syntheticSummary  strings.Builder
-	realSummary       strings.Builder
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -117,32 +116,12 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		}
 		return nil
 	}
-	appendRealSummary := func(text string) {
-		if text == "" {
-			return
-		}
-		state.realSummary.WriteString(text)
-	}
-	writeRealReasoningDelta := func(text string) error {
-		if text == "" {
-			return nil
-		}
-		appendRealSummary(text)
-		if err := writeStreamEvent("response.reasoning.delta", map[string]any{"summary": text}); err != nil {
-			return err
-		}
-		return writeStreamEvent("response.reasoning_summary_text.delta", map[string]any{"delta": text})
-	}
 	closeSyntheticReasoning := func() error {
 		if !state.reasoningStarted || state.reasoningClosed {
 			return nil
 		}
 		summary := []any{}
-		text := state.syntheticSummary.String()
-		if state.realReasoningSeen {
-			text = state.realSummary.String()
-		}
-		if text != "" {
+		if text := state.syntheticSummary.String(); text != "" {
 			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
 		}
 		payload, err := responseStreamPayload("response.output_item.done", map[string]any{
@@ -167,33 +146,28 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		state.reasoningClosed = true
 		return nil
 	}
+	markRealReasoningSeen := func() error {
+		if state.realReasoningSeen {
+			return nil
+		}
+		state.realReasoningSeen = true
+		return closeSyntheticReasoning()
+	}
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
-			if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
-				state.realReasoningSeen = true
-				return writeRealReasoningDelta(reasoningContent)
+			if err := markRealReasoningSeen(); err != nil {
+				return err
 			}
-			return nil
-		}
-		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
-			state.realReasoningSeen = true
 		}
 	case "response.output_text.delta":
-		if !state.realReasoningSeen {
-			if err := closeSyntheticReasoning(); err != nil {
-				return err
-			}
+		if err := closeSyntheticReasoning(); err != nil {
+			return err
 		}
 		state.textStarted = true
-	case "response.reasoning.delta":
-		if delta := reasoningContentValue(evt.Data); delta != "" {
-			state.realReasoningSeen = true
-			appendRealSummary(delta)
-			if err := writeStreamEvent(evt.Event, evt.Data); err != nil {
-				return err
-			}
-			return writeStreamEvent("response.reasoning_summary_text.delta", map[string]any{"delta": delta})
+	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		if err := markRealReasoningSeen(); err != nil {
+			return err
 		}
 	case "response.completed", "response.done":
 		if err := closeSyntheticReasoning(); err != nil {

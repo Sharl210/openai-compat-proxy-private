@@ -48,12 +48,16 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	}
 }
 
-func TestResponsesStreamKeepsSingleContinuousReasoningItem(t *testing.T) {
+func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"alpha\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"text\":\"alpha\"}\n\n",
 		"event: response.output_item.done\n" +
 			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"alpha\"}]}}\n\n",
-		"event: response.reasoning.delta\n" +
-			"data: {\"summary\":\"beta\"}\n\n",
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
 	})
@@ -71,26 +75,23 @@ func TestResponsesStreamKeepsSingleContinuousReasoningItem(t *testing.T) {
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	if count := strings.Count(body, `event: response.output_item.added`); count != 1 {
-		t.Fatalf("expected one reasoning item start, got %d body=%s", count, body)
+	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
+	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
+	realAddedIdx := strings.Index(body, `{"item":{"id":"rs_1","summary":[],"type":"reasoning"},"type":"response.output_item.added"}`)
+	realDeltaIdx := strings.Index(body, `{"delta":"alpha","item_id":"rs_1","summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	realDoneIdx := strings.LastIndex(body, `{"item":{"id":"rs_1","summary":[{"text":"alpha","type":"summary_text"}],"type":"reasoning"},"type":"response.output_item.done"}`)
+
+	if proxyAddedIdx == -1 || proxyDoneIdx == -1 {
+		t.Fatalf("expected proxy fallback reasoning item to open and close, got %s", body)
 	}
-	if count := strings.Count(body, `event: response.output_item.done`); count != 1 {
-		t.Fatalf("expected one reasoning item completion, got %d body=%s", count, body)
+	if realAddedIdx == -1 || realDeltaIdx == -1 || realDoneIdx == -1 {
+		t.Fatalf("expected real reasoning item lifecycle and summary delta to be forwarded, got %s", body)
 	}
-	alphaIdx := strings.Index(body, `"summary":"alpha"`)
-	betaIdx := strings.Index(body, `"summary":"beta"`)
-	doneIdx := strings.LastIndex(body, `event: response.output_item.done`)
-	if alphaIdx == -1 || betaIdx == -1 || doneIdx == -1 {
-		t.Fatalf("expected merged reasoning stream to include alpha, beta, and a single done event, got %s", body)
+	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < realAddedIdx && realAddedIdx < realDeltaIdx && realDeltaIdx < realDoneIdx) {
+		t.Fatalf("expected fallback reasoning to finish before real reasoning lifecycle begins, got %s", body)
 	}
-	if doneIdx < betaIdx {
-		t.Fatalf("expected reasoning item to stay open until after beta summary delta, got %s", body)
-	}
-	if !strings.Contains(body, `"summary":[{"text":"`) {
-		t.Fatalf("expected final reasoning item to include merged summary payload, got %s", body)
-	}
-	if strings.Contains(body, `"id":"rs_1"`) {
-		t.Fatalf("expected upstream reasoning item boundaries to be coalesced into proxy reasoning item, got %s", body)
+	if strings.Contains(body, `{"item":{"id":"rs_proxy","summary":[{"text":"alpha"`) {
+		t.Fatalf("expected real reasoning content to stay on real item instead of being merged into rs_proxy, got %s", body)
 	}
 }
 
