@@ -2,10 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/testutil"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -45,5 +50,53 @@ func TestStreamLiveWithSyntheticTicksFiresWhileWaitingForFirstText(t *testing.T)
 	}
 	if eventCount != 1 {
 		t.Fatalf("expected one upstream event, got %d", eventCount)
+	}
+}
+
+func TestMessagesStreamStopsSyntheticTicksAfterRealReasoningStarts(t *testing.T) {
+	oldInterval := syntheticReasoningTickInterval
+	syntheticReasoningTickInterval = 10 * time.Millisecond
+	defer func() { syntheticReasoningTickInterval = oldInterval }()
+
+	upstream := testutil.NewDelayedStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"alpha\"}\n\n",
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	}, 35*time.Millisecond)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider: "anthropic",
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	alphaIdx := strings.Index(body, `"thinking":"alpha"`)
+	helloIdx := strings.Index(body, `"text":"hello"`)
+	if alphaIdx == -1 || helloIdx == -1 || helloIdx <= alphaIdx {
+		t.Fatalf("expected real reasoning before output text, got %s", body)
+	}
+	if strings.Contains(body[alphaIdx:helloIdx], "\u200b") {
+		t.Fatalf("expected no synthetic zero-width ticks after real reasoning started, got %s", body)
 	}
 }

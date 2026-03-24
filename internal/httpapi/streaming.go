@@ -255,9 +255,9 @@ func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.
 		return err
 	}
 	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
-		func() bool { return state.textStarted },
+		func() bool { return state.textStarted || state.realThinkingSeen },
 		func() error {
-			if state.textStarted {
+			if state.textStarted || state.realThinkingSeen {
 				return nil
 			}
 			if err := startAnthropicUnreasonedPlaceholder(w, flusher, &state); err != nil {
@@ -340,8 +340,10 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.textStarted {
 			return nil
 		}
-		if err := closeThinkingBlock(); err != nil {
-			return err
+		if !state.realThinkingSeen {
+			if err := closeThinkingBlock(); err != nil {
+				return err
+			}
 		}
 		if err := startMessage(); err != nil {
 			return err
@@ -403,8 +405,10 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.toolStarted {
 			return nil
 		}
-		if err := closeThinkingBlock(); err != nil {
-			return err
+		if !state.realThinkingSeen {
+			if err := closeThinkingBlock(); err != nil {
+				return err
+			}
 		}
 		if err := startMessage(); err != nil {
 			return err
@@ -671,9 +675,9 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 		return err
 	}
 	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
-		func() bool { return state.textStarted },
+		func() bool { return state.textStarted || state.realReasoningSeen },
 		func() error {
-			if state.textStarted {
+			if state.textStarted || state.realReasoningSeen {
 				return nil
 			}
 			return writeChatChunk(w, flusher, map[string]any{"reasoning_content": "\u200b"}, "", nil)
