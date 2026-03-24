@@ -42,6 +42,9 @@ func TestMessagesStreamClosesThinkingBeforeTextAndEmitsSignature(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
+	if !strings.Contains(body, `"thinking":"## 推理中…\n"`) {
+		t.Fatalf("expected anthropic placeholder thinking to use titled format, got %s", body)
+	}
 
 	sigIdx := strings.Index(body, `"type":"signature_delta"`)
 	stopIdx := strings.Index(body, `event: content_block_stop`)

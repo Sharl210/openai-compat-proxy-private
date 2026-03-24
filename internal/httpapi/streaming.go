@@ -81,7 +81,7 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 
 func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
 	state := responsesStreamState{}
-	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, "推理中…"); err != nil {
+	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, "## 推理中…"); err != nil {
 		return err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
@@ -323,7 +323,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 		"type":  "content_block_delta",
 		"index": state.thinkingIndex,
-		"delta": map[string]any{"type": "thinking_delta", "thinking": "推理中…\n"},
+		"delta": map[string]any{"type": "thinking_delta", "thinking": "## 推理中…\n"},
 	})
 }
 
@@ -680,7 +680,7 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "推理中…\n"}, "", nil); err != nil {
+	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": "## 推理中…\n"}, "", nil); err != nil {
 		return err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
