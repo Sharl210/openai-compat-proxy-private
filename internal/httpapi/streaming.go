@@ -464,42 +464,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
-		if !state.textStarted {
-			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realThinkingSeen {
-				if err := startThinkingBlock(); err != nil {
-					return err
-				}
-				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
-					"type":  "content_block_delta",
-					"index": state.thinkingIndex,
-					"delta": map[string]any{"type": "thinking_delta", "thinking": "分析中…\n"},
-				}); err != nil {
-					return err
-				}
-				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
-					"type":  "content_block_delta",
-					"index": state.thinkingIndex,
-					"delta": map[string]any{"type": "thinking_delta", "thinking": "正在组织回答…\n"},
-				}); err != nil {
-					return err
-				}
-				state.planningSent = true
-			}
-		}
 		if itemType, _ := item["type"].(string); itemType == "function_call" {
-			if !state.textStarted && !state.realThinkingSeen && !state.toolStatusSent {
-				if err := startThinkingBlock(); err != nil {
-					return err
-				}
-				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
-					"type":  "content_block_delta",
-					"index": state.thinkingIndex,
-					"delta": map[string]any{"type": "thinking_delta", "thinking": "正在调用工具…\n"},
-				}); err != nil {
-					return err
-				}
-				state.toolStatusSent = true
-			}
 			return startToolBlock(item)
 		}
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
@@ -806,14 +771,6 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	case "response.created":
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
-		if !state.textStarted {
-			if phase := stringValue(item["phase"]); phase == "final_answer" && !state.planningSent && !state.realReasoningSeen {
-				if err := writeChatChunk(w, flusher, syntheticReasoningStatus("正在组织回答…"), "", nil); err != nil {
-					return err
-				}
-				state.planningSent = true
-			}
-		}
 		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
 			state.realReasoningSeen = true
 			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
@@ -821,12 +778,6 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 		}
 		if itemType, _ := item["type"].(string); itemType == "function_call" {
-			if !state.textStarted && !state.realReasoningSeen && !state.toolStatusSent {
-				if err := writeChatChunk(w, flusher, syntheticReasoningStatus("正在调用工具…"), "", nil); err != nil {
-					return err
-				}
-				state.toolStatusSent = true
-			}
 			itemID, _ := item["id"].(string)
 			if itemID != "" {
 				if _, ok := state.toolIndex[itemID]; !ok {
