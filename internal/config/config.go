@@ -32,9 +32,9 @@ func Default() Config {
 		ListenAddr:       ":21021",
 		LogEnable:        false,
 		ConnectTimeout:   10 * time.Second,
-		FirstByteTimeout: 30 * time.Second,
-		IdleTimeout:      30 * time.Second,
-		TotalTimeout:     2 * time.Minute,
+		FirstByteTimeout: 90 * time.Second,
+		IdleTimeout:      3 * time.Minute,
+		TotalTimeout:     time.Hour,
 		LogFilePath:      ".proxy.requests.jsonl",
 		LogMaxSizeMB:     100,
 		LogMaxBackups:    10,
@@ -75,6 +75,26 @@ func LoadFromEnv() Config {
 	if value := os.Getenv("LOG_MAX_BACKUPS"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
 			cfg.LogMaxBackups = parsed
+		}
+	}
+	if value := os.Getenv("CONNECT_TIMEOUT"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			cfg.ConnectTimeout = parsed
+		}
+	}
+	if value := os.Getenv("FIRST_BYTE_TIMEOUT"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			cfg.FirstByteTimeout = parsed
+		}
+	}
+	if value := os.Getenv("IDLE_TIMEOUT"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			cfg.IdleTimeout = parsed
+		}
+	}
+	if value := os.Getenv("TOTAL_TIMEOUT"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			cfg.TotalTimeout = parsed
 		}
 	}
 	return cfg

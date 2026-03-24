@@ -1,0 +1,27 @@
+package config
+
+import (
+	"testing"
+	"time"
+)
+
+func TestLoadFromEnvParsesTimeouts(t *testing.T) {
+	t.Setenv("CONNECT_TIMEOUT", "11s")
+	t.Setenv("FIRST_BYTE_TIMEOUT", "45s")
+	t.Setenv("IDLE_TIMEOUT", "75s")
+	t.Setenv("TOTAL_TIMEOUT", "12m")
+
+	cfg := LoadFromEnv()
+	if cfg.ConnectTimeout != 11*time.Second {
+		t.Fatalf("expected ConnectTimeout 11s, got %v", cfg.ConnectTimeout)
+	}
+	if cfg.FirstByteTimeout != 45*time.Second {
+		t.Fatalf("expected FirstByteTimeout 45s, got %v", cfg.FirstByteTimeout)
+	}
+	if cfg.IdleTimeout != 75*time.Second {
+		t.Fatalf("expected IdleTimeout 75s, got %v", cfg.IdleTimeout)
+	}
+	if cfg.TotalTimeout != 12*time.Minute {
+		t.Fatalf("expected TotalTimeout 12m, got %v", cfg.TotalTimeout)
+	}
+}
