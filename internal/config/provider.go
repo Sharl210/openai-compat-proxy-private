@@ -23,7 +23,15 @@ type ProviderConfig struct {
 	ModelMap                    map[string]string
 	EnableReasoningEffortSuffix bool
 	ExposeReasoningSuffixModels bool
+	SystemPromptFiles           []string
+	SystemPromptPosition        string
+	SystemPromptText            string
 }
+
+const (
+	SystemPromptPositionPrepend = "prepend"
+	SystemPromptPositionAppend  = "append"
+)
 
 type invalidConfigError string
 
@@ -112,11 +120,16 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.EnableReasoningEffortSuffix = parseBool(value)
 		case "EXPOSE_REASONING_SUFFIX_MODELS":
 			provider.ExposeReasoningSuffixModels = parseBool(value)
+		case "SYSTEM_PROMPT_FILES":
+			provider.SystemPromptFiles = resolveProviderRelativePaths(path, value)
+		case "SYSTEM_PROMPT_POSITION":
+			provider.SystemPromptPosition = normalizeSystemPromptPosition(value)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return ProviderConfig{}, err
 	}
+	provider.SystemPromptPosition = normalizeSystemPromptPosition(provider.SystemPromptPosition)
 	return provider, nil
 }
 
@@ -138,6 +151,45 @@ func (c Config) DefaultProviderConfig() (ProviderConfig, error) {
 
 func parseBool(value string) bool {
 	return strings.EqualFold(value, "true") || value == "1"
+}
+
+func normalizeSystemPromptPosition(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case SystemPromptPositionAppend:
+		return SystemPromptPositionAppend
+	default:
+		return SystemPromptPositionPrepend
+	}
+}
+
+func resolveProviderRelativePaths(providerEnvPath string, raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		switch r {
+		case ',', '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	})
+	if len(parts) == 0 {
+		return nil
+	}
+	baseDir := filepath.Dir(providerEnvPath)
+	resolved := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if !filepath.IsAbs(trimmed) {
+			trimmed = filepath.Join(baseDir, trimmed)
+		}
+		resolved = append(resolved, filepath.Clean(trimmed))
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
 }
 
 func (p ProviderConfig) ResolveModel(model string, enableSuffix bool) string {

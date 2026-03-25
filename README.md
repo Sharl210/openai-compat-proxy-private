@@ -115,6 +115,13 @@ cp providers/openai.env.example providers/anthropic.env
 
 程序只会读取 `providers/*.env`，会忽略 `providers/*.env.example`。
 
+模板里默认还会写入：
+
+- `SYSTEM_PROMPT_FILES=prompt.md`
+- `SYSTEM_PROMPT_POSITION=prepend`
+
+同时仓库会提供一个空的 `providers/prompt.md` 示例文件。空文件不会注入任何内容，所以默认效果等同于关闭。你可以直接编辑这个文件，或者把 `SYSTEM_PROMPT_FILES` 留空来彻底关闭 provider 级系统提示词注入。
+
 ### 4. 执行脚本
 
 #### `scripts/deploy-linux.sh`
@@ -173,7 +180,7 @@ chmod +x scripts/*.sh
 
 ## 热加载说明
 
-当前运行时会监听根级 `.env` 和 `providers/*.env`。
+当前运行时会监听根级 `.env`、`providers/*.env`，以及 provider 配置里引用到的系统提示词文件。
 
 ### 当前可热加载
 
@@ -197,6 +204,9 @@ chmod +x scripts/*.sh
   - `MODEL_MAP_JSON`
   - `ENABLE_REASONING_EFFORT_SUFFIX`
   - `EXPOSE_REASONING_SUFFIX_MODELS`
+  - `SYSTEM_PROMPT_FILES`
+  - `SYSTEM_PROMPT_POSITION`
+- provider 配置中 `SYSTEM_PROMPT_FILES` 引用到的文本文件内容
 
 ### 当前不能热加载
 
@@ -310,6 +320,25 @@ http(s)://<host>/v1/<providerId>/xxx
 - `PROVIDER_ENABLED`：是否启用该 provider
 - `UPSTREAM_BASE_URL`：这个 provider 对应的上游基础地址
 - `UPSTREAM_API_KEY`：这个 provider 对应的上游 key
+
+### provider 级系统提示词字段
+
+- `SYSTEM_PROMPT_FILES`：provider 级系统提示词文件列表，使用逗号分隔多个路径；路径相对于当前 provider `.env` 文件所在目录。留空表示关闭注入。
+- `SYSTEM_PROMPT_POSITION`：provider 级系统提示词的拼接位置。支持 `prepend` 和 `append`；留空或非法值会回退为 `prepend`。
+
+行为说明：
+
+- 模板默认写 `SYSTEM_PROMPT_FILES=prompt.md`，并配一个空的 `providers/prompt.md` 示例文件。
+- 如果文件内容为空，实际效果等同于关闭注入。
+- 如果配置了多个文件，会按配置顺序读取并用空行拼接。
+- 如果文件不存在、文件为空，或者 `SYSTEM_PROMPT_FILES=` 留空，都不会导致启动或热加载报错，只会回退为“不注入 provider 级系统提示词”。
+- 修改这些文件内容后会热加载生效，不需要重启。
+
+拼接规则：
+
+- 如果请求本身带有显式 system / developer / instructions 内容，provider 文本会按 `SYSTEM_PROMPT_POSITION` 拼到前面或后面。
+- 对 `/v1/responses` 来说，如果请求同时带了顶层 `instructions` 和 `input` 里的 `system/developer` 项，当前会优先把 provider 文本拼到顶层 `instructions`，不会重复注入两次。
+- 如果请求本身没有系统提示词，provider 文本会作为本次请求的系统提示词发送到上游。
 
 ### 能力开关
 

@@ -29,7 +29,7 @@ func NewRuntimeStore(rootEnvPath string) (*RuntimeStore, error) {
 
 func NewStaticRuntimeStore(cfg Config) *RuntimeStore {
 	store := &RuntimeStore{}
-	store.active.Store(&RuntimeSnapshot{Config: cfg, ProviderVersionByID: map[string]string{}, ProviderPathByID: map[string]string{}, providerMTimeByID: map[string]time.Time{}})
+	store.active.Store(&RuntimeSnapshot{Config: cfg, ProviderVersionByID: map[string]string{}, ProviderPathByID: map[string]string{}, PromptPathsByID: map[string][]string{}, providerMTimeByID: map[string]time.Time{}})
 	return store
 }
 
@@ -95,13 +95,13 @@ func (s *RuntimeStore) StartWatching(ctx context.Context, debounce time.Duration
 	if err != nil {
 		return err
 	}
-	rootDir, providersDir, err := s.watchDirs()
+	watchDirs, _, providersDir, promptPaths, err := s.watchDirs()
 	if err != nil {
 		_ = watcher.Close()
 		return err
 	}
 	tracked := map[string]struct{}{}
-	for _, path := range []string{rootDir, providersDir} {
+	for _, path := range watchDirs {
 		if err := addWatch(watcher, tracked, path); err != nil {
 			_ = watcher.Close()
 			return err
@@ -127,25 +127,26 @@ func (s *RuntimeStore) StartWatching(ctx context.Context, debounce time.Duration
 				if !ok {
 					return
 				}
-				if isWatchDirRemoved(event, rootDir, providersDir) {
+				if isWatchDirRemoved(event, watchDirs) {
 					delete(tracked, event.Name)
 				}
-				if !shouldRefreshForEvent(event, s.rootEnvPath, providersDir) {
+				if !shouldRefreshForEvent(event, s.rootEnvPath, providersDir, promptPaths) {
 					continue
 				}
 				debounceTimer, debounceC = resetDebounceTimer(debounceTimer, debounce, debounceC)
 			case <-debounceC:
 				_ = s.Refresh()
+				watchDirs, _, providersDir, promptPaths, _ = s.ensureWatchDirs(watcher, tracked)
 				debounceTimer = nil
 				debounceC = nil
 			case <-resyncTicker.C:
-				_, _, _ = s.ensureWatchDirs(watcher, tracked)
+				watchDirs, _, providersDir, promptPaths, _ = s.ensureWatchDirs(watcher, tracked)
 				_ = s.Refresh()
 			case _, ok := <-watcher.Errors:
 				if !ok {
 					return
 				}
-				_, _, _ = s.ensureWatchDirs(watcher, tracked)
+				watchDirs, _, providersDir, promptPaths, _ = s.ensureWatchDirs(watcher, tracked)
 				_ = s.Refresh()
 			}
 		}
@@ -153,30 +154,33 @@ func (s *RuntimeStore) StartWatching(ctx context.Context, debounce time.Duration
 	return nil
 }
 
-func (s *RuntimeStore) watchDirs() (string, string, error) {
+func (s *RuntimeStore) watchDirs() ([]string, string, string, []string, error) {
 	snapshot := s.Active()
 	if snapshot == nil {
-		return "", "", ErrInvalidConfig("runtime config unavailable")
+		return nil, "", "", nil, ErrInvalidConfig("runtime config unavailable")
 	}
 	rootDir := filepath.Dir(snapshot.RootEnvPath)
 	providersDir := snapshot.Config.ProvidersDir
 	if providersDir == "" {
-		return "", "", ErrInvalidConfig("providers dir is required")
+		return nil, "", "", nil, ErrInvalidConfig("providers dir is required")
 	}
-	return rootDir, providersDir, nil
+	promptPaths := flattenPromptPaths(snapshot.PromptPathsByID)
+	paths := []string{rootDir, providersDir}
+	paths = append(paths, snapshot.PromptWatchDirs()...)
+	return dedupePaths(paths), rootDir, providersDir, promptPaths, nil
 }
 
-func (s *RuntimeStore) ensureWatchDirs(watcher *fsnotify.Watcher, tracked map[string]struct{}) (string, string, error) {
-	rootDir, providersDir, err := s.watchDirs()
+func (s *RuntimeStore) ensureWatchDirs(watcher *fsnotify.Watcher, tracked map[string]struct{}) ([]string, string, string, []string, error) {
+	watchDirs, rootDir, providersDir, promptPaths, err := s.watchDirs()
 	if err != nil {
-		return "", "", err
+		return nil, "", "", nil, err
 	}
-	for _, path := range []string{rootDir, providersDir} {
+	for _, path := range watchDirs {
 		if err := addWatch(watcher, tracked, path); err != nil {
-			return rootDir, providersDir, err
+			return watchDirs, rootDir, providersDir, promptPaths, err
 		}
 	}
-	return rootDir, providersDir, nil
+	return watchDirs, rootDir, providersDir, promptPaths, nil
 }
 
 func addWatch(watcher *fsnotify.Watcher, tracked map[string]struct{}, path string) error {
@@ -184,6 +188,9 @@ func addWatch(watcher *fsnotify.Watcher, tracked map[string]struct{}, path strin
 		return nil
 	}
 	if err := watcher.Add(path); err != nil {
+		if isPathMissing(err) {
+			return nil
+		}
 		return err
 	}
 	tracked[path] = struct{}{}
@@ -205,7 +212,7 @@ func resetDebounceTimer(timer *time.Timer, delay time.Duration, current <-chan t
 	return timer, timer.C
 }
 
-func shouldRefreshForEvent(event fsnotify.Event, rootEnvPath string, providersDir string) bool {
+func shouldRefreshForEvent(event fsnotify.Event, rootEnvPath string, providersDir string, promptPaths []string) bool {
 	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) == 0 {
 		return false
 	}
@@ -214,17 +221,62 @@ func shouldRefreshForEvent(event fsnotify.Event, rootEnvPath string, providersDi
 		return true
 	}
 	cleanProvidersDir := filepath.Clean(providersDir)
+	for _, promptPath := range promptPaths {
+		if cleanName == filepath.Clean(promptPath) {
+			return true
+		}
+	}
 	if filepath.Dir(cleanName) != cleanProvidersDir {
 		return false
 	}
 	base := filepath.Base(cleanName)
-	return strings.HasSuffix(base, ".env") && !strings.HasSuffix(base, ".env.example")
+	if strings.HasSuffix(base, ".env") && !strings.HasSuffix(base, ".env.example") {
+		return true
+	}
+	return false
 }
 
-func isWatchDirRemoved(event fsnotify.Event, rootDir string, providersDir string) bool {
+func isWatchDirRemoved(event fsnotify.Event, watchDirs []string) bool {
 	if event.Op&(fsnotify.Remove|fsnotify.Rename) == 0 {
 		return false
 	}
 	name := filepath.Clean(event.Name)
-	return name == filepath.Clean(rootDir) || name == filepath.Clean(providersDir)
+	for _, dir := range watchDirs {
+		if name == filepath.Clean(dir) {
+			return true
+		}
+	}
+	return false
+}
+
+func flattenPromptPaths(pathsByID map[string][]string) []string {
+	flat := make([]string, 0)
+	for _, paths := range pathsByID {
+		flat = append(flat, paths...)
+	}
+	return dedupePaths(flat)
+}
+
+func dedupePaths(paths []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		cleaned := filepath.Clean(path)
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		result = append(result, cleaned)
+	}
+	return result
+}
+
+func isPathMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no such file or directory")
 }

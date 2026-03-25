@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -18,6 +19,7 @@ type RuntimeSnapshot struct {
 	RootEnvVersion      string
 	ProviderVersionByID map[string]string
 	ProviderPathByID    map[string]string
+	PromptPathsByID     map[string][]string
 	providerMTimeByID   map[string]time.Time
 }
 
@@ -43,7 +45,7 @@ func BuildRuntimeSnapshot(rootEnvPath string) (*RuntimeSnapshot, error) {
 	}
 	cfg := LoadFromValues(values)
 	cfg.ProvidersDir = ResolveProvidersDir(rootEnvPath, cfg.ProvidersDir)
-	providers, providerVersions, providerPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir)
+	providers, providerVersions, providerPaths, promptPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +60,7 @@ func BuildRuntimeSnapshot(rootEnvPath string) (*RuntimeSnapshot, error) {
 		RootEnvVersion:      FormatVersionTime(rootInfo.ModTime()),
 		ProviderVersionByID: providerVersions,
 		ProviderPathByID:    providerPaths,
+		PromptPathsByID:     promptPaths,
 		providerMTimeByID:   providerMTimes,
 	}, nil
 }
@@ -88,15 +91,16 @@ func parseEnvFile(path string) (map[string]string, error) {
 	return values, nil
 }
 
-func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string, map[string]string, map[string]time.Time, error) {
+func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string, map[string]string, map[string][]string, map[string]time.Time, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	providers := make([]ProviderConfig, 0, len(entries))
 	versions := map[string]string{}
 	paths := map[string]string{}
+	promptPaths := map[string][]string{}
 	mtimes := map[string]time.Time{}
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
@@ -110,26 +114,31 @@ func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string,
 		fullPath := filepath.Join(dir, name)
 		provider, err := loadProviderFile(fullPath)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
+		}
+		provider.SystemPromptText, err = loadSystemPromptText(provider.SystemPromptFiles)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
 		}
 		if provider.ID == "" {
-			return nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("provider file %s is missing PROVIDER_ID", name))
+			return nil, nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("provider file %s is missing PROVIDER_ID", name))
 		}
 		if _, exists := seen[provider.ID]; exists {
-			return nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("duplicate provider id: %s", provider.ID))
+			return nil, nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("duplicate provider id: %s", provider.ID))
 		}
 		info, err := os.Stat(fullPath)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		seen[provider.ID] = struct{}{}
 		providers = append(providers, provider)
 		versions[provider.ID] = FormatVersionTime(info.ModTime())
 		paths[provider.ID] = fullPath
+		promptPaths[provider.ID] = append([]string(nil), provider.SystemPromptFiles...)
 		mtimes[provider.ID] = info.ModTime()
 	}
 	sortProviders(providers)
-	return providers, versions, paths, mtimes, nil
+	return providers, versions, paths, promptPaths, mtimes, nil
 }
 
 func sortProviders(providers []ProviderConfig) {
@@ -140,4 +149,50 @@ func sortProviders(providers []ProviderConfig) {
 			}
 		}
 	}
+}
+
+func loadSystemPromptText(paths []string) (string, error) {
+	if len(paths) == 0 {
+		return "", nil
+	}
+	sections := make([]string, 0, len(paths))
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", err
+		}
+		raw := string(content)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		trimmed := strings.TrimRight(raw, "\r\n")
+		sections = append(sections, trimmed)
+	}
+	return strings.Join(sections, "\n\n"), nil
+}
+
+func (s *RuntimeSnapshot) PromptWatchDirs() []string {
+	if s == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	dirs := make([]string, 0)
+	for _, paths := range s.PromptPathsByID {
+		for _, path := range paths {
+			dir := filepath.Dir(path)
+			if dir == "" {
+				continue
+			}
+			if _, ok := seen[dir]; ok {
+				continue
+			}
+			seen[dir] = struct{}{}
+			dirs = append(dirs, dir)
+		}
+	}
+	slices.Sort(dirs)
+	return dirs
 }

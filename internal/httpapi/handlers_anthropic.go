@@ -32,6 +32,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		applyProviderSystemPrompt(&canon, provider)
 		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 		canon.Model = mappedModel
 		if effort != "" {

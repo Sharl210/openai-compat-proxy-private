@@ -34,6 +34,7 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		applyProviderSystemPrompt(&canon, provider)
 		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 			canon.Model = mappedModel
