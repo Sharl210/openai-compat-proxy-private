@@ -9,23 +9,33 @@ import (
 )
 
 func NewServer(cfg config.Config) http.Handler {
+	return NewServerWithStore(config.NewStaticRuntimeStore(cfg))
+}
+
+func NewServerWithStore(store *config.RuntimeStore) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/v1/models", handleModels(cfg))
-	mux.HandleFunc("/v1/responses", handleResponses(cfg))
-	mux.HandleFunc("/v1/chat/completions", handleChat(cfg))
-	mux.HandleFunc("/v1/messages", handleAnthropicMessages(cfg))
+	mux.HandleFunc("/v1/models", handleModels())
+	mux.HandleFunc("/v1/responses", handleResponses())
+	mux.HandleFunc("/v1/chat/completions", handleChat())
+	mux.HandleFunc("/v1/messages", handleAnthropicMessages())
 
 	return withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		snapshot := store.Active()
+		if snapshot == nil {
+			errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
+			return
+		}
 		if r.URL.Path == "/healthz" {
 			mux.ServeHTTP(w, r)
 			return
 		}
 
-		if info, err := resolveRouteInfo(r.URL.Path, cfg); err == nil {
-			r = r.Clone(withRouteInfo(r.Context(), info))
+		if info, err := resolveRouteInfo(r.URL.Path, snapshot.Config); err == nil {
+			setConfigVersionHeaders(w, snapshot, info.ProviderID)
+			r = r.Clone(withRuntimeSnapshot(withRouteInfo(r.Context(), info), snapshot))
 			r.URL.Path = info.CanonicalPath
-			if err := auth.ValidateProxyAuth(r, cfg.ProxyAPIKey); err != nil {
+			if err := auth.ValidateProxyAuth(r, snapshot.Config.ProxyAPIKey); err != nil {
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 				return
 			}

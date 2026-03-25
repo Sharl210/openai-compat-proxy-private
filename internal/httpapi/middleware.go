@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
 )
 
@@ -42,6 +43,22 @@ func withRequestID(next http.Handler) http.Handler {
 
 func setNormalizationVersionHeader(w http.ResponseWriter) {
 	w.Header().Set("X-Proxy-Normalization-Version", normalizationVersion)
+}
+
+func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnapshot, providerID string) {
+	if snapshot == nil {
+		return
+	}
+	if snapshot.RootEnvVersion != "" {
+		w.Header().Set("X-Env-Version", snapshot.RootEnvVersion)
+	}
+	if providerID == "" {
+		return
+	}
+	w.Header().Set("X-Provider-Name", providerID)
+	if version := snapshot.ProviderVersionByID[providerID]; version != "" {
+		w.Header().Set("X-Provider-Version", version)
+	}
 }
 
 type captureWriter struct {

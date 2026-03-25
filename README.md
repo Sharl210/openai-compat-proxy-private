@@ -79,12 +79,17 @@ cp .env.example .env
 最小示例：
 
 ```bash
-APP_NAME=openai-compat-proxy
 LISTEN_ADDR=:21021
+PROXY_API_KEY=
+
 PROVIDERS_DIR=./providers
 DEFAULT_PROVIDER=openai
 ENABLE_LEGACY_V1_ROUTES=true
-PROXY_API_KEY=
+
+CONNECT_TIMEOUT=10s
+FIRST_BYTE_TIMEOUT=90s
+IDLE_TIMEOUT=3m
+TOTAL_TIMEOUT=1h
 
 LOG_ENABLE=false
 LOG_FILE_PATH=.proxy.requests.jsonl
@@ -166,6 +171,55 @@ chmod +x scripts/*.sh
 ./scripts/uninstall-linux.sh
 ```
 
+## 热加载说明
+
+当前运行时会监听根级 `.env` 和 `providers/*.env`。
+
+### 当前可热加载
+
+- `PROXY_API_KEY`
+- `PROVIDERS_DIR`
+- `DEFAULT_PROVIDER`
+- `ENABLE_LEGACY_V1_ROUTES`
+- `CONNECT_TIMEOUT`
+- `FIRST_BYTE_TIMEOUT`
+- `IDLE_TIMEOUT`
+- `TOTAL_TIMEOUT`
+- provider 文件中的：
+  - `PROVIDER_ID`
+  - `PROVIDER_ENABLED`
+  - `UPSTREAM_BASE_URL`
+  - `UPSTREAM_API_KEY`
+  - `SUPPORTS_CHAT`
+  - `SUPPORTS_RESPONSES`
+  - `SUPPORTS_MODELS`
+  - `SUPPORTS_ANTHROPIC_MESSAGES`
+  - `MODEL_MAP_JSON`
+  - `ENABLE_REASONING_EFFORT_SUFFIX`
+  - `EXPOSE_REASONING_SUFFIX_MODELS`
+
+### 当前不能热加载
+
+下面这些全局配置仍然只在进程启动时生效。运行中修改后会被忽略，仍以启动时加载值为准：
+
+- `LISTEN_ADDR`
+- `LOG_ENABLE`
+- `LOG_FILE_PATH`
+- `LOG_INCLUDE_BODIES`
+- `LOG_MAX_SIZE_MB`
+- `LOG_MAX_BACKUPS`
+
+### 版本头语义
+
+- `X-Env-Version`：当前**已生效**根 `.env` 可热加载配置版本对应的文件修改时间
+- `X-Provider-Version`：当前请求命中的 provider `.env` **已生效**版本对应的文件修改时间
+- `X-Provider-Name`：当前请求实际命中的 provider id
+
+注意：
+
+- 如果你只改了不能热加载的根配置，例如 `LISTEN_ADDR` 或日志配置，运行时会忽略这些变更，`X-Env-Version` 不会更新。
+- 如果新配置写坏了，运行时会继续使用上一份最后可用配置，版本头也保持旧值不变。
+
 ## 路由说明
 
 ### base URL 规则
@@ -211,6 +265,7 @@ http(s)://<host>/v1/<providerId>/xxx
 默认 provider 只通过全局 `.env` 中的 `DEFAULT_PROVIDER` 指定。
 
 注意：`DEFAULT_PROVIDER` 必须对应一个已存在且启用的 provider。
+另外，只有 `ENABLE_LEGACY_V1_ROUTES=true` 时，裸 `/v1/*` 路由才会生效。
 
 ## 鉴权约定
 
@@ -223,23 +278,29 @@ http(s)://<host>/v1/<providerId>/xxx
 
 ### 基础字段
 
-- `APP_NAME`：应用名，可选
-- `LISTEN_ADDR`：监听地址，例如 `:21021`
-- `PROXY_API_KEY`：代理自身访问 key，可选；设置后调用方必须带代理鉴权
+- `LISTEN_ADDR`：监听地址，例如 `:21021`。**不能热加载**
+- `PROXY_API_KEY`：代理自身访问 key，可选；设置后调用方必须带代理鉴权。**可热加载**
 
 ### 多 provider 相关字段
 
-- `PROVIDERS_DIR`：provider 配置目录，例如 `./providers`
-- `DEFAULT_PROVIDER`：默认 provider 的 id
-- `ENABLE_LEGACY_V1_ROUTES`：是否把裸 `/v1/*` 作为默认 provider 的兼容入口
+- `PROVIDERS_DIR`：provider 配置目录，例如 `./providers`。**可热加载**
+- `DEFAULT_PROVIDER`：默认 provider 的 id。**可热加载**
+- `ENABLE_LEGACY_V1_ROUTES`：是否把裸 `/v1/*` 作为默认 provider 的兼容入口。**可热加载**
+
+### 超时字段
+
+- `CONNECT_TIMEOUT`：连接上游时的 TCP 建连超时。**可热加载**
+- `FIRST_BYTE_TIMEOUT`：等待上游响应头 / 首字节的超时。**可热加载**
+- `IDLE_TIMEOUT`：读取活跃上游响应体 / 流时允许的最长静默间隔。**可热加载**
+- `TOTAL_TIMEOUT`：单次请求总超时。**可热加载**
 
 ### 日志字段
 
-- `LOG_ENABLE`：是否启用结构化日志
-- `LOG_FILE_PATH`：日志文件路径，默认 `.proxy.requests.jsonl`
-- `LOG_INCLUDE_BODIES`：是否记录请求和响应 body，只有 `true` / `1` 才会开启
-- `LOG_MAX_SIZE_MB`：单个日志文件最大大小，默认 `100`
-- `LOG_MAX_BACKUPS`：最多保留多少个轮转归档，默认 `10`
+- `LOG_ENABLE`：是否启用结构化日志。**不能热加载**
+- `LOG_FILE_PATH`：日志文件路径，默认 `.proxy.requests.jsonl`。**不能热加载**
+- `LOG_INCLUDE_BODIES`：是否记录请求和响应 body，只有 `true` / `1` 才会开启。**不能热加载**
+- `LOG_MAX_SIZE_MB`：单个日志文件最大大小，默认 `100`。**不能热加载**
+- `LOG_MAX_BACKUPS`：最多保留多少个轮转归档，默认 `10`。**不能热加载**
 
 ## provider 配置 `providers/*.env` 字段说明
 
@@ -257,6 +318,8 @@ http(s)://<host>/v1/<providerId>/xxx
 - `SUPPORTS_MODELS`：是否支持 `models`
 - `SUPPORTS_ANTHROPIC_MESSAGES`：是否支持 Anthropic `messages`
 
+这些能力开关当前都会在请求进入时实际生效，并且支持热加载。
+
 ### 模型映射字段
 
 - `MODEL_MAP_JSON`：provider 级模型映射 JSON
@@ -271,7 +334,7 @@ http(s)://<host>/v1/<providerId>/xxx
 
 - 请求 `gpt-5` 时映射到 `gpt-5.4`
 - 其他没有单独写出来的模型名，全部通过 `*` 映射到 `gpt-5`
-- 匹配顺序是：**先精确匹配，再匹配 `*`，最后才透传原模型名**
+- 匹配顺序是：**`*-suffix` 通配 key（优先） → 精确 key → 去掉 suffix 后精确 key → `*` 通配 key**
 
 ### reasoning 后缀字段
 
@@ -297,6 +360,13 @@ http(s)://<host>/v1/<providerId>/xxx
 ```bash
 curl http://127.0.0.1:21021/healthz
 ```
+
+## 鸣谢
+
+以下是本项目直接对接、兼容或明显借鉴接口语义的应用层开源项目 / 开放生态协议：
+
+- [OpenAI API / Responses API / Chat Completions](https://platform.openai.com/docs/api-reference)
+- [Anthropic Messages API / Claude 生态协议](https://docs.anthropic.com/)
 
 ## 许可证
 

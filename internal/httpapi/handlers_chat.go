@@ -7,17 +7,21 @@ import (
 
 	chatadapter "openai-compat-proxy/internal/adapter/chat"
 	"openai-compat-proxy/internal/aggregate"
-	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
 	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
-func handleChat(cfg config.Config) http.HandlerFunc {
+func handleChat() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		providerCfg := providerConfigForRequest(r, cfg)
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL)
+		providerCfg := providerConfigForRequest(r)
+		provider, ok := providerForRequest(r)
+		if !ok || !provider.SupportsChat {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
+			return
+		}
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		setNormalizationVersionHeader(w)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
@@ -30,7 +34,7 @@ func handleChat(cfg config.Config) http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		if provider, ok := providerForRequest(r, cfg); ok {
+		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 			canon.Model = mappedModel
 			if effort != "" {

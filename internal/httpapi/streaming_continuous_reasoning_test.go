@@ -125,7 +125,8 @@ func TestMessagesStreamStopsSyntheticTicksAfterRealReasoningStarts(t *testing.T)
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider: "anthropic",
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
 			ID:                        "anthropic",
 			Enabled:                   true,

@@ -7,22 +7,21 @@ import (
 
 	anthropicadapter "openai-compat-proxy/internal/adapter/anthropic"
 	"openai-compat-proxy/internal/aggregate"
-	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
-func handleAnthropicMessages(cfg config.Config) http.HandlerFunc {
+func handleAnthropicMessages() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		providerCfg := providerConfigForRequest(r, cfg)
+		providerCfg := providerConfigForRequest(r)
 		setNormalizationVersionHeader(w)
-		provider, ok := providerForRequest(r, cfg)
+		provider, ok := providerForRequest(r)
 		if !ok || !provider.SupportsAnthropicMessages {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
 			return
 		}
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
