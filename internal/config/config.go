@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -42,57 +43,67 @@ func Default() Config {
 }
 
 func LoadFromEnv() Config {
+	return loadFromLookup(os.Getenv)
+}
+
+func LoadFromValues(values map[string]string) Config {
+	return loadFromLookup(func(key string) string {
+		return values[key]
+	})
+}
+
+func loadFromLookup(lookup func(string) string) Config {
 	cfg := Default()
-	if value := os.Getenv("LISTEN_ADDR"); value != "" {
+	if value := lookup("LISTEN_ADDR"); value != "" {
 		cfg.ListenAddr = value
 	}
-	if value := os.Getenv("PROXY_API_KEY"); value != "" {
+	if value := lookup("PROXY_API_KEY"); value != "" {
 		cfg.ProxyAPIKey = value
 	}
-	if value := os.Getenv("PROVIDERS_DIR"); value != "" {
+	if value := lookup("PROVIDERS_DIR"); value != "" {
 		cfg.ProvidersDir = value
 	}
-	if value := os.Getenv("DEFAULT_PROVIDER"); value != "" {
+	if value := lookup("DEFAULT_PROVIDER"); value != "" {
 		cfg.DefaultProvider = value
 	}
-	if value := os.Getenv("ENABLE_LEGACY_V1_ROUTES"); value != "" {
+	if value := lookup("ENABLE_LEGACY_V1_ROUTES"); value != "" {
 		cfg.EnableLegacyV1Routes = strings.EqualFold(value, "true") || value == "1"
 	}
-	if value := os.Getenv("LOG_ENABLE"); value != "" {
+	if value := lookup("LOG_ENABLE"); value != "" {
 		cfg.LogEnable = strings.EqualFold(value, "true") || value == "1"
 	}
-	if value := os.Getenv("LOG_FILE_PATH"); value != "" {
+	if value := lookup("LOG_FILE_PATH"); value != "" {
 		cfg.LogFilePath = value
 	}
-	if value := os.Getenv("LOG_INCLUDE_BODIES"); value != "" {
+	if value := lookup("LOG_INCLUDE_BODIES"); value != "" {
 		cfg.LogIncludeBodies = strings.EqualFold(value, "true") || value == "1"
 	}
-	if value := os.Getenv("LOG_MAX_SIZE_MB"); value != "" {
+	if value := lookup("LOG_MAX_SIZE_MB"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
 			cfg.LogMaxSizeMB = parsed
 		}
 	}
-	if value := os.Getenv("LOG_MAX_BACKUPS"); value != "" {
+	if value := lookup("LOG_MAX_BACKUPS"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
 			cfg.LogMaxBackups = parsed
 		}
 	}
-	if value := os.Getenv("CONNECT_TIMEOUT"); value != "" {
+	if value := lookup("CONNECT_TIMEOUT"); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.ConnectTimeout = parsed
 		}
 	}
-	if value := os.Getenv("FIRST_BYTE_TIMEOUT"); value != "" {
+	if value := lookup("FIRST_BYTE_TIMEOUT"); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.FirstByteTimeout = parsed
 		}
 	}
-	if value := os.Getenv("IDLE_TIMEOUT"); value != "" {
+	if value := lookup("IDLE_TIMEOUT"); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.IdleTimeout = parsed
 		}
 	}
-	if value := os.Getenv("TOTAL_TIMEOUT"); value != "" {
+	if value := lookup("TOTAL_TIMEOUT"); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.TotalTimeout = parsed
 		}
@@ -107,6 +118,15 @@ func (c Config) Validate() error {
 	if len(c.Providers) == 0 {
 		return ErrInvalidConfig("at least one provider must be configured")
 	}
+	if strings.TrimSpace(c.DefaultProvider) != "" {
+		provider, err := c.DefaultProviderConfig()
+		if err != nil {
+			return ErrInvalidConfig("default provider not found")
+		}
+		if !provider.Enabled {
+			return ErrInvalidConfig("default provider must be enabled")
+		}
+	}
 	if c.EnableLegacyV1Routes && strings.TrimSpace(c.DefaultProvider) == "" {
 		return ErrInvalidConfig("default provider is required when legacy v1 routes are enabled")
 	}
@@ -114,4 +134,31 @@ func (c Config) Validate() error {
 		return ErrInvalidConfig("legacy v1 routes require a default provider")
 	}
 	return nil
+}
+
+func ResolveProvidersDir(rootEnvPath string, providersDir string) string {
+	if providersDir == "" || filepath.IsAbs(providersDir) {
+		return providersDir
+	}
+	return filepath.Join(filepath.Dir(rootEnvPath), providersDir)
+}
+
+func (c *Config) applyStartupOnlyFrom(previous Config) {
+	c.ListenAddr = previous.ListenAddr
+	c.LogEnable = previous.LogEnable
+	c.LogFilePath = previous.LogFilePath
+	c.LogIncludeBodies = previous.LogIncludeBodies
+	c.LogMaxSizeMB = previous.LogMaxSizeMB
+	c.LogMaxBackups = previous.LogMaxBackups
+}
+
+func (c Config) hotReloadableRootEquals(other Config) bool {
+	return c.ProxyAPIKey == other.ProxyAPIKey &&
+		c.ProvidersDir == other.ProvidersDir &&
+		c.DefaultProvider == other.DefaultProvider &&
+		c.EnableLegacyV1Routes == other.EnableLegacyV1Routes &&
+		c.ConnectTimeout == other.ConnectTimeout &&
+		c.FirstByteTimeout == other.FirstByteTimeout &&
+		c.IdleTimeout == other.IdleTimeout &&
+		c.TotalTimeout == other.TotalTimeout
 }
