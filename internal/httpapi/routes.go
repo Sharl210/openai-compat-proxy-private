@@ -18,9 +18,13 @@ type routeInfo struct {
 type routeContextKey string
 
 const routeInfoKey routeContextKey = "route-info"
+const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 	if path == "/v1/models" || path == "/v1/responses" || path == "/v1/chat/completions" || path == "/v1/messages" {
+		if !cfg.EnableLegacyV1Routes {
+			return routeInfo{}, errors.New("route not found")
+		}
 		if len(cfg.Providers) == 0 {
 			return routeInfo{Legacy: true, CanonicalPath: path}, nil
 		}
@@ -52,15 +56,28 @@ func withRouteInfo(ctx context.Context, info routeInfo) context.Context {
 	return context.WithValue(ctx, routeInfoKey, info)
 }
 
+func withRuntimeSnapshot(ctx context.Context, snapshot *config.RuntimeSnapshot) context.Context {
+	return context.WithValue(ctx, runtimeSnapshotKey, snapshot)
+}
+
 func routeInfoFromRequest(r *http.Request) (routeInfo, bool) {
 	info, ok := r.Context().Value(routeInfoKey).(routeInfo)
 	return info, ok
 }
 
-func providerConfigForRequest(r *http.Request, cfg config.Config) config.Config {
-	providerCfg := cfg
+func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool) {
+	snapshot, ok := r.Context().Value(runtimeSnapshotKey).(*config.RuntimeSnapshot)
+	return snapshot, ok
+}
+
+func providerConfigForRequest(r *http.Request) config.Config {
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil {
+		return config.Config{}
+	}
+	providerCfg := snapshot.Config
 	if info, ok := routeInfoFromRequest(r); ok {
-		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
+		if provider, err := snapshot.Config.ProviderByID(info.ProviderID); err == nil {
 			providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
 			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
 		}
@@ -68,9 +85,13 @@ func providerConfigForRequest(r *http.Request, cfg config.Config) config.Config 
 	return providerCfg
 }
 
-func providerForRequest(r *http.Request, cfg config.Config) (config.ProviderConfig, bool) {
+func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil {
+		return config.ProviderConfig{}, false
+	}
 	if info, ok := routeInfoFromRequest(r); ok {
-		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
+		if provider, err := snapshot.Config.ProviderByID(info.ProviderID); err == nil {
 			return provider, true
 		}
 	}
