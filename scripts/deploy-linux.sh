@@ -84,7 +84,7 @@ install_go_from_official_tarball() {
   local url="https://go.dev/dl/${filename}"
   local tmpdir
   tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' RETURN
+  trap "rm -rf '$tmpdir'" RETURN
 
   curl -fsSL "$url" -o "$tmpdir/go.tgz"
   local sha256_actual
