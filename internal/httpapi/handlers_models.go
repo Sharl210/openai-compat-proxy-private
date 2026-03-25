@@ -12,10 +12,15 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
-func handleModels(cfg config.Config) http.HandlerFunc {
+func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		providerCfg := providerConfigForRequest(r, cfg)
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL)
+		providerCfg := providerConfigForRequest(r)
+		provider, ok := providerForRequest(r)
+		if !ok || !provider.SupportsModels {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support models")
+			return
+		}
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
@@ -42,7 +47,7 @@ func handleModels(cfg config.Config) http.HandlerFunc {
 		if contentType == "" {
 			contentType = "application/json"
 		}
-		if provider, ok := providerForRequest(r, cfg); ok {
+		if ok {
 			body = rewriteModelsBody(body, provider)
 		}
 		w.Header().Set("Content-Type", contentType)
