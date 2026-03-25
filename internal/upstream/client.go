@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
@@ -36,11 +38,64 @@ func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("upstream status %d: %s", e.StatusCode, e.Body)
 }
 
-func NewClient(baseURL string) *Client {
+func NewClient(baseURL string, cfgs ...config.Config) *Client {
+	var cfg config.Config
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: &http.Client{},
+		httpClient: newHTTPClient(cfg),
 	}
+}
+
+func newHTTPClient(cfg config.Config) *http.Client {
+	return &http.Client{Transport: newTransport(cfg)}
+}
+
+func newTransport(cfg config.Config) *http.Transport {
+	return newTransportWithDialer(cfg, (&net.Dialer{}).DialContext)
+}
+
+func newTransportWithDialer(cfg config.Config, baseDialContext func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if cfg.FirstByteTimeout > 0 {
+		transport.ResponseHeaderTimeout = cfg.FirstByteTimeout
+	}
+	if cfg.IdleTimeout > 0 {
+		transport.IdleConnTimeout = cfg.IdleTimeout
+	}
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialCtx := ctx
+		var cancel context.CancelFunc
+		if cfg.ConnectTimeout > 0 {
+			dialCtx, cancel = context.WithTimeout(ctx, cfg.ConnectTimeout)
+			defer cancel()
+		}
+		conn, err := baseDialContext(dialCtx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.IdleTimeout > 0 {
+			return &idleTimeoutConn{Conn: conn, timeout: cfg.IdleTimeout}, nil
+		}
+		return conn, nil
+	}
+	return transport
+}
+
+type idleTimeoutConn struct {
+	net.Conn
+	timeout time.Duration
+}
+
+func (c *idleTimeoutConn) Read(p []byte) (int, error) {
+	if c.timeout > 0 {
+		if err := c.Conn.SetReadDeadline(time.Now().Add(c.timeout)); err != nil {
+			return 0, err
+		}
+	}
+	return c.Conn.Read(p)
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
