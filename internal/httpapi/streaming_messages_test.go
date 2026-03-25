@@ -20,7 +20,8 @@ func TestMessagesStreamClosesThinkingBeforeTextAndEmitsSignature(t *testing.T) {
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider: "anthropic",
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
 			ID:                        "anthropic",
 			Enabled:                   true,
@@ -77,7 +78,8 @@ func TestMessagesStreamKeepsSingleThinkingBlockAcrossReasoningPhases(t *testing.
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider: "anthropic",
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
 			ID:                        "anthropic",
 			Enabled:                   true,

@@ -20,12 +20,14 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider: "openai",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
 			ID:                "openai",
 			Enabled:           true,
 			UpstreamBaseURL:   upstream.URL,
 			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
 			SupportsResponses: true,
 		}},
 	})

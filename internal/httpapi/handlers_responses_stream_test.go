@@ -97,12 +97,14 @@ func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 
 func testResponsesConfig(upstreamURL string) config.Config {
 	return config.Config{
-		DefaultProvider: "openai",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
 			ID:                "openai",
 			Enabled:           true,
 			UpstreamBaseURL:   upstreamURL,
 			UpstreamAPIKey:    "test-key",
+			SupportsModels:    true,
 			SupportsResponses: true,
 		}},
 	}
