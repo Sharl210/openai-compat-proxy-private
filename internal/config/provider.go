@@ -24,6 +24,7 @@ type ProviderConfig struct {
 	EnableReasoningEffortSuffix bool
 	ExposeReasoningSuffixModels bool
 	SystemPromptFiles           []string
+	SystemPromptFilesRaw        string
 	SystemPromptPosition        string
 	SystemPromptText            string
 }
@@ -121,6 +122,7 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		case "EXPOSE_REASONING_SUFFIX_MODELS":
 			provider.ExposeReasoningSuffixModels = parseBool(value)
 		case "SYSTEM_PROMPT_FILES":
+			provider.SystemPromptFilesRaw = value
 			provider.SystemPromptFiles = resolveProviderRelativePaths(path, value)
 		case "SYSTEM_PROMPT_POSITION":
 			provider.SystemPromptPosition = normalizeSystemPromptPosition(value)

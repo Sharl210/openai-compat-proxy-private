@@ -24,14 +24,20 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type EventStream struct {
+	resp *http.Response
+}
+
 var TestOnlyRetryAttempts = 5
 var TestOnlyRetryDelay = 3 * time.Second
 var sseScannerInitialBufferSize = 64 * 1024
 var sseScannerMaxTokenSize = 8 * 1024 * 1024
 
 type HTTPStatusError struct {
-	StatusCode int
-	Body       string
+	StatusCode  int
+	ContentType string
+	BodyBytes   []byte
+	Body        string
 }
 
 func (e *HTTPStatusError) Error() string {
@@ -155,28 +161,14 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 }
 
 func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {
-	body, err := buildRequestBody(req)
+	stream, err := c.OpenEventStream(ctx, req, authorization)
 	if err != nil {
 		return err
 	}
-	attrs := map[string]any{
-		"request_id":    req.RequestID,
-		"auth_mode":     req.AuthMode,
-		"model":         req.Model,
-		"stream":        true,
-		"body_hash":     hashBytes(body),
-		"body_size":     len(body),
-		"message_count": len(req.Messages),
-		"tool_count":    len(req.Tools),
-		"body":          string(body),
-	}
-	for k, v := range upstreamBodyLogAttrs(body) {
-		attrs[k] = v
-	}
-	logging.Event("upstream_request_built", attrs)
+	defer stream.Close()
 	var eventCount int
 	var cachedTokens any
-	err = c.streamEventsOnce(ctx, body, authorization, func(evt Event) error {
+	err = stream.Consume(func(evt Event) error {
 		eventCount++
 		if tokens := cachedTokensFromEvent(evt); tokens != nil {
 			cachedTokens = tokens
@@ -198,6 +190,29 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 		})
 	}
 	return err
+}
+
+func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest, authorization string) (*EventStream, error) {
+	body, err := buildRequestBody(req)
+	if err != nil {
+		return nil, err
+	}
+	attrs := map[string]any{
+		"request_id":    req.RequestID,
+		"auth_mode":     req.AuthMode,
+		"model":         req.Model,
+		"stream":        true,
+		"body_hash":     hashBytes(body),
+		"body_size":     len(body),
+		"message_count": len(req.Messages),
+		"tool_count":    len(req.Tools),
+		"body":          string(body),
+	}
+	for k, v := range upstreamBodyLogAttrs(body) {
+		attrs[k] = v
+	}
+	logging.Event("upstream_request_built", attrs)
+	return c.openEventStream(ctx, body, authorization)
 }
 
 func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {
@@ -240,21 +255,25 @@ func (c *Client) streamOnce(ctx context.Context, body []byte, authorization stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(respBody))
-		if msg == "" {
-			msg = http.StatusText(resp.StatusCode)
-		}
-		return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Body: msg}
+		return nil, readHTTPStatusError(resp)
 	}
 
 	return parseSSE(resp)
 }
 
 func (c *Client) streamEventsOnce(ctx context.Context, body []byte, authorization string, onEvent func(Event) error) error {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
+	stream, err := c.openEventStream(ctx, body, authorization)
 	if err != nil {
 		return err
+	}
+	defer stream.Close()
+	return stream.Consume(onEvent)
+}
+
+func (c *Client) openEventStream(ctx context.Context, body []byte, authorization string) (*EventStream, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if authorization != "" {
@@ -263,20 +282,45 @@ func (c *Client) streamEventsOnce(ctx context.Context, body []byte, authorizatio
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(respBody))
-		if msg == "" {
-			msg = http.StatusText(resp.StatusCode)
-		}
-		return &HTTPStatusError{StatusCode: resp.StatusCode, Body: msg}
+		err := readHTTPStatusError(resp)
+		_ = resp.Body.Close()
+		return nil, err
 	}
 
-	return parseSSEStreaming(resp, onEvent)
+	return &EventStream{resp: resp}, nil
+}
+
+func (s *EventStream) Consume(onEvent func(Event) error) error {
+	if s == nil || s.resp == nil {
+		return nil
+	}
+	return parseSSEStreaming(s.resp, onEvent)
+}
+
+func (s *EventStream) Close() error {
+	if s == nil || s.resp == nil || s.resp.Body == nil {
+		return nil
+	}
+	return s.resp.Body.Close()
+}
+
+func readHTTPStatusError(resp *http.Response) *HTTPStatusError {
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	msg := strings.TrimSpace(string(bodyBytes))
+	if msg == "" {
+		msg = http.StatusText(resp.StatusCode)
+		bodyBytes = []byte(msg)
+	}
+	return &HTTPStatusError{
+		StatusCode:  resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		BodyBytes:   bodyBytes,
+		Body:        msg,
+	}
 }
 
 func shouldRetry(err error) bool {

@@ -23,3 +23,11 @@ func WriteRawJSON(w http.ResponseWriter, status int, payload []byte) {
 	w.WriteHeader(status)
 	_, _ = w.Write(payload)
 }
+
+func WriteRaw(w http.ResponseWriter, status int, contentType string, payload []byte) {
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(payload)
+}

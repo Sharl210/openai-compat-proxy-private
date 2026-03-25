@@ -82,7 +82,7 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 	return nil
 }
 
-func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
 	state := responsesStreamState{}
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return err
@@ -90,7 +90,7 @@ func writeResponsesSSELive(ctx context.Context, client *upstream.Client, w http.
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
+	return streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return true },
 		nil,
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
@@ -263,7 +263,7 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
 	state := anthropicStreamState{}
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
@@ -274,7 +274,7 @@ func writeAnthropicSSELive(ctx context.Context, client *upstream.Client, w http.
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
+	return streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realThinkingSeen },
 		func() error {
 			if state.textStarted || state.realThinkingSeen {
@@ -645,7 +645,7 @@ type chatStreamState struct {
 	nextToolIx        int
 }
 
-func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, authorization string) error {
+func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
 	state := chatStreamState{
 		toolMeta:  map[string]map[string]string{},
 		toolIndex: map[string]int{},
@@ -660,7 +660,7 @@ func writeChatSSELive(ctx context.Context, client *upstream.Client, w http.Respo
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return streamLiveWithSyntheticTicks(ctx, req, authorization, client.StreamEvents,
+	return streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realReasoningSeen },
 		func() error {
 			if state.textStarted || state.realReasoningSeen {
@@ -692,9 +692,7 @@ type streamSignal struct {
 
 func streamLiveWithSyntheticTicks(
 	ctx context.Context,
-	req model.CanonicalRequest,
-	authorization string,
-	streamFn func(context.Context, model.CanonicalRequest, string, func(upstream.Event) error) error,
+	consumeFn func(func(upstream.Event) error) error,
 	stopTicks func() bool,
 	onTick func() error,
 	onHeartbeat func() error,
@@ -702,7 +700,7 @@ func streamLiveWithSyntheticTicks(
 ) error {
 	signals := make(chan streamSignal, 32)
 	go func() {
-		err := streamFn(ctx, req, authorization, func(evt upstream.Event) error {
+		err := consumeFn(func(evt upstream.Event) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

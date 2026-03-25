@@ -224,6 +224,7 @@ chmod +x scripts/*.sh
 - `X-Env-Version`：当前**已生效**根 `.env` 可热加载配置版本对应的文件修改时间
 - `X-Provider-Version`：当前请求命中的 provider `.env` **已生效**版本对应的文件修改时间
 - `X-Provider-Name`：当前请求实际命中的 provider id
+- `X-SYSTEM-PROMPT-ATTACH`：当当前 provider 实际启用了非空系统提示词注入时返回，值格式为 `<position>:<paths>`，例如 `prepend:prompt.md, prompts/extra.md`。这里只暴露注入方向和配置路径，不会回传原始提示词文本。
 
 注意：
 

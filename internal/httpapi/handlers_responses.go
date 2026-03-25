@@ -74,8 +74,20 @@ func handleResponses() http.HandlerFunc {
 		}
 
 		if canon.Stream {
+			stream, err := client.OpenEventStream(ctx, canon, authorization)
+			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return
+				}
+				if writeUpstreamError(w, err) {
+					return
+				}
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+			defer stream.Close()
 			flusher := startSSE(w)
-			if err := writeResponsesSSELive(ctx, client, w, flusher, canon, authorization); err != nil {
+			if err := writeResponsesSSELive(ctx, stream, w, flusher, canon); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					return
 				}

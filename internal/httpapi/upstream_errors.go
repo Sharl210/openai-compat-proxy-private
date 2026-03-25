@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,21 +15,21 @@ func writeUpstreamError(w http.ResponseWriter, err error) bool {
 	if !errors.As(err, &httpErr) {
 		return false
 	}
-	if isJSONErrorBody(httpErr.Body) {
-		errorsx.WriteRawJSON(w, httpErr.StatusCode, []byte(httpErr.Body))
-		return true
+	contentType := httpErr.ContentType
+	if contentType == "" {
+		contentType = detectRawErrorContentType(httpErr.BodyBytes)
 	}
-	return false
+	errorsx.WriteRaw(w, httpErr.StatusCode, contentType, httpErr.BodyBytes)
+	return true
 }
 
-func isJSONErrorBody(body string) bool {
-	if body == "" {
-		return false
+func detectRawErrorContentType(body []byte) string {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return "text/plain; charset=utf-8"
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(body), &payload); err != nil {
-		return false
+	if json.Valid(trimmed) {
+		return "application/json"
 	}
-	_, ok := payload["error"]
-	return ok
+	return "text/plain; charset=utf-8"
 }

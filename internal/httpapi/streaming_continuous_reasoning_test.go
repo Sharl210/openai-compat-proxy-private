@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/config"
-	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/testutil"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -31,9 +30,7 @@ func TestStreamLiveWithSyntheticTicksFiresWhileWaitingForFirstText(t *testing.T)
 	eventCount := 0
 	err := streamLiveWithSyntheticTicks(
 		ctx,
-		model.CanonicalRequest{},
-		"",
-		func(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(upstream.Event) error) error {
+		func(onEvent func(upstream.Event) error) error {
 			time.Sleep(35 * time.Millisecond)
 			return onEvent(upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "hello"}})
 		},
@@ -76,9 +73,7 @@ func TestStreamLiveWithSyntheticTicksSendsHeartbeatWhileWaiting(t *testing.T) {
 	eventCount := 0
 	err := streamLiveWithSyntheticTicks(
 		ctx,
-		model.CanonicalRequest{},
-		"",
-		func(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(upstream.Event) error) error {
+		func(onEvent func(upstream.Event) error) error {
 			time.Sleep(35 * time.Millisecond)
 			return onEvent(upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "hello"}})
 		},

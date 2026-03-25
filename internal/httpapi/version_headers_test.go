@@ -139,6 +139,48 @@ func TestVersionHeadersIgnoreStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 }
 
+func TestSystemPromptAttachHeaderPresentOnlyWhenProviderPromptActuallyInjected(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	promptPath := filepath.Join(providersDir, "prompt.md")
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nTOTAL_TIMEOUT=1h\n", time.Date(2026, 3, 26, 9, 0, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL="+upstream.URL+"\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nSYSTEM_PROMPT_FILES=prompt.md, prompts/extra.md\n", time.Date(2026, 3, 26, 9, 1, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, promptPath, "provider prompt\n", time.Date(2026, 3, 26, 9, 1, 30, 0, time.UTC))
+
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	server := NewServerWithStore(store)
+
+	first := performResponsesRequest(t, server)
+	if got := first.Header().Get("X-SYSTEM-PROMPT-ATTACH"); got != "prepend:prompt.md, prompts/extra.md" {
+		t.Fatalf("expected attach header to expose configured path string, got %q", got)
+	}
+
+	writeConfigFileWithMTime(t, promptPath, "\n\n", time.Date(2026, 3, 26, 9, 2, 0, 0, time.UTC))
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("Refresh returned error: %v", err)
+	}
+
+	second := performResponsesRequest(t, server)
+	if got := second.Header().Get("X-SYSTEM-PROMPT-ATTACH"); got != "" {
+		t.Fatalf("expected blank injected prompt to omit attach header, got %q", got)
+	}
+}
+
 func performResponsesRequest(t *testing.T, server http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
