@@ -363,11 +363,29 @@ curl http://127.0.0.1:21021/healthz
 
 ## 鸣谢
 
-以下是本项目直接对接、兼容或明显借鉴接口语义的应用层开源项目 / 开放生态协议：
+以下是本项目**实际使用到**，或者**明确面向兼容/适配**的开源项目、协议生态与 GitHub 仓库技术来源：
+
+### 1. 项目实际使用到的开源项目
+
+- [fsnotify/fsnotify](https://github.com/fsnotify/fsnotify)
+  - 用于运行时监听根 `.env` 和 `providers/*.env` 文件变化，是当前热加载能力的核心依赖之一。
+
+### 2. 明确兼容的协议与上层生态
 
 - [OpenAI API / Responses API / Chat Completions](https://platform.openai.com/docs/api-reference)
 - [Anthropic Messages API / Claude 生态协议](https://docs.anthropic.com/)
 
+本项目对外提供 `chat/completions`、`responses`、`models`、`messages` 等兼容入口，核心目标就是让这些上层协议生态可以尽量直接接入。
+
+### 3. 明确面向适配和修正体验的上层客户端 / GitHub 项目
+
+- [anthropics/claude-code](https://github.com/anthropics/claude-code)
+- [CherryHQ/cherry-studio](https://github.com/CherryHQ/cherry-studio)
+- [CherryHQ/cherry-studio-app](https://github.com/CherryHQ/cherry-studio-app)
+- [rikkahub/rikkahub](https://github.com/rikkahub/rikkahub)
+
+这些项目并不等于本项目直接复用其源码，但本项目的协议兼容、流式展示、reasoning 展示、provider 路由、模型映射、占位推理文本以及错误透传等行为，很多都是围绕这类上层应用的真实接入需求来设计、调试和修正的。
+
 ## 许可证
 
-如需补充许可证，请按仓库实际策略维护。
+MIT
