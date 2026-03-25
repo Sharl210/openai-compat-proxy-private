@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,22 +23,26 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	retryCount int
+	retryDelay time.Duration
 }
 
 type EventStream struct {
-	resp *http.Response
+	resp         *http.Response
+	scanner      *bufio.Scanner
+	pendingEvent *Event
 }
 
-var TestOnlyRetryAttempts = 5
-var TestOnlyRetryDelay = 3 * time.Second
 var sseScannerInitialBufferSize = 64 * 1024
 var sseScannerMaxTokenSize = 8 * 1024 * 1024
 
 type HTTPStatusError struct {
-	StatusCode  int
-	ContentType string
-	BodyBytes   []byte
-	Body        string
+	StatusCode       int
+	ContentType      string
+	BodyBytes        []byte
+	Body             string
+	RetriesPerformed int
+	RetryDelay       time.Duration
 }
 
 func (e *HTTPStatusError) Error() string {
@@ -52,11 +57,27 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: newHTTPClient(cfg),
+		retryCount: cfg.UpstreamRetryCount,
+		retryDelay: cfg.UpstreamRetryDelay,
 	}
 }
 
 func newHTTPClient(cfg config.Config) *http.Client {
 	return &http.Client{Transport: newTransport(cfg)}
+}
+
+func (c *Client) configuredRetryCount() int {
+	if c.retryCount < 0 {
+		return 0
+	}
+	return c.retryCount
+}
+
+func (c *Client) configuredRetryDelay() time.Duration {
+	if c.retryDelay < 0 {
+		return 0
+	}
+	return c.retryDelay
 }
 
 func newTransport(cfg config.Config) *http.Transport {
@@ -124,40 +145,32 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-
-	var lastErr error
-	for attempt := 1; attempt <= TestOnlyRetryAttempts; attempt++ {
-		events, err := c.streamOnce(ctx, body, authorization)
-		if err == nil {
-			cachedTokens := cachedTokensFromEvents(events)
-			logging.Event("upstream_stream_usage_observed", map[string]any{
-				"request_id":     req.RequestID,
-				"upstream_event": "response.completed",
-				"cached_tokens":  cachedTokens,
-				"streaming":      false,
-			})
-			logging.Event("upstream_response_completed", map[string]any{
-				"request_id":    req.RequestID,
-				"attempt":       attempt,
-				"event_count":   len(events),
-				"cached_tokens": cachedTokens,
-			})
-			return events, nil
-		}
-		lastErr = err
-
-		if !shouldRetry(lastErr) || attempt == TestOnlyRetryAttempts {
-			break
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(TestOnlyRetryDelay):
-		}
+	stream, err := c.openEventStreamWithRetry(ctx, body, authorization)
+	if err != nil {
+		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
-
-	return nil, lastErr
+	defer stream.Close()
+	var events []Event
+	if err := stream.Consume(func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	cachedTokens := cachedTokensFromEvents(events)
+	logging.Event("upstream_stream_usage_observed", map[string]any{
+		"request_id":     req.RequestID,
+		"upstream_event": "response.completed",
+		"cached_tokens":  cachedTokens,
+		"streaming":      false,
+	})
+	logging.Event("upstream_response_completed", map[string]any{
+		"request_id":    req.RequestID,
+		"attempt":       1,
+		"event_count":   len(events),
+		"cached_tokens": cachedTokens,
+	})
+	return events, nil
 }
 
 func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {
@@ -212,7 +225,11 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	return c.openEventStream(ctx, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, body, authorization)
+	if err != nil {
+		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
+	}
+	return stream, nil
 }
 
 func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {
@@ -238,36 +255,42 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 	return resp.StatusCode, body, resp.Header.Get("Content-Type"), nil
 }
 
-func (c *Client) streamOnce(ctx context.Context, body []byte, authorization string) ([]Event, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if authorization != "" {
-		httpReq.Header.Set("Authorization", authorization)
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, readHTTPStatusError(resp)
-	}
-
-	return parseSSE(resp)
-}
-
 func (c *Client) streamEventsOnce(ctx context.Context, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStream(ctx, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, body, authorization)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
 	return stream.Consume(onEvent)
+}
+
+func (c *Client) openEventStreamWithRetry(ctx context.Context, body []byte, authorization string) (*EventStream, error) {
+	retryCount := c.configuredRetryCount()
+	retryDelay := c.configuredRetryDelay()
+	var lastErr error
+	for attempt := 1; attempt <= retryCount+1; attempt++ {
+		stream, err := c.openEventStream(ctx, body, authorization)
+		if err == nil {
+			return stream, nil
+		}
+		lastErr = err
+		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		if retryDelay > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
+	}
+	return nil, lastErr
 }
 
 func (c *Client) openEventStream(ctx context.Context, body []byte, authorization string) (*EventStream, error) {
@@ -291,14 +314,25 @@ func (c *Client) openEventStream(ctx context.Context, body []byte, authorization
 		return nil, err
 	}
 
-	return &EventStream{resp: resp}, nil
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body)}
+	if err := stream.prime(); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	return stream, nil
 }
 
 func (s *EventStream) Consume(onEvent func(Event) error) error {
 	if s == nil || s.resp == nil {
 		return nil
 	}
-	return parseSSEStreaming(s.resp, onEvent)
+	if s.pendingEvent != nil {
+		if err := onEvent(*s.pendingEvent); err != nil {
+			return err
+		}
+		s.pendingEvent = nil
+	}
+	return consumeSSEScanner(s.scanner, onEvent)
 }
 
 func (s *EventStream) Close() error {
@@ -306,6 +340,21 @@ func (s *EventStream) Close() error {
 		return nil
 	}
 	return s.resp.Body.Close()
+}
+
+func (s *EventStream) prime() error {
+	if s == nil || s.scanner == nil {
+		return nil
+	}
+	evt, err := readNextSSEEvent(s.scanner)
+	if err != nil {
+		return err
+	}
+	if evt == nil {
+		return io.ErrUnexpectedEOF
+	}
+	s.pendingEvent = evt
+	return nil
 }
 
 func readHTTPStatusError(resp *http.Response) *HTTPStatusError {
@@ -323,15 +372,45 @@ func readHTTPStatusError(resp *http.Response) *HTTPStatusError {
 	}
 }
 
-func shouldRetry(err error) bool {
-	httpErr, ok := err.(*HTTPStatusError)
-	if !ok {
+func shouldRetryRequestFailure(err error) bool {
+	if err == nil {
 		return false
 	}
-	if httpErr.StatusCode >= 500 && httpErr.StatusCode < 600 {
-		return true
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
 	}
-	return false
+	return true
+}
+
+func annotateRetryExhaustion(err error, retryCount int, retryDelay time.Duration) error {
+	if err == nil || retryCount <= 0 {
+		return err
+	}
+	var httpErr *HTTPStatusError
+	if errors.As(err, &httpErr) {
+		cloned := *httpErr
+		cloned.RetriesPerformed = retryCount
+		cloned.RetryDelay = retryDelay
+		return &cloned
+	}
+	return fmt.Errorf("%s%s", buildRetryNotice(retryCount, retryDelay), err.Error())
+}
+
+func buildRetryNotice(retryCount int, retryDelay time.Duration) string {
+	if retryCount <= 0 {
+		return ""
+	}
+	total := retryDelay * time.Duration(retryCount)
+	return fmt.Sprintf("本代理层已重试%d遍，每次重试间隔%s，共重试了%s。下面是上游错误原信息：", retryCount, formatRetrySeconds(retryDelay), formatRetrySeconds(total))
+}
+
+func formatRetrySeconds(delay time.Duration) string {
+	seconds := delay.Seconds()
+	if seconds == float64(int64(seconds)) {
+		return fmt.Sprintf("%d秒", int64(seconds))
+	}
+	text := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", seconds), "0"), ".")
+	return text + "秒"
 }
 
 func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
@@ -589,10 +668,38 @@ func sortedMapKeys(m map[string]any) []string {
 
 func parseSSE(resp *http.Response) ([]Event, error) {
 	var events []Event
+	scanner := newSSEScanner(resp.Body)
+	if err := consumeSSEScanner(scanner, func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+func parseSSEStreaming(resp *http.Response, onEvent func(Event) error) error {
+	return consumeSSEScanner(newSSEScanner(resp.Body), onEvent)
+}
+
+func consumeSSEScanner(scanner *bufio.Scanner, onEvent func(Event) error) error {
+	for {
+		evt, err := readNextSSEEvent(scanner)
+		if err != nil {
+			return err
+		}
+		if evt == nil {
+			return nil
+		}
+		if err := onEvent(*evt); err != nil {
+			return err
+		}
+	}
+}
+
+func readNextSSEEvent(scanner *bufio.Scanner) (*Event, error) {
 	var currentEvent string
 	var dataLines []string
-
-	scanner := newSSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -601,7 +708,7 @@ func parseSSE(resp *http.Response) ([]Event, error) {
 				if err != nil {
 					return nil, err
 				}
-				events = append(events, evt)
+				return &evt, nil
 			}
 			currentEvent = ""
 			dataLines = nil
@@ -627,59 +734,10 @@ func parseSSE(resp *http.Response) ([]Event, error) {
 		if err != nil {
 			return nil, err
 		}
-		events = append(events, evt)
+		return &evt, nil
 	}
 
-	return events, nil
-}
-
-func parseSSEStreaming(resp *http.Response, onEvent func(Event) error) error {
-	var currentEvent string
-	var dataLines []string
-
-	scanner := newSSEScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if currentEvent != "" {
-				evt, err := finalizeEvent(currentEvent, dataLines)
-				if err != nil {
-					return err
-				}
-				if err := onEvent(evt); err != nil {
-					return err
-				}
-			}
-			currentEvent = ""
-			dataLines = nil
-			continue
-		}
-
-		if strings.HasPrefix(line, "event: ") {
-			currentEvent = strings.TrimPrefix(line, "event: ")
-			continue
-		}
-
-		if strings.HasPrefix(line, "data: ") {
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	if currentEvent != "" {
-		evt, err := finalizeEvent(currentEvent, dataLines)
-		if err != nil {
-			return err
-		}
-		if err := onEvent(evt); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return nil, nil
 }
 
 func finalizeEvent(name string, dataLines []string) (Event, error) {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T) {
@@ -127,5 +128,80 @@ func TestLoadProviderFileAllowsBlankSystemPromptFiles(t *testing.T) {
 	}
 	if provider.SystemPromptText != "" {
 		t.Fatalf("expected blank prompt text, got %q", provider.SystemPromptText)
+	}
+}
+
+func TestLoadProviderFileUsesRetryDefaultsWhenUnset(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamRetryCount != DefaultUpstreamRetryCount {
+		t.Fatalf("expected default retry count %d, got %d", DefaultUpstreamRetryCount, provider.UpstreamRetryCount)
+	}
+	if provider.UpstreamRetryDelay != DefaultUpstreamRetryDelay {
+		t.Fatalf("expected default retry delay %v, got %v", DefaultUpstreamRetryDelay, provider.UpstreamRetryDelay)
+	}
+}
+
+func TestLoadProviderFileParsesRetryOverrides(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_RETRY_COUNT=2\nUPSTREAM_RETRY_DELAY=750ms\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamRetryCount != 2 {
+		t.Fatalf("expected retry count 2, got %d", provider.UpstreamRetryCount)
+	}
+	if provider.UpstreamRetryDelay != 750*time.Millisecond {
+		t.Fatalf("expected retry delay 750ms, got %v", provider.UpstreamRetryDelay)
+	}
+}
+
+func TestLoadProviderFileAllowsZeroRetryOverrideAndFallsBackOnInvalidValues(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_RETRY_COUNT=0\nUPSTREAM_RETRY_DELAY=0s\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamRetryCount != 0 {
+		t.Fatalf("expected retry count 0, got %d", provider.UpstreamRetryCount)
+	}
+	if provider.UpstreamRetryDelay != 0 {
+		t.Fatalf("expected retry delay 0, got %v", provider.UpstreamRetryDelay)
+	}
+
+	providerBody = "PROVIDER_ID=openai\nUPSTREAM_RETRY_COUNT=-3\nUPSTREAM_RETRY_DELAY=bad\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	provider, err = loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error after invalid values: %v", err)
+	}
+	if provider.UpstreamRetryCount != DefaultUpstreamRetryCount {
+		t.Fatalf("expected invalid retry count to fall back to %d, got %d", DefaultUpstreamRetryCount, provider.UpstreamRetryCount)
+	}
+	if provider.UpstreamRetryDelay != DefaultUpstreamRetryDelay {
+		t.Fatalf("expected invalid retry delay to fall back to %v, got %v", DefaultUpstreamRetryDelay, provider.UpstreamRetryDelay)
 	}
 }

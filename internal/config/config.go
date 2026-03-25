@@ -22,6 +22,8 @@ type Config struct {
 	FirstByteTimeout     time.Duration
 	IdleTimeout          time.Duration
 	TotalTimeout         time.Duration
+	UpstreamRetryCount   int
+	UpstreamRetryDelay   time.Duration
 	LogFilePath          string
 	LogIncludeBodies     bool
 	LogMaxSizeMB         int

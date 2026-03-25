@@ -1,12 +1,17 @@
 package upstream
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -146,5 +151,135 @@ func TestParseSSEStreamingAcceptsLargeEventPayload(t *testing.T) {
 	item, _ := seen.Data["item"].(map[string]any)
 	if got, _ := item["encrypted_content"].(string); got != large {
 		t.Fatalf("expected encrypted_content length %d, got %d", len(large), len(got))
+	}
+}
+
+func TestStreamRetriesBeforeAnyEventUsingProviderRetryConfig(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		attempt := attempts.Add(1)
+		if attempt <= 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("temporary upstream failure"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 2, UpstreamRetryDelay: time.Millisecond})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "")
+	if err != nil {
+		t.Fatalf("expected stream to succeed after retries, got %v", err)
+	}
+	if attempts.Load() != 3 {
+		t.Fatalf("expected 3 upstream attempts, got %d", attempts.Load())
+	}
+	if len(events) != 1 || events[0].Event != "response.completed" {
+		t.Fatalf("expected response.completed after retries, got %#v", events)
+	}
+}
+
+func TestOpenEventStreamRetriesBeforeAnyEventUsingProviderRetryConfig(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		attempt := attempts.Add(1)
+		if attempt <= 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("temporary upstream failure"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 2, UpstreamRetryDelay: time.Millisecond})
+	stream, err := client.OpenEventStream(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "")
+	if err != nil {
+		t.Fatalf("expected open event stream to succeed after retries, got %v", err)
+	}
+	defer stream.Close()
+	if attempts.Load() != 3 {
+		t.Fatalf("expected 3 upstream attempts, got %d", attempts.Load())
+	}
+	var seen []Event
+	if err := stream.Consume(func(evt Event) error {
+		seen = append(seen, evt)
+		return nil
+	}); err != nil {
+		t.Fatalf("consume stream error: %v", err)
+	}
+	if len(seen) != 1 || seen[0].Event != "response.completed" {
+		t.Fatalf("expected response.completed after retries, got %#v", seen)
+	}
+}
+
+func TestStreamEventsDoesNotRetryAfterFirstEventArrives(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n"))
+		flusher.Flush()
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {broken json}\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 2, UpstreamRetryDelay: time.Millisecond})
+	err := client.StreamEvents(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err == nil {
+		t.Fatalf("expected malformed stream error")
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("expected no retry after first event, got %d attempts", attempts.Load())
+	}
+}
+
+func TestStreamDoesNotRetryAfterFirstEventArrives(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n"))
+		flusher.Flush()
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {broken json}\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 2, UpstreamRetryDelay: time.Millisecond})
+	_, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "")
+	if err == nil {
+		t.Fatalf("expected malformed stream error")
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("expected no retry after first event, got %d attempts", attempts.Load())
 	}
 }

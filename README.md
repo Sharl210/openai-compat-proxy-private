@@ -204,6 +204,8 @@ chmod +x scripts/*.sh
   - `MODEL_MAP_JSON`
   - `ENABLE_REASONING_EFFORT_SUFFIX`
   - `EXPOSE_REASONING_SUFFIX_MODELS`
+  - `UPSTREAM_RETRY_COUNT`
+  - `UPSTREAM_RETRY_DELAY`
   - `SYSTEM_PROMPT_FILES`
   - `SYSTEM_PROMPT_POSITION`
 - provider 配置中 `SYSTEM_PROMPT_FILES` 引用到的文本文件内容
@@ -340,6 +342,19 @@ http(s)://<host>/v1/<providerId>/xxx
 - 如果请求本身带有显式 system / developer / instructions 内容，provider 文本会按 `SYSTEM_PROMPT_POSITION` 拼到前面或后面。
 - 对 `/v1/responses` 来说，如果请求同时带了顶层 `instructions` 和 `input` 里的 `system/developer` 项，当前会优先把 provider 文本拼到顶层 `instructions`，不会重复注入两次。
 - 如果请求本身没有系统提示词，provider 文本会作为本次请求的系统提示词发送到上游。
+
+### provider 级上游重试字段
+
+- `UPSTREAM_RETRY_COUNT`：上游请求的最后一道安全门重试次数。这里表示“首次请求失败后，额外最多再重试多少遍”，默认 `5`。
+- `UPSTREAM_RETRY_DELAY`：每次自动重试之间的间隔，默认 `5s`。
+
+行为说明：
+
+- 这两个字段是 **provider 级** 配置，支持热加载。
+- 重试同时适用于流式和非流式请求。
+- 只有在“请求上游后，尚未收到任何上游数据”时才会触发自动重试。
+- 一旦已经收到上游首个 event / chunk，后续中途断流、解析失败或其他读流错误都不会再重试，而是直接把当次上游错误返回给客户端。
+- 当所有重试都失败时，代理会在最终返回的上游错误信息前加上一句说明：已重试多少遍、每次间隔多少秒、总共重试了多少秒，然后再附上上游原始错误信息。
 
 ### 能力开关
 

@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type ProviderConfig struct {
@@ -23,6 +25,8 @@ type ProviderConfig struct {
 	ModelMap                    map[string]string
 	EnableReasoningEffortSuffix bool
 	ExposeReasoningSuffixModels bool
+	UpstreamRetryCount          int
+	UpstreamRetryDelay          time.Duration
 	SystemPromptFiles           []string
 	SystemPromptFilesRaw        string
 	SystemPromptPosition        string
@@ -32,6 +36,8 @@ type ProviderConfig struct {
 const (
 	SystemPromptPositionPrepend = "prepend"
 	SystemPromptPositionAppend  = "append"
+	DefaultUpstreamRetryCount   = 5
+	DefaultUpstreamRetryDelay   = 5 * time.Second
 )
 
 type invalidConfigError string
@@ -80,7 +86,10 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	}
 	defer file.Close()
 
-	provider := ProviderConfig{}
+	provider := ProviderConfig{
+		UpstreamRetryCount: DefaultUpstreamRetryCount,
+		UpstreamRetryDelay: DefaultUpstreamRetryDelay,
+	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -121,6 +130,10 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.EnableReasoningEffortSuffix = parseBool(value)
 		case "EXPOSE_REASONING_SUFFIX_MODELS":
 			provider.ExposeReasoningSuffixModels = parseBool(value)
+		case "UPSTREAM_RETRY_COUNT":
+			provider.UpstreamRetryCount = parseProviderRetryCount(value)
+		case "UPSTREAM_RETRY_DELAY":
+			provider.UpstreamRetryDelay = parseProviderRetryDelay(value)
 		case "SYSTEM_PROMPT_FILES":
 			provider.SystemPromptFilesRaw = value
 			provider.SystemPromptFiles = resolveProviderRelativePaths(path, value)
@@ -131,6 +144,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	if err := scanner.Err(); err != nil {
 		return ProviderConfig{}, err
 	}
+	provider.UpstreamRetryCount = normalizeProviderRetryCount(provider.UpstreamRetryCount)
+	provider.UpstreamRetryDelay = normalizeProviderRetryDelay(provider.UpstreamRetryDelay)
 	provider.SystemPromptPosition = normalizeSystemPromptPosition(provider.SystemPromptPosition)
 	return provider, nil
 }
@@ -153,6 +168,44 @@ func (c Config) DefaultProviderConfig() (ProviderConfig, error) {
 
 func parseBool(value string) bool {
 	return strings.EqualFold(value, "true") || value == "1"
+}
+
+func parseProviderRetryCount(value string) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return DefaultUpstreamRetryCount
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return DefaultUpstreamRetryCount
+	}
+	return normalizeProviderRetryCount(parsed)
+}
+
+func normalizeProviderRetryCount(value int) int {
+	if value < 0 {
+		return DefaultUpstreamRetryCount
+	}
+	return value
+}
+
+func parseProviderRetryDelay(value string) time.Duration {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return DefaultUpstreamRetryDelay
+	}
+	parsed, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return DefaultUpstreamRetryDelay
+	}
+	return normalizeProviderRetryDelay(parsed)
+}
+
+func normalizeProviderRetryDelay(value time.Duration) time.Duration {
+	if value < 0 {
+		return DefaultUpstreamRetryDelay
+	}
+	return value
 }
 
 func normalizeSystemPromptPosition(value string) string {
