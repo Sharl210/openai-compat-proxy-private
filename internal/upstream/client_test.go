@@ -171,6 +171,46 @@ func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *
 	}
 }
 
+func TestBuildRequestBodyPreservesInputFileAndStructuredToolOutput(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{
+			{
+				Role: "user",
+				Parts: []model.CanonicalContentPart{{
+					Type: "input_file",
+					Raw:  map[string]any{"input_file": map[string]any{"file_id": "file_123"}},
+				}},
+			},
+			{
+				Role:       "tool",
+				ToolCallID: "call_1",
+				Parts:      []model.CanonicalContentPart{{Type: "text", Text: "看图"}, {Type: "image_url", Raw: map[string]any{"image_url": map[string]any{"url": "https://example.com/tool.png"}}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	user, _ := input[0].(map[string]any)
+	content, _ := user["content"].([]any)
+	filePart, _ := content[0].(map[string]any)
+	inputFile, _ := filePart["input_file"].(map[string]any)
+	if got := inputFile["file_id"]; got != "file_123" {
+		t.Fatalf("expected input_file preserved, got %#v", filePart)
+	}
+	toolOutput, _ := input[1].(map[string]any)
+	if got, _ := toolOutput["output"].(string); !strings.Contains(got, `"type":"input_image"`) {
+		t.Fatalf("expected structured tool output JSON to preserve image content, got %#v", toolOutput)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{

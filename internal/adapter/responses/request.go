@@ -42,9 +42,10 @@ type toolCall struct {
 }
 
 type contentPart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	ImageURL string `json:"image_url"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ImageURL  string          `json:"image_url"`
+	InputFile json.RawMessage `json:"input_file"`
 }
 
 type tool struct {
@@ -172,6 +173,13 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			case "input_image", "image_url":
 				parts = append(parts, model.CanonicalContentPart{Type: "input_image", ImageURL: part.ImageURL})
 				normalizedContent = append(normalizedContent, map[string]any{"type": "input_image", "image_url": part.ImageURL})
+			case "input_file":
+				var rawFile map[string]any
+				if err := json.Unmarshal(part.InputFile, &rawFile); err != nil {
+					return nil, model.CanonicalMessage{}, false, err
+				}
+				parts = append(parts, model.CanonicalContentPart{Type: "input_file", Raw: map[string]any{"input_file": rawFile}})
+				normalizedContent = append(normalizedContent, map[string]any{"type": "input_file", "input_file": rawFile})
 			default:
 				return nil, model.CanonicalMessage{}, false, fmt.Errorf("unsupported content type: %s", part.Type)
 			}

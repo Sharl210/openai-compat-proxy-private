@@ -90,3 +90,22 @@ func TestDecodeRequestPreservesAssistantStructuredMessagesAsOutputText(t *testin
 		t.Fatalf("expected assistant structured content type output_text, got %#v", canon.ResponseInputItems[0])
 	}
 }
+
+func TestDecodeRequestAcceptsResponsesInputFileContent(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[{"role":"user","content":[{"type":"input_file","input_file":{"file_id":"file_123"}}]}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 1 {
+		t.Fatalf("expected one input_file part, got %#v", canon.Messages)
+	}
+	fileRaw, _ := canon.Messages[0].Parts[0].Raw["input_file"].(map[string]any)
+	if got := fileRaw["file_id"]; got != "file_123" {
+		t.Fatalf("expected input_file file_id preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+}

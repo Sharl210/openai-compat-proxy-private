@@ -462,7 +462,7 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 				input = append(input, map[string]any{
 					"type":    "function_call_output",
 					"call_id": msg.ToolCallID,
-					"output":  joinTextParts(msg.Parts),
+					"output":  buildToolOutput(msg.Parts),
 				})
 				continue
 			}
@@ -477,12 +477,18 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 					if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
 						image := cloneMap(rawImage)
 						if _, ok := image["url"]; !ok {
-							image["url"] = part.ImageURL
+							if part.ImageURL != "" {
+								image["url"] = part.ImageURL
+							}
 						}
 						content = append(content, map[string]any{"type": "input_image", "image_url": image})
 						continue
 					}
 					content = append(content, map[string]any{"type": "input_image", "image_url": map[string]any{"url": part.ImageURL}})
+				case "input_file":
+					if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
+						content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
+					}
 				}
 			}
 			if len(content) > 0 {
@@ -556,6 +562,59 @@ func joinTextParts(parts []model.CanonicalContentPart) string {
 		}
 	}
 	return builder.String()
+}
+
+func buildToolOutput(parts []model.CanonicalContentPart) any {
+	structured := normalizeContentParts(parts)
+	if len(structured) == 0 {
+		return ""
+	}
+	allText := true
+	for _, part := range structured {
+		if part["type"] != "input_text" {
+			allText = false
+			break
+		}
+	}
+	if allText {
+		var builder strings.Builder
+		for _, part := range structured {
+			if text, _ := part["text"].(string); text != "" {
+				builder.WriteString(text)
+			}
+		}
+		return builder.String()
+	}
+	encoded, err := json.Marshal(structured)
+	if err != nil {
+		return joinTextParts(parts)
+	}
+	return string(encoded)
+}
+
+func normalizeContentParts(parts []model.CanonicalContentPart) []map[string]any {
+	content := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			content = append(content, map[string]any{"type": "input_text", "text": part.Text})
+		case "image_url", "input_image":
+			if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
+				image := cloneMap(rawImage)
+				if _, ok := image["url"]; !ok && part.ImageURL != "" {
+					image["url"] = part.ImageURL
+				}
+				content = append(content, map[string]any{"type": "input_image", "image_url": image})
+				continue
+			}
+			content = append(content, map[string]any{"type": "input_image", "image_url": map[string]any{"url": part.ImageURL}})
+		case "input_file":
+			if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
+				content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
+			}
+		}
+	}
+	return content
 }
 
 func cloneMap(input map[string]any) map[string]any {

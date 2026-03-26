@@ -28,10 +28,19 @@ type contentPart struct {
 	Text         string          `json:"text"`
 	ID           string          `json:"id"`
 	Name         string          `json:"name"`
+	Source       json.RawMessage `json:"source"`
 	Input        json.RawMessage `json:"input"`
 	ToolUseID    string          `json:"tool_use_id"`
 	Content      json.RawMessage `json:"content"`
 	CacheControl json.RawMessage `json:"cache_control"`
+}
+
+type imageSource struct {
+	Type      string `json:"type"`
+	URL       string `json:"url"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+	FileID    string `json:"file_id"`
 }
 
 type tool struct {
@@ -98,6 +107,18 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 		switch part.Type {
 		case "text":
 			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text})
+		case "image":
+			imagePart, err := decodeAnthropicImagePart(part.Source)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, imagePart)
+		case "document":
+			docParts, err := decodeAnthropicDocumentParts(part.Source)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, docParts...)
 		case "tool_use", "tool_result", "thinking", "redacted_thinking":
 			continue
 		case "":
@@ -110,6 +131,95 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 		}
 	}
 	return out, nil
+}
+
+func decodeAnthropicImagePart(raw json.RawMessage) (model.CanonicalContentPart, error) {
+	if len(raw) == 0 {
+		return model.CanonicalContentPart{}, fmt.Errorf("anthropic image block missing source")
+	}
+	var src imageSource
+	if err := json.Unmarshal(raw, &src); err != nil {
+		return model.CanonicalContentPart{}, fmt.Errorf("decode anthropic image source: %w", err)
+	}
+	switch src.Type {
+	case "url":
+		if src.URL == "" {
+			return model.CanonicalContentPart{}, fmt.Errorf("anthropic image url is required")
+		}
+		return model.CanonicalContentPart{
+			Type:     "image_url",
+			ImageURL: src.URL,
+			Raw:      map[string]any{"image_url": map[string]any{"url": src.URL}},
+		}, nil
+	case "base64":
+		if src.MediaType == "" || src.Data == "" {
+			return model.CanonicalContentPart{}, fmt.Errorf("anthropic base64 image requires media_type and data")
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", src.MediaType, src.Data)
+		return model.CanonicalContentPart{
+			Type:     "image_url",
+			ImageURL: dataURL,
+			MimeType: src.MediaType,
+			Raw:      map[string]any{"image_url": map[string]any{"url": dataURL}},
+		}, nil
+	case "file":
+		if src.FileID == "" {
+			return model.CanonicalContentPart{}, fmt.Errorf("anthropic file image requires file_id")
+		}
+		return model.CanonicalContentPart{
+			Type: "image_url",
+			Raw:  map[string]any{"image_url": map[string]any{"file_id": src.FileID}},
+		}, nil
+	default:
+		return model.CanonicalContentPart{}, fmt.Errorf("unsupported anthropic image source type: %s", src.Type)
+	}
+}
+
+func decodeAnthropicDocumentParts(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("anthropic document block missing source")
+	}
+	var src struct {
+		Type      string          `json:"type"`
+		URL       string          `json:"url"`
+		MediaType string          `json:"media_type"`
+		Data      string          `json:"data"`
+		Content   json.RawMessage `json:"content"`
+		FileID    string          `json:"file_id"`
+	}
+	if err := json.Unmarshal(raw, &src); err != nil {
+		return nil, fmt.Errorf("decode anthropic document source: %w", err)
+	}
+	switch src.Type {
+	case "text":
+		if src.Data == "" {
+			return nil, fmt.Errorf("anthropic text document requires data")
+		}
+		return []model.CanonicalContentPart{{Type: "text", Text: src.Data}}, nil
+	case "content":
+		return decodeContent(src.Content)
+	case "base64":
+		if src.MediaType == "" || src.Data == "" {
+			return nil, fmt.Errorf("anthropic base64 document requires media_type and data")
+		}
+		return []model.CanonicalContentPart{{
+			Type:     "input_file",
+			MimeType: src.MediaType,
+			Raw:      map[string]any{"input_file": map[string]any{"file_data": fmt.Sprintf("data:%s;base64,%s", src.MediaType, src.Data)}},
+		}}, nil
+	case "url":
+		if src.URL == "" {
+			return nil, fmt.Errorf("anthropic url document requires url")
+		}
+		return []model.CanonicalContentPart{{Type: "input_file", Raw: map[string]any{"input_file": map[string]any{"file_url": src.URL}}}}, nil
+	case "file":
+		if src.FileID == "" {
+			return nil, fmt.Errorf("anthropic file document requires file_id")
+		}
+		return []model.CanonicalContentPart{{Type: "input_file", Raw: map[string]any{"input_file": map[string]any{"file_id": src.FileID}}}}, nil
+	default:
+		return nil, fmt.Errorf("unsupported anthropic document source type: %s", src.Type)
+	}
 }
 
 func decodeToolTransitions(role string, raw json.RawMessage) ([]model.CanonicalToolCall, []model.CanonicalMessage, error) {
@@ -128,35 +238,29 @@ func decodeToolTransitions(role string, raw json.RawMessage) ([]model.CanonicalT
 			}
 			toolCalls = append(toolCalls, model.CanonicalToolCall{ID: part.ID, Type: "function", Name: part.Name, Arguments: arguments})
 		case "tool_result":
-			toolText, err := decodeToolResultContent(part.Content)
+			toolParts, err := decodeToolResultContent(part.Content)
 			if err != nil {
 				return nil, nil, err
 			}
-			toolResults = append(toolResults, model.CanonicalMessage{Role: "tool", ToolCallID: part.ToolUseID, Parts: []model.CanonicalContentPart{{Type: "text", Text: toolText}}})
+			toolResults = append(toolResults, model.CanonicalMessage{Role: "tool", ToolCallID: part.ToolUseID, Parts: toolParts})
 		}
 	}
 	return toolCalls, toolResults, nil
 }
 
-func decodeToolResultContent(raw json.RawMessage) (string, error) {
+func decodeToolResultContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 	if len(raw) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		return text, nil
+		return []model.CanonicalContentPart{{Type: "text", Text: text}}, nil
 	}
-	var parts []contentPart
-	if err := json.Unmarshal(raw, &parts); err == nil {
-		var out string
-		for _, part := range parts {
-			if part.Type == "text" {
-				out += part.Text
-			}
-		}
-		return out, nil
+	parts, err := decodeContent(raw)
+	if err == nil {
+		return parts, nil
 	}
-	return string(raw), nil
+	return []model.CanonicalContentPart{{Type: "text", Text: string(raw)}}, nil
 }
 
 func decodeAnthropicSystem(raw json.RawMessage) string {
