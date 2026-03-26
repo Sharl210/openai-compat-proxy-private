@@ -227,7 +227,7 @@ chmod +x scripts/*.sh
 - `X-Provider-Version`：当前请求命中的 provider `.env` **已生效**版本对应的文件修改时间
 - `X-Provider-Name`：当前请求实际命中的 provider id
 - `X-SYSTEM-PROMPT-ATTACH`：当当前 provider 实际启用了非空系统提示词注入时返回，值格式为 `<position>:<paths>`，例如 `prepend:prompt.md, prompts/extra.md`。这里只暴露注入方向和配置路径，不会回传原始提示词文本。
-- `X-STATUS-CHECK-URL`：当前请求对应的状态查询地址，使用 provider 作用域路径，格式为 `/{providerId}/v1/requests/{requestId}`。如果配置了 `PROXY_API_KEY`，这个 URL 会直接拼上 `?key=<proxy_api_key>`，方便客户端开箱即用。
+- `X-STATUS-CHECK-URL`：当前请求对应的状态查询地址，使用 provider 作用域路径，格式为 `/{providerId}/v1/requests/{requestId}`。如果当前请求对应的 provider 需要代理鉴权，这个 URL 会直接拼上 `?key=<实际可用的代理 key>`，方便客户端开箱即用。
 - `X-RESPONSE-PROCESS-HEALTH-FLAG`：当前请求处理状态的短标记。正常是 `health`；出现代理层、上游或流式处理异常时，会返回对应的短状态值。
 
 ### 请求状态查询接口
@@ -235,11 +235,18 @@ chmod +x scripts/*.sh
 - 查询路径使用 **provider 作用域**，不提供全局 `/v1/requests/{requestId}`：
   - `GET /{providerId}/v1/requests/{requestId}`
 - 这样可以避免不同 provider 之间通过 request id 相互探测状态。
-- 如果配置了 `PROXY_API_KEY`，状态查询接口支持直接用查询参数鉴权：
-  - `GET /{providerId}/v1/requests/{requestId}?key=<proxy_api_key>`
+- 如果当前 provider 需要代理鉴权，状态查询接口支持直接用查询参数鉴权：
+  - `GET /{providerId}/v1/requests/{requestId}?key=<实际可用的代理 key>`
 - 同时仍然保留现有代理鉴权方式：
   - `Authorization: Bearer <proxy_api_key>`
   - `X-API-Key: <proxy_api_key>`
+
+这里的“实际可用代理 key”规则是：
+
+- provider 没有设置 `PROXY_API_KEY_OVERRIDE`：继承根 `.env` 的 `PROXY_API_KEY`
+- provider 设置了普通值：这个 provider 的分组路由使用自己的 key
+- provider 设置为 `empty`：这个 provider 不需要代理鉴权，状态查询 URL 也不会拼 `?key=`
+- 默认 provider 的裸 `/v1/*` 路由仍然允许使用根 `.env` 的 `PROXY_API_KEY` 访问；如果它自己设置了 `PROXY_API_KEY_OVERRIDE`，则它的分组路由 `/{providerId}/v1/*` 使用自己的 key
 
 返回 JSON 至少包含这些字段：
 
@@ -335,7 +342,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 基础字段
 
 - `LISTEN_ADDR`：监听地址，例如 `:21021`。**不能热加载**
-- `PROXY_API_KEY`：代理自身访问 key，可选；设置后调用方必须带代理鉴权。**可热加载**
+- `PROXY_API_KEY`：根级代理访问 key，可选；provider 没有设置 `PROXY_API_KEY_OVERRIDE` 时会继承它。默认 provider 的裸 `/v1/*` 路由也使用这把 key。**可热加载**
 
 ### 多 provider 相关字段
 
@@ -366,6 +373,18 @@ http(s)://<host>/v1/<providerId>/xxx
 - `PROVIDER_ENABLED`：是否启用该 provider
 - `UPSTREAM_BASE_URL`：这个 provider 对应的上游基础地址
 - `UPSTREAM_API_KEY`：这个 provider 对应的上游 key
+- `PROXY_API_KEY_OVERRIDE`：这个 provider 的代理鉴权覆写值。留空表示继承根 `PROXY_API_KEY`；设置普通值表示该 provider 的分组路由只接受自己的 key；设置为 `empty` 表示这个 provider 不需要代理鉴权。
+
+### provider 级代理鉴权字段
+
+行为说明：
+
+- provider 分组路由 `/{providerId}/v1/*` 会优先按当前 provider 的 `PROXY_API_KEY_OVERRIDE` 判断代理鉴权。
+- `PROXY_API_KEY_OVERRIDE=` 留空：继承根 `.env` 的 `PROXY_API_KEY`
+- `PROXY_API_KEY_OVERRIDE=empty`：这个 provider 不做代理鉴权
+- `PROXY_API_KEY_OVERRIDE=<custom>`：这个 provider 的分组路由只接受自己的 key
+- 如果这个 provider 同时又是 `DEFAULT_PROVIDER`，那么裸 `/v1/*` 路由仍然允许根 `.env` 的 `PROXY_API_KEY` 访问；它自己的分组路由继续使用自己的 override key。
+- provider 作用域状态查询接口 `/{providerId}/v1/requests/{requestId}` 和这个 provider 的代理鉴权规则保持一致。
 
 ### provider 级系统提示词字段
 

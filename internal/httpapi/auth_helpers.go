@@ -35,3 +35,17 @@ func authModeForUpstream(r *http.Request, cfg config.Config) string {
 	}
 	return "missing"
 }
+
+func allowRootProxyKeyForRequest(r *http.Request, cfg config.Config, provider config.ProviderConfig) bool {
+	if provider.ID == "" || provider.ID != cfg.DefaultProvider {
+		return false
+	}
+	if info, ok := routeInfoFromRequest(r); ok {
+		return info.Legacy
+	}
+	return false
+}
+
+func statusCheckProxyKeyForRequest(r *http.Request, cfg config.Config, provider config.ProviderConfig) string {
+	return provider.StatusCheckProxyAPIKey(cfg.ProxyAPIKey, allowRootProxyKeyForRequest(r, cfg, provider))
+}

@@ -205,3 +205,46 @@ func TestLoadProviderFileAllowsZeroRetryOverrideAndFallsBackOnInvalidValues(t *t
 		t.Fatalf("expected invalid retry delay to fall back to %v, got %v", DefaultUpstreamRetryDelay, provider.UpstreamRetryDelay)
 	}
 }
+
+func TestLoadProviderFileParsesProxyAPIKeyOverride(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nPROXY_API_KEY_OVERRIDE=provider-secret\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if !provider.ProxyAPIKeyOverrideSet {
+		t.Fatalf("expected proxy api key override to be marked as set")
+	}
+	if provider.ProxyAPIKeyOverride != "provider-secret" {
+		t.Fatalf("expected proxy api key override provider-secret, got %q", provider.ProxyAPIKeyOverride)
+	}
+	if provider.EffectiveProxyAPIKey("root-secret") != "provider-secret" {
+		t.Fatalf("expected provider override to win over root key")
+	}
+	if provider.StatusCheckProxyAPIKey("root-secret", false) != "provider-secret" {
+		t.Fatalf("expected provider-scoped status key to use provider override")
+	}
+	if provider.StatusCheckProxyAPIKey("root-secret", true) != "root-secret" {
+		t.Fatalf("expected legacy status key to prefer root key")
+	}
+	providerBody = "PROVIDER_ID=openai\nPROXY_API_KEY_OVERRIDE=empty\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	provider, err = loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error after empty override: %v", err)
+	}
+	if !provider.ProxyAPIKeyDisabled() {
+		t.Fatalf("expected empty override to disable proxy auth")
+	}
+	if provider.EffectiveProxyAPIKey("root-secret") != "" {
+		t.Fatalf("expected disabled override to return empty effective proxy key")
+	}
+}

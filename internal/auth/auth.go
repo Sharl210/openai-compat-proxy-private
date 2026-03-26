@@ -12,6 +12,22 @@ var ErrUnauthorized = errors.New("unauthorized")
 var ErrMissingUpstreamAuth = errors.New("missing upstream authorization")
 
 func ValidateProxyAuth(r *http.Request, proxyKey string) error {
+	return validateProxyAuthValue(r, proxyKey)
+}
+
+func ValidateProxyAuthForProvider(r *http.Request, rootKey string, provider config.ProviderConfig, allowRootFallback bool) error {
+	if provider.ProxyAPIKeyDisabled() {
+		return nil
+	}
+	if allowRootFallback && rootKey != "" {
+		if err := validateProxyAuthValue(r, rootKey); err == nil {
+			return nil
+		}
+	}
+	return validateProxyAuthValue(r, provider.EffectiveProxyAPIKey(rootKey))
+}
+
+func validateProxyAuthValue(r *http.Request, proxyKey string) error {
 	if proxyKey == "" {
 		return nil
 	}

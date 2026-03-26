@@ -27,6 +27,8 @@ type ProviderConfig struct {
 	ExposeReasoningSuffixModels bool
 	UpstreamRetryCount          int
 	UpstreamRetryDelay          time.Duration
+	ProxyAPIKeyOverride         string
+	ProxyAPIKeyOverrideSet      bool
 	SystemPromptFiles           []string
 	SystemPromptFilesRaw        string
 	SystemPromptPosition        string
@@ -134,6 +136,9 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.UpstreamRetryCount = parseProviderRetryCount(value)
 		case "UPSTREAM_RETRY_DELAY":
 			provider.UpstreamRetryDelay = parseProviderRetryDelay(value)
+		case "PROXY_API_KEY_OVERRIDE":
+			provider.ProxyAPIKeyOverrideSet = true
+			provider.ProxyAPIKeyOverride = value
 		case "SYSTEM_PROMPT_FILES":
 			provider.SystemPromptFilesRaw = value
 			provider.SystemPromptFiles = resolveProviderRelativePaths(path, value)
@@ -148,6 +153,30 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	provider.UpstreamRetryDelay = normalizeProviderRetryDelay(provider.UpstreamRetryDelay)
 	provider.SystemPromptPosition = normalizeSystemPromptPosition(provider.SystemPromptPosition)
 	return provider, nil
+}
+
+func (p ProviderConfig) ProxyAPIKeyDisabled() bool {
+	return p.ProxyAPIKeyOverrideSet && strings.EqualFold(strings.TrimSpace(p.ProxyAPIKeyOverride), "empty")
+}
+
+func (p ProviderConfig) EffectiveProxyAPIKey(rootKey string) string {
+	if p.ProxyAPIKeyDisabled() {
+		return ""
+	}
+	if p.ProxyAPIKeyOverrideSet {
+		return p.ProxyAPIKeyOverride
+	}
+	return rootKey
+}
+
+func (p ProviderConfig) StatusCheckProxyAPIKey(rootKey string, preferRoot bool) string {
+	if p.ProxyAPIKeyDisabled() {
+		return ""
+	}
+	if preferRoot && rootKey != "" {
+		return rootKey
+	}
+	return p.EffectiveProxyAPIKey(rootKey)
 }
 
 func (c Config) ProviderByID(id string) (ProviderConfig, error) {
