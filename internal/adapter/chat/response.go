@@ -25,13 +25,17 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		}
 		message["tool_calls"] = toolCalls
 	}
+	finishReason := "stop"
+	if len(result.ToolCalls) > 0 {
+		finishReason = "tool_calls"
+	}
 
 	return map[string]any{
 		"object": "chat.completion",
 		"choices": []map[string]any{{
 			"index":         0,
 			"message":       message,
-			"finish_reason": "stop",
+			"finish_reason": finishReason,
 		}},
 		"usage": chatUsage(result.Usage),
 	}

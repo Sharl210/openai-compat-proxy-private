@@ -22,7 +22,7 @@ type request struct {
 	Temperature     *float64        `json:"temperature"`
 	TopP            *float64        `json:"top_p"`
 	MaxTokens       *int            `json:"max_tokens"`
-	Stop            []string        `json:"stop"`
+	StopRaw         json.RawMessage `json:"stop"`
 	N               *int            `json:"n"`
 	Raw             json.RawMessage `json:"-"`
 }
@@ -80,8 +80,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		Temperature:     req.Temperature,
 		TopP:            req.TopP,
 		MaxOutputTokens: req.MaxTokens,
-		Stop:            req.Stop,
 	}
+	stop, err := decodeStop(req.StopRaw)
+	if err != nil {
+		return model.CanonicalRequest{}, fmt.Errorf("decode stop: %w", err)
+	}
+	canon.Stop = stop
 
 	if len(req.Reasoning) > 0 {
 		reasoningRaw := cloneMap(req.Reasoning)
@@ -176,6 +180,24 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 	}
 
 	return result, nil
+}
+
+func decodeStop(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		if single == "" {
+			return nil, nil
+		}
+		return []string{single}, nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return nil, err
+	}
+	return many, nil
 }
 
 func stringMapValue(m map[string]any, key string) string {

@@ -113,6 +113,64 @@ func TestBuildRequestBodyPreservesResponsesMetadataAndTypedInputItems(t *testing
 	}
 }
 
+func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *testing.T) {
+	temperature := 0.2
+	topP := 0.7
+	maxTokens := 321
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:           "gpt-5",
+		Temperature:     &temperature,
+		TopP:            &topP,
+		MaxOutputTokens: &maxTokens,
+		Stop:            []string{"END"},
+		ToolChoice: model.CanonicalToolChoice{Mode: "tool", Raw: map[string]any{
+			"type": "tool",
+			"name": "get_weather",
+		}},
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type:     "image_url",
+				ImageURL: "https://example.com/cat.png",
+				Raw:      map[string]any{"image_url": map[string]any{"url": "https://example.com/cat.png", "detail": "high"}},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got := payload["temperature"]; got != temperature {
+		t.Fatalf("expected temperature %v, got %#v", temperature, got)
+	}
+	if got := payload["top_p"]; got != topP {
+		t.Fatalf("expected top_p %v, got %#v", topP, got)
+	}
+	if got := payload["max_output_tokens"]; got != float64(maxTokens) {
+		t.Fatalf("expected max_output_tokens %d, got %#v", maxTokens, got)
+	}
+	stop, _ := payload["stop"].([]any)
+	if len(stop) != 1 || stop[0] != "END" {
+		t.Fatalf("expected stop END, got %#v", payload["stop"])
+	}
+	toolChoice, _ := payload["tool_choice"].(map[string]any)
+	if toolChoice["name"] != "get_weather" || toolChoice["type"] != "tool" {
+		t.Fatalf("expected structured tool_choice object, got %#v", payload["tool_choice"])
+	}
+	input, _ := payload["input"].([]any)
+	msg, _ := input[0].(map[string]any)
+	content, _ := msg["content"].([]any)
+	image, _ := content[0].(map[string]any)
+	imageURL, _ := image["image_url"].(map[string]any)
+	if imageURL["detail"] != "high" {
+		t.Fatalf("expected image detail high preserved, got %#v", imageURL)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{
@@ -151,6 +209,26 @@ func TestParseSSEStreamingAcceptsLargeEventPayload(t *testing.T) {
 	item, _ := seen.Data["item"].(map[string]any)
 	if got, _ := item["encrypted_content"].(string); got != large {
 		t.Fatalf("expected encrypted_content length %d, got %d", len(large), len(got))
+	}
+}
+
+func TestParseSSEAcceptsEventAndDataWithoutTrailingSpace(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("event:response.output_text.delta\n" +
+			"data:{\"delta\":\"hello\"}\n\n" +
+			"event:response.completed\n" +
+			"data:{\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")),
+	}
+
+	events, err := parseSSE(resp)
+	if err != nil {
+		t.Fatalf("parseSSE error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected two events, got %#v", events)
+	}
+	if events[0].Event != "response.output_text.delta" {
+		t.Fatalf("expected first event response.output_text.delta, got %#v", events[0])
 	}
 }
 

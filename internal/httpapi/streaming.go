@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ type responsesStreamState struct {
 	reasoningStarted  bool
 	reasoningClosed   bool
 	syntheticSummary  strings.Builder
+	terminalSeen      bool
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -116,7 +118,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return streamLiveWithSyntheticTicks(ctx, stream.Consume,
+	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return true },
 		nil,
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
@@ -124,6 +126,13 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			return writeResponsesEvent(w, flusher, &state, evt)
 		},
 	)
+	if err != nil {
+		return err
+	}
+	if !state.terminalSeen {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event) error {
@@ -204,6 +213,7 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			return err
 		}
 	case "response.completed", "response.done":
+		state.terminalSeen = true
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
@@ -387,6 +397,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.textStarted && !state.textStopped {
 			return nil
 		}
+		state.stopReason = ""
 		if err := closeThinkingBlock(); err != nil {
 			return err
 		}
@@ -413,6 +424,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.thinkingStarted && !state.thinkingStopped {
 			return nil
 		}
+		state.stopReason = ""
 		if err := closeTextBlock(state, w, flusher); err != nil {
 			return err
 		}
@@ -552,7 +564,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			"index": state.textIndex,
 			"delta": map[string]any{"type": "text_delta", "text": delta},
 		})
-	case "response.reasoning.delta":
+	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -762,14 +774,16 @@ type chatStreamState struct {
 	toolMeta          map[string]map[string]string
 	toolIndex         map[string]int
 	toolSent          map[string]bool
+	pendingToolArgs   map[string]string
 	nextToolIx        int
 }
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
 	state := chatStreamState{
-		toolMeta:  map[string]map[string]string{},
-		toolIndex: map[string]int{},
-		toolSent:  map[string]bool{},
+		toolMeta:        map[string]map[string]string{},
+		toolIndex:       map[string]int{},
+		toolSent:        map[string]bool{},
+		pendingToolArgs: map[string]string{},
 	}
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
@@ -872,9 +886,10 @@ func streamLiveWithSyntheticTicks(
 
 func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event, includeUsage bool) error {
 	state := chatStreamState{
-		toolMeta:  map[string]map[string]string{},
-		toolIndex: map[string]int{},
-		toolSent:  map[string]bool{},
+		toolMeta:        map[string]map[string]string{},
+		toolIndex:       map[string]int{},
+		toolSent:        map[string]bool{},
+		pendingToolArgs: map[string]string{},
 	}
 	for _, evt := range events {
 		if err := writeChatEvent(w, flusher, &state, evt, includeUsage); err != nil {
@@ -885,12 +900,25 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 }
 
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool) error {
+	ensureRoleSent := func() error {
+		if state.roleSent {
+			return nil
+		}
+		if err := writeChatChunk(w, flusher, map[string]any{"role": "assistant"}, "", nil); err != nil {
+			return err
+		}
+		state.roleSent = true
+		return nil
+	}
 	switch evt.Event {
 	case "response.created":
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
 		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
 			state.realReasoningSeen = true
+			if err := ensureRoleSent(); err != nil {
+				return err
+			}
 			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
 				return err
 			}
@@ -907,21 +935,22 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 					"call_id": stringValue(item["call_id"]),
 				}
 				if !state.toolSent[itemID] {
-					toolDelta := chatToolDelta(state.toolIndex[itemID], stringValue(item["call_id"]), stringValue(item["name"]), "", true)
+					if err := ensureRoleSent(); err != nil {
+						return err
+					}
+					toolDelta := chatToolDelta(state.toolIndex[itemID], stringValue(item["call_id"]), stringValue(item["name"]), state.pendingToolArgs[itemID], true)
 					if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
 						return err
 					}
 					state.toolSent[itemID] = true
+					delete(state.pendingToolArgs, itemID)
 				}
 			}
 		}
 	case "response.output_text.delta":
 		state.textStarted = true
-		if !state.roleSent {
-			if err := writeChatChunk(w, flusher, map[string]any{"role": "assistant"}, "", nil); err != nil {
-				return err
-			}
-			state.roleSent = true
+		if err := ensureRoleSent(); err != nil {
+			return err
 		}
 		if delta := stringValue(evt.Data["delta"]); delta != "" {
 			if err := writeChatChunk(w, flusher, map[string]any{"content": delta}, "", nil); err != nil {
@@ -931,6 +960,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	case "response.reasoning.delta":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realReasoningSeen = true
+			if err := ensureRoleSent(); err != nil {
+				return err
+			}
 			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": delta}, "", nil); err != nil {
 				return err
 			}
@@ -938,12 +970,35 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	case "response.function_call_arguments.delta":
 		itemID := stringValue(evt.Data["item_id"])
 		delta := stringValue(evt.Data["delta"])
+		if itemID == "" || delta == "" {
+			return nil
+		}
+		if !state.toolSent[itemID] {
+			state.pendingToolArgs[itemID] += delta
+			if _, ok := state.toolMeta[itemID]; !ok {
+				return nil
+			}
+			if err := ensureRoleSent(); err != nil {
+				return err
+			}
+			toolDelta := chatToolDelta(state.toolIndex[itemID], state.toolMeta[itemID]["call_id"], state.toolMeta[itemID]["name"], state.pendingToolArgs[itemID], true)
+			if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
+				return err
+			}
+			state.toolSent[itemID] = true
+			delete(state.pendingToolArgs, itemID)
+			return nil
+		}
 		index := state.toolIndex[itemID]
 		toolDelta := chatToolDelta(index, "", "", delta, false)
 		if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
 			return err
 		}
 	case "response.completed", "response.done":
+		finishReason := "stop"
+		if len(state.toolSent) > 0 {
+			finishReason = "tool_calls"
+		}
 		cachedTokens := nestedCachedTokens(usageFromEventData(evt.Data))
 		logging.Event("upstream_stream_usage_observed", map[string]any{
 			"upstream_event":       evt.Event,
@@ -961,7 +1016,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				}
 			}
 		}
-		if err := writeChatChunk(w, flusher, map[string]any{}, "stop", nil); err != nil {
+		if err := writeChatChunk(w, flusher, map[string]any{}, finishReason, nil); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {

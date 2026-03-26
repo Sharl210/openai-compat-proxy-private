@@ -45,3 +45,115 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 		t.Fatalf("expected chat placeholder reasoning to use titled format, got %s", body)
 	}
 }
+
+func TestChatStreamUsesToolCallsFinishReasonForToolCallTurns(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("expected tool_calls finish_reason, got %s", body)
+	}
+}
+
+func TestChatStreamSendsAssistantRoleBeforeToolCalls(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	roleIdx := strings.Index(body, `"delta":{"role":"assistant"}`)
+	toolIdx := strings.Index(body, `"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`)
+	if roleIdx == -1 || toolIdx == -1 || roleIdx > toolIdx {
+		t.Fatalf("expected assistant role chunk before tool_calls chunk, got %s", body)
+	}
+}
+
+func TestChatStreamBuffersToolArgumentsUntilMetadataArrives(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"tool_calls":[{"function":{"arguments":"{\"city\":\"Shanghai\"}","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected buffered arguments to merge into first metadata chunk, got %s", body)
+	}
+}

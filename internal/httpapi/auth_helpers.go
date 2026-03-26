@@ -12,6 +12,11 @@ func authHeaderForUpstream(r *http.Request, cfg config.Config) (string, error) {
 		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
 			providerCfg := cfg
 			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
+			if allowRootProxyKeyForRequest(r, cfg, provider) {
+				providerCfg.ProxyAPIKey = cfg.ProxyAPIKey
+			} else {
+				providerCfg.ProxyAPIKey = provider.EffectiveProxyAPIKey(cfg.ProxyAPIKey)
+			}
 			return auth.ResolveUpstreamAuthorization(r, providerCfg)
 		}
 	}
@@ -22,6 +27,11 @@ func authModeForUpstream(r *http.Request, cfg config.Config) string {
 	if info, ok := routeInfoFromRequest(r); ok {
 		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
 			cfg.UpstreamAPIKey = provider.UpstreamAPIKey
+			if allowRootProxyKeyForRequest(r, cfg, provider) {
+				cfg.ProxyAPIKey = cfg.ProxyAPIKey
+			} else {
+				cfg.ProxyAPIKey = provider.EffectiveProxyAPIKey(cfg.ProxyAPIKey)
+			}
 		}
 	}
 	if r.Header.Get("X-Upstream-Authorization") != "" {
@@ -47,5 +57,5 @@ func allowRootProxyKeyForRequest(r *http.Request, cfg config.Config, provider co
 }
 
 func statusCheckProxyKeyForRequest(r *http.Request, cfg config.Config, provider config.ProviderConfig) string {
-	return provider.StatusCheckProxyAPIKey(cfg.ProxyAPIKey, allowRootProxyKeyForRequest(r, cfg, provider))
+	return provider.StatusCheckProxyAPIKey(cfg.ProxyAPIKey, false)
 }

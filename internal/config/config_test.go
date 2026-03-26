@@ -25,3 +25,10 @@ func TestLoadFromEnvParsesTimeouts(t *testing.T) {
 		t.Fatalf("expected TotalTimeout 12m, got %v", cfg.TotalTimeout)
 	}
 }
+
+func TestValidateRootEnvValuesRejectsInvalidTimeout(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"TOTAL_TIMEOUT": "abc"})
+	if err == nil {
+		t.Fatalf("expected invalid TOTAL_TIMEOUT to fail validation")
+	}
+}

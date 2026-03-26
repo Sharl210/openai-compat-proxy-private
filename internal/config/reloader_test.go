@@ -401,6 +401,35 @@ func TestRuntimeStoreWatcherAllowsMissingPromptDirectoriesAtStartup(t *testing.T
 	}
 }
 
+func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidRootTimeout(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nTOTAL_TIMEOUT=10m\n", time.Date(2026, 3, 25, 13, 15, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 25, 13, 15, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	if got := store.Active().Config.TotalTimeout; got != 10*time.Minute {
+		t.Fatalf("expected initial TotalTimeout 10m, got %v", got)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nTOTAL_TIMEOUT=abc\n", time.Date(2026, 3, 25, 13, 16, 0, 0, time.UTC))
+	if err := store.Refresh(); err == nil {
+		t.Fatalf("expected Refresh to fail for invalid root timeout")
+	}
+	if got := store.Active().Config.TotalTimeout; got != 10*time.Minute {
+		t.Fatalf("expected last good TotalTimeout 10m to remain active, got %v", got)
+	}
+}
+
 func writeConfigFileWithMTime(t *testing.T, path string, content string, mtime time.Time) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

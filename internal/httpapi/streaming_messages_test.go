@@ -219,3 +219,83 @@ func TestMessagesStreamSeparatesMultipleToolCallsIntoDistinctBlocks(t *testing.T
 		t.Fatalf("expected first tool block to stop before second starts, got %s", body)
 	}
 }
+
+func TestMessagesStreamResetsStopReasonAfterToolUseFollowedByText(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search_web\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"query\\\":\\\"Quectel\\\"}\"}\n\n",
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"done\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"stop_reason":"end_turn"`) {
+		t.Fatalf("expected final stop_reason end_turn after later text, got %s", body)
+	}
+}
+
+func TestMessagesStreamForwardsReasoningSummaryTextDelta(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"alpha\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"thinking":"alpha"`) {
+		t.Fatalf("expected reasoning summary text delta to be forwarded as thinking, got %s", body)
+	}
+}

@@ -379,11 +379,21 @@ func shouldRetryRequestFailure(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
+	if httpErr, ok := err.(*HTTPStatusError); ok {
+		return httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500
+	}
+	var httpErr *HTTPStatusError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500
+	}
 	return true
 }
 
 func annotateRetryExhaustion(err error, retryCount int, retryDelay time.Duration) error {
 	if err == nil || retryCount <= 0 {
+		return err
+	}
+	if !shouldRetryRequestFailure(err) {
 		return err
 	}
 	var httpErr *HTTPStatusError
@@ -417,6 +427,18 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	payload := map[string]any{
 		"model":  req.Model,
 		"stream": true,
+	}
+	if req.Temperature != nil {
+		payload["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		payload["top_p"] = *req.TopP
+	}
+	if req.MaxOutputTokens != nil {
+		payload["max_output_tokens"] = *req.MaxOutputTokens
+	}
+	if len(req.Stop) > 0 {
+		payload["stop"] = append([]string(nil), req.Stop...)
 	}
 	if req.ResponseStore != nil {
 		payload["store"] = *req.ResponseStore
@@ -452,7 +474,15 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 				case "text":
 					content = append(content, map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text})
 				case "image_url", "input_image":
-					content = append(content, map[string]any{"type": "input_image", "image_url": part.ImageURL})
+					if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
+						image := cloneMap(rawImage)
+						if _, ok := image["url"]; !ok {
+							image["url"] = part.ImageURL
+						}
+						content = append(content, map[string]any{"type": "input_image", "image_url": image})
+						continue
+					}
+					content = append(content, map[string]any{"type": "input_image", "image_url": map[string]any{"url": part.ImageURL}})
 				}
 			}
 			if len(content) > 0 {
@@ -484,12 +514,14 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		}
 		payload["tools"] = tools
 	}
-	if req.ToolChoice.Mode != "" {
-		payload["tool_choice"] = req.ToolChoice.Mode
-	} else if req.ToolChoice.Raw != nil {
+	if req.ToolChoice.Raw != nil {
 		if value, ok := req.ToolChoice.Raw["value"]; ok {
 			payload["tool_choice"] = value
+		} else {
+			payload["tool_choice"] = cloneMap(req.ToolChoice.Raw)
 		}
+	} else if req.ToolChoice.Mode != "" {
+		payload["tool_choice"] = req.ToolChoice.Mode
 	}
 	if req.Reasoning != nil {
 		if len(req.Reasoning.Raw) > 0 {
@@ -715,13 +747,13 @@ func readNextSSEEvent(scanner *bufio.Scanner) (*Event, error) {
 			continue
 		}
 
-		if strings.HasPrefix(line, "event: ") {
-			currentEvent = strings.TrimPrefix(line, "event: ")
+		if strings.HasPrefix(line, "event:") {
+			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 			continue
 		}
 
-		if strings.HasPrefix(line, "data: ") {
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
 	}
 

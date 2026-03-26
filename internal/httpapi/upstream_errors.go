@@ -40,7 +40,10 @@ func detectRawErrorContentType(body []byte) string {
 
 func decorateUpstreamErrorBody(httpErr *upstream.HTTPStatusError, contentType string) ([]byte, string) {
 	body := append([]byte(nil), httpErr.BodyBytes...)
-	notice := buildRetryNoticeText(httpErr.RetriesPerformed, httpErr.RetryDelay)
+	notice := ""
+	if httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500 {
+		notice = buildRetryNoticeText(httpErr.RetriesPerformed, httpErr.RetryDelay)
+	}
 	if notice == "" {
 		return body, contentType
 	}

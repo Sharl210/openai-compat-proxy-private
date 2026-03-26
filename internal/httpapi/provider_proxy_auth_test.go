@@ -40,8 +40,8 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	if legacyRec.Code != http.StatusOK {
 		t.Fatalf("expected default legacy route to accept root key, got %d body=%s", legacyRec.Code, legacyRec.Body.String())
 	}
-	if got := legacyRec.Header().Get("X-STATUS-CHECK-URL"); !strings.Contains(got, "?key=root-secret") {
-		t.Fatalf("expected legacy status URL to use root key, got %q", got)
+	if got := legacyRec.Header().Get("X-STATUS-CHECK-URL"); !strings.Contains(got, "?key=provider-secret") {
+		t.Fatalf("expected legacy status URL to use provider key for provider-scoped status route, got %q", got)
 	}
 	requestID := legacyRec.Header().Get("X-Request-Id")
 
@@ -66,11 +66,19 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 		t.Fatalf("expected provider route to reject root key when override set, got %d body=%s", providerRootRec.Code, providerRootRec.Body.String())
 	}
 
+	providerQueryReq := httptest.NewRequest(http.MethodPost, "/openai/v1/responses?key=provider-secret", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	providerQueryReq.Header.Set("Content-Type", "application/json")
+	providerQueryRec := httptest.NewRecorder()
+	server.ServeHTTP(providerQueryRec, providerQueryReq)
+	if providerQueryRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected provider route to reject query key auth, got %d body=%s", providerQueryRec.Code, providerQueryRec.Body.String())
+	}
+
 	statusRootReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=root-secret", nil)
 	statusRootRec := httptest.NewRecorder()
 	server.ServeHTTP(statusRootRec, statusRootReq)
-	if statusRootRec.Code != http.StatusOK {
-		t.Fatalf("expected default provider status route to accept root key, got %d body=%s", statusRootRec.Code, statusRootRec.Body.String())
+	if statusRootRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected provider-scoped status route to reject root key when override set, got %d body=%s", statusRootRec.Code, statusRootRec.Body.String())
 	}
 
 	statusProviderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=provider-secret", nil)
@@ -78,6 +86,43 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	server.ServeHTTP(statusProviderRec, statusProviderReq)
 	if statusProviderRec.Code != http.StatusOK {
 		t.Fatalf("expected default provider status route to accept provider key, got %d body=%s", statusProviderRec.Code, statusProviderRec.Body.String())
+	}
+}
+
+func TestProviderScopedProxyAPIKeyOverrideEmptyAllowsAuthorizationPassthrough(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                     "openai",
+			Enabled:                true,
+			UpstreamBaseURL:        upstream.URL,
+			SupportsResponses:      true,
+			ProxyAPIKeyOverride:    "empty",
+			ProxyAPIKeyOverrideSet: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer real-upstream-token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected passthrough auth request to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer real-upstream-token" {
+		t.Fatalf("expected upstream authorization passthrough, got %q", gotAuth)
 	}
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,6 +112,52 @@ func loadFromLookup(lookup func(string) string) Config {
 		}
 	}
 	return cfg
+}
+
+func ValidateRootEnvValues(values map[string]string) error {
+	if err := validatePositiveDuration(values, "CONNECT_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "FIRST_BYTE_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "IDLE_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "TOTAL_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validateMinInt(values, "LOG_MAX_SIZE_MB", 1); err != nil {
+		return err
+	}
+	if err := validateMinInt(values, "LOG_MAX_BACKUPS", 0); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePositiveDuration(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func validateMinInt(values map[string]string, key string, min int) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < min {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
 }
 
 func (c Config) Validate() error {

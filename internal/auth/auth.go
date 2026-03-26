@@ -12,7 +12,7 @@ var ErrUnauthorized = errors.New("unauthorized")
 var ErrMissingUpstreamAuth = errors.New("missing upstream authorization")
 
 func ValidateProxyAuth(r *http.Request, proxyKey string) error {
-	return validateProxyAuthValue(r, proxyKey)
+	return validateProxyAuthValue(r, proxyKey, false)
 }
 
 func ValidateProxyAuthForProvider(r *http.Request, rootKey string, provider config.ProviderConfig, allowRootFallback bool) error {
@@ -20,14 +20,14 @@ func ValidateProxyAuthForProvider(r *http.Request, rootKey string, provider conf
 		return nil
 	}
 	if allowRootFallback && rootKey != "" {
-		if err := validateProxyAuthValue(r, rootKey); err == nil {
+		if err := validateProxyAuthValue(r, rootKey, allowQueryProxyKey(r)); err == nil {
 			return nil
 		}
 	}
-	return validateProxyAuthValue(r, provider.EffectiveProxyAPIKey(rootKey))
+	return validateProxyAuthValue(r, provider.EffectiveProxyAPIKey(rootKey), allowQueryProxyKey(r))
 }
 
-func validateProxyAuthValue(r *http.Request, proxyKey string) error {
+func validateProxyAuthValue(r *http.Request, proxyKey string, allowQueryKey bool) error {
 	if proxyKey == "" {
 		return nil
 	}
@@ -52,7 +52,7 @@ func validateProxyAuthValue(r *http.Request, proxyKey string) error {
 		return nil
 	}
 
-	if strings.TrimSpace(r.URL.Query().Get("key")) == proxyKey {
+	if allowQueryKey && strings.TrimSpace(r.URL.Query().Get("key")) == proxyKey {
 		return nil
 	}
 
@@ -61,6 +61,10 @@ func validateProxyAuthValue(r *http.Request, proxyKey string) error {
 	}
 
 	return nil
+}
+
+func allowQueryProxyKey(r *http.Request) bool {
+	return strings.Contains(r.URL.Path, "/v1/requests/")
 }
 
 func ResolveUpstreamAuthorization(r *http.Request, cfg config.Config) (string, error) {

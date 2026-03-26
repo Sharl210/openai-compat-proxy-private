@@ -43,6 +43,9 @@ func BuildRuntimeSnapshot(rootEnvPath string) (*RuntimeSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateRootEnvValues(values); err != nil {
+		return nil, err
+	}
 	cfg := LoadFromValues(values)
 	cfg.ProvidersDir = ResolveProvidersDir(rootEnvPath, cfg.ProvidersDir)
 	providers, providerVersions, providerPaths, promptPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir)

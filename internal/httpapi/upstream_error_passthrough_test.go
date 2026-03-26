@@ -59,11 +59,13 @@ func TestResponsesNonStreamPassesThroughPlainTextUpstreamError(t *testing.T) {
 }
 
 func TestResponsesStreamReturnsUpstreamErrorBeforeStartingSSE(t *testing.T) {
+	var attempts atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
 			http.NotFound(w, r)
 			return
 		}
+		attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"upstream auth failed","detail":"bad key"}`))
@@ -103,8 +105,11 @@ func TestResponsesStreamReturnsUpstreamErrorBeforeStartingSSE(t *testing.T) {
 	if got, _ := payload["detail"].(string); got != "bad key" {
 		t.Fatalf("expected upstream detail to be preserved, got %#v", payload)
 	}
-	if got, _ := payload["message"].(string); got != "本代理层已重试1遍，每次重试间隔0.01秒，共重试了0.01秒。下面是上游错误原信息：upstream auth failed" {
+	if got, _ := payload["message"].(string); got != "upstream auth failed" {
 		t.Fatalf("expected JSON message with retry notice, got %#v", payload)
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("expected unauthorized upstream error to skip retries, got %d attempts", attempts.Load())
 	}
 	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Fatalf("expected json content type to be preserved, got %q", got)

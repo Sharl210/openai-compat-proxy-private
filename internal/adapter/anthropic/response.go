@@ -8,6 +8,12 @@ import (
 
 func BuildResponse(result aggregate.Result, modelName string) map[string]any {
 	content := make([]map[string]any, 0, len(result.ToolCalls)+1)
+	if result.Text != "" {
+		content = append(content, map[string]any{
+			"type": "text",
+			"text": result.Text,
+		})
+	}
 	if len(result.ToolCalls) > 0 {
 		for _, call := range result.ToolCalls {
 			content = append(content, map[string]any{
@@ -17,7 +23,7 @@ func BuildResponse(result aggregate.Result, modelName string) map[string]any {
 				"input": parseArguments(call.Arguments),
 			})
 		}
-	} else {
+	} else if len(content) == 0 {
 		content = append(content, map[string]any{
 			"type": "text",
 			"text": result.Text,

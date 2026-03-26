@@ -37,12 +37,12 @@ func NewServerWithStore(store *config.RuntimeStore) http.Handler {
 				errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "request not found")
 				return
 			}
-			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, statusPath.ProviderID == snapshot.Config.DefaultProvider && snapshot.Config.EnableLegacyV1Routes); err != nil {
+			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, false); err != nil {
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 				return
 			}
 			setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
-			setRequestStatusHeaders(w, r, statusPath.ProviderID, w.Header().Get("X-Request-Id"), provider.StatusCheckProxyAPIKey(snapshot.Config.ProxyAPIKey, statusPath.ProviderID == snapshot.Config.DefaultProvider && snapshot.Config.EnableLegacyV1Routes), "health")
+			setRequestStatusHeaders(w, r, statusPath.ProviderID, w.Header().Get("X-Request-Id"), provider.StatusCheckProxyAPIKey(snapshot.Config.ProxyAPIKey, false), "health")
 			r = r.Clone(withRequestStatusStore(r.Context(), statusStore))
 			handleRequestStatus(statusStore).ServeHTTP(w, r)
 			return
@@ -57,12 +57,12 @@ func NewServerWithStore(store *config.RuntimeStore) http.Handler {
 			setConfigVersionHeaders(w, snapshot, info.ProviderID)
 			requestID := w.Header().Get("X-Request-Id")
 			statusStore.start(requestID, info.ProviderID, info.CanonicalPath)
-			setRequestStatusHeaders(w, r, info.ProviderID, requestID, provider.StatusCheckProxyAPIKey(snapshot.Config.ProxyAPIKey, info.Legacy), "health")
+			setRequestStatusHeaders(w, r, info.ProviderID, requestID, provider.StatusCheckProxyAPIKey(snapshot.Config.ProxyAPIKey, false), "health")
 			r = r.Clone(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(r.Context(), info), snapshot), statusStore))
 			r.URL.Path = info.CanonicalPath
 			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
 				statusStore.markFailed(requestID, "proxy_internal_error", "unauthorized", "invalid proxy api key")
-				setRequestStatusHeaders(w, r, info.ProviderID, requestID, provider.StatusCheckProxyAPIKey(snapshot.Config.ProxyAPIKey, info.Legacy), "proxy_internal_error")
+				setRequestStatusHeaders(w, r, info.ProviderID, requestID, provider.StatusCheckProxyAPIKey(snapshot.Config.ProxyAPIKey, false), "proxy_internal_error")
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 				return
 			}
