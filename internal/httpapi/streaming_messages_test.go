@@ -163,3 +163,59 @@ func TestMessagesStreamClosesToolBlockBeforeLaterTextAndForwardsArgumentDeltas(t
 		t.Fatalf("expected tool block to close before later text starts, got %s", body)
 	}
 }
+
+func TestMessagesStreamSeparatesMultipleToolCallsIntoDistinctBlocks(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search_web\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"query\\\":\\\"A\\\",\\\"topic\\\":\\\"general\\\"}\"}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_2\",\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"search_web\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_2\",\"delta\":\"{\\\"query\\\":\\\"B\\\"}\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if count := strings.Count(body, `"type":"tool_use"`); count != 2 {
+		t.Fatalf("expected two tool_use blocks, got %d body=%s", count, body)
+	}
+	if !strings.Contains(body, `"partial_json":"{\"query\":\"A\",\"topic\":\"general\"}"`) {
+		t.Fatalf("expected first tool arguments in stream, got %s", body)
+	}
+	if !strings.Contains(body, `"partial_json":"{\"query\":\"B\"}"`) {
+		t.Fatalf("expected second tool arguments in stream, got %s", body)
+	}
+	firstStopIdx := strings.Index(body, `event: content_block_stop`+"\n"+`data: {"index":1,"type":"content_block_stop"}`)
+	secondStartIdx := strings.LastIndex(body, `"content_block":{"id":"call_2","input":{},"name":"search_web","type":"tool_use"}`)
+	if firstStopIdx == -1 || secondStartIdx == -1 || firstStopIdx > secondStartIdx {
+		t.Fatalf("expected first tool block to stop before second starts, got %s", body)
+	}
+}

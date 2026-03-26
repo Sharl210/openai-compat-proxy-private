@@ -37,6 +37,8 @@ type anthropicStreamState struct {
 	realThinkingSeen bool
 	planningSent     bool
 	toolStatusSent   bool
+	toolItemID       string
+	toolDeltaSent    bool
 }
 
 type responsesStreamState struct {
@@ -455,8 +457,26 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		return nil
 	}
 	startToolBlock := func(item map[string]any) error {
+		itemID := stringValue(item["id"])
 		if state.toolStarted && !state.toolStopped {
-			return nil
+			if state.toolItemID == itemID && itemID != "" {
+				if state.toolDeltaSent {
+					return nil
+				}
+				arguments := stringValue(item["arguments"])
+				if arguments == "" {
+					return nil
+				}
+				state.toolDeltaSent = true
+				return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+					"type":  "content_block_delta",
+					"index": state.toolIndex,
+					"delta": map[string]any{"type": "input_json_delta", "partial_json": arguments},
+				})
+			}
+			if err := closeToolBlock(state, w, flusher); err != nil {
+				return err
+			}
 		}
 		if err := closeThinkingBlock(); err != nil {
 			return err
@@ -469,6 +489,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 		state.toolStarted = true
 		state.toolStopped = false
+		state.toolItemID = itemID
+		state.toolDeltaSent = false
 		state.stopReason = "tool_use"
 		state.toolIndex = state.nextIndex
 		state.nextIndex++
@@ -486,6 +508,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 		arguments := stringValue(item["arguments"])
 		if arguments != "" {
+			state.toolDeltaSent = true
 			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": state.toolIndex,
@@ -547,10 +570,14 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return nil
 		}
 		if itemID != "" && state.toolStarted && !state.toolStopped {
+			if state.toolItemID != "" && state.toolItemID != itemID {
+				return nil
+			}
 			partial := stringValue(evt.Data["delta"])
 			if partial == "" {
 				return nil
 			}
+			state.toolDeltaSent = true
 			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": state.toolIndex,
@@ -618,6 +645,8 @@ func closeToolBlock(state *anthropicStreamState, w http.ResponseWriter, flusher 
 		return err
 	}
 	state.toolStopped = true
+	state.toolItemID = ""
+	state.toolDeltaSent = false
 	return nil
 }
 
