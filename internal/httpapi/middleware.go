@@ -3,6 +3,7 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -66,6 +67,27 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 	if provider.SystemPromptText != "" && provider.SystemPromptFilesRaw != "" {
 		w.Header().Set("X-SYSTEM-PROMPT-ATTACH", provider.SystemPromptPosition+":"+provider.SystemPromptFilesRaw)
 	}
+}
+
+func setRequestStatusHeaders(w http.ResponseWriter, r *http.Request, providerID string, requestID string, healthFlag string) {
+	if requestID == "" || providerID == "" {
+		return
+	}
+	w.Header().Set("X-STATUS-CHECK-URL", buildStatusCheckURL(r, providerID, requestID))
+	if healthFlag == "" {
+		healthFlag = "health"
+	}
+	w.Header().Set("X-RESPONSE-PROCESS-HEALTH-FLAG", healthFlag)
+}
+
+func buildStatusCheckURL(r *http.Request, providerID string, requestID string) string {
+	scheme := "http"
+	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/%s/v1/requests/%s", scheme, r.Host, providerID, requestID)
 }
 
 type captureWriter struct {

@@ -16,13 +16,23 @@ func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		providerCfg := providerConfigForRequest(r)
 		provider, ok := providerForRequest(r)
+		requestID := w.Header().Get("X-Request-Id")
+		statusStore, _ := requestStatusStoreFromRequest(r)
 		if !ok || !provider.SupportsModels {
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "proxy_internal_error", "unsupported_provider_contract", "provider does not support models")
+			}
+			setRequestStatusHeaders(w, r, provider.ID, requestID, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support models")
 			return
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "proxy_internal_error", "missing_upstream_auth", err.Error())
+			}
+			setRequestStatusHeaders(w, r, provider.ID, requestID, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
@@ -36,10 +46,18 @@ func handleModels() http.HandlerFunc {
 
 		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+			}
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				setRequestStatusHeaders(w, r, provider.ID, requestID, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "upstream_error", "upstream_error", err.Error())
+			}
+			setRequestStatusHeaders(w, r, provider.ID, requestID, "upstream_error")
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
@@ -53,6 +71,9 @@ func handleModels() http.HandlerFunc {
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
+		if statusStore != nil {
+			statusStore.markCompleted(requestID)
+		}
 	}
 }
 

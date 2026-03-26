@@ -13,6 +13,7 @@ func NewServer(cfg config.Config) http.Handler {
 }
 
 func NewServerWithStore(store *config.RuntimeStore) http.Handler {
+	statusStore := newRequestStatusStore()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/v1/models", handleModels())
@@ -30,12 +31,28 @@ func NewServerWithStore(store *config.RuntimeStore) http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		if statusPath, ok := parseRequestStatusPath(r.URL.Path, snapshot.Config); ok {
+			if err := auth.ValidateProxyAuth(r, snapshot.Config.ProxyAPIKey); err != nil {
+				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
+				return
+			}
+			setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
+			setRequestStatusHeaders(w, r, statusPath.ProviderID, w.Header().Get("X-Request-Id"), "health")
+			r = r.Clone(withRequestStatusStore(r.Context(), statusStore))
+			handleRequestStatus(statusStore).ServeHTTP(w, r)
+			return
+		}
 
 		if info, err := resolveRouteInfo(r.URL.Path, snapshot.Config); err == nil {
 			setConfigVersionHeaders(w, snapshot, info.ProviderID)
-			r = r.Clone(withRuntimeSnapshot(withRouteInfo(r.Context(), info), snapshot))
+			requestID := w.Header().Get("X-Request-Id")
+			statusStore.start(requestID, info.ProviderID, info.CanonicalPath)
+			setRequestStatusHeaders(w, r, info.ProviderID, requestID, "health")
+			r = r.Clone(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(r.Context(), info), snapshot), statusStore))
 			r.URL.Path = info.CanonicalPath
 			if err := auth.ValidateProxyAuth(r, snapshot.Config.ProxyAPIKey); err != nil {
+				statusStore.markFailed(requestID, "proxy_internal_error", "unauthorized", "invalid proxy api key")
+				setRequestStatusHeaders(w, r, info.ProviderID, requestID, "proxy_internal_error")
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 				return
 			}

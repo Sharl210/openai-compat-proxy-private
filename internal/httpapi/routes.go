@@ -19,6 +19,7 @@ type routeContextKey string
 
 const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
+const requestStatusStoreKey routeContextKey = "request-status-store"
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 	if path == "/v1/models" || path == "/v1/responses" || path == "/v1/chat/completions" || path == "/v1/messages" {
@@ -68,6 +69,15 @@ func routeInfoFromRequest(r *http.Request) (routeInfo, bool) {
 func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool) {
 	snapshot, ok := r.Context().Value(runtimeSnapshotKey).(*config.RuntimeSnapshot)
 	return snapshot, ok
+}
+
+func withRequestStatusStore(ctx context.Context, store *requestStatusStore) context.Context {
+	return context.WithValue(ctx, requestStatusStoreKey, store)
+}
+
+func requestStatusStoreFromRequest(r *http.Request) (*requestStatusStore, bool) {
+	store, ok := r.Context().Value(requestStatusStoreKey).(*requestStatusStore)
+	return store, ok
 }
 
 func providerConfigForRequest(r *http.Request) config.Config {

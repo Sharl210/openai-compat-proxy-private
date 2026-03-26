@@ -33,6 +33,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		applyProviderSystemPrompt(&canon, provider)
+		canon.RequestID = w.Header().Get("X-Request-Id")
+		statusStore, _ := requestStatusStoreFromRequest(r)
+		providerID := provider.ID
 		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 		canon.Model = mappedModel
 		if effort != "" {
@@ -52,10 +55,18 @@ func handleAnthropicMessages() http.HandlerFunc {
 		if canon.Stream {
 			stream, err := client.OpenEventStream(ctx, canon, authorization)
 			if err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+				}
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_timeout")
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_error")
 				if writeUpstreamError(w, err) {
 					return
 				}
@@ -63,18 +74,36 @@ func handleAnthropicMessages() http.HandlerFunc {
 				return
 			}
 			defer stream.Close()
+			if statusStore != nil {
+				statusStore.markStreaming(canon.RequestID)
+			}
 			flusher := startSSE(w)
 			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon); err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_stream_broken", "upstream_stream_broken", err.Error())
+				}
+				_ = writeAnthropicTerminalFailure(w, flusher, canon.RequestID, "upstream_stream_broken", err.Error())
 				return
+			}
+			if statusStore != nil {
+				statusStore.markCompleted(canon.RequestID)
 			}
 			return
 		}
 		events, err := client.Stream(ctx, canon, authorization)
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+			}
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_error")
 			if writeUpstreamError(w, err) {
 				return
 			}
@@ -87,13 +116,24 @@ func handleAnthropicMessages() http.HandlerFunc {
 		}
 		result, err := collector.Result()
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "invalid_upstream_stream", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := writeJSON(w, anthropicadapter.BuildResponse(result, canon.Model)); err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
+		}
+		if statusStore != nil {
+			statusStore.markCompleted(canon.RequestID)
 		}
 	}
 }

@@ -49,6 +49,8 @@ func handleResponses() http.HandlerFunc {
 		}
 		canon.RequestID = w.Header().Get("X-Request-Id")
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
+		statusStore, _ := requestStatusStoreFromRequest(r)
+		providerID := provider.ID
 		attrs := map[string]any{
 			"request_id":            canon.RequestID,
 			"route":                 "/v1/responses",
@@ -76,9 +78,17 @@ func handleResponses() http.HandlerFunc {
 		if canon.Stream {
 			stream, err := client.OpenEventStream(ctx, canon, authorization)
 			if err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+				}
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_timeout")
 					return
 				}
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_error")
 				if writeUpstreamError(w, err) {
 					return
 				}
@@ -86,22 +96,41 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			defer stream.Close()
+			if statusStore != nil {
+				statusStore.markStreaming(canon.RequestID)
+			}
 			flusher := startSSE(w)
 			if err := writeResponsesSSELive(ctx, stream, w, flusher, canon); err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_stream_broken", "upstream_stream_broken", err.Error())
+				}
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_timeout", "upstream request timed out")
 					return
 				}
+				_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_stream_broken", err.Error())
 				return
+			}
+			if statusStore != nil {
+				statusStore.markCompleted(canon.RequestID)
 			}
 			return
 		}
 
 		events, err := client.Stream(ctx, canon, authorization)
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+			}
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_error")
 			if writeUpstreamError(w, err) {
 				return
 			}
@@ -116,14 +145,25 @@ func handleResponses() http.HandlerFunc {
 
 		result, err := collector.Result()
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "invalid_upstream_stream", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := writeJSON(w, responsesadapter.BuildResponse(result)); err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
+		}
+		if statusStore != nil {
+			statusStore.markCompleted(canon.RequestID)
 		}
 		logging.Event("downstream_responses_usage_mapped", map[string]any{
 			"request_id":    canon.RequestID,
