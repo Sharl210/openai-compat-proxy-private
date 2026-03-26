@@ -227,6 +227,49 @@ chmod +x scripts/*.sh
 - `X-Provider-Version`：当前请求命中的 provider `.env` **已生效**版本对应的文件修改时间
 - `X-Provider-Name`：当前请求实际命中的 provider id
 - `X-SYSTEM-PROMPT-ATTACH`：当当前 provider 实际启用了非空系统提示词注入时返回，值格式为 `<position>:<paths>`，例如 `prepend:prompt.md, prompts/extra.md`。这里只暴露注入方向和配置路径，不会回传原始提示词文本。
+- `X-STATUS-CHECK-URL`：当前请求对应的状态查询地址，使用 provider 作用域路径，格式为 `/{providerId}/v1/requests/{requestId}`。如果配置了 `PROXY_API_KEY`，这个 URL 会直接拼上 `?key=<proxy_api_key>`，方便客户端开箱即用。
+- `X-RESPONSE-PROCESS-HEALTH-FLAG`：当前请求处理状态的短标记。正常是 `health`；出现代理层、上游或流式处理异常时，会返回对应的短状态值。
+
+### 请求状态查询接口
+
+- 查询路径使用 **provider 作用域**，不提供全局 `/v1/requests/{requestId}`：
+  - `GET /{providerId}/v1/requests/{requestId}`
+- 这样可以避免不同 provider 之间通过 request id 相互探测状态。
+- 如果配置了 `PROXY_API_KEY`，状态查询接口支持直接用查询参数鉴权：
+  - `GET /{providerId}/v1/requests/{requestId}?key=<proxy_api_key>`
+- 同时仍然保留现有代理鉴权方式：
+  - `Authorization: Bearer <proxy_api_key>`
+  - `X-API-Key: <proxy_api_key>`
+
+返回 JSON 至少包含这些字段：
+
+- `request_id`
+- `provider`
+- `route`
+- `status`
+- `health_flag`
+- `stage`
+- `started_at`
+- `updated_at`
+- `completed`
+- 失败时还会返回 `error_code` 和 `error_message`
+
+当前 `status` / `health_flag` 的基础语义：
+
+- `health`：处理正常
+- `completed`：请求已完成
+- `failed`：请求已失败
+- `upstream_timeout`：上游超时
+- `upstream_error`：上游报错
+- `upstream_stream_broken`：上游流中途中断
+- `proxy_internal_error`：代理内部处理失败
+
+### 流式失败显式终态
+
+- `responses` 流式请求中途失败时，代理不再直接静默断开，而会补发 `response.incomplete` 事件。
+- `chat/completions` 流式请求中途失败时，代理会补发带 `finish_reason="error"` 的终止 chunk，并继续发 `[DONE]`。
+- `messages` 流式请求中途失败时，代理会补发 `event: error`，然后补一个 `message_stop`。
+- 这些流式失败都会同步写入请求状态查询接口，客户端拿不到完整流时仍然可以去查最终状态。
 
 注意：
 

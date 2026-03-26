@@ -36,6 +36,10 @@ func ValidateProxyAuth(r *http.Request, proxyKey string) error {
 		return nil
 	}
 
+	if strings.TrimSpace(r.URL.Query().Get("key")) == proxyKey {
+		return nil
+	}
+
 	if r.Header.Get("Authorization") != "Bearer "+proxyKey {
 		return ErrUnauthorized
 	}

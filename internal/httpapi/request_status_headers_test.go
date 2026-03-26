@@ -19,6 +19,7 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
+		ProxyAPIKey:          "proxy-secret",
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
@@ -31,6 +32,7 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer proxy-secret")
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -42,14 +44,14 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 	if requestID == "" {
 		t.Fatalf("expected X-Request-Id header")
 	}
-	if got := rec.Header().Get("X-STATUS-CHECK-URL"); got != "http://example.com/openai/v1/requests/"+requestID {
+	if got := rec.Header().Get("X-STATUS-CHECK-URL"); got != "http://example.com/openai/v1/requests/"+requestID+"?key=proxy-secret" {
 		t.Fatalf("expected provider-scoped status URL, got %q", got)
 	}
 	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
 		t.Fatalf("expected health flag health, got %q", got)
 	}
 
-	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
+	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=proxy-secret", nil)
 	statusRec := httptest.NewRecorder()
 	server.ServeHTTP(statusRec, statusReq)
 	if statusRec.Code != http.StatusOK {
@@ -63,11 +65,18 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 		t.Fatalf("unexpected status payload: %#v", status)
 	}
 
-	wrongProviderReq := httptest.NewRequest(http.MethodGet, "/other/v1/requests/"+requestID, nil)
+	wrongProviderReq := httptest.NewRequest(http.MethodGet, "/other/v1/requests/"+requestID+"?key=proxy-secret", nil)
 	wrongProviderRec := httptest.NewRecorder()
 	server.ServeHTTP(wrongProviderRec, wrongProviderReq)
 	if wrongProviderRec.Code != http.StatusNotFound {
 		t.Fatalf("expected wrong provider scoped status lookup to 404, got %d body=%s", wrongProviderRec.Code, wrongProviderRec.Body.String())
+	}
+
+	missingKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
+	missingKeyRec := httptest.NewRecorder()
+	server.ServeHTTP(missingKeyRec, missingKeyReq)
+	if missingKeyRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected missing key status lookup to 401, got %d body=%s", missingKeyRec.Code, missingKeyRec.Body.String())
 	}
 }
 
@@ -97,6 +106,7 @@ func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *t
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)

@@ -59,14 +59,14 @@ func handleAnthropicMessages() http.HandlerFunc {
 					statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 				}
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_timeout")
+					setRequestStatusHeaders(w, r, providerID, canon.RequestID, providerCfg.ProxyAPIKey, "upstream_timeout")
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
 				}
-				setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_error")
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, providerCfg.ProxyAPIKey, "upstream_error")
 				if writeUpstreamError(w, err) {
 					return
 				}
@@ -96,14 +96,14 @@ func handleAnthropicMessages() http.HandlerFunc {
 				statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 			}
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_timeout")
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, providerCfg.ProxyAPIKey, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
 			}
-			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "upstream_error")
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, providerCfg.ProxyAPIKey, "upstream_error")
 			if writeUpstreamError(w, err) {
 				return
 			}
@@ -119,7 +119,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "invalid_upstream_stream", err.Error())
 			}
-			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "proxy_internal_error")
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, providerCfg.ProxyAPIKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
 			return
 		}
@@ -128,7 +128,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
 			}
-			setRequestStatusHeaders(w, r, providerID, canon.RequestID, "proxy_internal_error")
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, providerCfg.ProxyAPIKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
 		}

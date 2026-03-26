@@ -22,7 +22,7 @@ func handleModels() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(requestID, "proxy_internal_error", "unsupported_provider_contract", "provider does not support models")
 			}
-			setRequestStatusHeaders(w, r, provider.ID, requestID, "proxy_internal_error")
+			setRequestStatusHeaders(w, r, provider.ID, requestID, providerCfg.ProxyAPIKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support models")
 			return
 		}
@@ -32,7 +32,7 @@ func handleModels() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(requestID, "proxy_internal_error", "missing_upstream_auth", err.Error())
 			}
-			setRequestStatusHeaders(w, r, provider.ID, requestID, "proxy_internal_error")
+			setRequestStatusHeaders(w, r, provider.ID, requestID, providerCfg.ProxyAPIKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
@@ -50,14 +50,14 @@ func handleModels() http.HandlerFunc {
 				statusStore.markFailed(requestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 			}
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				setRequestStatusHeaders(w, r, provider.ID, requestID, "upstream_timeout")
+				setRequestStatusHeaders(w, r, provider.ID, requestID, providerCfg.ProxyAPIKey, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
 			if statusStore != nil {
 				statusStore.markFailed(requestID, "upstream_error", "upstream_error", err.Error())
 			}
-			setRequestStatusHeaders(w, r, provider.ID, requestID, "upstream_error")
+			setRequestStatusHeaders(w, r, provider.ID, requestID, providerCfg.ProxyAPIKey, "upstream_error")
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
