@@ -24,8 +24,8 @@ func mustStatusRequestPathFromHeader(t *testing.T, statusURL string) string {
 	if parsed.Query().Get("key") != "" {
 		t.Fatalf("expected status url to avoid raw key query, got %q", statusURL)
 	}
-	if parsed.Query().Get("token") == "" {
-		t.Fatalf("expected status url token query, got %q", statusURL)
+	if parsed.Query().Get("token") != "" {
+		t.Fatalf("expected status url to omit token query, got %q", statusURL)
 	}
 	return parsed.RequestURI()
 }
@@ -64,7 +64,7 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 		t.Fatalf("expected X-Request-Id header")
 	}
 	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
-	if !strings.HasPrefix(statusURL, "http://example.com/openai/v1/requests/"+requestID+"?") {
+	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
 		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
 	}
 	if strings.Contains(statusURL, "proxy-secret") {
@@ -80,12 +80,8 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 	if statusRec.Code != http.StatusOK {
 		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
 	}
-	nextStatusURL := statusRec.Header().Get("X-STATUS-CHECK-URL")
-	if nextStatusURL == "" {
-		t.Fatalf("expected status response to issue next status URL")
-	}
-	if nextStatusURL == statusURL {
-		t.Fatalf("expected one-time token status URL to rotate, got %q", nextStatusURL)
+	if nextStatusURL := statusRec.Header().Get("X-STATUS-CHECK-URL"); nextStatusURL != statusURL {
+		t.Fatalf("expected status response to keep same unauthenticated status URL, got %q", nextStatusURL)
 	}
 	var status requestStatus
 	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
@@ -95,22 +91,14 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 		t.Fatalf("unexpected status payload: %#v", status)
 	}
 
-	reusedTokenReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
-	reusedTokenRec := httptest.NewRecorder()
-	server.ServeHTTP(reusedTokenRec, reusedTokenReq)
-	if reusedTokenRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected reused one-time token lookup to 401, got %d body=%s", reusedTokenRec.Code, reusedTokenRec.Body.String())
-	}
-
-	rotatedTokenReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, nextStatusURL), nil)
-	rotatedTokenRec := httptest.NewRecorder()
-	server.ServeHTTP(rotatedTokenRec, rotatedTokenReq)
-	if rotatedTokenRec.Code != http.StatusOK {
-		t.Fatalf("expected rotated one-time token lookup to 200, got %d body=%s", rotatedTokenRec.Code, rotatedTokenRec.Body.String())
+	repeatedStatusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
+	repeatedStatusRec := httptest.NewRecorder()
+	server.ServeHTTP(repeatedStatusRec, repeatedStatusReq)
+	if repeatedStatusRec.Code != http.StatusOK {
+		t.Fatalf("expected repeated unauthenticated lookup to stay 200, got %d body=%s", repeatedStatusRec.Code, repeatedStatusRec.Body.String())
 	}
 
 	wrongProviderReq := httptest.NewRequest(http.MethodGet, "/other/v1/requests/"+requestID, nil)
-	wrongProviderReq.Header.Set("Authorization", "Bearer proxy-secret")
 	wrongProviderRec := httptest.NewRecorder()
 	server.ServeHTTP(wrongProviderRec, wrongProviderReq)
 	if wrongProviderRec.Code != http.StatusNotFound {
@@ -120,15 +108,31 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 	rawKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=proxy-secret", nil)
 	rawKeyRec := httptest.NewRecorder()
 	server.ServeHTTP(rawKeyRec, rawKeyReq)
-	if rawKeyRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected raw key query status lookup to 401, got %d body=%s", rawKeyRec.Code, rawKeyRec.Body.String())
+	if rawKeyRec.Code != http.StatusOK {
+		t.Fatalf("expected status lookup with ignored raw key query to stay 200, got %d body=%s", rawKeyRec.Code, rawKeyRec.Body.String())
 	}
 
 	missingKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
 	missingKeyRec := httptest.NewRecorder()
 	server.ServeHTTP(missingKeyRec, missingKeyReq)
-	if missingKeyRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected missing key status lookup to 401, got %d body=%s", missingKeyRec.Code, missingKeyRec.Body.String())
+	if missingKeyRec.Code != http.StatusOK {
+		t.Fatalf("expected missing auth status lookup to 200, got %d body=%s", missingKeyRec.Code, missingKeyRec.Body.String())
+	}
+
+	authHeaderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
+	authHeaderReq.Header.Set("Authorization", "Bearer definitely-not-needed")
+	authHeaderRec := httptest.NewRecorder()
+	server.ServeHTTP(authHeaderRec, authHeaderReq)
+	if authHeaderRec.Code != http.StatusOK {
+		t.Fatalf("expected authorization header to be ignored for status lookup, got %d body=%s", authHeaderRec.Code, authHeaderRec.Body.String())
+	}
+
+	xAPIKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
+	xAPIKeyReq.Header.Set("X-API-Key", "also-not-needed")
+	xAPIKeyRec := httptest.NewRecorder()
+	server.ServeHTTP(xAPIKeyRec, xAPIKeyReq)
+	if xAPIKeyRec.Code != http.StatusOK {
+		t.Fatalf("expected X-API-Key to be ignored for status lookup, got %d body=%s", xAPIKeyRec.Code, xAPIKeyRec.Body.String())
 	}
 }
 
@@ -168,7 +172,7 @@ func TestResponsesStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T)
 		t.Fatalf("expected X-Request-Id header")
 	}
 	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
-	if !strings.HasPrefix(statusURL, "http://example.com/openai/v1/requests/"+requestID+"?") {
+	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
 		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
 	}
 	if strings.Contains(statusURL, "proxy-secret") {

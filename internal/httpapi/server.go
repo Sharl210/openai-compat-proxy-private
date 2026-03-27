@@ -10,12 +10,11 @@ import (
 )
 
 type Server struct {
-	store           *config.RuntimeStore
-	statusStore     *requestStatusStore
-	statusAuthStore *requestStatusAuthStore
-	statusHandler   http.Handler
-	mux             *http.ServeMux
-	handler         http.Handler
+	store         *config.RuntimeStore
+	statusStore   *requestStatusStore
+	statusHandler http.Handler
+	mux           *http.ServeMux
+	handler       http.Handler
 
 	CacheInfo *cacheinfo.Manager
 }
@@ -26,10 +25,9 @@ func NewServer(cfg config.Config) *Server {
 
 func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *Server {
 	srv := &Server{
-		store:           store,
-		statusStore:     newRequestStatusStore(),
-		statusAuthStore: newRequestStatusAuthStore(),
-		CacheInfo:       cacheMgr,
+		store:       store,
+		statusStore: newRequestStatusStore(),
+		CacheInfo:   cacheMgr,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
@@ -70,11 +68,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "request not found")
 			return
 		}
-		r = r.Clone(withRequestStatusID(withRequestStatusAuthStore(withRequestStatusStore(r.Context(), s.statusStore), s.statusAuthStore), statusPath.RequestID))
-		if err := validateStatusCheckAuth(r, snapshot.Config.ProxyAPIKey, provider, statusPath.RequestID); err != nil {
-			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
-			return
-		}
+		r = r.Clone(withRequestStatusID(withRequestStatusStore(r.Context(), s.statusStore), statusPath.RequestID))
 		setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
 		setRequestStatusHeaders(w, r, statusPath.ProviderID, statusPath.RequestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
 		s.statusHandler.ServeHTTP(w, r)
@@ -93,7 +87,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.CacheInfo != nil {
 			ctx = withCacheInfoManager(ctx, s.CacheInfo)
 		}
-		r = r.Clone(withRequestStatusID(withRequestStatusAuthStore(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot), s.statusStore), s.statusAuthStore), requestID))
+		r = r.Clone(withRequestStatusID(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot), s.statusStore), requestID))
 		r.URL.Path = info.CanonicalPath
 		if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")

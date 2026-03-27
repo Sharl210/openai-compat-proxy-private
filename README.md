@@ -270,7 +270,7 @@ chmod +x scripts/*.sh
 - `X-Provider-Version`：当前请求命中的 provider `.env` **已生效**版本对应的文件修改时间
 - `X-Provider-Name`：当前请求实际命中的 provider id
 - `X-SYSTEM-PROMPT-ATTACH`：当当前 provider 实际启用了非空系统提示词注入时返回，值格式为 `<position>:<paths>`，例如 `prepend:prompt.md, prompts/extra.md`。这里只暴露注入方向和配置路径，不会回传原始提示词文本。
-- `X-STATUS-CHECK-URL`：当前请求对应的状态查询地址，使用 provider 作用域路径，格式为 `/{providerId}/v1/requests/{requestId}?token=<one-time-token>`。这里不再回显真实代理 key。这个 token 是一次性的；每次查询后都应该继续使用响应头里新返回的下一条 `X-STATUS-CHECK-URL`。
+- `X-STATUS-CHECK-URL`：当前请求对应的状态查询地址，使用 provider 作用域路径，格式为 `/{providerId}/v1/requests/{requestId}`。这里不回显真实代理 key，也不再附带一次性 token。
 - `X-RESPONSE-PROCESS-HEALTH-FLAG`：当前请求处理状态的短标记。非流式成功请求通常是 `health`；流式请求在响应开始时会返回 `streaming`，表示“仍在处理中”，不是最终成功态。流式最终是否成功应以终态事件和请求状态查询接口为准。
 
 ### 请求状态查询接口
@@ -278,16 +278,13 @@ chmod +x scripts/*.sh
 - 查询路径使用 **provider 作用域**，不提供全局 `/v1/requests/{requestId}`：
   - `GET /{providerId}/v1/requests/{requestId}`
 - 这样可以避免不同 provider 之间通过 request id 相互探测状态。
-- 如果当前 provider 需要代理鉴权，状态查询默认使用 `X-STATUS-CHECK-URL` 里的 `token` 完成一次性查询；旧的 `?key=` 查询参数不再作为状态查询鉴权方式。
-- 同时仍然保留现有代理鉴权方式：
-  - `Authorization: Bearer <proxy_api_key>`
-  - `X-API-Key: <proxy_api_key>`
+- 状态查询接口现在完全不做鉴权；不会读取 `Authorization`、`X-API-Key`、`Api-Key`，也不会读取 `?key=` 之类的查询参数。
 
 这里的状态查询规则现在是：
 
-- `X-STATUS-CHECK-URL` 只负责给出 provider 作用域路径和一次性 token，不再暴露真实代理 key
-- 一次性 token 只对当前 `providerId + requestId` 有效，且每次查询后都会轮换
-- 如果客户端不用 token，也仍然可以继续使用常规代理鉴权头访问状态查询接口
+- `X-STATUS-CHECK-URL` 只负责给出 provider 作用域路径，不再附带 token，也不暴露真实代理 key
+- 状态查询只按 `providerId + requestId` 命中记录；provider 不匹配或请求不存在时返回 `404`
+- 即使主请求仍然开启了代理鉴权，状态查询接口也始终允许匿名访问
 - 默认 provider 的裸 `/v1/*` 路由和 `/{providerId}/v1/*` 路由现在共享同一套状态查询语义，不再出现“主请求能过、状态查询换另一把 key”的分叉
 
 返回 JSON 至少包含这些字段：
@@ -331,6 +328,22 @@ chmod +x scripts/*.sh
 
 - 如果你只改了不能热加载的根配置，例如 `LISTEN_ADDR` 或日志配置，运行时会忽略这些变更，`X-Env-Version` 不会更新。
 - 如果新配置写坏了，运行时会继续使用上一份最后可用配置，版本头也保持旧值不变。
+
+### 升级旧版本时的 Cache_Info 迁移说明
+
+如果你是从旧版本升级，并且线上已经有 `.env`、`providers/*.env` 和历史 Cache_Info 文件，建议按下面顺序处理：
+
+1. 先备份现有配置和统计目录，例如：
+
+```bash
+cp .env .env.bak
+cp providers/openai.env providers/openai.env.bak
+cp -R providers/Cache_Info providers/Cache_Info.bak 2>/dev/null || true
+```
+
+2. 对照新的 `.env.example` 和 `providers/*.env.example`，把线上 `.env`、`providers/*.env` 的注释与字段说明补齐到最新语义，尤其是 Cache_Info 现在统一写到 `<PROVIDERS_DIR>/SYSTEM_JSON_FILES/Cache_Info/`。
+3. 如果你希望把历史统计文件也迁到新目录，可以把旧的 `Cache_Info/*.json`、`Cache_Info/*.txt` 搬到 `SYSTEM_JSON_FILES/Cache_Info/`；如果不搬，程序读取 JSON 时仍会兼容旧的 `Cache_Info/*.json`。
+4. `CACHE_INFO_TIMEZONE` 不能热加载；如果你在升级时改了它，完成迁移后必须重启服务。
 
 ## 路由说明
 
@@ -391,8 +404,8 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 基础字段
 
 - `LISTEN_ADDR`：监听地址，例如 `:21021`。**不能热加载**
-- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。只支持 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`。**不能热加载，修改后需要重启**
-- `PROXY_API_KEY`：根级代理访问 key，可选；provider 没有设置 `PROXY_API_KEY_OVERRIDE` 时会继承它。默认 provider 的裸 `/v1/*` 路由也使用这把 key。**可热加载**
+- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。provider 统计快照会写到 `<PROVIDERS_DIR>/SYSTEM_JSON_FILES/Cache_Info/`；读取旧数据时仍会兼容历史 `Cache_Info/*.json`。只支持 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`。**不能热加载，修改后需要重启**
+- `PROXY_API_KEY`：根级代理访问 key，可选；provider 没有设置 `PROXY_API_KEY_OVERRIDE` 时会继承它。默认 provider 的裸 `/v1/*` 路由也使用这把 key。provider 作用域请求状态查询 `/{providerId}/v1/requests/{requestId}` 不会使用这把 key。**可热加载**
 
 ### 多 provider 相关字段
 
@@ -447,7 +460,7 @@ http(s)://<host>/v1/<providerId>/xxx
 - `PROXY_API_KEY_OVERRIDE=empty`：这个 provider 不做代理鉴权
 - `PROXY_API_KEY_OVERRIDE=<custom>`：这个 provider 的分组路由只接受自己的 key
 - 如果这个 provider 同时又是 `DEFAULT_PROVIDER`，那么裸 `/v1/*` 路由仍然允许根 `.env` 的 `PROXY_API_KEY` 访问；它自己的分组路由继续使用自己的 override key。
-- provider 作用域状态查询接口 `/{providerId}/v1/requests/{requestId}` 和这个 provider 的代理鉴权规则保持一致。
+- provider 作用域状态查询接口 `/{providerId}/v1/requests/{requestId}` 不继承这里的代理鉴权规则，会始终保持无鉴权。
 
 ### provider 级系统提示词字段
 

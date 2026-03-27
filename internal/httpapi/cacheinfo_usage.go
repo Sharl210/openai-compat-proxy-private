@@ -9,7 +9,7 @@ import (
 	"openai-compat-proxy/internal/cacheinfo"
 )
 
-func cacheInfoUsageRecorder(r *http.Request, requestID, providerID string) func(map[string]any) {
+func cacheInfoUsageRecorder(r *http.Request, requestID, providerID string) usageRecorderFunc {
 	manager := cacheInfoManagerFromRequest(r)
 	if manager == nil {
 		return nil
@@ -41,9 +41,21 @@ func cacheInfoUsageFromMap(usage map[string]any) (*cacheinfo.Usage, bool) {
 		parsed.InputTokens = n
 		hasValues = true
 	}
+	if parsed.InputTokens == 0 {
+		if n, ok := usageNumberAsInt64(usage["prompt_tokens"]); ok {
+			parsed.InputTokens = n
+			hasValues = true
+		}
+	}
 	if n, ok := usageNumberAsInt64(usage["output_tokens"]); ok {
 		parsed.OutputTokens = n
 		hasValues = true
+	}
+	if parsed.OutputTokens == 0 {
+		if n, ok := usageNumberAsInt64(usage["completion_tokens"]); ok {
+			parsed.OutputTokens = n
+			hasValues = true
+		}
 	}
 	if n, ok := usageNumberAsInt64(usage["total_tokens"]); ok {
 		parsed.TotalTokens = n
@@ -75,6 +87,9 @@ func cachedTokensFromUsage(usage map[string]any) (int64, bool) {
 		if n, ok := usageNumberAsInt64(details["cached_tokens"]); ok {
 			return n, true
 		}
+	}
+	if n, ok := usageNumberAsInt64(usage["cache_read_input_tokens"]); ok {
+		return n, true
 	}
 	if n, ok := usageNumberAsInt64(usage["cached_tokens"]); ok {
 		return n, true

@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+func expectedCacheInfoDir(root string) string {
+	return filepath.Join(root, "SYSTEM_JSON_FILES", "Cache_Info")
+}
+
+func expectedCacheInfoJSONPath(root, providerID string) string {
+	return filepath.Join(expectedCacheInfoDir(root), providerID+".json")
+}
+
+func expectedCacheInfoTXTPath(root, providerID string) string {
+	return filepath.Join(expectedCacheInfoDir(root), providerID+".txt")
+}
+
 func TestEnsureCacheInfoDir(t *testing.T) {
 	tmp := t.TempDir()
 
@@ -16,20 +28,20 @@ func TestEnsureCacheInfoDir(t *testing.T) {
 		t.Fatalf("EnsureCacheInfoDir() error: %v", err)
 	}
 
-	info, err := os.Stat(filepath.Join(tmp, "Cache_Info"))
+	info, err := os.Stat(filepath.Join(tmp, "SYSTEM_JSON_FILES"))
 	if err != nil {
-		t.Fatalf("Cache_Info directory not created: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatal("Cache_Info is not a directory")
-	}
-	jsonDir := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES")
-	info, err = os.Stat(jsonDir)
-	if err != nil {
-		t.Fatalf("SYSTEM_JSON_FILES not created: %v", err)
+		t.Fatalf("SYSTEM_JSON_FILES directory not created: %v", err)
 	}
 	if !info.IsDir() {
 		t.Fatal("SYSTEM_JSON_FILES is not a directory")
+	}
+	jsonDir := expectedCacheInfoDir(tmp)
+	info, err = os.Stat(jsonDir)
+	if err != nil {
+		t.Fatalf("Cache_Info not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("Cache_Info is not a directory")
 	}
 
 	// calling again should be idempotent
@@ -89,7 +101,7 @@ func TestLoadProviderStats_NormalRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json")
+	path := expectedCacheInfoJSONPath(tmp, "openai")
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -109,13 +121,54 @@ func TestLoadProviderStats_NormalRecovery(t *testing.T) {
 	}
 }
 
+func TestLoadProviderStats_LegacyFallback(t *testing.T) {
+	tmp := t.TempDir()
+	if err := EnsureCacheInfoDir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	original := ProviderStats{
+		Timezone:      "Asia/Shanghai",
+		TodayDate:     "2026-03-27",
+		YesterdayDate: "2026-03-26",
+		Today:         TokenTotals{InputTokens: 123, TotalTokens: 123},
+		HistoryTotal:  TokenTotals{InputTokens: 456, TotalTokens: 456},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(tmp, "Cache_Info", "openai.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatalf("LoadProviderStats() error: %v", err)
+	}
+	if stats == nil {
+		t.Fatal("expected non-nil stats")
+	}
+	if stats.Today.InputTokens != 123 {
+		t.Errorf("Today.InputTokens = %d, want 123", stats.Today.InputTokens)
+	}
+	if stats.HistoryTotal.InputTokens != 456 {
+		t.Errorf("HistoryTotal.InputTokens = %d, want 456", stats.HistoryTotal.InputTokens)
+	}
+}
+
 func TestLoadProviderStats_CorruptJSON(t *testing.T) {
 	tmp := t.TempDir()
 	if err := EnsureCacheInfoDir(tmp); err != nil {
 		t.Fatal(err)
 	}
 
-	path := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json")
+	path := expectedCacheInfoJSONPath(tmp, "openai")
 	if err := os.WriteFile(path, []byte("{invalid json"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +189,7 @@ func TestLoadProviderStats_IgnoresTmpFiles(t *testing.T) {
 	}
 
 	// write only a .tmp file, no real json
-	tmpPath := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json.tmp")
+	tmpPath := expectedCacheInfoJSONPath(tmp, "openai") + ".tmp"
 	if err := os.WriteFile(tmpPath, []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +240,7 @@ func TestSaveProviderStats_AtomicWrite(t *testing.T) {
 	}
 
 	// verify JSON file exists and has correct content
-	jsonPath := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json")
+	jsonPath := expectedCacheInfoJSONPath(tmp, "openai")
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		t.Fatalf("read json: %v", err)
@@ -201,7 +254,7 @@ func TestSaveProviderStats_AtomicWrite(t *testing.T) {
 	}
 
 	// verify TXT file exists
-	txtPath := filepath.Join(tmp, "Cache_Info", "openai.txt")
+	txtPath := expectedCacheInfoTXTPath(tmp, "openai")
 	txtData, err := os.ReadFile(txtPath)
 	if err != nil {
 		t.Fatalf("read txt: %v", err)
@@ -218,7 +271,7 @@ func TestSaveProviderStats_AtomicWrite(t *testing.T) {
 	}
 
 	// verify no .tmp files remain
-	entries, err := os.ReadDir(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES"))
+	entries, err := os.ReadDir(expectedCacheInfoDir(tmp))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,12 +347,12 @@ func TestSaveProviderStats_CustomProvidersDir(t *testing.T) {
 	}
 
 	// verify files are in the correct location
-	jsonPath := filepath.Join(customDir, "Cache_Info", "SYSTEM_JSON_FILES", "test-provider.json")
+	jsonPath := expectedCacheInfoJSONPath(customDir, "test-provider")
 	if _, err := os.Stat(jsonPath); err != nil {
 		t.Fatalf("JSON file not at expected path %s: %v", jsonPath, err)
 	}
 
-	txtPath := filepath.Join(customDir, "Cache_Info", "test-provider.txt")
+	txtPath := expectedCacheInfoTXTPath(customDir, "test-provider")
 	if _, err := os.Stat(txtPath); err != nil {
 		t.Fatalf("TXT file not at expected path %s: %v", txtPath, err)
 	}

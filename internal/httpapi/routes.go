@@ -21,7 +21,6 @@ type routeContextKey string
 const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const requestStatusStoreKey routeContextKey = "request-status-store"
-const requestStatusAuthStoreKey routeContextKey = "request-status-auth-store"
 const requestStatusIDKey routeContextKey = "request-status-id"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 
@@ -93,15 +92,6 @@ func withRequestStatusStore(ctx context.Context, store *requestStatusStore) cont
 
 func requestStatusStoreFromRequest(r *http.Request) (*requestStatusStore, bool) {
 	store, ok := r.Context().Value(requestStatusStoreKey).(*requestStatusStore)
-	return store, ok
-}
-
-func withRequestStatusAuthStore(ctx context.Context, store *requestStatusAuthStore) context.Context {
-	return context.WithValue(ctx, requestStatusAuthStoreKey, store)
-}
-
-func requestStatusAuthStoreFromRequest(r *http.Request) (*requestStatusAuthStore, bool) {
-	store, ok := r.Context().Value(requestStatusAuthStoreKey).(*requestStatusAuthStore)
 	return store, ok
 }
 

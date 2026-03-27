@@ -229,6 +229,8 @@ func TestProviderScopedResponsesRequestExposesVersionAndStatusHeadersTogether(t 
 	}
 	if got := rec.Header().Get("X-STATUS-CHECK-URL"); got == "" {
 		t.Fatalf("expected X-STATUS-CHECK-URL header")
+	} else if strings.Contains(got, "?token=") {
+		t.Fatalf("expected X-STATUS-CHECK-URL to omit token query, got %q", got)
 	}
 	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
 		t.Fatalf("expected X-RESPONSE-PROCESS-HEALTH-FLAG health, got %q", got)

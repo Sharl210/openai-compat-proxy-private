@@ -186,6 +186,9 @@ func handleChat() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markCompleted(canon.RequestID)
 			}
+			if usageRecorder != nil {
+				usageRecorder(result.Usage)
+			}
 			return
 		}
 

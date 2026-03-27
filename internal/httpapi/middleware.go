@@ -81,17 +81,14 @@ func setRequestStatusHeaders(w http.ResponseWriter, r *http.Request, providerID 
 }
 
 func buildStatusCheckURL(r *http.Request, providerID string, requestID string, statusToken string) string {
+	_ = statusToken
 	scheme := "http"
 	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
 		scheme = proto
 	} else if r.TLS != nil {
 		scheme = "https"
 	}
-	urlText := fmt.Sprintf("%s://%s/%s/v1/requests/%s", scheme, r.Host, providerID, requestID)
-	if statusToken == "" {
-		return urlText
-	}
-	return urlText + "?token=" + statusToken
+	return fmt.Sprintf("%s://%s/%s/v1/requests/%s", scheme, r.Host, providerID, requestID)
 }
 
 type captureWriter struct {

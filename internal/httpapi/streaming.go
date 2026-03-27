@@ -22,6 +22,8 @@ var sseHeartbeatInterval = 15 * time.Second
 
 const syntheticReasoningPlaceholder = "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"
 
+type usageRecorderFunc func(map[string]any)
+
 type anthropicStreamState struct {
 	messageStarted   bool
 	messageID        string
@@ -117,7 +119,7 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	return nil
 }
 
-func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder func(map[string]any)) error {
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder usageRecorderFunc) error {
 	state := responsesStreamState{}
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return err
@@ -145,7 +147,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	return nil
 }
 
-func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder func(map[string]any)) error {
+func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	item, _ := evt.Data["item"].(map[string]any)
 	writeStreamEvent := func(event string, data map[string]any) error {
 		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
@@ -328,7 +330,7 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, usageRecorder func(map[string]any)) error {
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, usageRecorder usageRecorderFunc) error {
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
@@ -409,7 +411,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	})
 }
 
-func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event, usageRecorder func(map[string]any)) error {
+func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	var closeThinkingBlock func() error
 	startMessage := func() error {
 		if state.messageStarted {
@@ -659,6 +661,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.stopReason != "" {
 			stopReason = state.stopReason
 		}
+		rawUsage := usageFromEventData(evt.Data)
 		usage := anthropicUsageFromEvent(evt.Data)
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
@@ -667,8 +670,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}); err != nil {
 			return err
 		}
-		if usageRecorder != nil && usage != nil {
-			usageRecorder(usage)
+		if usageRecorder != nil && len(rawUsage) > 0 {
+			usageRecorder(rawUsage)
 		}
 		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
 			return err
@@ -874,7 +877,7 @@ type chatStreamState struct {
 	terminalFailure   *aggregate.TerminalFailureError
 }
 
-func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder func(map[string]any)) error {
+func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder usageRecorderFunc) error {
 	state := chatStreamState{
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
@@ -1005,7 +1008,7 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 	return nil
 }
 
-func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder func(map[string]any)) error {
+func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder usageRecorderFunc) error {
 	ensureRoleSent := func() error {
 		if state.roleSent {
 			return nil
@@ -1106,7 +1109,8 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if len(state.toolSent) > 0 {
 			finishReason = "tool_calls"
 		}
-		cachedTokens := nestedCachedTokens(usageFromEventData(evt.Data))
+		rawUsage := usageFromEventData(evt.Data)
+		cachedTokens := nestedCachedTokens(rawUsage)
 		logging.Event("upstream_stream_usage_observed", map[string]any{
 			"upstream_event":       evt.Event,
 			"cached_tokens":        cachedTokens,
@@ -1116,7 +1120,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 		if includeUsage {
-			if usage := chatUsage(usageFromEventData(evt.Data)); usage != nil {
+			if usage := chatUsage(rawUsage); usage != nil {
 				logging.Event("downstream_stream_usage_mapped", map[string]any{
 					"upstream_event": evt.Event,
 					"cached_tokens":  nestedCachedTokens(mapUsageForLogging(usage)),
@@ -1124,12 +1128,10 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				if err := writeChatChunk(w, flusher, nil, "", usage); err != nil {
 					return err
 				}
-				if usageRecorder != nil {
-					if mapped, ok := usage.(map[string]any); ok && len(mapped) > 0 {
-						usageRecorder(mapped)
-					}
-				}
 			}
+		}
+		if usageRecorder != nil && len(rawUsage) > 0 {
+			usageRecorder(rawUsage)
 		}
 		if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
 			return err
