@@ -101,8 +101,8 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 		return nil
 	}
 
+	m.checkCrossDayAndReset(providerID)
 	now := m.clock.Now().In(m.location)
-	m.checkAndRollOver(providerID, now)
 
 	stats.Today.InputTokens += usage.InputTokens
 	stats.Today.CachedTokens += usage.CachedTokens
@@ -120,8 +120,9 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	return nil
 }
 
-func (m *Manager) checkAndRollOver(providerID string, now time.Time) {
+func (m *Manager) checkCrossDayAndReset(providerID string) {
 	stats := m.stats[providerID]
+	now := m.clock.Now().In(m.location)
 	todayStr := now.Format("2006-01-02")
 
 	todayDate, err := time.ParseInLocation("2006-01-02", stats.TodayDate, m.location)
@@ -138,13 +139,13 @@ func (m *Manager) checkAndRollOver(providerID string, now time.Time) {
 	}
 
 	if nowDate.After(todayDate) {
-		diff := nowDate.Sub(todayDate)
-		if diff <= 24*time.Hour {
+		daysSinceToday := int(nowDate.Sub(todayDate) / (24 * time.Hour))
+		if daysSinceToday >= 2 {
+			stats.Yesterday = TokenTotals{}
+			stats.YesterdayDate = ""
+		} else {
 			stats.Yesterday = stats.Today
 			stats.YesterdayDate = stats.TodayDate
-		} else {
-			stats.Yesterday = TokenTotals{}
-			stats.YesterdayDate = todayStr
 		}
 		stats.Today = TokenTotals{}
 		stats.TodayDate = todayStr
@@ -180,8 +181,12 @@ func (m *Manager) Stop() {
 }
 
 func (m *Manager) flushAll() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for pid := range m.stats {
+		m.checkCrossDayAndReset(pid)
+	}
 
 	for pid, stats := range m.stats {
 		_ = SaveProviderStats(m.providersDir, pid, stats)

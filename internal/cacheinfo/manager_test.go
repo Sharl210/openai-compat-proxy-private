@@ -146,6 +146,32 @@ func TestManager_RolloverTwoDaysOrMore(t *testing.T) {
 	}
 }
 
+func TestManager_MultiDayDowntimeClearsYesterday(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+
+	usage1 := Usage{InputTokens: 100, TotalTokens: 100}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage1); err != nil {
+		t.Fatal(err)
+	}
+
+	clock.Set(time.Date(2026, 3, 30, 10, 0, 0, 0, loc))
+	usage2 := Usage{InputTokens: 50, TotalTokens: 50}
+	if err := m.RecordFinalUsage("req-2", "openai", &usage2); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := m.stats["openai"]
+	if stats.YesterdayDate != "" {
+		t.Fatalf("YesterdayDate = %s, want empty when gap >= 2 days", stats.YesterdayDate)
+	}
+	if stats.Yesterday.TotalTokens != 0 {
+		t.Fatalf("Yesterday.TotalTokens = %d, want 0 when gap >= 2 days", stats.Yesterday.TotalTokens)
+	}
+}
+
 func TestManager_DateBeforeToday(t *testing.T) {
 	tmp := t.TempDir()
 	loc := time.FixedZone("CST", 8*3600)
@@ -310,6 +336,35 @@ func TestManager_FlushWritesFile(t *testing.T) {
 	}
 	if loaded.Today.InputTokens != 100 {
 		t.Errorf("file Today.InputTokens = %d, want 100", loaded.Today.InputTokens)
+	}
+}
+
+func TestManager_FlushTriggersRollover(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+
+	usage := Usage{InputTokens: 100, CachedTokens: 40, OutputTokens: 50, TotalTokens: 150}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	clock.Set(time.Date(2026, 3, 28, 1, 0, 0, 0, loc))
+	m.flushAll()
+
+	stats := m.stats["openai"]
+	if stats.TodayDate != "2026-03-28" {
+		t.Fatalf("TodayDate = %s, want 2026-03-28", stats.TodayDate)
+	}
+	if stats.YesterdayDate != "2026-03-27" {
+		t.Fatalf("YesterdayDate = %s, want 2026-03-27", stats.YesterdayDate)
+	}
+	if stats.Yesterday.TotalTokens != 150 {
+		t.Fatalf("Yesterday.TotalTokens = %d, want 150", stats.Yesterday.TotalTokens)
+	}
+	if stats.Today.TotalTokens != 0 {
+		t.Fatalf("Today.TotalTokens = %d, want 0", stats.Today.TotalTokens)
 	}
 }
 
