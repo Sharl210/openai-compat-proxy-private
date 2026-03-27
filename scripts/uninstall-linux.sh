@@ -2,18 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_PATH="$ROOT_DIR/bin/openai-compat-proxy"
-PID_FILE="$ROOT_DIR/.proxy.pid"
-LOG_FILE="$ROOT_DIR/.proxy.log"
+cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/lib/runtime.sh"
 
-if [[ -f "$PID_FILE" ]]; then
-  PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
-    kill "$PID"
-    sleep 1
-  fi
-fi
-
-rm -f "$PID_FILE" "$LOG_FILE" "$BIN_PATH"
+acquire_lock
+load_env
+prepare_runtime_dependencies
+stop_managed_service "$(extract_port "$LISTEN_ADDR")"
+rm -f "$LOG_FILE" "$BIN_PATH" "$BACKUP_BIN_PATH" "$TMP_BIN_PATH"
 
 echo "stopped and cleaned runtime artifacts"

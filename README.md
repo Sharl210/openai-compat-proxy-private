@@ -142,13 +142,14 @@ cp providers/openai.env.example providers/anthropic.env
 它会做这些事：
 
 - 检查根目录 `.env` 是否存在
-- 自动安装 Go（仅在当前机器缺少 Go 且支持 `apt-get` 时）
-- 编译 `./cmd/proxy`
-- 停掉旧进程
-- 后台启动代理
+- 检查 `PROVIDERS_DIR` 是否存在，且至少包含一个 `*.env`
+- 自动补齐部署依赖，例如 `curl`、`python3`、`tar`、`ss`，以及缺失时的 Go（**仅在当前机器支持 `apt-get` 时**）
+- 先编译候选二进制，再停止旧进程，避免前置检查没过就误伤现网进程
+- 停掉旧代理进程后，确认目标监听端口上已经没有旧代理实例，再启动新进程
+- 只有在**新 PID 已经监听目标端口且 `healthz` 成功**后，才把部署视为成功
 - 写入 `.proxy.pid`
-- 把运行日志写到 `.proxy.log`
-- 自动请求 `healthz` 做启动检查
+- 追加运行日志到 `.proxy.log`
+- 如果新版本启动失败，会优先恢复旧二进制；如果旧服务原本在运行，还会尝试回滚启动旧版本
 
 使用方式：
 
@@ -157,14 +158,36 @@ chmod +x scripts/*.sh
 ./scripts/deploy-linux.sh
 ```
 
+#### `scripts/stop-linux.sh`
+
+作用：只停止当前服务，不删除部署产物。
+
+它会：
+
+- 使用共享锁避免与 deploy / restart / uninstall 并发打架
+- 优先根据 `.proxy.pid` 定位当前代理进程，并校验 PID 确实属于 `bin/openai-compat-proxy`
+- 如果 pid 文件失真，还会继续检查目标监听端口上的代理进程
+- 先发送 `SIGTERM`，等待退出；超时后升级到 `SIGKILL`
+- 确认目标监听端口上已经没有旧代理实例后再删除 `.proxy.pid`
+- **不会**删除 `.proxy.log` 和 `bin/openai-compat-proxy`
+
+使用方式：
+
+```bash
+./scripts/stop-linux.sh
+```
+
 #### `scripts/restart-linux.sh`
 
 作用：重启服务。
 
-它本质上等于：
+它会：
 
-1. 执行 `scripts/uninstall-linux.sh`
-2. 再执行 `scripts/deploy-linux.sh`
+1. 先执行与 `stop-linux.sh` 相同的可靠停机流程
+2. 确认旧进程已经退出、目标端口已经释放
+3. 再执行和 `deploy-linux.sh` 相同的预检、构建、启动与健康检查流程
+
+整个过程共用同一把锁，不会和其他 deploy / stop / uninstall 并发执行。旧进程没有死透时，新进程不会启动。
 
 使用方式：
 
@@ -178,10 +201,12 @@ chmod +x scripts/*.sh
 
 它会：
 
-- 停止 `.proxy.pid` 对应的进程
+- 先执行与 `stop-linux.sh` 相同的可靠停机流程，确认服务已经彻底停止
 - 删除 `.proxy.pid`
 - 删除 `.proxy.log`
 - 删除 `bin/openai-compat-proxy`
+
+只有在确认进程已经退出后，才会执行清理。
 
 使用方式：
 
