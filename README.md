@@ -391,7 +391,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 基础字段
 
 - `LISTEN_ADDR`：监听地址，例如 `:21021`。**不能热加载**
-- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。**不能热加载，修改后需要重启**
+- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。只支持 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`。**不能热加载，修改后需要重启**
 - `PROXY_API_KEY`：根级代理访问 key，可选；provider 没有设置 `PROXY_API_KEY_OVERRIDE` 时会继承它。默认 provider 的裸 `/v1/*` 路由也使用这把 key。**可热加载**
 
 ### 多 provider 相关字段

@@ -35,6 +35,18 @@ func TestLoadFromEnvParsesCacheInfoTimezone(t *testing.T) {
 	}
 }
 
+func TestConfigCacheInfoLocationResolvesTimezone(t *testing.T) {
+	cfg := Config{CacheInfoTimezone: "Asia/Shanghai"}
+
+	location, err := cfg.CacheInfoLocation()
+	if err != nil {
+		t.Fatalf("expected CacheInfoLocation to resolve timezone, got error: %v", err)
+	}
+	if got := location.String(); got != "Asia/Shanghai" {
+		t.Fatalf("expected resolved timezone %q, got %q", "Asia/Shanghai", got)
+	}
+}
+
 func TestLoadFromEnvParsesTimeouts(t *testing.T) {
 	t.Setenv("CONNECT_TIMEOUT", "11s")
 	t.Setenv("FIRST_BYTE_TIMEOUT", "45s")
@@ -60,6 +72,25 @@ func TestValidateRootEnvValuesRejectsInvalidTimeout(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"TOTAL_TIMEOUT": "abc"})
 	if err == nil {
 		t.Fatalf("expected invalid TOTAL_TIMEOUT to fail validation")
+	}
+}
+
+func TestValidateRootEnvValuesAcceptsIANATimezone(t *testing.T) {
+	testCases := []string{"UTC", "Asia/Shanghai"}
+	for _, timezone := range testCases {
+		t.Run(timezone, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{"CACHE_INFO_TIMEZONE": timezone})
+			if err != nil {
+				t.Fatalf("expected valid CACHE_INFO_TIMEZONE %q to pass validation, got %v", timezone, err)
+			}
+		})
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidCacheInfoTimezone(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"CACHE_INFO_TIMEZONE": "foo"})
+	if err == nil {
+		t.Fatalf("expected invalid CACHE_INFO_TIMEZONE to fail validation")
 	}
 }
 

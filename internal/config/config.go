@@ -132,6 +132,9 @@ func loadFromLookup(lookup func(string) string) Config {
 }
 
 func ValidateRootEnvValues(values map[string]string) error {
+	if err := validateTimezone(values, "CACHE_INFO_TIMEZONE"); err != nil {
+		return err
+	}
 	if err := validatePositiveDuration(values, "CONNECT_TIMEOUT"); err != nil {
 		return err
 	}
@@ -152,6 +155,17 @@ func ValidateRootEnvValues(values map[string]string) error {
 	}
 	if err := validateMinInt(values, "LOG_MAX_BACKUPS", 0); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateTimezone(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	if _, err := time.LoadLocation(value); err != nil {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
 	}
 	return nil
 }
@@ -225,6 +239,18 @@ func (c Config) Validate() error {
 		return ErrInvalidConfig("legacy v1 routes require a default provider")
 	}
 	return nil
+}
+
+func (c Config) CacheInfoLocation() (*time.Location, error) {
+	timezone := strings.TrimSpace(c.CacheInfoTimezone)
+	if timezone == "" {
+		timezone = Default().CacheInfoTimezone
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return nil, ErrInvalidConfig(fmt.Sprintf("invalid CACHE_INFO_TIMEZONE: %q", timezone))
+	}
+	return location, nil
 }
 
 func ResolveProvidersDir(rootEnvPath string, providersDir string) string {
