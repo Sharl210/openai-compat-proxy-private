@@ -7,17 +7,30 @@ import (
 	"encoding/base64"
 	"strings"
 	"sync"
+	"time"
+)
+
+const (
+	defaultRequestStatusTokenTTL            = 15 * time.Minute
+	defaultRequestStatusAuthGCSweepInterval = 256
 )
 
 type requestStatusAuthGrant struct {
 	ProviderID string
 	RequestID  string
+	issuedAt   time.Time
 }
 
 type requestStatusAuthStore struct {
-	mu     sync.Mutex
+	mu sync.Mutex
+
 	secret []byte
 	grants map[string]requestStatusAuthGrant
+
+	ttl             time.Duration
+	now             func() time.Time
+	gcSweepInterval uint32
+	opsSinceGC      uint32
 }
 
 func newRequestStatusAuthStore() *requestStatusAuthStore {
@@ -28,8 +41,11 @@ func newRequestStatusAuthStore() *requestStatusAuthStore {
 		}
 	}
 	return &requestStatusAuthStore{
-		secret: secret,
-		grants: map[string]requestStatusAuthGrant{},
+		secret:          secret,
+		grants:          map[string]requestStatusAuthGrant{},
+		ttl:             defaultRequestStatusTokenTTL,
+		now:             time.Now,
+		gcSweepInterval: defaultRequestStatusAuthGCSweepInterval,
 	}
 }
 
@@ -46,7 +62,8 @@ func (s *requestStatusAuthStore) issueToken(providerID, requestID string) string
 	payload := providerID + ":" + requestID + ":" + base64.RawURLEncoding.EncodeToString(nonceBytes)
 	token := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(s.sign(payload))
 	s.mu.Lock()
-	s.grants[token] = requestStatusAuthGrant{ProviderID: providerID, RequestID: requestID}
+	s.grants[token] = requestStatusAuthGrant{ProviderID: providerID, RequestID: requestID, issuedAt: s.nowUnsafe()}
+	s.scheduleGCLocked()
 	s.mu.Unlock()
 	return token
 }
@@ -82,6 +99,7 @@ func (s *requestStatusAuthStore) consumeToken(token, providerID, requestID strin
 		return false
 	}
 	delete(s.grants, token)
+	s.scheduleGCLocked()
 	return true
 }
 
@@ -89,4 +107,49 @@ func (s *requestStatusAuthStore) sign(payload string) []byte {
 	mac := hmac.New(sha256.New, s.secret)
 	_, _ = mac.Write([]byte(payload))
 	return mac.Sum(nil)
+}
+
+func (s *requestStatusAuthStore) scheduleGCLocked() {
+	if s == nil {
+		return
+	}
+	if s.gcSweepInterval == 0 {
+		s.gcSweepInterval = 1
+	}
+	s.opsSinceGC++
+	if s.opsSinceGC < s.gcSweepInterval {
+		return
+	}
+	s.gcExpiredGrantsLocked()
+	s.opsSinceGC = 0
+}
+
+func (s *requestStatusAuthStore) gcExpiredGrantsLocked() {
+	if s == nil {
+		return
+	}
+	now := s.nowUnsafe()
+	for token, grant := range s.grants {
+		age := now.Sub(grant.issuedAt)
+		if s.ttl <= 0 || age > s.ttl {
+			delete(s.grants, token)
+		}
+	}
+}
+
+func (s *requestStatusAuthStore) forceGC() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gcExpiredGrantsLocked()
+	s.opsSinceGC = 0
+}
+
+func (s *requestStatusAuthStore) nowUnsafe() time.Time {
+	if s == nil || s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }

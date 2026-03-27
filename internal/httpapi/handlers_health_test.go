@@ -9,6 +9,41 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
+func TestHealthzReturnsServiceUnavailableWhenStoreNil(t *testing.T) {
+	server := NewServerWithStore(nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v body=%s", err, rec.Body.String())
+	}
+	errBody, _ := payload["error"].(map[string]any)
+	if errBody == nil {
+		t.Fatalf("expected error object, got %#v", payload)
+	}
+	if msg, _ := errBody["message"].(string); msg != "runtime config unavailable" {
+		t.Fatalf("unexpected error message: %#v", errBody)
+	}
+}
+
+func TestHealthzReturnsServiceUnavailableWhenSnapshotNil(t *testing.T) {
+	server := NewServerWithStore(&config.RuntimeStore{}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHealthzReturnsServiceUnavailableWhenDefaultProviderMissingUpstreamBaseURL(t *testing.T) {
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",

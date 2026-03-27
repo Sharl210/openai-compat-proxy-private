@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
 )
@@ -36,6 +37,28 @@ func TestChatRejectsProviderWithoutChatSupport(t *testing.T) {
 	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
 	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
 		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
+	}
+}
+
+func TestNewServerWithStoreAcceptsCacheManager(t *testing.T) {
+	cfg := config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{
+			{
+				ID:                "openai",
+				Enabled:           true,
+				UpstreamBaseURL:   "https://example.test",
+				UpstreamAPIKey:    "test-key",
+				SupportsResponses: true,
+			},
+		},
+	}
+	store := config.NewStaticRuntimeStore(cfg)
+	manager := &cacheinfo.Manager{}
+	server := NewServerWithStore(store, manager)
+	if server.CacheInfo != manager {
+		t.Fatalf("expected cache manager to be stored on server")
 	}
 }
 

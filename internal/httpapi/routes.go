@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 )
 
@@ -22,6 +23,19 @@ const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const requestStatusStoreKey routeContextKey = "request-status-store"
 const requestStatusAuthStoreKey routeContextKey = "request-status-auth-store"
 const requestStatusIDKey routeContextKey = "request-status-id"
+const cacheInfoManagerKey routeContextKey = "cache-info-manager"
+
+func withCacheInfoManager(ctx context.Context, manager *cacheinfo.Manager) context.Context {
+	if manager == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, cacheInfoManagerKey, manager)
+}
+
+func cacheInfoManagerFromRequest(r *http.Request) *cacheinfo.Manager {
+	manager, _ := r.Context().Value(cacheInfoManagerKey).(*cacheinfo.Manager)
+	return manager
+}
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 	if path == "/v1/models" || path == "/v1/responses" || path == "/v1/chat/completions" || path == "/v1/messages" {

@@ -4,72 +4,107 @@ import (
 	"net/http"
 
 	"openai-compat-proxy/internal/auth"
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 )
 
-func NewServer(cfg config.Config) http.Handler {
-	return NewServerWithStore(config.NewStaticRuntimeStore(cfg))
+type Server struct {
+	store           *config.RuntimeStore
+	statusStore     *requestStatusStore
+	statusAuthStore *requestStatusAuthStore
+	statusHandler   http.Handler
+	mux             *http.ServeMux
+	handler         http.Handler
+
+	CacheInfo *cacheinfo.Manager
 }
 
-func NewServerWithStore(store *config.RuntimeStore) http.Handler {
-	statusStore := newRequestStatusStore()
-	statusAuthStore := newRequestStatusAuthStore()
+func NewServer(cfg config.Config) *Server {
+	return NewServerWithStore(config.NewStaticRuntimeStore(cfg), nil)
+}
+
+func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *Server {
+	srv := &Server{
+		store:           store,
+		statusStore:     newRequestStatusStore(),
+		statusAuthStore: newRequestStatusAuthStore(),
+		CacheInfo:       cacheMgr,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
 	mux.HandleFunc("/v1/models", handleModels())
 	mux.HandleFunc("/v1/responses", handleResponses())
 	mux.HandleFunc("/v1/chat/completions", handleChat())
 	mux.HandleFunc("/v1/messages", handleAnthropicMessages())
+	srv.mux = mux
+	srv.statusHandler = handleRequestStatus(srv.statusStore)
+	srv.handler = withRequestID(http.HandlerFunc(srv.serveHTTP))
+	return srv
+}
 
-	return withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		snapshot := store.Active()
-		if snapshot == nil {
-			errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.handler == nil {
+		s.handler = withRequestID(http.HandlerFunc(s.serveHTTP))
+	}
+	s.handler.ServeHTTP(w, r)
+}
+
+func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
+		return
+	}
+	snapshot := s.store.Active()
+	if snapshot == nil {
+		errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
+		return
+	}
+	if r.URL.Path == "/healthz" {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+	if statusPath, ok := parseRequestStatusPath(r.URL.Path, snapshot.Config); ok {
+		provider, err := snapshot.Config.ProviderByID(statusPath.ProviderID)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "request not found")
 			return
 		}
-		if r.URL.Path == "/healthz" {
-			mux.ServeHTTP(w, r)
+		r = r.Clone(withRequestStatusID(withRequestStatusAuthStore(withRequestStatusStore(r.Context(), s.statusStore), s.statusAuthStore), statusPath.RequestID))
+		if err := validateStatusCheckAuth(r, snapshot.Config.ProxyAPIKey, provider, statusPath.RequestID); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 			return
 		}
-		if statusPath, ok := parseRequestStatusPath(r.URL.Path, snapshot.Config); ok {
-			provider, err := snapshot.Config.ProviderByID(statusPath.ProviderID)
-			if err != nil {
-				errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "request not found")
-				return
-			}
-			r = r.Clone(withRequestStatusID(withRequestStatusAuthStore(withRequestStatusStore(r.Context(), statusStore), statusAuthStore), statusPath.RequestID))
-			if err := validateStatusCheckAuth(r, snapshot.Config.ProxyAPIKey, provider, statusPath.RequestID); err != nil {
-				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
-				return
-			}
-			setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
-			setRequestStatusHeaders(w, r, statusPath.ProviderID, statusPath.RequestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
-			handleRequestStatus(statusStore).ServeHTTP(w, r)
+		setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
+		setRequestStatusHeaders(w, r, statusPath.ProviderID, statusPath.RequestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
+		s.statusHandler.ServeHTTP(w, r)
+		return
+	}
+
+	if info, err := resolveRouteInfo(r.URL.Path, snapshot.Config); err == nil {
+		provider, err := snapshot.Config.ProviderByID(info.ProviderID)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
-
-		if info, err := resolveRouteInfo(r.URL.Path, snapshot.Config); err == nil {
-			provider, err := snapshot.Config.ProviderByID(info.ProviderID)
-			if err != nil {
-				errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
-				return
-			}
-			setConfigVersionHeaders(w, snapshot, info.ProviderID)
-			requestID := w.Header().Get("X-Request-Id")
-			r = r.Clone(withRequestStatusID(withRequestStatusAuthStore(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(r.Context(), info), snapshot), statusStore), statusAuthStore), requestID))
-			r.URL.Path = info.CanonicalPath
-			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
-				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
-				return
-			}
-			statusStore.start(requestID, info.ProviderID, info.CanonicalPath)
-			setRequestStatusHeaders(w, r, info.ProviderID, requestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
-
-			mux.ServeHTTP(w, r)
+		setConfigVersionHeaders(w, snapshot, info.ProviderID)
+		requestID := w.Header().Get("X-Request-Id")
+		ctx := r.Context()
+		if s.CacheInfo != nil {
+			ctx = withCacheInfoManager(ctx, s.CacheInfo)
+		}
+		r = r.Clone(withRequestStatusID(withRequestStatusAuthStore(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot), s.statusStore), s.statusAuthStore), requestID))
+		r.URL.Path = info.CanonicalPath
+		if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 			return
 		}
+		s.statusStore.start(requestID, info.ProviderID, info.CanonicalPath)
+		setRequestStatusHeaders(w, r, info.ProviderID, requestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
 
-		errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
-	}))
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+
+	errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
 }
