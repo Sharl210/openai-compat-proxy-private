@@ -219,7 +219,7 @@ func TestManager_TimezoneChange(t *testing.T) {
 	stats := m.stats["openai"]
 	stats.Timezone = "America/New_York" // 模拟之前用的是纽约时区
 	data, _ := json.Marshal(stats)
-	os.WriteFile(filepath.Join(tmp, "Cache_Info", "openai.json"), data, 0644)
+	os.WriteFile(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json"), data, 0644)
 
 	// 创建新 manager，时区是 Asia/Shanghai
 	m2 := NewManager(tmp, loc, []string{"openai"}, clock)
@@ -274,13 +274,13 @@ func TestManager_DisabledProviderDoesNotDeleteOldFile(t *testing.T) {
 		UpdatedAt:    time.Now(),
 	}
 	data, _ := json.Marshal(oldStats)
-	os.WriteFile(filepath.Join(tmp, "Cache_Info", "disabled-provider.json"), data, 0644)
+	os.WriteFile(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "disabled-provider.json"), data, 0644)
 
 	// 创建 manager，不包含 disabled-provider
 	_ = NewManager(tmp, loc, []string{"openai"}, nil)
 
 	// 文件应该仍然存在
-	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "disabled-provider.json")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "disabled-provider.json")); os.IsNotExist(err) {
 		t.Error("old file for disabled provider was deleted")
 	}
 }
@@ -295,7 +295,7 @@ func TestManager_ProviderRenameCreatesNewFile(t *testing.T) {
 	m.RecordFinalUsage("req-1", "old-name", &usage)
 
 	// 文件应该存在
-	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "old-name.json")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "old-name.json")); os.IsNotExist(err) {
 		t.Error("old-name.json not created")
 	}
 
@@ -304,11 +304,11 @@ func TestManager_ProviderRenameCreatesNewFile(t *testing.T) {
 	m2.RecordFinalUsage("req-2", "new-name", &usage)
 
 	// 新文件应该存在
-	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "new-name.json")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "new-name.json")); os.IsNotExist(err) {
 		t.Error("new-name.json not created")
 	}
 	// 旧文件仍然存在
-	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "old-name.json")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "old-name.json")); os.IsNotExist(err) {
 		t.Error("old-name.json should still exist")
 	}
 }
@@ -324,7 +324,7 @@ func TestManager_FlushWritesFile(t *testing.T) {
 	}
 
 	// 检查文件是否写入
-	jsonPath := filepath.Join(tmp, "Cache_Info", "openai.json")
+	jsonPath := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json")
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		t.Fatalf("failed to read json file: %v", err)
@@ -387,7 +387,7 @@ func TestManager_StartStop(t *testing.T) {
 	time.Sleep(6 * time.Second)
 
 	// 检查文件
-	jsonPath := filepath.Join(tmp, "Cache_Info", "openai.json")
+	jsonPath := filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json")
 	if _, err := os.Stat(jsonPath); os.IsNotExist(err) {
 		t.Error("json file not created by periodic flush")
 	}
@@ -429,7 +429,7 @@ func TestManager_LoadExistingStats(t *testing.T) {
 		UpdatedAt:     time.Now(),
 	}
 	data, _ := json.Marshal(existing)
-	os.WriteFile(filepath.Join(tmp, "Cache_Info", "openai.json"), data, 0644)
+	os.WriteFile(filepath.Join(tmp, "Cache_Info", "SYSTEM_JSON_FILES", "openai.json"), data, 0644)
 
 	// 创建 manager，应该加载已有数据
 	clock := newMockClock(loc)

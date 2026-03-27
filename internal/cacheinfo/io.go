@@ -7,32 +7,55 @@ import (
 	"path/filepath"
 )
 
-const cacheInfoDirName = "Cache_Info"
+const (
+	cacheInfoDirName     = "Cache_Info"
+	cacheInfoJSONDirName = "SYSTEM_JSON_FILES"
+)
 
 func cacheInfoDir(providersDir string) string {
 	return filepath.Join(providersDir, cacheInfoDirName)
 }
 
+func cacheInfoJSONDir(providersDir string) string {
+	return filepath.Join(cacheInfoDir(providersDir), cacheInfoJSONDirName)
+}
+
 func EnsureCacheInfoDir(providersDir string) error {
-	return os.MkdirAll(cacheInfoDir(providersDir), 0755)
+	if err := os.MkdirAll(cacheInfoDir(providersDir), 0755); err != nil {
+		return err
+	}
+	return os.MkdirAll(cacheInfoJSONDir(providersDir), 0755)
 }
 
 func LoadProviderStats(providersDir, providerID string) (*ProviderStats, error) {
-	path := filepath.Join(cacheInfoDir(providersDir), providerID+".json")
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+	jsonPath := filepath.Join(cacheInfoJSONDir(providersDir), providerID+".json")
+	stats, err := loadProviderStatsFromPath(jsonPath)
+	if err == nil {
+		return stats, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	legacyPath := filepath.Join(cacheInfoDir(providersDir), providerID+".json")
+	legacyStats, legacyErr := loadProviderStatsFromPath(legacyPath)
+	if legacyErr != nil {
+		if os.IsNotExist(legacyErr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("读取 %s 失败: %w", path, err)
+		return nil, legacyErr
 	}
+	return legacyStats, nil
+}
 
+func loadProviderStatsFromPath(path string) (*ProviderStats, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	var stats ProviderStats
 	if err := json.Unmarshal(data, &stats); err != nil {
 		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
 	}
-
 	return &stats, nil
 }
 
@@ -41,8 +64,12 @@ func SaveProviderStats(providersDir, providerID string, stats *ProviderStats) er
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
+	jsonDir := cacheInfoJSONDir(providersDir)
+	if err := os.MkdirAll(jsonDir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
 
-	jsonPath := filepath.Join(dir, providerID+".json")
+	jsonPath := filepath.Join(jsonDir, providerID+".json")
 	if err := atomicWriteJSON(jsonPath, stats); err != nil {
 		return err
 	}

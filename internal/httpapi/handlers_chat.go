@@ -57,6 +57,7 @@ func handleChat() http.HandlerFunc {
 			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		}
 		canon.RequestID = requestID
+		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
 		attrs := map[string]any{
 			"request_id":            canon.RequestID,
@@ -108,7 +109,7 @@ func handleChat() http.HandlerFunc {
 				statusStore.markStreaming(canon.RequestID)
 			}
 			flusher := startSSE(w)
-			if err := writeChatSSELive(ctx, stream, w, flusher, canon); err != nil {
+			if err := writeChatSSELive(ctx, stream, w, flusher, canon, usageRecorder); err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					if statusStore != nil {
@@ -243,6 +244,9 @@ func handleChat() http.HandlerFunc {
 		}
 		if statusStore != nil {
 			statusStore.markCompleted(canon.RequestID)
+		}
+		if usageRecorder != nil {
+			usageRecorder(result.Usage)
 		}
 		logging.Event("downstream_chat_usage_mapped", map[string]any{
 			"request_id":    canon.RequestID,

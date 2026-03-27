@@ -33,6 +33,7 @@ type Manager struct {
 
 	ticker *time.Ticker
 	stopCh chan struct{}
+	wg     sync.WaitGroup
 }
 
 func NewManager(providersDir string, location *time.Location, enabledProviders []string, clock Clock) *Manager {
@@ -157,7 +158,9 @@ func (m *Manager) checkCrossDayAndReset(providerID string) {
 
 func (m *Manager) Start(ctx context.Context) {
 	m.ticker = time.NewTicker(5 * time.Second)
+	m.wg.Add(1)
 	go func() {
+		defer m.wg.Done()
 		for {
 			select {
 			case <-m.ticker.C:
@@ -178,6 +181,7 @@ func (m *Manager) Stop() {
 	if m.ticker != nil {
 		m.ticker.Stop()
 	}
+	m.wg.Wait()
 }
 
 func (m *Manager) flushAll() {

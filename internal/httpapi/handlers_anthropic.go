@@ -50,6 +50,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		}
 		applyProviderSystemPrompt(&canon, provider)
 		canon.RequestID = requestID
+		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
 		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 		canon.Model = mappedModel
 		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
@@ -86,7 +87,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			}
 			flusher := startSSE(w)
 			streamState := &anthropicStreamState{}
-			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState); err != nil {
+			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState, usageRecorder); err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					if statusStore != nil {
@@ -163,6 +164,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markCompleted(canon.RequestID)
 			}
+			if usageRecorder != nil {
+				usageRecorder(result.Usage)
+			}
 			return
 		}
 		events, err := client.Stream(ctx, canon, authorization)
@@ -217,6 +221,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 		}
 		if statusStore != nil {
 			statusStore.markCompleted(canon.RequestID)
+		}
+		if usageRecorder != nil {
+			usageRecorder(result.Usage)
 		}
 	}
 }

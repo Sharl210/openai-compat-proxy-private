@@ -31,6 +31,7 @@ func handleResponses() http.HandlerFunc {
 		statusStore, _ := requestStatusStoreFromRequest(r)
 		providerID := provider.ID
 		statusCheckKey := statusCheckProxyKeyForRequest(r, providerCfg, provider)
+		usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			if statusStore != nil {
@@ -113,7 +114,7 @@ func handleResponses() http.HandlerFunc {
 				statusStore.markStreaming(canon.RequestID)
 			}
 			flusher := startSSE(w)
-			if err := writeResponsesSSELive(ctx, stream, w, flusher, canon); err != nil {
+			if err := writeResponsesSSELive(ctx, stream, w, flusher, canon, usageRecorder); err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					if statusStore != nil {
@@ -176,6 +177,11 @@ func handleResponses() http.HandlerFunc {
 			}
 			if statusStore != nil {
 				statusStore.markCompleted(canon.RequestID)
+			}
+			if usageRecorder != nil && len(payload) > 0 {
+				if result, err := aggregate.ResultFromResponsePayload(payload); err == nil {
+					usageRecorder(result.Usage)
+				}
 			}
 			return
 		}
@@ -240,6 +246,9 @@ func handleResponses() http.HandlerFunc {
 		}
 		if statusStore != nil {
 			statusStore.markCompleted(canon.RequestID)
+		}
+		if usageRecorder != nil {
+			usageRecorder(result.Usage)
 		}
 		logging.Event("downstream_responses_usage_mapped", map[string]any{
 			"request_id":    canon.RequestID,

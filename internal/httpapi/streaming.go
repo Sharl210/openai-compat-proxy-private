@@ -117,7 +117,7 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	return nil
 }
 
-func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder func(map[string]any)) error {
 	state := responsesStreamState{}
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return err
@@ -130,7 +130,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		nil,
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
-			return writeResponsesEvent(w, flusher, &state, evt)
+			return writeResponsesEvent(w, flusher, &state, evt, usageRecorder)
 		},
 	)
 	if err != nil {
@@ -145,7 +145,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	return nil
 }
 
-func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event) error {
+func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder func(map[string]any)) error {
 	item, _ := evt.Data["item"].(map[string]any)
 	writeStreamEvent := func(event string, data map[string]any) error {
 		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
@@ -242,6 +242,11 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			return err
 		}
 	}
+	if usageRecorder != nil && (evt.Event == "response.completed" || evt.Event == "response.done") {
+		if usage := usageFromEventData(evt.Data); len(usage) > 0 {
+			usageRecorder(usage)
+		}
+	}
 	return writeStreamEvent(evt.Event, evt.Data)
 }
 
@@ -323,7 +328,7 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState) error {
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, usageRecorder func(map[string]any)) error {
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
@@ -358,7 +363,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
-			return writeAnthropicEvent(w, flusher, state, evt)
+			return writeAnthropicEvent(w, flusher, state, evt, usageRecorder)
 		},
 	)
 	if err != nil {
@@ -404,7 +409,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	})
 }
 
-func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event) error {
+func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event, usageRecorder func(map[string]any)) error {
 	var closeThinkingBlock func() error
 	startMessage := func() error {
 		if state.messageStarted {
@@ -654,12 +659,16 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if state.stopReason != "" {
 			stopReason = state.stopReason
 		}
+		usage := anthropicUsageFromEvent(evt.Data)
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
 			"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil},
-			"usage": anthropicUsageFromEvent(evt.Data),
+			"usage": usage,
 		}); err != nil {
 			return err
+		}
+		if usageRecorder != nil && usage != nil {
+			usageRecorder(usage)
 		}
 		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
 			return err
@@ -865,7 +874,7 @@ type chatStreamState struct {
 	terminalFailure   *aggregate.TerminalFailureError
 }
 
-func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
+func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder func(map[string]any)) error {
 	state := chatStreamState{
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
@@ -891,7 +900,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
-			return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage)
+			return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage, usageRecorder)
 		},
 	)
 	if err != nil {
@@ -989,14 +998,14 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 		pendingToolArgs: map[string]string{},
 	}
 	for _, evt := range events {
-		if err := writeChatEvent(w, flusher, &state, evt, includeUsage); err != nil {
+		if err := writeChatEvent(w, flusher, &state, evt, includeUsage, nil); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool) error {
+func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder func(map[string]any)) error {
 	ensureRoleSent := func() error {
 		if state.roleSent {
 			return nil
@@ -1114,6 +1123,11 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				})
 				if err := writeChatChunk(w, flusher, nil, "", usage); err != nil {
 					return err
+				}
+				if usageRecorder != nil {
+					if mapped, ok := usage.(map[string]any); ok && len(mapped) > 0 {
+						usageRecorder(mapped)
+					}
 				}
 			}
 		}

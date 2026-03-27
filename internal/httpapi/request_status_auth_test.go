@@ -1,8 +1,12 @@
 package httpapi
 
 import (
+	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"openai-compat-proxy/internal/config"
 )
 
 func TestRequestStatusAuthStoreIssueConsumeRemovesToken(t *testing.T) {
@@ -66,5 +70,21 @@ func TestRequestStatusAuthStoreZeroTTLExpiresImmediately(t *testing.T) {
 	defer store.mu.Unlock()
 	if _, ok := store.grants[token]; ok {
 		t.Fatal("token should be removed immediately when TTL <= 0")
+	}
+}
+
+func TestValidateStatusCheckAuthAcceptsToken(t *testing.T) {
+	store := newRequestStatusAuthStore()
+	token := store.issueToken("openai", "req-1")
+	req := httptest.NewRequest("GET", "/openai/v1/requests/req-1?token="+token, nil)
+	ctx := withRequestStatusAuthStore(context.Background(), store)
+	ctx = withRequestStatusID(ctx, "req-1")
+	req = req.WithContext(ctx)
+	provider := config.ProviderConfig{ID: "openai", Enabled: true, ProxyAPIKeyOverrideSet: true, ProxyAPIKeyOverride: "override-key"}
+	if err := validateStatusCheckAuth(req, "root-key", provider, "req-1"); err != nil {
+		t.Fatalf("token should authorize request: %v", err)
+	}
+	if store.consumeToken(token, "openai", "req-1") {
+		t.Fatal("token should be consumed after validation")
 	}
 }
