@@ -10,11 +10,11 @@ import (
 )
 
 func expectedCacheInfoDir(root string) string {
-	return filepath.Join(root, "SYSTEM_JSON_FILES", "Cache_Info")
+	return filepath.Join(root, "Cache_Info")
 }
 
 func expectedCacheInfoJSONPath(root, providerID string) string {
-	return filepath.Join(expectedCacheInfoDir(root), providerID+".json")
+	return filepath.Join(expectedCacheInfoDir(root), "SYSTEM_JSON_FILES", providerID+".json")
 }
 
 func expectedCacheInfoTXTPath(root, providerID string) string {
@@ -28,20 +28,20 @@ func TestEnsureCacheInfoDir(t *testing.T) {
 		t.Fatalf("EnsureCacheInfoDir() error: %v", err)
 	}
 
-	info, err := os.Stat(filepath.Join(tmp, "SYSTEM_JSON_FILES"))
+	info, err := os.Stat(filepath.Join(tmp, "Cache_Info"))
 	if err != nil {
-		t.Fatalf("SYSTEM_JSON_FILES directory not created: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatal("SYSTEM_JSON_FILES is not a directory")
-	}
-	jsonDir := expectedCacheInfoDir(tmp)
-	info, err = os.Stat(jsonDir)
-	if err != nil {
-		t.Fatalf("Cache_Info not created: %v", err)
+		t.Fatalf("Cache_Info directory not created: %v", err)
 	}
 	if !info.IsDir() {
 		t.Fatal("Cache_Info is not a directory")
+	}
+	jsonDir := filepath.Join(expectedCacheInfoDir(tmp), "SYSTEM_JSON_FILES")
+	info, err = os.Stat(jsonDir)
+	if err != nil {
+		t.Fatalf("SYSTEM_JSON_FILES not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("SYSTEM_JSON_FILES is not a directory")
 	}
 
 	// calling again should be idempotent
@@ -260,11 +260,11 @@ func TestSaveProviderStats_AtomicWrite(t *testing.T) {
 		t.Fatalf("read txt: %v", err)
 	}
 	txtStr := string(txtData)
-	if !strings.Contains(txtStr, "[昨日]") {
-		t.Error("TXT missing [昨日]")
+	if !strings.Contains(txtStr, "[前一天]") {
+		t.Error("TXT missing [前一天]")
 	}
-	if !strings.Contains(txtStr, "[今日]") {
-		t.Error("TXT missing [今日]")
+	if !strings.Contains(txtStr, "[今天]") {
+		t.Error("TXT missing [今天]")
 	}
 	if !strings.Contains(txtStr, "[提供商历史以来总计]") {
 		t.Error("TXT missing [提供商历史以来总计]")

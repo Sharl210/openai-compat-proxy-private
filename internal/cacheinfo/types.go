@@ -10,13 +10,19 @@ type TokenTotals struct {
 	TotalTokens  int64 `json:"total_tokens"`
 }
 
+type DailyStats struct {
+	Date   string      `json:"date"`
+	Totals TokenTotals `json:"totals"`
+}
+
 // ProviderStats 表示单个 provider 的统计状态
 type ProviderStats struct {
-	Timezone      string      `json:"timezone"`
-	TodayDate     string      `json:"today_date"`     // e.g. "2026-03-27"
-	YesterdayDate string      `json:"yesterday_date"` // e.g. "2026-03-26"
-	Today         TokenTotals `json:"today"`
-	Yesterday     TokenTotals `json:"yesterday"`
-	HistoryTotal  TokenTotals `json:"history_total"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	Timezone      string       `json:"timezone"`
+	TodayDate     string       `json:"today_date"`     // e.g. "2026-03-27"
+	YesterdayDate string       `json:"yesterday_date"` // e.g. "2026-03-26"
+	Today         TokenTotals  `json:"today"`
+	Yesterday     TokenTotals  `json:"yesterday"`
+	RecentDays    []DailyStats `json:"recent_days,omitempty"`
+	HistoryTotal  TokenTotals  `json:"history_total"`
+	UpdatedAt     time.Time    `json:"updated_at"`
 }

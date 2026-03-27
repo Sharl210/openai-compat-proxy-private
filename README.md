@@ -341,8 +341,8 @@ cp providers/openai.env providers/openai.env.bak
 cp -R providers/Cache_Info providers/Cache_Info.bak 2>/dev/null || true
 ```
 
-2. 对照新的 `.env.example` 和 `providers/*.env.example`，把线上 `.env`、`providers/*.env` 的注释与字段说明补齐到最新语义，尤其是 Cache_Info 现在统一写到 `<PROVIDERS_DIR>/SYSTEM_JSON_FILES/Cache_Info/`。
-3. 如果你希望把历史统计文件也迁到新目录，可以把旧的 `Cache_Info/*.json`、`Cache_Info/*.txt` 搬到 `SYSTEM_JSON_FILES/Cache_Info/`；如果不搬，程序读取 JSON 时仍会兼容旧的 `Cache_Info/*.json`。
+2. 对照新的 `.env.example` 和 `providers/*.env.example`，把线上 `.env`、`providers/*.env` 的注释与字段说明补齐到最新语义，尤其是 Cache_Info 的 JSON 统计快照现在统一写到 `<PROVIDERS_DIR>/Cache_Info/SYSTEM_JSON_FILES/`，而 TXT 统计仍保留在 `<PROVIDERS_DIR>/Cache_Info/`。
+3. 如果你希望把历史统计文件也迁到新目录，可以把旧的 `Cache_Info/*.json` 搬到 `Cache_Info/SYSTEM_JSON_FILES/`；旧的 `Cache_Info/*.txt` 继续保留即可。如果不搬，程序读取 JSON 时仍会兼容旧的 `Cache_Info/*.json`。
 4. `CACHE_INFO_TIMEZONE` 不能热加载；如果你在升级时改了它，完成迁移后必须重启服务。
 
 ## 路由说明
@@ -404,7 +404,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 基础字段
 
 - `LISTEN_ADDR`：监听地址，例如 `:21021`。**不能热加载**
-- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。provider 统计快照会写到 `<PROVIDERS_DIR>/SYSTEM_JSON_FILES/Cache_Info/`；读取旧数据时仍会兼容历史 `Cache_Info/*.json`。只支持 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`。**不能热加载，修改后需要重启**
+- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。provider 的 JSON 统计快照会写到 `<PROVIDERS_DIR>/Cache_Info/SYSTEM_JSON_FILES/`，TXT 统计仍写到 `<PROVIDERS_DIR>/Cache_Info/`；读取旧数据时仍会兼容历史 `Cache_Info/*.json`。只支持 IANA 时区名称，例如 `Asia/Shanghai`、`UTC`。**不能热加载，修改后需要重启**
 - `PROXY_API_KEY`：根级代理访问 key，可选；provider 没有设置 `PROXY_API_KEY_OVERRIDE` 时会继承它。默认 provider 的裸 `/v1/*` 路由也使用这把 key。provider 作用域请求状态查询 `/{providerId}/v1/requests/{requestId}` 不会使用这把 key。**可热加载**
 
 ### 多 provider 相关字段

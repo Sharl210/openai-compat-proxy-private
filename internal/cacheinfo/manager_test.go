@@ -163,11 +163,11 @@ func TestManager_MultiDayDowntimeClearsYesterday(t *testing.T) {
 	}
 
 	stats := m.stats["openai"]
-	if stats.YesterdayDate != "" {
-		t.Fatalf("YesterdayDate = %s, want empty when gap >= 2 days", stats.YesterdayDate)
+	if stats.YesterdayDate != "2026-03-29" {
+		t.Fatalf("YesterdayDate = %s, want 2026-03-29 when filling recent days", stats.YesterdayDate)
 	}
 	if stats.Yesterday.TotalTokens != 0 {
-		t.Fatalf("Yesterday.TotalTokens = %d, want 0 when gap >= 2 days", stats.Yesterday.TotalTokens)
+		t.Fatalf("Yesterday.TotalTokens = %d, want 0 for filled downtime day", stats.Yesterday.TotalTokens)
 	}
 }
 
@@ -447,5 +447,32 @@ func TestManager_LoadExistingStats(t *testing.T) {
 	}
 	if stats.HistoryTotal.InputTokens != 1100 {
 		t.Errorf("HistoryTotal.InputTokens = %d, want 1100", stats.HistoryTotal.InputTokens)
+	}
+}
+
+func TestManager_RecentDaysTrimToSeven(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	clock.Set(time.Date(2026, 3, 20, 10, 0, 0, 0, loc))
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+
+	for day := 0; day < 9; day++ {
+		clock.Set(time.Date(2026, 3, 20+day, 10, 0, 0, 0, loc))
+		usage := Usage{InputTokens: int64(day + 1), TotalTokens: int64(day + 1)}
+		if err := m.RecordFinalUsage("req-"+time.Date(2026, 3, 20+day, 10, 0, 0, 0, loc).Format("2006-01-02"), "openai", &usage); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats := m.stats["openai"]
+	if len(stats.RecentDays) != 7 {
+		t.Fatalf("len(RecentDays) = %d, want 7", len(stats.RecentDays))
+	}
+	if stats.RecentDays[0].Date != "2026-03-22" {
+		t.Fatalf("first RecentDays date = %s, want 2026-03-22", stats.RecentDays[0].Date)
+	}
+	if stats.RecentDays[6].Date != "2026-03-28" {
+		t.Fatalf("last RecentDays date = %s, want 2026-03-28", stats.RecentDays[6].Date)
 	}
 }

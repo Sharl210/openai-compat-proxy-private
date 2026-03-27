@@ -3,6 +3,7 @@ package cacheinfo
 import (
 	"context"
 	"log"
+	"sort"
 	"sync"
 	"time"
 )
@@ -68,21 +69,22 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 			if loaded.Timezone != tzName {
 				log.Printf("[cacheinfo] provider %s 时区变更: %s -> %s，保留 history_total", pid, loaded.Timezone, tzName)
 				loaded.Timezone = tzName
-				loaded.TodayDate = todayStr
-				loaded.YesterdayDate = yesterdayStr
-				loaded.Today = TokenTotals{}
-				loaded.Yesterday = TokenTotals{}
+				loaded.RecentDays = []DailyStats{{Date: todayStr}}
+				syncLegacyFields(loaded)
 				loaded.UpdatedAt = now
 				_ = SaveProviderStats(providersDir, pid, loaded)
 			}
+			normalizeRecentDays(loaded, todayStr)
 			m.stats[pid] = loaded
 		} else {
 			m.stats[pid] = &ProviderStats{
 				Timezone:      tzName,
 				TodayDate:     todayStr,
 				YesterdayDate: yesterdayStr,
+				RecentDays:    []DailyStats{{Date: todayStr}},
 				UpdatedAt:     now,
 			}
+			syncLegacyFields(m.stats[pid])
 		}
 	}
 
@@ -105,14 +107,16 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	m.checkCrossDayAndReset(providerID)
 	now := m.clock.Now().In(m.location)
 
-	stats.Today.InputTokens += usage.InputTokens
-	stats.Today.CachedTokens += usage.CachedTokens
-	stats.Today.OutputTokens += usage.OutputTokens
-	stats.Today.TotalTokens += usage.TotalTokens
+	day := ensureCurrentDay(stats, now.Format("2006-01-02"))
+	day.InputTokens += usage.InputTokens
+	day.CachedTokens += usage.CachedTokens
+	day.OutputTokens += usage.OutputTokens
+	day.TotalTokens += usage.TotalTokens
 	stats.HistoryTotal.InputTokens += usage.InputTokens
 	stats.HistoryTotal.CachedTokens += usage.CachedTokens
 	stats.HistoryTotal.OutputTokens += usage.OutputTokens
 	stats.HistoryTotal.TotalTokens += usage.TotalTokens
+	syncLegacyFields(stats)
 	stats.UpdatedAt = now
 
 	m.submitted[requestID] = true
@@ -125,11 +129,12 @@ func (m *Manager) checkCrossDayAndReset(providerID string) {
 	stats := m.stats[providerID]
 	now := m.clock.Now().In(m.location)
 	todayStr := now.Format("2006-01-02")
+	normalizeRecentDays(stats, todayStr)
 
 	todayDate, err := time.ParseInLocation("2006-01-02", stats.TodayDate, m.location)
 	if err != nil {
-		stats.TodayDate = todayStr
-		stats.YesterdayDate = now.AddDate(0, 0, -1).Format("2006-01-02")
+		stats.RecentDays = []DailyStats{{Date: todayStr}}
+		syncLegacyFields(stats)
 		return
 	}
 
@@ -141,19 +146,88 @@ func (m *Manager) checkCrossDayAndReset(providerID string) {
 
 	if nowDate.After(todayDate) {
 		daysSinceToday := int(nowDate.Sub(todayDate) / (24 * time.Hour))
-		if daysSinceToday >= 2 {
-			stats.Yesterday = TokenTotals{}
-			stats.YesterdayDate = ""
-		} else {
-			stats.Yesterday = stats.Today
-			stats.YesterdayDate = stats.TodayDate
+		for i := 1; i <= daysSinceToday; i++ {
+			stats.RecentDays = append(stats.RecentDays, DailyStats{Date: todayDate.AddDate(0, 0, i).Format("2006-01-02")})
 		}
-		stats.Today = TokenTotals{}
-		stats.TodayDate = todayStr
+		trimRecentDays(stats)
+		syncLegacyFields(stats)
 		return
 	}
 
 	log.Printf("[cacheinfo] provider %s 当前日期 %s 早于 today_date %s，继续累计", providerID, todayStr, stats.TodayDate)
+}
+
+func normalizeRecentDays(stats *ProviderStats, todayStr string) {
+	if stats == nil {
+		return
+	}
+	if len(stats.RecentDays) == 0 {
+		if stats.YesterdayDate != "" || stats.Yesterday != (TokenTotals{}) {
+			stats.RecentDays = append(stats.RecentDays, DailyStats{Date: stats.YesterdayDate, Totals: stats.Yesterday})
+		}
+		if stats.TodayDate != "" || stats.Today != (TokenTotals{}) {
+			stats.RecentDays = append(stats.RecentDays, DailyStats{Date: stats.TodayDate, Totals: stats.Today})
+		}
+	}
+	filtered := make([]DailyStats, 0, len(stats.RecentDays))
+	seen := map[string]TokenTotals{}
+	for _, day := range stats.RecentDays {
+		if day.Date == "" {
+			continue
+		}
+		seen[day.Date] = day.Totals
+	}
+	for date, totals := range seen {
+		filtered = append(filtered, DailyStats{Date: date, Totals: totals})
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Date < filtered[j].Date })
+	stats.RecentDays = filtered
+	if len(stats.RecentDays) == 0 {
+		stats.RecentDays = []DailyStats{{Date: todayStr}}
+	}
+	trimRecentDays(stats)
+	syncLegacyFields(stats)
+}
+
+func trimRecentDays(stats *ProviderStats) {
+	if len(stats.RecentDays) <= 7 {
+		return
+	}
+	stats.RecentDays = append([]DailyStats(nil), stats.RecentDays[len(stats.RecentDays)-7:]...)
+}
+
+func syncLegacyFields(stats *ProviderStats) {
+	stats.Today = TokenTotals{}
+	stats.TodayDate = ""
+	stats.Yesterday = TokenTotals{}
+	stats.YesterdayDate = ""
+	if n := len(stats.RecentDays); n > 0 {
+		stats.TodayDate = stats.RecentDays[n-1].Date
+		stats.Today = stats.RecentDays[n-1].Totals
+	}
+	if n := len(stats.RecentDays); n > 1 {
+		stats.YesterdayDate = stats.RecentDays[n-2].Date
+		stats.Yesterday = stats.RecentDays[n-2].Totals
+	}
+}
+
+func ensureCurrentDay(stats *ProviderStats, date string) *TokenTotals {
+	normalizeRecentDays(stats, date)
+	if len(stats.RecentDays) == 0 {
+		stats.RecentDays = append(stats.RecentDays, DailyStats{Date: date})
+		trimRecentDays(stats)
+		syncLegacyFields(stats)
+	}
+	lastIdx := len(stats.RecentDays) - 1
+	if stats.RecentDays[lastIdx].Date > date {
+		return &stats.RecentDays[lastIdx].Totals
+	}
+	if stats.RecentDays[lastIdx].Date != date {
+		stats.RecentDays = append(stats.RecentDays, DailyStats{Date: date})
+		trimRecentDays(stats)
+		syncLegacyFields(stats)
+	}
+	return &stats.RecentDays[len(stats.RecentDays)-1].Totals
 }
 
 func (m *Manager) Start(ctx context.Context) {
