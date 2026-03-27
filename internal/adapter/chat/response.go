@@ -3,9 +3,13 @@ package chat
 import "openai-compat-proxy/internal/aggregate"
 
 func BuildResponse(result aggregate.Result) map[string]any {
+	content := any(result.Text)
+	if len(result.ToolCalls) > 0 && result.Text == "" {
+		content = nil
+	}
 	message := map[string]any{
 		"role":    "assistant",
-		"content": result.Text,
+		"content": content,
 	}
 	if reasoningContent := reasoningContentValue(result.Reasoning); reasoningContent != "" {
 		message["reasoning_content"] = reasoningContent

@@ -117,13 +117,25 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		case "UPSTREAM_API_KEY":
 			provider.UpstreamAPIKey = value
 		case "SUPPORTS_CHAT":
-			provider.SupportsChat = parseBool(value)
+			provider.SupportsChat, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "SUPPORTS_RESPONSES":
-			provider.SupportsResponses = parseBool(value)
+			provider.SupportsResponses, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "SUPPORTS_MODELS":
-			provider.SupportsModels = parseBool(value)
+			provider.SupportsModels, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "SUPPORTS_ANTHROPIC_MESSAGES":
-			provider.SupportsAnthropicMessages = parseBool(value)
+			provider.SupportsAnthropicMessages, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "MODEL_MAP_JSON":
 			if value != "" {
 				provider.ModelMap = map[string]string{}
@@ -242,6 +254,18 @@ func (c Config) DefaultProviderConfig() (ProviderConfig, error) {
 
 func parseBool(value string) bool {
 	return strings.EqualFold(value, "true") || value == "1"
+}
+
+func parseProviderSupportsBool(value string, key string, path string) (bool, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(trimmed)
+	if err != nil {
+		return false, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
+	}
+	return parsed, nil
 }
 
 func parseProviderRetryCount(value string, path string) (int, error) {

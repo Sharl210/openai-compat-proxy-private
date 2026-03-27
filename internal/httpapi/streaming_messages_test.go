@@ -64,6 +64,54 @@ func TestMessagesStreamClosesThinkingBeforeTextAndEmitsSignature(t *testing.T) {
 	}
 }
 
+func TestMessagesStreamUsesRequestIdentityInMessageStart(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatalf("expected X-Request-Id header, got headers=%v", rec.Header())
+	}
+	if !strings.Contains(body, `"id":"`+requestID+`"`) {
+		t.Fatalf("expected message_start to use request id %q, got %s", requestID, body)
+	}
+	if !strings.Contains(body, `"model":"gpt-5.4"`) {
+		t.Fatalf("expected message_start to use downstream model, got %s", body)
+	}
+	if strings.Contains(body, `"id":"msg_proxy"`) || strings.Contains(body, `"model":"responses-upstream"`) {
+		t.Fatalf("expected proxy placeholder identity to be absent, got %s", body)
+	}
+}
+
 func TestMessagesStreamReopensThinkingBlockAcrossReasoningPhases(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning.delta\n" +

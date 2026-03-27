@@ -143,8 +143,16 @@ func handleAnthropicMessages() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_response", err.Error())
 				return
 			}
+			if len(result.UnsupportedContentTypes) > 0 {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "proxy_internal_error", "unsupported_output_mapping", "upstream returned unsupported anthropic output content")
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "proxy_internal_error")
+				errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported anthropic output content")
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := writeJSON(w, anthropicadapter.BuildResponse(result, canon.Model)); err != nil {
+			if err := writeJSON(w, anthropicadapter.BuildResponse(result, canon.RequestID, canon.Model)); err != nil {
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
 				}
@@ -190,8 +198,16 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
 			return
 		}
+		if len(result.UnsupportedContentTypes) > 0 {
+			if statusStore != nil {
+				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "unsupported_output_mapping", "upstream returned unsupported anthropic output content")
+			}
+			setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "proxy_internal_error")
+			errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported anthropic output content")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := writeJSON(w, anthropicadapter.BuildResponse(result, canon.Model)); err != nil {
+		if err := writeJSON(w, anthropicadapter.BuildResponse(result, canon.RequestID, canon.Model)); err != nil {
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
 			}

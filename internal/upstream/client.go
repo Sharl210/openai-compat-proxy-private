@@ -145,7 +145,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -155,6 +155,11 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		events = append(events, evt)
 		return nil
 	}); err != nil {
+		logging.Event("upstream_stream_broken", mergeLogAttrs(map[string]any{
+			"request_id":  req.RequestID,
+			"streaming":   true,
+			"event_count": len(events),
+		}, failureLogAttrs(err, "upstream_stream_broken")))
 		return nil, err
 	}
 	cachedTokens := cachedTokensFromEvents(events)
@@ -193,6 +198,13 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 		}
 		return onEvent(evt)
 	})
+	if err != nil {
+		logging.Event("upstream_stream_broken", mergeLogAttrs(map[string]any{
+			"request_id":  req.RequestID,
+			"streaming":   true,
+			"event_count": eventCount,
+		}, failureLogAttrs(err, "upstream_stream_broken")))
+	}
 	if err == nil {
 		logging.Event("upstream_response_completed", map[string]any{
 			"request_id":    req.RequestID,
@@ -225,7 +237,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -252,7 +264,7 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	payload, err := c.responseWithRetry(ctx, body, authorization)
+	payload, err := c.responseWithRetry(ctx, req.RequestID, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -287,8 +299,8 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 	return resp.StatusCode, body, resp.Header.Get("Content-Type"), nil
 }
 
-func (c *Client) streamEventsOnce(ctx context.Context, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, body, authorization)
+func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, body, authorization)
 	if err != nil {
 		return err
 	}
@@ -296,7 +308,7 @@ func (c *Client) streamEventsOnce(ctx context.Context, body []byte, authorizatio
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, body []byte, authorization string) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, body []byte, authorization string) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
@@ -307,8 +319,23 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, body []byte, auth
 		}
 		lastErr = err
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
+			logging.Event("upstream_request_failed", mergeLogAttrs(map[string]any{
+				"request_id":         requestID,
+				"attempt":            attempt,
+				"retries_performed":  attempt - 1,
+				"configured_retries": retryCount,
+				"streaming":          true,
+			}, failureLogAttrs(lastErr, classifyRequestFailure(lastErr))))
 			break
 		}
+		logging.Event("upstream_request_retry", mergeLogAttrs(map[string]any{
+			"request_id":         requestID,
+			"attempt":            attempt,
+			"next_attempt":       attempt + 1,
+			"configured_retries": retryCount,
+			"retry_delay":        retryDelay.String(),
+			"streaming":          true,
+		}, failureLogAttrs(lastErr, classifyRequestFailure(lastErr))))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -325,7 +352,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, body []byte, auth
 	return nil, lastErr
 }
 
-func (c *Client) responseWithRetry(ctx context.Context, body []byte, authorization string) (map[string]any, error) {
+func (c *Client) responseWithRetry(ctx context.Context, requestID string, body []byte, authorization string) (map[string]any, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
@@ -336,8 +363,23 @@ func (c *Client) responseWithRetry(ctx context.Context, body []byte, authorizati
 		}
 		lastErr = err
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
+			logging.Event("upstream_request_failed", mergeLogAttrs(map[string]any{
+				"request_id":         requestID,
+				"attempt":            attempt,
+				"retries_performed":  attempt - 1,
+				"configured_retries": retryCount,
+				"streaming":          false,
+			}, failureLogAttrs(lastErr, classifyRequestFailure(lastErr))))
 			break
 		}
+		logging.Event("upstream_request_retry", mergeLogAttrs(map[string]any{
+			"request_id":         requestID,
+			"attempt":            attempt,
+			"next_attempt":       attempt + 1,
+			"configured_retries": retryCount,
+			"retry_delay":        retryDelay.String(),
+			"streaming":          false,
+		}, failureLogAttrs(lastErr, classifyRequestFailure(lastErr))))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -495,6 +537,48 @@ func annotateRetryExhaustion(err error, retryCount int, retryDelay time.Duration
 		return &cloned
 	}
 	return fmt.Errorf("%s%s", buildRetryNotice(retryCount, retryDelay), err.Error())
+}
+
+func mergeLogAttrs(base map[string]any, extra map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged
+}
+
+func failureLogAttrs(err error, healthFlag string) map[string]any {
+	attrs := map[string]any{
+		"health_flag": healthFlag,
+		"error":       err,
+	}
+	var httpErr *HTTPStatusError
+	if errors.As(err, &httpErr) {
+		attrs["status_code"] = httpErr.StatusCode
+		attrs["content_type"] = httpErr.ContentType
+	}
+	return attrs
+}
+
+func classifyRequestFailure(err error) string {
+	if isTimeoutError(err) {
+		return "upstream_timeout"
+	}
+	return "upstream_error"
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func buildRetryNotice(retryCount int, retryDelay time.Duration) string {

@@ -1,17 +1,21 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -402,4 +406,135 @@ func TestStreamDoesNotRetryAfterFirstEventArrives(t *testing.T) {
 	if attempts.Load() != 1 {
 		t.Fatalf("expected no retry after first event, got %d attempts", attempts.Load())
 	}
+}
+
+func TestResponseLogsRetryAndFinalFailureEvidence(t *testing.T) {
+	logPath, cleanup := initUpstreamTestLogger(t)
+	defer cleanup()
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("temporary upstream failure"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 1, UpstreamRetryDelay: time.Millisecond})
+	_, err := client.Response(context.Background(), model.CanonicalRequest{RequestID: "req-retry-fail", Model: "gpt-5"}, "")
+	if err == nil {
+		t.Fatalf("expected upstream error")
+	}
+
+	records := readUpstreamTestLogRecords(t, logPath)
+	assertHasLogRecord(t, records, "upstream_request_retry", func(record map[string]any) bool {
+		return record["request_id"] == "req-retry-fail" && record["attempt"] == float64(1) && record["status_code"] == float64(http.StatusBadGateway)
+	})
+	assertHasLogRecord(t, records, "upstream_request_failed", func(record map[string]any) bool {
+		return record["request_id"] == "req-retry-fail" && record["status_code"] == float64(http.StatusBadGateway) && record["health_flag"] == "upstream_error"
+	})
+	if attempts.Load() != 2 {
+		t.Fatalf("expected retry to reach upstream twice, got %d", attempts.Load())
+	}
+}
+
+func TestStreamLogsTimeoutFailureBeforeFirstEvent(t *testing.T) {
+	logPath, cleanup := initUpstreamTestLogger(t)
+	defer cleanup()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{FirstByteTimeout: 50 * time.Millisecond})
+	_, err := client.Stream(context.Background(), model.CanonicalRequest{RequestID: "req-timeout", Model: "gpt-5"}, "")
+	if err == nil {
+		t.Fatalf("expected timeout error")
+	}
+
+	records := readUpstreamTestLogRecords(t, logPath)
+	assertHasLogRecord(t, records, "upstream_request_failed", func(record map[string]any) bool {
+		return record["request_id"] == "req-timeout" && record["health_flag"] == "upstream_timeout" && record["streaming"] == true
+	})
+}
+
+func TestStreamEventsLogsBrokenStreamAfterFirstEvent(t *testing.T) {
+	logPath, cleanup := initUpstreamTestLogger(t)
+	defer cleanup()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n"))
+		flusher.Flush()
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {broken json}\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{})
+	err := client.StreamEvents(context.Background(), model.CanonicalRequest{RequestID: "req-broken-stream", Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err == nil {
+		t.Fatalf("expected malformed stream error")
+	}
+
+	records := readUpstreamTestLogRecords(t, logPath)
+	assertHasLogRecord(t, records, "upstream_stream_broken", func(record map[string]any) bool {
+		return record["request_id"] == "req-broken-stream" && record["event_count"] == float64(1)
+	})
+}
+
+func initUpstreamTestLogger(t *testing.T) (string, func()) {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "proxy.jsonl")
+	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logPath}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+	return logPath, func() {
+		if err := closeFn(); err != nil {
+			t.Fatalf("close logger: %v", err)
+		}
+	}
+}
+
+func readUpstreamTestLogRecords(t *testing.T, logPath string) []map[string]any {
+	t.Helper()
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	records := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func assertHasLogRecord(t *testing.T, records []map[string]any, event string, match func(map[string]any) bool) {
+	t.Helper()
+	for _, record := range records {
+		if record["event"] == event && match(record) {
+			return
+		}
+	}
+	t.Fatalf("expected log event %q in %#v", event, records)
 }

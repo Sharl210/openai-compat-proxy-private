@@ -217,6 +217,23 @@ extract_port() {
   printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
+extract_host() {
+  local listen_addr="$1"
+  if [[ "$listen_addr" =~ ^:([0-9]+)$ ]]; then
+    printf '\n'
+    return 0
+  fi
+  if [[ "$listen_addr" =~ ^\[([^]]+)\]:([0-9]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$listen_addr" =~ ^([^:]+):([0-9]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  fail "LISTEN_ADDR must be in host:port form: $listen_addr"
+}
+
 pid_exists() {
   local pid="$1"
   [[ -n "$pid" ]] || return 1
@@ -241,6 +258,15 @@ listener_pids_for_port() {
   local port="$1"
   command -v ss >/dev/null 2>&1 || return 0
   ss -ltnpH "( sport = :$port )" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
+}
+
+port_has_any_listener() {
+  local port="$1"
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && return 0
+  done < <(listener_pids_for_port "$port")
+  return 1
 }
 
 port_has_service_listener() {
@@ -280,7 +306,7 @@ wait_for_port_free() {
   local port="$1"
   local timeout_seconds="$2"
   local deadline=$((SECONDS + timeout_seconds))
-  while port_has_service_listener "$port"; do
+  while port_has_any_listener "$port"; do
     (( SECONDS < deadline )) || return 1
     sleep 0.2
   done
@@ -316,7 +342,7 @@ stop_managed_service() {
     fi
   done < <(listener_pids_for_port "$port")
 
-  wait_for_port_free "$port" 5 || fail "service port $port is still occupied after stop"
+  wait_for_port_free "$port" 5 || fail "service port $port is occupied by another process"
   rm -f "$PID_FILE"
 }
 
@@ -354,7 +380,16 @@ append_log_banner() {
 
 health_url() {
   local port="$1"
-  printf 'http://127.0.0.1:%s/healthz\n' "$port"
+  local host
+  host="$(extract_host "$LISTEN_ADDR")"
+  case "$host" in
+    ""|"0.0.0.0"|"::") host="127.0.0.1" ;;
+  esac
+  if [[ "$host" == *:* ]]; then
+    printf 'http://[%s]:%s/healthz\n' "$host" "$port"
+    return 0
+  fi
+  printf 'http://%s:%s/healthz\n' "$host" "$port"
 }
 
 start_service() {
@@ -434,6 +469,26 @@ deploy_service() {
     fi
   fi
   fail "deployment failed; service did not become healthy"
+}
+
+restart_service() {
+  load_env
+  prepare_runtime_dependencies
+  local port
+  port="$(extract_port "$LISTEN_ADDR")"
+  stop_managed_service "$port"
+  preflight_deploy
+  build_candidate_binary
+  install_candidate_binary
+  if start_service "$port"; then
+    rm -f "$BACKUP_BIN_PATH"
+    return 0
+  fi
+  rollback_binary
+  if [[ -x "$BIN_PATH" ]] && start_service "$port"; then
+    fail "restart failed after stop; rolled back to previous binary"
+  fi
+  fail "restart failed; service did not become healthy"
 }
 
 stop_service_entry() {

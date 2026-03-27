@@ -3,6 +3,7 @@ package logging_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,5 +157,38 @@ func TestInitDisablesLoggingWhenLogEnableIsFalse(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("expected no stdout output when logging disabled, got %q", stdout.String())
+	}
+}
+
+func TestLoggerSerializesErrorAttrsAsReadableStrings(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "proxy.jsonl")
+	stdout := &bytes.Buffer{}
+
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: logPath}, stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFn()
+
+	logger.Event("upstream_request_failed", map[string]any{
+		"error":        errors.New("first byte timeout"),
+		"nested_error": map[string]any{"cause": errors.New("connection reset by peer")},
+	})
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(content), &record); err != nil {
+		t.Fatal(err)
+	}
+	if got := record["error"]; got != "first byte timeout" {
+		t.Fatalf("expected top-level error string, got %#v", got)
+	}
+	nested, _ := record["nested_error"].(map[string]any)
+	if got := nested["cause"]; got != "connection reset by peer" {
+		t.Fatalf("expected nested error string, got %#v", record["nested_error"])
 	}
 }

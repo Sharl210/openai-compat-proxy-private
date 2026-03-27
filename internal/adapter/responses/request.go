@@ -10,20 +10,22 @@ import (
 )
 
 type request struct {
-	Model              string            `json:"model"`
-	Stream             bool              `json:"stream"`
-	Store              *bool             `json:"store"`
-	Include            []string          `json:"include"`
-	Instructions       json.RawMessage   `json:"instructions"`
-	Input              []json.RawMessage `json:"input"`
-	Tools              []tool            `json:"tools"`
-	ToolChoice         any               `json:"tool_choice"`
-	Reasoning          *reasoning        `json:"reasoning"`
-	Temperature        json.RawMessage   `json:"temperature"`
-	TopP               json.RawMessage   `json:"top_p"`
-	MaxOutputTokensRaw json.RawMessage   `json:"max_output_tokens"`
-	Stop               []string          `json:"stop"`
+	Model              string          `json:"model"`
+	Stream             bool            `json:"stream"`
+	Store              *bool           `json:"store"`
+	Include            []string        `json:"include"`
+	Instructions       json.RawMessage `json:"instructions"`
+	Input              requestInput    `json:"input"`
+	Tools              []tool          `json:"tools"`
+	ToolChoice         any             `json:"tool_choice"`
+	Reasoning          *reasoning      `json:"reasoning"`
+	Temperature        json.RawMessage `json:"temperature"`
+	TopP               json.RawMessage `json:"top_p"`
+	MaxOutputTokensRaw json.RawMessage `json:"max_output_tokens"`
+	Stop               []string        `json:"stop"`
 }
+
+type requestInput []json.RawMessage
 
 type message struct {
 	Role       string          `json:"role"`
@@ -227,6 +229,40 @@ func decodeMessageContent(raw json.RawMessage) ([]contentPart, error) {
 		return nil, err
 	}
 	return parts, nil
+}
+
+func (ri *requestInput) UnmarshalJSON(data []byte) error {
+	trimmed := json.RawMessage(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		*ri = nil
+		return nil
+	}
+
+	var multi []json.RawMessage
+	if err := json.Unmarshal(data, &multi); err == nil {
+		*ri = multi
+		return nil
+	}
+
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		wrapped, err := json.Marshal(map[string]any{
+			"role":    "user",
+			"content": single,
+		})
+		if err != nil {
+			return err
+		}
+		*ri = []json.RawMessage{wrapped}
+		return nil
+	}
+
+	var rawItem json.RawMessage
+	if err := json.Unmarshal(data, &rawItem); err != nil {
+		return err
+	}
+	*ri = []json.RawMessage{rawItem}
+	return nil
 }
 
 func (r *reasoning) UnmarshalJSON(data []byte) error {

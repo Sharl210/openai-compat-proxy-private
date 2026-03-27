@@ -51,6 +51,54 @@ func TestDeployFailsPreflightWithoutTouchingRunningProcess(t *testing.T) {
 	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
+func TestDeployUsesListenHostForHealthCheck(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePortOnHost(t, "127.0.0.2")
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.2:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	result := runScript(t, repoDir, "deploy-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected deploy to succeed for loopback host alias, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	newPID, err := strconv.Atoi(newPIDText)
+	if err != nil {
+		t.Fatalf("parse new pid: %v text=%q", err, newPIDText)
+	}
+	if !processAlive(newPID) {
+		t.Fatalf("expected deployed pid %d to stay alive", newPID)
+	}
+	mustWaitHealthOnHost(t, "127.0.0.2", port)
+	stopPID(t, newPID)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
+func TestDeployFailsWhenThirdPartyOccupiesPort(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	blocker := mustListen(t, fmt.Sprintf("127.0.0.1:%d", port))
+	defer blocker.Close()
+
+	result := runScript(t, repoDir, "deploy-linux.sh")
+	if result.err == nil {
+		t.Fatalf("expected deploy to fail when third-party listener occupies port, stdout=%s stderr=%s", result.stdout, result.stderr)
+	}
+	if !strings.Contains(result.stderr, fmt.Sprintf("service port %d is occupied by another process", port)) {
+		t.Fatalf("expected occupied-port error, got stdout=%s stderr=%s", result.stdout, result.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
+		t.Fatalf("expected no pid file after occupied-port failure, got err=%v", err)
+	}
+}
+
 func TestRestartReplacesStubbornOldProcess(t *testing.T) {
 	repoDir := newScriptTestRepo(t)
 	port := mustReservePort(t)
@@ -89,6 +137,38 @@ func TestRestartReplacesStubbornOldProcess(t *testing.T) {
 	mustWaitHealth(t, port)
 	stopPID(t, newPID)
 	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
+func TestRestartStopsManagedServiceBeforePreflightFailure(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	goodProviders := filepath.Join(repoDir, "providers-ok")
+	mustWriteFile(t, filepath.Join(goodProviders, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, goodProviders))
+	mustBuildFakeProxy(t, repoDir)
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": goodProviders,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, filepath.Join(repoDir, "providers-missing")))
+
+	result := runScript(t, repoDir, "restart-linux.sh")
+	if result.err == nil {
+		t.Fatalf("expected restart to fail on missing providers after stop, stdout=%s stderr=%s", result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected old process %d to be stopped before restart preflight failure", oldPID)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
+		t.Fatalf("expected pid file removed after restart stop phase, got err=%v", err)
+	}
+	_, _ = oldCmd.Process.Wait()
 }
 
 func TestStopLinuxStopsStubbornProcessAndKeepsArtifacts(t *testing.T) {
@@ -220,7 +300,12 @@ func startFakeProxy(t *testing.T, repoDir string, env map[string]string) *exec.C
 
 func mustWaitHealth(t *testing.T, port int) {
 	t.Helper()
-	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	mustWaitHealthOnHost(t, "127.0.0.1", port)
+}
+
+func mustWaitHealthOnHost(t *testing.T, host string, port int) {
+	t.Helper()
+	url := fmt.Sprintf("http://%s:%d/healthz", host, port)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url)
@@ -280,12 +365,26 @@ func stopPID(t *testing.T, pid int) {
 
 func mustReservePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	return mustReservePortOnHost(t, "127.0.0.1")
+}
+
+func mustReservePortOnHost(t *testing.T, host string) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		t.Fatalf("reserve port: %v", err)
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func mustListen(t *testing.T, addr string) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", addr, err)
+	}
+	return ln
 }
 
 func mustWriteEnv(t *testing.T, repoDir string, content string) {

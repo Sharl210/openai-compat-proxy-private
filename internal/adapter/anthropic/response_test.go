@@ -34,7 +34,11 @@ func TestBuildResponsePreservesTextAlongsideToolUse(t *testing.T) {
 			Name:      "search_web",
 			Arguments: `{"query":"Quectel"}`,
 		}},
-	}, "claude-sonnet-4-5")
+	}, "req_123", "claude-sonnet-4-5")
+
+	if got, _ := resp["id"].(string); got != "req_123" {
+		t.Fatalf("expected response id req_123, got %#v", resp)
+	}
 
 	content, _ := resp["content"].([]map[string]any)
 	if len(content) != 2 {

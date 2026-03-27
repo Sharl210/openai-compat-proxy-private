@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,6 +129,73 @@ func TestLoadProviderFileAllowsBlankSystemPromptFiles(t *testing.T) {
 	}
 	if provider.SystemPromptText != "" {
 		t.Fatalf("expected blank prompt text, got %q", provider.SystemPromptText)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidSupportsBooleanValues(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"SUPPORTS_CHAT=yes",
+		"SUPPORTS_RESPONSES=enabled",
+		"SUPPORTS_MODELS=maybe",
+		"SUPPORTS_ANTHROPIC_MESSAGES=on",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid SUPPORTS_* boolean to fail validation")
+	}
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid SUPPORTS_* boolean, got %T", err)
+	}
+	if err.Error() != "invalid SUPPORTS_CHAT in "+providerEnvPath+": \"yes\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileSupportsFlagsKeepWeakSemantics(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"SUPPORTS_CHAT=false",
+		"SUPPORTS_RESPONSES=true",
+		"SUPPORTS_MODELS=1",
+		"SUPPORTS_ANTHROPIC_MESSAGES=false",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+
+	if provider.SupportsChat {
+		t.Fatalf("expected SUPPORTS_CHAT=false to disable only chat exposure")
+	}
+	if !provider.SupportsResponses {
+		t.Fatalf("expected SUPPORTS_RESPONSES=true to keep responses exposure enabled")
+	}
+	if !provider.SupportsModels {
+		t.Fatalf("expected SUPPORTS_MODELS=1 to keep models exposure enabled")
+	}
+	if provider.SupportsAnthropicMessages {
+		t.Fatalf("expected SUPPORTS_ANTHROPIC_MESSAGES=false to disable only messages exposure")
+	}
+	if provider.SupportsResponses == provider.SupportsChat {
+		t.Fatalf("expected responses exposure to remain independent from chat exposure")
+	}
+	if provider.SupportsModels == provider.SupportsAnthropicMessages {
+		t.Fatalf("expected models exposure to remain independent from anthropic messages exposure")
 	}
 }
 

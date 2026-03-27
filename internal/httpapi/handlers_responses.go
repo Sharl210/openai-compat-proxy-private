@@ -56,6 +56,11 @@ func handleResponses() http.HandlerFunc {
 			canon.Model = mappedModel
 			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		}
+		responseHealthFlag := "health"
+		if canon.Stream {
+			responseHealthFlag = "streaming"
+		}
+		setRequestStatusHeaders(w, r, providerID, requestID, statusCheckKey, responseHealthFlag)
 		canon.RequestID = requestID
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
 		attrs := map[string]any{
@@ -156,8 +161,12 @@ func handleResponses() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 				return
 			}
+			normalized := payload
+			if result, err := aggregate.ResultFromResponsePayload(payload); err == nil {
+				normalized = responsesadapter.BuildResponse(result)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := writeJSON(w, payload); err != nil {
+			if err := writeJSON(w, normalized); err != nil {
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
 				}

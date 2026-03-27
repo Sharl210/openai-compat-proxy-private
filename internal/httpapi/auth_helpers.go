@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"openai-compat-proxy/internal/auth"
 	"openai-compat-proxy/internal/config"
@@ -52,5 +53,26 @@ func allowRootProxyKeyForRequest(r *http.Request, cfg config.Config, provider co
 }
 
 func statusCheckProxyKeyForRequest(r *http.Request, cfg config.Config, provider config.ProviderConfig) string {
-	return provider.StatusCheckProxyAPIKey(cfg.ProxyAPIKey, false)
+	if provider.StatusCheckProxyAPIKey(cfg.ProxyAPIKey, false) == "" {
+		return ""
+	}
+	requestID, ok := requestStatusIDFromRequest(r)
+	if !ok || strings.TrimSpace(requestID) == "" {
+		return ""
+	}
+	store, ok := requestStatusAuthStoreFromRequest(r)
+	if !ok || store == nil {
+		return ""
+	}
+	return store.issueToken(provider.ID, requestID)
+}
+
+func validateStatusCheckAuth(r *http.Request, rootKey string, provider config.ProviderConfig, requestID string) error {
+	if store, ok := requestStatusAuthStoreFromRequest(r); ok && store != nil {
+		if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" && store.consumeToken(token, provider.ID, requestID) {
+			return nil
+		}
+	}
+	statusCheckKey := provider.StatusCheckProxyAPIKey(rootKey, false)
+	return auth.ValidateProxyAuth(r, statusCheckKey)
 }

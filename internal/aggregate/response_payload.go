@@ -13,6 +13,12 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
 		result.Reasoning = cloneMap(reasoning)
 	}
+	if len(result.Usage) > 0 {
+		if result.Reasoning == nil {
+			result.Reasoning = map[string]any{}
+		}
+		result.Reasoning["usage"] = cloneMap(result.Usage)
+	}
 	output, _ := payload["output"].([]any)
 	for _, rawItem := range output {
 		item, _ := rawItem.(map[string]any)
@@ -42,7 +48,9 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 				if result.Reasoning == nil {
 					result.Reasoning = map[string]any{}
 				}
-				result.Reasoning["summary"] = stringValue(result.Reasoning["summary"]) + summary
+				if existing := stringValue(result.Reasoning["summary"]); existing == "" {
+					result.Reasoning["summary"] = summary
+				}
 			}
 		case "function_call":
 			call := ToolCall{}

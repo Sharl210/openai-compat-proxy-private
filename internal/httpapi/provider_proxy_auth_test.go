@@ -3,12 +3,28 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
 )
+
+func mustTokenStatusRequestURI(t *testing.T, statusURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(statusURL)
+	if err != nil {
+		t.Fatalf("parse status url %q: %v", statusURL, err)
+	}
+	if parsed.Query().Get("token") == "" {
+		t.Fatalf("expected status url token query, got %q", statusURL)
+	}
+	if parsed.Query().Get("key") != "" {
+		t.Fatalf("expected status url to omit raw key query, got %q", statusURL)
+	}
+	return parsed.RequestURI()
+}
 
 func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
@@ -40,8 +56,9 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	if legacyRec.Code != http.StatusOK {
 		t.Fatalf("expected default legacy route to accept root key, got %d body=%s", legacyRec.Code, legacyRec.Body.String())
 	}
-	if got := legacyRec.Header().Get("X-STATUS-CHECK-URL"); !strings.Contains(got, "?key=provider-secret") {
-		t.Fatalf("expected legacy status URL to use provider key for provider-scoped status route, got %q", got)
+	legacyStatusURL := legacyRec.Header().Get("X-STATUS-CHECK-URL")
+	if strings.Contains(legacyStatusURL, "provider-secret") || strings.Contains(legacyStatusURL, "root-secret") {
+		t.Fatalf("expected legacy status URL to hide proxy keys, got %q", legacyStatusURL)
 	}
 	requestID := legacyRec.Header().Get("X-Request-Id")
 
@@ -53,8 +70,9 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	if providerRec.Code != http.StatusOK {
 		t.Fatalf("expected provider route to accept override key, got %d body=%s", providerRec.Code, providerRec.Body.String())
 	}
-	if got := providerRec.Header().Get("X-STATUS-CHECK-URL"); !strings.Contains(got, "?key=provider-secret") {
-		t.Fatalf("expected provider status URL to use override key, got %q", got)
+	providerStatusURL := providerRec.Header().Get("X-STATUS-CHECK-URL")
+	if strings.Contains(providerStatusURL, "provider-secret") || strings.Contains(providerStatusURL, "root-secret") {
+		t.Fatalf("expected provider status URL to hide proxy keys, got %q", providerStatusURL)
 	}
 
 	providerRootReq := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
@@ -81,11 +99,19 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 		t.Fatalf("expected provider-scoped status route to reject root key when override set, got %d body=%s", statusRootRec.Code, statusRootRec.Body.String())
 	}
 
-	statusProviderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=provider-secret", nil)
+	statusProviderReq := httptest.NewRequest(http.MethodGet, mustTokenStatusRequestURI(t, legacyStatusURL), nil)
 	statusProviderRec := httptest.NewRecorder()
 	server.ServeHTTP(statusProviderRec, statusProviderReq)
 	if statusProviderRec.Code != http.StatusOK {
-		t.Fatalf("expected default provider status route to accept provider key, got %d body=%s", statusProviderRec.Code, statusProviderRec.Body.String())
+		t.Fatalf("expected default provider status route to accept one-time token, got %d body=%s", statusProviderRec.Code, statusProviderRec.Body.String())
+	}
+
+	statusHeaderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
+	statusHeaderReq.Header.Set("Authorization", "Bearer provider-secret")
+	statusHeaderRec := httptest.NewRecorder()
+	server.ServeHTTP(statusHeaderRec, statusHeaderReq)
+	if statusHeaderRec.Code != http.StatusOK {
+		t.Fatalf("expected default provider status route to accept provider auth header, got %d body=%s", statusHeaderRec.Code, statusHeaderRec.Body.String())
 	}
 }
 

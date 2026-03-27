@@ -24,6 +24,8 @@ const syntheticReasoningPlaceholder = "**推理中**\n\n代理层占位，以兼
 
 type anthropicStreamState struct {
 	messageStarted   bool
+	messageID        string
+	modelName        string
 	textStarted      bool
 	textIndex        int
 	textStopped      bool
@@ -325,6 +327,8 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
+	state.messageID = req.RequestID
+	state.modelName = req.Model
 	if state.pendingToolArgs == nil {
 		state.pendingToolArgs = map[string]string{}
 	}
@@ -374,17 +378,8 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 		return nil
 	}
 	if err := writeAnthropicSSEEvent(w, flusher, "message_start", map[string]any{
-		"type": "message_start",
-		"message": map[string]any{
-			"id":            "msg_proxy",
-			"type":          "message",
-			"role":          "assistant",
-			"model":         "responses-upstream",
-			"content":       []any{},
-			"stop_reason":   nil,
-			"stop_sequence": nil,
-			"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
-		},
+		"type":    "message_start",
+		"message": anthropicMessageStartMessage(state),
 	}); err != nil {
 		return err
 	}
@@ -417,17 +412,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 		state.messageStarted = true
 		return writeAnthropicSSEEvent(w, flusher, "message_start", map[string]any{
-			"type": "message_start",
-			"message": map[string]any{
-				"id":            "msg_proxy",
-				"type":          "message",
-				"role":          "assistant",
-				"model":         "responses-upstream",
-				"content":       []any{},
-				"stop_reason":   nil,
-				"stop_sequence": nil,
-				"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
-			},
+			"type":    "message_start",
+			"message": anthropicMessageStartMessage(state),
 		})
 	}
 	startTextBlock := func() error {
@@ -760,6 +746,25 @@ func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	return writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
 }
 
+func anthropicMessageStartMessage(state *anthropicStreamState) map[string]any {
+	messageID := ""
+	modelName := ""
+	if state != nil {
+		messageID = state.messageID
+		modelName = state.modelName
+	}
+	return map[string]any{
+		"id":            messageID,
+		"type":          "message",
+		"role":          "assistant",
+		"model":         modelName,
+		"content":       []any{},
+		"stop_reason":   nil,
+		"stop_sequence": nil,
+		"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
+	}
+}
+
 func closeThinkingBlockForFailure(state *anthropicStreamState, w http.ResponseWriter, flusher http.Flusher) error {
 	if state == nil || !state.thinkingStarted || state.thinkingStopped {
 		return nil
@@ -1049,7 +1054,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				return err
 			}
 		}
-	case "response.reasoning.delta":
+	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
@@ -1098,6 +1103,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			"cached_tokens":        cachedTokens,
 			"stream_include_usage": includeUsage,
 		})
+		if err := writeChatChunk(w, flusher, map[string]any{}, finishReason, nil); err != nil {
+			return err
+		}
 		if includeUsage {
 			if usage := chatUsage(usageFromEventData(evt.Data)); usage != nil {
 				logging.Event("downstream_stream_usage_mapped", map[string]any{
@@ -1108,9 +1116,6 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 					return err
 				}
 			}
-		}
-		if err := writeChatChunk(w, flusher, map[string]any{}, finishReason, nil); err != nil {
-			return err
 		}
 		if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
 			return err
@@ -1227,7 +1232,7 @@ func stringValue(value any) string {
 }
 
 func reasoningContentValue(data map[string]any) string {
-	for _, key := range []string{"reasoning_content", "summary", "content", "delta"} {
+	for _, key := range []string{"reasoning_content", "summary", "content", "delta", "text"} {
 		if text, _ := data[key].(string); text != "" {
 			return text
 		}

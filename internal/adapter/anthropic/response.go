@@ -6,7 +6,7 @@ import (
 	"openai-compat-proxy/internal/aggregate"
 )
 
-func BuildResponse(result aggregate.Result, modelName string) map[string]any {
+func BuildResponse(result aggregate.Result, requestID string, modelName string) map[string]any {
 	content := make([]map[string]any, 0, len(result.ToolCalls)+1)
 	if result.Text != "" {
 		content = append(content, map[string]any{
@@ -34,6 +34,7 @@ func BuildResponse(result aggregate.Result, modelName string) map[string]any {
 		stopReason = "tool_use"
 	}
 	return map[string]any{
+		"id":            requestID,
 		"type":          "message",
 		"role":          "assistant",
 		"model":         modelName,

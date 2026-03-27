@@ -157,3 +157,82 @@ func TestChatStreamBuffersToolArgumentsUntilMetadataArrives(t *testing.T) {
 		t.Fatalf("expected buffered arguments to merge into first metadata chunk, got %s", body)
 	}
 }
+
+func TestChatStreamMapsReasoningSummaryDeltaToReasoningContent(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"alpha\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"alpha"`) {
+		t.Fatalf("expected reasoning summary delta to map into chat reasoning_content, got %s", body)
+	}
+}
+
+func TestChatStreamWritesIncludeUsageChunkAtTail(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"stream_options":{"include_usage":true},
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	finishIdx := strings.LastIndex(body, `"finish_reason":"stop"`)
+	usageIdx := strings.LastIndex(body, `"choices":[],"object":"chat.completion.chunk","usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}`)
+	doneIdx := strings.LastIndex(body, `data: [DONE]`)
+	if finishIdx == -1 || usageIdx == -1 || doneIdx == -1 {
+		t.Fatalf("expected finish chunk, usage tail chunk and DONE marker, got %s", body)
+	}
+	if !(finishIdx < usageIdx && usageIdx < doneIdx) {
+		t.Fatalf("expected include_usage chunk to be the final JSON chunk before DONE, got %s", body)
+	}
+}

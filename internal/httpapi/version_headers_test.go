@@ -181,6 +181,60 @@ func TestSystemPromptAttachHeaderPresentOnlyWhenProviderPromptActuallyInjected(t
 	}
 }
 
+func TestProviderScopedResponsesRequestExposesVersionAndStatusHeadersTogether(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	rootMTime := time.Date(2026, 3, 26, 10, 0, 0, 123000000, time.UTC)
+	providerMTime := time.Date(2026, 3, 26, 10, 1, 0, 456000000, time.UTC)
+
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROXY_API_KEY=proxy-secret\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nTOTAL_TIMEOUT=1h\n", rootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL="+upstream.URL+"\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", providerMTime)
+
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	server := NewServerWithStore(store)
+
+	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer proxy-secret")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "openai" {
+		t.Fatalf("expected X-Provider-Name openai, got %q", got)
+	}
+	if got := rec.Header().Get("X-Env-Version"); got != config.FormatVersionTime(rootMTime) {
+		t.Fatalf("expected X-Env-Version %q, got %q", config.FormatVersionTime(rootMTime), got)
+	}
+	if got := rec.Header().Get("X-Provider-Version"); got != config.FormatVersionTime(providerMTime) {
+		t.Fatalf("expected X-Provider-Version %q, got %q", config.FormatVersionTime(providerMTime), got)
+	}
+	if got := rec.Header().Get("X-STATUS-CHECK-URL"); got == "" {
+		t.Fatalf("expected X-STATUS-CHECK-URL header")
+	}
+	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
+		t.Fatalf("expected X-RESPONSE-PROCESS-HEALTH-FLAG health, got %q", got)
+	}
+}
+
 func performResponsesRequest(t *testing.T, server http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -176,10 +177,54 @@ func redactAttrs(attrs map[string]any, includeBodies bool) map[string]any {
 		case strings.Contains(lower, "body") && lower == "body" && !includeBodies:
 			clean[k] = "[REDACTED]"
 		default:
-			clean[k] = v
+			clean[k] = normalizeAttrValue(v)
 		}
 	}
 	return clean
+}
+
+func normalizeAttrValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	if err, ok := v.(error); ok {
+		return err.Error()
+	}
+	switch typed := v.(type) {
+	case map[string]any:
+		normalized := make(map[string]any, len(typed))
+		for key, value := range typed {
+			normalized[key] = normalizeAttrValue(value)
+		}
+		return normalized
+	case []any:
+		normalized := make([]any, 0, len(typed))
+		for _, value := range typed {
+			normalized = append(normalized, normalizeAttrValue(value))
+		}
+		return normalized
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		normalized := make([]any, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			normalized = append(normalized, normalizeAttrValue(rv.Index(i).Interface()))
+		}
+		return normalized
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String {
+			return v
+		}
+		normalized := make(map[string]any, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			normalized[iter.Key().String()] = normalizeAttrValue(iter.Value().Interface())
+		}
+		return normalized
+	default:
+		return v
+	}
 }
 
 func summarize(record map[string]any) string {

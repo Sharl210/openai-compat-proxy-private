@@ -5,6 +5,56 @@ import (
 	"testing"
 )
 
+func TestDecodeRequestAcceptsStringInputAsSingleUserMessage(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":"hello"
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one canonical message, got %#v", canon.Messages)
+	}
+	if canon.Messages[0].Role != "user" {
+		t.Fatalf("expected user role, got %#v", canon.Messages[0])
+	}
+	if len(canon.Messages[0].Parts) != 1 || canon.Messages[0].Parts[0].Text != "hello" {
+		t.Fatalf("expected single text part hello, got %#v", canon.Messages[0])
+	}
+	if len(canon.ResponseInputItems) != 1 {
+		t.Fatalf("expected one preserved input item, got %#v", canon.ResponseInputItems)
+	}
+	if got, _ := canon.ResponseInputItems[0]["role"].(string); got != "user" {
+		t.Fatalf("expected preserved role user, got %#v", canon.ResponseInputItems[0])
+	}
+}
+
+func TestDecodeRequestAcceptsSingleObjectInput(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":{"role":"user","content":"hello"}
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one canonical message, got %#v", canon.Messages)
+	}
+	if canon.Messages[0].Role != "user" {
+		t.Fatalf("expected user role, got %#v", canon.Messages[0])
+	}
+	if len(canon.ResponseInputItems) != 1 {
+		t.Fatalf("expected one preserved input item, got %#v", canon.ResponseInputItems)
+	}
+}
+
 func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

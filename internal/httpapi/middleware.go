@@ -3,7 +3,6 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -70,18 +69,18 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 	}
 }
 
-func setRequestStatusHeaders(w http.ResponseWriter, r *http.Request, providerID string, requestID string, proxyKey string, healthFlag string) {
+func setRequestStatusHeaders(w http.ResponseWriter, r *http.Request, providerID string, requestID string, statusToken string, healthFlag string) {
 	if requestID == "" || providerID == "" {
 		return
 	}
-	w.Header().Set("X-STATUS-CHECK-URL", buildStatusCheckURL(r, providerID, requestID, proxyKey))
+	w.Header().Set("X-STATUS-CHECK-URL", buildStatusCheckURL(r, providerID, requestID, statusToken))
 	if healthFlag == "" {
 		healthFlag = "health"
 	}
 	w.Header().Set("X-RESPONSE-PROCESS-HEALTH-FLAG", healthFlag)
 }
 
-func buildStatusCheckURL(r *http.Request, providerID string, requestID string, proxyKey string) string {
+func buildStatusCheckURL(r *http.Request, providerID string, requestID string, statusToken string) string {
 	scheme := "http"
 	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
 		scheme = proto
@@ -89,10 +88,10 @@ func buildStatusCheckURL(r *http.Request, providerID string, requestID string, p
 		scheme = "https"
 	}
 	urlText := fmt.Sprintf("%s://%s/%s/v1/requests/%s", scheme, r.Host, providerID, requestID)
-	if proxyKey == "" {
+	if statusToken == "" {
 		return urlText
 	}
-	return urlText + "?key=" + url.QueryEscape(proxyKey)
+	return urlText + "?token=" + statusToken
 }
 
 type captureWriter struct {
