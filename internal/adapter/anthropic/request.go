@@ -225,6 +225,10 @@ func decodeAnthropicDocumentParts(raw json.RawMessage) ([]model.CanonicalContent
 func decodeToolTransitions(role string, raw json.RawMessage) ([]model.CanonicalToolCall, []model.CanonicalMessage, error) {
 	var parts []contentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
+		trimmed := string(raw)
+		if len(trimmed) > 0 && trimmed[0] == '[' {
+			return nil, nil, err
+		}
 		return nil, nil, nil
 	}
 	var toolCalls []model.CanonicalToolCall

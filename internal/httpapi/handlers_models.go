@@ -3,8 +3,9 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
+	"sort"
+	"strings"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
@@ -50,7 +51,7 @@ func handleModels() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(requestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 			}
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if isUpstreamTimeout(err, ctx) {
 				setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
@@ -85,15 +86,27 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	data, _ := payload["data"].([]any)
 	baseIDs := make([]string, 0, len(data)+len(provider.ModelMap))
-	for publicModel := range provider.ModelMap {
-		baseIDs = append(baseIDs, publicModel)
-	}
+	entriesByID := map[string]map[string]any{}
 	for _, item := range data {
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		if id != "" {
 			baseIDs = append(baseIDs, id)
+			entriesByID[id] = cloneModelEntry(entry)
 		}
+	}
+	publicAliases := sortedPublicModelAliases(provider.ModelMap)
+	for _, publicModel := range publicAliases {
+		baseIDs = append(baseIDs, publicModel)
+		if _, exists := entriesByID[publicModel]; exists {
+			continue
+		}
+		if source := cloneSourceModelEntry(provider, publicModel, entriesByID); len(source) > 0 {
+			source["id"] = publicModel
+			entriesByID[publicModel] = source
+			continue
+		}
+		entriesByID[publicModel] = map[string]any{"id": publicModel}
 	}
 	expanded := baseIDs
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
@@ -105,7 +118,13 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	entries := make([]map[string]any, 0, len(expanded))
 	for _, id := range expanded {
-		entries = append(entries, map[string]any{"id": id})
+		entry := cloneModelEntry(entriesByID[id])
+		if len(entry) == 0 {
+			entry = map[string]any{"id": id}
+		} else {
+			entry["id"] = id
+		}
+		entries = append(entries, entry)
 	}
 	payload["data"] = entries
 	encoded, err := json.Marshal(payload)
@@ -113,4 +132,49 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		return body
 	}
 	return encoded
+}
+
+func cloneModelEntry(entry map[string]any) map[string]any {
+	if len(entry) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(entry))
+	for k, v := range entry {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func sortedPublicModelAliases(modelMap map[string]string) []string {
+	aliases := make([]string, 0, len(modelMap))
+	for key := range modelMap {
+		if shouldHideModelAlias(key) {
+			continue
+		}
+		aliases = append(aliases, key)
+	}
+	sort.Strings(aliases)
+	return aliases
+}
+
+func shouldHideModelAlias(id string) bool {
+	id = strings.TrimSpace(id)
+	return id == "" || strings.Contains(id, "*")
+}
+
+func cloneSourceModelEntry(provider config.ProviderConfig, publicModel string, entriesByID map[string]map[string]any) map[string]any {
+	mapped := strings.TrimSpace(provider.ModelMap[publicModel])
+	if mapped == "" {
+		return nil
+	}
+	if base, _, ok := reasoning.SplitSuffix(mapped); ok {
+		mapped = base
+	}
+	if entry := cloneModelEntry(entriesByID[mapped]); len(entry) > 0 {
+		return entry
+	}
+	if mapped == publicModel {
+		return cloneModelEntry(entriesByID[publicModel])
+	}
+	return nil
 }

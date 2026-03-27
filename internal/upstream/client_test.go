@@ -165,9 +165,11 @@ func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *
 	msg, _ := input[0].(map[string]any)
 	content, _ := msg["content"].([]any)
 	image, _ := content[0].(map[string]any)
-	imageURL, _ := image["image_url"].(map[string]any)
-	if imageURL["detail"] != "high" {
-		t.Fatalf("expected image detail high preserved, got %#v", imageURL)
+	if got, _ := image["image_url"].(string); got != "https://example.com/cat.png" {
+		t.Fatalf("expected image_url string preserved, got %#v", image)
+	}
+	if got := image["detail"]; got != "high" {
+		t.Fatalf("expected image detail high preserved, got %#v", image)
 	}
 }
 

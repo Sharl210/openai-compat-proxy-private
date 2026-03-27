@@ -8,32 +8,11 @@ import (
 )
 
 func authHeaderForUpstream(r *http.Request, cfg config.Config) (string, error) {
-	if info, ok := routeInfoFromRequest(r); ok {
-		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
-			providerCfg := cfg
-			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
-			if allowRootProxyKeyForRequest(r, cfg, provider) {
-				providerCfg.ProxyAPIKey = cfg.ProxyAPIKey
-			} else {
-				providerCfg.ProxyAPIKey = provider.EffectiveProxyAPIKey(cfg.ProxyAPIKey)
-			}
-			return auth.ResolveUpstreamAuthorization(r, providerCfg)
-		}
-	}
-	return auth.ResolveUpstreamAuthorization(r, cfg)
+	return auth.ResolveUpstreamAuthorization(r, effectiveUpstreamAuthConfig(r, cfg))
 }
 
 func authModeForUpstream(r *http.Request, cfg config.Config) string {
-	if info, ok := routeInfoFromRequest(r); ok {
-		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
-			cfg.UpstreamAPIKey = provider.UpstreamAPIKey
-			if allowRootProxyKeyForRequest(r, cfg, provider) {
-				cfg.ProxyAPIKey = cfg.ProxyAPIKey
-			} else {
-				cfg.ProxyAPIKey = provider.EffectiveProxyAPIKey(cfg.ProxyAPIKey)
-			}
-		}
-	}
+	cfg = effectiveUpstreamAuthConfig(r, cfg)
 	if r.Header.Get("X-Upstream-Authorization") != "" {
 		return "x_upstream_authorization"
 	}
@@ -44,6 +23,22 @@ func authModeForUpstream(r *http.Request, cfg config.Config) string {
 		return "server_default_key"
 	}
 	return "missing"
+}
+
+func effectiveUpstreamAuthConfig(r *http.Request, cfg config.Config) config.Config {
+	if info, ok := routeInfoFromRequest(r); ok {
+		if provider, err := cfg.ProviderByID(info.ProviderID); err == nil {
+			providerCfg := cfg
+			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
+			if allowRootProxyKeyForRequest(r, cfg, provider) {
+				providerCfg.ProxyAPIKey = cfg.ProxyAPIKey
+			} else {
+				providerCfg.ProxyAPIKey = provider.EffectiveProxyAPIKey(cfg.ProxyAPIKey)
+			}
+			return providerCfg
+		}
+	}
+	return cfg
 }
 
 func allowRootProxyKeyForRequest(r *http.Request, cfg config.Config, provider config.ProviderConfig) bool {

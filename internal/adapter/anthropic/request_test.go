@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -130,6 +131,13 @@ func TestDecodeRequestAcceptsAnthropicBase64ImageBlock(t *testing.T) {
 	}
 	if got := canon.Messages[0].Parts[0].MimeType; got != "image/png" {
 		t.Fatalf("expected mime type preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+}
+
+func TestDecodeToolTransitionsReturnsErrorForMalformedArrayPayload(t *testing.T) {
+	_, _, err := decodeToolTransitions("assistant", json.RawMessage(`[{"type":"tool_use"`))
+	if err == nil {
+		t.Fatalf("expected malformed array payload to return error")
 	}
 }
 

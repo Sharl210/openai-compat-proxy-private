@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	anthropicadapter "openai-compat-proxy/internal/adapter/anthropic"
@@ -59,7 +58,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 				}
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				if isUpstreamTimeout(err, ctx) {
 					setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "upstream_timeout")
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
@@ -96,7 +95,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 			}
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if isUpstreamTimeout(err, ctx) {
 				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return

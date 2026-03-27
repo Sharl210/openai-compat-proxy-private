@@ -474,17 +474,7 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 				case "text":
 					content = append(content, map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text})
 				case "image_url", "input_image":
-					if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
-						image := cloneMap(rawImage)
-						if _, ok := image["url"]; !ok {
-							if part.ImageURL != "" {
-								image["url"] = part.ImageURL
-							}
-						}
-						content = append(content, map[string]any{"type": "input_image", "image_url": image})
-						continue
-					}
-					content = append(content, map[string]any{"type": "input_image", "image_url": map[string]any{"url": part.ImageURL}})
+					content = append(content, buildInputImageContent(part))
 				case "input_file":
 					if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
 						content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
@@ -599,15 +589,7 @@ func normalizeContentParts(parts []model.CanonicalContentPart) []map[string]any 
 		case "text":
 			content = append(content, map[string]any{"type": "input_text", "text": part.Text})
 		case "image_url", "input_image":
-			if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
-				image := cloneMap(rawImage)
-				if _, ok := image["url"]; !ok && part.ImageURL != "" {
-					image["url"] = part.ImageURL
-				}
-				content = append(content, map[string]any{"type": "input_image", "image_url": image})
-				continue
-			}
-			content = append(content, map[string]any{"type": "input_image", "image_url": map[string]any{"url": part.ImageURL}})
+			content = append(content, buildInputImageContent(part))
 		case "input_file":
 			if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
 				content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
@@ -615,6 +597,29 @@ func normalizeContentParts(parts []model.CanonicalContentPart) []map[string]any 
 		}
 	}
 	return content
+}
+
+func buildInputImageContent(part model.CanonicalContentPart) map[string]any {
+	entry := map[string]any{"type": "input_image"}
+	if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
+		image := cloneMap(rawImage)
+		url, _ := image["url"].(string)
+		if url == "" {
+			url = part.ImageURL
+		}
+		if url != "" {
+			entry["image_url"] = url
+			delete(image, "url")
+			for key, value := range image {
+				entry[key] = value
+			}
+			return entry
+		}
+		entry["image_url"] = image
+		return entry
+	}
+	entry["image_url"] = part.ImageURL
+	return entry
 }
 
 func cloneMap(input map[string]any) map[string]any {

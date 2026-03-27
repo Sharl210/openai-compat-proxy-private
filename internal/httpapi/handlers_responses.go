@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	responsesadapter "openai-compat-proxy/internal/adapter/responses"
@@ -82,8 +81,9 @@ func handleResponses() http.HandlerFunc {
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 				}
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				if isUpstreamTimeout(err, ctx) {
 					setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "upstream_timeout")
+					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
 				if statusStore != nil {
@@ -105,7 +105,7 @@ func handleResponses() http.HandlerFunc {
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "upstream_stream_broken", "upstream_stream_broken", err.Error())
 				}
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				if isUpstreamTimeout(err, ctx) {
 					_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_timeout", "upstream request timed out")
 					return
 				}
@@ -123,7 +123,7 @@ func handleResponses() http.HandlerFunc {
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
 			}
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if isUpstreamTimeout(err, ctx) {
 				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return

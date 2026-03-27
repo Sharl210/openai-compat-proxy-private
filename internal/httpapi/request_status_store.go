@@ -24,6 +24,8 @@ type requestStatusStore struct {
 	items map[string]requestStatus
 }
 
+const requestStatusStoreMaxItems = 1024
+
 func newRequestStatusStore() *requestStatusStore {
 	return &requestStatusStore{items: map[string]requestStatus{}}
 }
@@ -41,6 +43,7 @@ func (s *requestStatusStore) start(requestID, providerID, route string) requestS
 		UpdatedAt:  now,
 	}
 	s.mu.Lock()
+	s.evictOldestLocked()
 	s.items[requestID] = status
 	s.mu.Unlock()
 	return status
@@ -95,4 +98,23 @@ func (s *requestStatusStore) update(requestID string, mutate func(requestStatus)
 		return
 	}
 	s.items[requestID] = mutate(status)
+}
+
+func (s *requestStatusStore) evictOldestLocked() {
+	if len(s.items) < requestStatusStoreMaxItems {
+		return
+	}
+	var (
+		oldestID string
+		oldest   time.Time
+	)
+	for id, status := range s.items {
+		if oldestID == "" || status.UpdatedAt.Before(oldest) {
+			oldestID = id
+			oldest = status.UpdatedAt
+		}
+	}
+	if oldestID != "" {
+		delete(s.items, oldestID)
+	}
 }

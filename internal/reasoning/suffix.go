@@ -49,22 +49,27 @@ func SplitSuffix(modelName string) (string, string, bool) {
 }
 
 func ExpandModelIDs(baseIDs []string, modelMapKeys []string, enabled bool) []string {
-	alreadyHas := map[string]bool{}
-	for _, k := range modelMapKeys {
-		alreadyHas[k] = true
-	}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(baseIDs)*5)
+	hiddenPatterns := map[string]bool{}
+	for _, k := range modelMapKeys {
+		if strings.Contains(k, "*") {
+			hiddenPatterns[k] = true
+		}
+	}
 	for _, id := range baseIDs {
-		if id == "" || seen[id] || alreadyHas[id] {
+		if id == "" || seen[id] || hiddenPatterns[id] || strings.Contains(id, "*") {
 			continue
 		}
 		seen[id] = true
 		out = append(out, id)
-		if enabled && id != "*" {
+		if enabled {
+			if _, _, ok := SplitSuffix(id); ok {
+				continue
+			}
 			for _, suffix := range supportedSuffixes {
 				expanded := id + suffix
-				if !seen[expanded] && !alreadyHas[expanded] {
+				if !seen[expanded] {
 					seen[expanded] = true
 					out = append(out, expanded)
 				}
