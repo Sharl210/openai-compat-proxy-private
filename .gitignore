@@ -5,3 +5,6 @@ bin/
 providers/*.env
 docs/
 tests/
+# Local worktrees
+.worktrees/
+worktrees/
