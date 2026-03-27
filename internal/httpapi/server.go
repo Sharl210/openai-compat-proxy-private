@@ -62,15 +62,14 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mux.ServeHTTP(w, r)
 		return
 	}
-	if statusPath, ok := parseRequestStatusPath(r.URL.Path, snapshot.Config); ok {
-		provider, err := snapshot.Config.ProviderByID(statusPath.ProviderID)
-		if err != nil {
-			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "request not found")
-			return
+	if statusPath, ok := parseRequestStatusPath(r.URL.Path); ok {
+		healthFlag := "health"
+		if status, ok := s.statusStore.get(statusPath.RequestID); ok && status.ProviderID == statusPath.ProviderID && status.HealthFlag != "" {
+			healthFlag = status.HealthFlag
 		}
 		r = r.Clone(withRequestStatusID(withRequestStatusStore(r.Context(), s.statusStore), statusPath.RequestID))
 		setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
-		setRequestStatusHeaders(w, r, statusPath.ProviderID, statusPath.RequestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
+		setRequestStatusHeaders(w, r, statusPath.ProviderID, statusPath.RequestID, "", healthFlag)
 		s.statusHandler.ServeHTTP(w, r)
 		return
 	}

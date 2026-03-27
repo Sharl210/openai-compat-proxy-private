@@ -15,6 +15,7 @@ GO_PROFILE_FILE="${GO_PROFILE_FILE:-/etc/profile.d/go.sh}"
 
 GO_BIN="${GO_BIN:-}"
 LOCK_ACQUIRED=0
+LOCK_PID_FILE="$LOCK_DIR/pid"
 
 log() {
   printf '%s\n' "$*"
@@ -28,8 +29,24 @@ fail() {
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     LOCK_ACQUIRED=1
+    printf '%s\n' "$$" > "$LOCK_PID_FILE"
     trap release_lock EXIT
     return 0
+  fi
+  if [[ -d "$LOCK_DIR" ]]; then
+    local lock_pid=""
+    if [[ -f "$LOCK_PID_FILE" ]]; then
+      lock_pid="$(tr -d '[:space:]' < "$LOCK_PID_FILE" 2>/dev/null || true)"
+    fi
+    if [[ -z "$lock_pid" ]] || ! pid_exists "$lock_pid"; then
+      rm -rf "$LOCK_DIR"
+      if mkdir "$LOCK_DIR" 2>/dev/null; then
+        LOCK_ACQUIRED=1
+        printf '%s\n' "$$" > "$LOCK_PID_FILE"
+        trap release_lock EXIT
+        return 0
+      fi
+    fi
   fi
   fail "another deploy/restart/stop operation is already running"
 }
@@ -86,6 +103,31 @@ load_env() {
   set +a
   : "${LISTEN_ADDR:?LISTEN_ADDR is required in .env}"
   : "${PROVIDERS_DIR:?PROVIDERS_DIR is required in .env}"
+}
+
+load_env_if_present() {
+  [[ -f "$ENV_FILE" ]] || return 1
+  local rc=0
+  unset LISTEN_ADDR
+  unset PROVIDERS_DIR
+  set +e
+  set -a
+  source "$ENV_FILE"
+  rc=$?
+  set +a
+  if [[ $rc -eq 0 && -z "${LISTEN_ADDR:-}" ]]; then
+    rc=1
+  fi
+  if [[ $rc -eq 0 && -z "${PROVIDERS_DIR:-}" ]]; then
+    rc=1
+  fi
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    unset LISTEN_ADDR
+    unset PROVIDERS_DIR
+    return 1
+  fi
+  return 0
 }
 
 validate_provider_inputs() {
@@ -260,6 +302,21 @@ listener_pids_for_port() {
   ss -ltnpH "( sport = :$port )" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
 }
 
+all_listener_pids() {
+  command -v ss >/dev/null 2>&1 || return 0
+  ss -ltnpH 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
+}
+
+service_listener_pids() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if pid_matches_service "$pid"; then
+      printf '%s\n' "$pid"
+    fi
+  done < <(all_listener_pids)
+}
+
 port_has_any_listener() {
   local port="$1"
   local pid
@@ -325,7 +382,7 @@ stop_pid_gracefully() {
 }
 
 stop_managed_service() {
-  local port="$1"
+  local port="${1:-}"
   local pid=""
   if [[ -f "$PID_FILE" ]]; then
     pid="$(tr -d '[:space:]' < "$PID_FILE" 2>/dev/null || true)"
@@ -337,12 +394,12 @@ stop_managed_service() {
   local listener_pid
   while IFS= read -r listener_pid; do
     [[ -n "$listener_pid" ]] || continue
-    if pid_matches_service "$listener_pid"; then
-      stop_pid_gracefully "$listener_pid"
-    fi
-  done < <(listener_pids_for_port "$port")
+    stop_pid_gracefully "$listener_pid"
+  done < <(service_listener_pids)
 
-  wait_for_port_free "$port" 5 || fail "service port $port is occupied by another process"
+  if [[ -n "$port" ]]; then
+    wait_for_port_free "$port" 5 || fail "service port $port is occupied by another process"
+  fi
   rm -f "$PID_FILE"
 }
 
@@ -492,10 +549,11 @@ restart_service() {
 }
 
 stop_service_entry() {
-  load_env
   prepare_runtime_dependencies
-  local port
-  port="$(extract_port "$LISTEN_ADDR")"
+  local port=""
+  if load_env_if_present; then
+    port="$(extract_port "$LISTEN_ADDR")"
+  fi
   stop_managed_service "$port"
   log "service stopped"
 }

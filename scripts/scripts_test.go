@@ -207,6 +207,109 @@ func TestStopLinuxStopsStubbornProcessAndKeepsArtifacts(t *testing.T) {
 	}
 }
 
+func TestStopLinuxStopsWithoutEnvFileUsingPidFile(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+	if err := os.Remove(filepath.Join(repoDir, ".env")); err != nil {
+		t.Fatalf("remove env: %v", err)
+	}
+
+	result := runScript(t, repoDir, "stop-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected stop without env to succeed, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected old process %d to be fully stopped without env", oldPID)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
+		t.Fatalf("expected pid file removed, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.log")); err != nil {
+		t.Fatalf("expected log file retained by stop script, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "bin", "openai-compat-proxy")); err != nil {
+		t.Fatalf("expected binary retained by stop script, err=%v", err)
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
+func TestStopLinuxRecoversFromStaleLock(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.lock", "pid"), "999999\n")
+
+	result := runScript(t, repoDir, "stop-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected stop to recover from stale lock, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected old process %d to be stopped after stale lock recovery", oldPID)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.lock")); !os.IsNotExist(err) {
+		t.Fatalf("expected lock dir removed after stale lock recovery, got err=%v", err)
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
+func TestStopLinuxStopsRunningServiceAfterListenAddrPortChange(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	oldPort := mustReservePort(t)
+	newPort := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", oldPort, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", oldPort),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWaitHealth(t, oldPort)
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), "999999\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", newPort, providersDir))
+
+	result := runScript(t, repoDir, "stop-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected stop to find running service after listen port change, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected old process %d to be stopped after listen port change", oldPID)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
+		t.Fatalf("expected pid file removed, got err=%v", err)
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
 func TestUninstallStopsStubbornProcessBeforeCleanup(t *testing.T) {
 	repoDir := newScriptTestRepo(t)
 	port := mustReservePort(t)
@@ -237,6 +340,104 @@ func TestUninstallStopsStubbornProcessBeforeCleanup(t *testing.T) {
 			t.Fatalf("expected %s removed, err=%v", rel, err)
 		}
 	}
+}
+
+func TestUninstallStopsWithoutEnvFileUsingPidFile(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+	if err := os.Remove(filepath.Join(repoDir, ".env")); err != nil {
+		t.Fatalf("remove env: %v", err)
+	}
+
+	result := runScript(t, repoDir, "uninstall-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected uninstall without env to succeed, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected uninstall to fully stop old process %d without env", oldPID)
+	}
+	for _, rel := range []string{".proxy.pid", ".proxy.log", filepath.Join("bin", "openai-compat-proxy")} {
+		if _, err := os.Stat(filepath.Join(repoDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s removed, err=%v", rel, err)
+		}
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
+func TestStopLinuxStopsWithBrokenEnvUsingPidFileFallback(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+	mustWriteFile(t, filepath.Join(repoDir, ".env"), "PROVIDERS_DIR=\n")
+
+	result := runScript(t, repoDir, "stop-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected stop with broken env to succeed, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected old process %d to stop with broken env fallback", oldPID)
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
+func TestUninstallStopsWithBrokenEnvUsingPidFileFallback(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
+
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+	mustWriteFile(t, filepath.Join(repoDir, ".env"), "LISTEN_ADDR=\n")
+
+	result := runScript(t, repoDir, "uninstall-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected uninstall with broken env to succeed, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected uninstall to stop old process %d with broken env fallback", oldPID)
+	}
+	for _, rel := range []string{".proxy.pid", ".proxy.log", filepath.Join("bin", "openai-compat-proxy")} {
+		if _, err := os.Stat(filepath.Join(repoDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s removed, err=%v", rel, err)
+		}
+	}
+	_, _ = oldCmd.Process.Wait()
 }
 
 type scriptResult struct {

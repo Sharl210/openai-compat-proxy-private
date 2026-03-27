@@ -46,6 +46,33 @@ func BuildRuntimeSnapshot(rootEnvPath string) (*RuntimeSnapshot, error) {
 	if err := ValidateRootEnvValues(values); err != nil {
 		return nil, err
 	}
+	return buildRuntimeSnapshotFromValues(rootEnvPath, rootInfo.ModTime(), values)
+}
+
+func BuildRuntimeSnapshotForRefresh(rootEnvPath string, previous Config) (*RuntimeSnapshot, error) {
+	rootInfo, err := os.Stat(rootEnvPath)
+	if err != nil {
+		return nil, err
+	}
+	values, err := parseEnvFile(rootEnvPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateHotReloadableRootEnvValues(values); err != nil {
+		return nil, err
+	}
+	snapshot, err := buildRuntimeSnapshotFromValues(rootEnvPath, rootInfo.ModTime(), values)
+	if err != nil {
+		return nil, err
+	}
+	snapshot.Config.applyStartupOnlyFrom(previous)
+	if err := snapshot.Config.Validate(); err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, values map[string]string) (*RuntimeSnapshot, error) {
 	cfg := LoadFromValues(values)
 	cfg.ProvidersDir = ResolveProvidersDir(rootEnvPath, cfg.ProvidersDir)
 	providers, providerVersions, providerPaths, promptPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir)
@@ -59,13 +86,32 @@ func BuildRuntimeSnapshot(rootEnvPath string) (*RuntimeSnapshot, error) {
 	return &RuntimeSnapshot{
 		Config:              cfg,
 		RootEnvPath:         rootEnvPath,
-		RootEnvMTime:        rootInfo.ModTime(),
-		RootEnvVersion:      FormatVersionTime(rootInfo.ModTime()),
+		RootEnvMTime:        rootEnvMTime,
+		RootEnvVersion:      FormatVersionTime(rootEnvMTime),
 		ProviderVersionByID: providerVersions,
 		ProviderPathByID:    providerPaths,
 		PromptPathsByID:     promptPaths,
 		providerMTimeByID:   providerMTimes,
 	}, nil
+}
+
+func validateHotReloadableRootEnvValues(values map[string]string) error {
+	if err := validatePositiveDuration(values, "CONNECT_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "FIRST_BYTE_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "IDLE_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "TOTAL_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validateDownstreamNonStreamStrategy(values, "DOWNSTREAM_NON_STREAM_STRATEGY"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func parseEnvFile(path string) (map[string]string, error) {
@@ -119,7 +165,12 @@ func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string,
 		if err != nil {
 			return nil, nil, nil, nil, nil, err
 		}
-		provider.SystemPromptText, err = loadSystemPromptText(provider.SystemPromptFiles)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		providerVersionTime := info.ModTime()
+		provider.SystemPromptText, providerVersionTime, err = loadSystemPromptText(provider.SystemPromptFiles, providerVersionTime)
 		if err != nil {
 			return nil, nil, nil, nil, nil, err
 		}
@@ -129,16 +180,12 @@ func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string,
 		if _, exists := seen[provider.ID]; exists {
 			return nil, nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("duplicate provider id: %s", provider.ID))
 		}
-		info, err := os.Stat(fullPath)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
 		seen[provider.ID] = struct{}{}
 		providers = append(providers, provider)
-		versions[provider.ID] = FormatVersionTime(info.ModTime())
+		versions[provider.ID] = FormatVersionTime(providerVersionTime)
 		paths[provider.ID] = fullPath
 		promptPaths[provider.ID] = append([]string(nil), provider.SystemPromptFiles...)
-		mtimes[provider.ID] = info.ModTime()
+		mtimes[provider.ID] = providerVersionTime
 	}
 	sortProviders(providers)
 	return providers, versions, paths, promptPaths, mtimes, nil
@@ -154,18 +201,28 @@ func sortProviders(providers []ProviderConfig) {
 	}
 }
 
-func loadSystemPromptText(paths []string) (string, error) {
+func loadSystemPromptText(paths []string, latest time.Time) (string, time.Time, error) {
 	if len(paths) == 0 {
-		return "", nil
+		return "", latest, nil
 	}
 	sections := make([]string, 0, len(paths))
 	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", latest, err
+		}
+		if info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return "", err
+			return "", latest, err
 		}
 		raw := string(content)
 		if strings.TrimSpace(raw) == "" {
@@ -174,7 +231,7 @@ func loadSystemPromptText(paths []string) (string, error) {
 		trimmed := strings.TrimRight(raw, "\r\n")
 		sections = append(sections, trimmed)
 	}
-	return strings.Join(sections, "\n\n"), nil
+	return strings.Join(sections, "\n\n"), latest, nil
 }
 
 func (s *RuntimeSnapshot) PromptWatchDirs() []string {

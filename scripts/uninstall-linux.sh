@@ -6,9 +6,12 @@ cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib/runtime.sh"
 
 acquire_lock
-load_env
 prepare_runtime_dependencies
-stop_managed_service "$(extract_port "$LISTEN_ADDR")"
+port=""
+if load_env_if_present; then
+  port="$(extract_port "$LISTEN_ADDR")"
+fi
+stop_managed_service "$port"
 rm -f "$LOG_FILE" "$BIN_PATH" "$BACKUP_BIN_PATH" "$TMP_BIN_PATH"
 
 echo "stopped and cleaned runtime artifacts"

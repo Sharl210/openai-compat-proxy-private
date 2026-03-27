@@ -1,8 +1,16 @@
 package responses
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/upstream"
 )
 
 func TestDecodeRequestAcceptsStringInputAsSingleUserMessage(t *testing.T) {
@@ -158,4 +166,115 @@ func TestDecodeRequestAcceptsResponsesInputFileContent(t *testing.T) {
 	if got := fileRaw["file_id"]; got != "file_123" {
 		t.Fatalf("expected input_file file_id preserved, got %#v", canon.Messages[0].Parts[0])
 	}
+}
+
+func TestDecodeRequestPreservesPreviousResponseIDMetadataParallelToolCallsTruncationAndText(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"previous_response_id":"resp_123",
+		"metadata":{"trace_id":"trace_123","tier":"gold"},
+		"parallel_tool_calls":true,
+		"truncation":"auto",
+		"text":{"format":{"type":"text"}},
+		"input":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	preserved := extractPreservedResponsesTopLevelFields(t, canon)
+	if got, _ := preserved["previous_response_id"].(string); got != "resp_123" {
+		t.Fatalf("expected previous_response_id resp_123, got %#v", preserved)
+	}
+	metadata, _ := preserved["metadata"].(map[string]any)
+	if got, _ := metadata["trace_id"].(string); got != "trace_123" {
+		t.Fatalf("expected metadata.trace_id trace_123, got %#v", preserved)
+	}
+	if got, _ := metadata["tier"].(string); got != "gold" {
+		t.Fatalf("expected metadata.tier gold, got %#v", preserved)
+	}
+	if got, _ := preserved["parallel_tool_calls"].(bool); !got {
+		t.Fatalf("expected parallel_tool_calls=true, got %#v", preserved)
+	}
+	if got, _ := preserved["truncation"].(string); got != "auto" {
+		t.Fatalf("expected truncation auto, got %#v", preserved)
+	}
+	text, _ := preserved["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if got, _ := format["type"].(string); got != "text" {
+		t.Fatalf("expected text.format.type text, got %#v", preserved)
+	}
+}
+
+func TestDecodeRequestPreservesPreviousResponseIDMetadataParallelToolCallsTruncationAndTextThroughUpstreamConstruction(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"previous_response_id":"resp_123",
+		"metadata":{"trace_id":"trace_123"},
+		"parallel_tool_calls":false,
+		"truncation":"auto",
+		"text":{"format":{"type":"text"}},
+		"input":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_ok"}`))
+	}))
+	defer server.Close()
+
+	client := upstream.NewClient(server.URL)
+	if _, err := client.Response(context.Background(), canon, ""); err != nil {
+		t.Fatalf("client.Response error: %v", err)
+	}
+
+	if got, _ := received["previous_response_id"].(string); got != "resp_123" {
+		t.Fatalf("expected previous_response_id resp_123 in upstream payload, got %#v", received)
+	}
+	metadata, _ := received["metadata"].(map[string]any)
+	if got, _ := metadata["trace_id"].(string); got != "trace_123" {
+		t.Fatalf("expected metadata.trace_id trace_123 in upstream payload, got %#v", received)
+	}
+	if got, ok := received["parallel_tool_calls"].(bool); !ok || got {
+		t.Fatalf("expected parallel_tool_calls=false in upstream payload, got %#v", received)
+	}
+	if got, _ := received["truncation"].(string); got != "auto" {
+		t.Fatalf("expected truncation auto in upstream payload, got %#v", received)
+	}
+	text, _ := received["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if got, _ := format["type"].(string); got != "text" {
+		t.Fatalf("expected text.format.type text in upstream payload, got %#v", received)
+	}
+	input, _ := received["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected passthrough marker to stay out of upstream input, got %#v", received)
+	}
+}
+
+func extractPreservedResponsesTopLevelFields(t *testing.T, canon model.CanonicalRequest) map[string]any {
+	t.Helper()
+	for _, item := range canon.ResponseInputItems {
+		if preserved, ok := item[preservedResponsesTopLevelFieldsKey].(map[string]any); ok {
+			return preserved
+		}
+	}
+	t.Fatalf("expected preserved top-level responses fields marker, got %#v", canon)
+	return nil
 }

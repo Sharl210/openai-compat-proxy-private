@@ -233,6 +233,98 @@ func TestManager_TimezoneChange(t *testing.T) {
 	}
 }
 
+func TestManager_StartupRolloverNormalizesLoadedStats(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	clock.Set(time.Date(2026, 3, 28, 9, 0, 0, 0, loc))
+
+	if err := EnsureCacheInfoDir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	stored := ProviderStats{
+		Timezone:     loc.String(),
+		TodayDate:    "2026-03-27",
+		Today:        TokenTotals{InputTokens: 100, TotalTokens: 100},
+		HistoryTotal: TokenTotals{InputTokens: 100, TotalTokens: 100},
+		UpdatedAt:    time.Date(2026, 3, 27, 23, 59, 0, 0, loc),
+	}
+	data, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(expectedCacheInfoJSONPath(tmp, "openai"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+	stats := m.stats["openai"]
+
+	if stats.TodayDate != "2026-03-28" {
+		t.Fatalf("TodayDate = %s, want 2026-03-28 after startup rollover", stats.TodayDate)
+	}
+	if stats.Today.TotalTokens != 0 {
+		t.Fatalf("Today.TotalTokens = %d, want 0 for rolled over startup day", stats.Today.TotalTokens)
+	}
+	if stats.YesterdayDate != "2026-03-27" {
+		t.Fatalf("YesterdayDate = %s, want 2026-03-27 after startup rollover", stats.YesterdayDate)
+	}
+	if stats.Yesterday.TotalTokens != 100 {
+		t.Fatalf("Yesterday.TotalTokens = %d, want 100 from stored previous day", stats.Yesterday.TotalTokens)
+	}
+}
+
+func TestManager_StartupNormalizesMixedLegacyAndRecentDays(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	clock.Set(time.Date(2026, 3, 28, 9, 0, 0, 0, loc))
+
+	if err := EnsureCacheInfoDir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	stored := ProviderStats{
+		Timezone:      loc.String(),
+		TodayDate:     "2026-03-28",
+		YesterdayDate: "2026-03-27",
+		Today:         TokenTotals{InputTokens: 30, TotalTokens: 30},
+		Yesterday:     TokenTotals{InputTokens: 20, TotalTokens: 20},
+		RecentDays: []DailyStats{
+			{Date: "2026-03-28", Totals: TokenTotals{InputTokens: 30, TotalTokens: 30}},
+		},
+		HistoryTotal: TokenTotals{InputTokens: 50, TotalTokens: 50},
+		UpdatedAt:    time.Date(2026, 3, 28, 8, 0, 0, 0, loc),
+	}
+	data, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(expectedCacheInfoJSONPath(tmp, "openai"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+	stats := m.stats["openai"]
+
+	if len(stats.RecentDays) != 2 {
+		t.Fatalf("len(RecentDays) = %d, want 2 after mixed schema normalization", len(stats.RecentDays))
+	}
+	if stats.RecentDays[0].Date != "2026-03-27" {
+		t.Fatalf("RecentDays[0].Date = %s, want 2026-03-27", stats.RecentDays[0].Date)
+	}
+	if stats.RecentDays[0].Totals.TotalTokens != 20 {
+		t.Fatalf("RecentDays[0].Totals.TotalTokens = %d, want 20 from legacy yesterday", stats.RecentDays[0].Totals.TotalTokens)
+	}
+	if stats.RecentDays[1].Date != "2026-03-28" {
+		t.Fatalf("RecentDays[1].Date = %s, want 2026-03-28", stats.RecentDays[1].Date)
+	}
+	if stats.RecentDays[1].Totals.TotalTokens != 30 {
+		t.Fatalf("RecentDays[1].Totals.TotalTokens = %d, want 30 from today", stats.RecentDays[1].Totals.TotalTokens)
+	}
+}
+
 func TestManager_DuplicateRequestID(t *testing.T) {
 	tmp := t.TempDir()
 	loc := time.FixedZone("CST", 8*3600)
@@ -254,6 +346,29 @@ func TestManager_DuplicateRequestID(t *testing.T) {
 	// 应该只入账一次
 	if stats.Today.InputTokens != 100 {
 		t.Errorf("Today.InputTokens = %d, want 100 (duplicate should be ignored)", stats.Today.InputTokens)
+	}
+}
+
+func TestManager_DuplicateRequestIDScopedByProvider(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	m := NewManager(tmp, loc, []string{"openai", "anthropic"}, nil)
+
+	openAIUsage := Usage{InputTokens: 100, TotalTokens: 100}
+	anthropicUsage := Usage{InputTokens: 200, TotalTokens: 200}
+
+	if err := m.RecordFinalUsage("req-shared", "openai", &openAIUsage); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-shared", "anthropic", &anthropicUsage); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := m.stats["openai"].Today.InputTokens; got != 100 {
+		t.Fatalf("openai Today.InputTokens = %d, want 100", got)
+	}
+	if got := m.stats["anthropic"].Today.InputTokens; got != 200 {
+		t.Fatalf("anthropic Today.InputTokens = %d, want 200", got)
 	}
 }
 
@@ -361,6 +476,42 @@ func TestManager_FlushTriggersRollover(t *testing.T) {
 	}
 	if stats.Yesterday.TotalTokens != 150 {
 		t.Fatalf("Yesterday.TotalTokens = %d, want 150", stats.Yesterday.TotalTokens)
+	}
+	if stats.Today.TotalTokens != 0 {
+		t.Fatalf("Today.TotalTokens = %d, want 0", stats.Today.TotalTokens)
+	}
+}
+
+func TestManager_FlushTriggersSevenDayRolloverAcrossDST(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation error: %v", err)
+	}
+
+	tmp := t.TempDir()
+	clock := &mockClock{now: time.Date(2026, 3, 7, 12, 0, 0, 0, loc)}
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+
+	usage := Usage{InputTokens: 100, TotalTokens: 100}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	clock.Set(time.Date(2026, 3, 14, 12, 0, 0, 0, loc))
+	m.flushAll()
+
+	stats := m.stats["openai"]
+	if stats.TodayDate != "2026-03-14" {
+		t.Fatalf("TodayDate = %s, want 2026-03-14", stats.TodayDate)
+	}
+	if len(stats.RecentDays) != 7 {
+		t.Fatalf("len(RecentDays) = %d, want 7", len(stats.RecentDays))
+	}
+	if stats.RecentDays[0].Date != "2026-03-08" {
+		t.Fatalf("RecentDays[0].Date = %s, want 2026-03-08", stats.RecentDays[0].Date)
+	}
+	if stats.RecentDays[6].Date != "2026-03-14" {
+		t.Fatalf("RecentDays[6].Date = %s, want 2026-03-14", stats.RecentDays[6].Date)
 	}
 	if stats.Today.TotalTokens != 0 {
 		t.Fatalf("Today.TotalTokens = %d, want 0", stats.Today.TotalTokens)

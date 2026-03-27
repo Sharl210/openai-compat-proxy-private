@@ -139,6 +139,44 @@ func TestLoggerRotatesAndKeepsRecentBackups(t *testing.T) {
 	}
 }
 
+func TestLoggerKeepsWritingWhenRotationRenameFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "proxy.jsonl")
+	stdout := &bytes.Buffer{}
+
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      logPath,
+		LogMaxSizeMB:     1,
+		LogMaxBackups:    2,
+		LogIncludeBodies: true,
+	}, stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeFn()
+
+	if err := os.WriteFile(logPath, []byte(strings.Repeat("x", 1024*1024)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(tmpDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(tmpDir, 0o755)
+
+	logger.Event("rotation_failure", map[string]any{"body": "still written"})
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(content, []byte("rotation_failure")) {
+		t.Fatalf("expected log file to retain event after rotate failure, got %d bytes", len(content))
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("rotation_failure")) {
+		t.Fatalf("expected stdout summary to mention event, got %s", stdout.String())
+	}
+}
+
 func TestInitDisablesLoggingWhenLogEnableIsFalse(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "proxy.jsonl")

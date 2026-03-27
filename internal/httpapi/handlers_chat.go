@@ -56,6 +56,11 @@ func handleChat() http.HandlerFunc {
 			canon.Model = mappedModel
 			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		}
+		responseHealthFlag := "health"
+		if canon.Stream {
+			responseHealthFlag = "streaming"
+		}
+		setRequestStatusHeaders(w, r, providerID, requestID, statusCheckKey, responseHealthFlag)
 		canon.RequestID = requestID
 		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
 		canon.AuthMode = authModeForUpstream(r, providerCfg)

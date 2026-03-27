@@ -111,6 +111,28 @@ func TestModelsRejectsProviderWithoutModelsSupport(t *testing.T) {
 	}
 }
 
+func TestDisabledDefaultProviderLegacyModelsRouteReturnsNotFound(t *testing.T) {
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         false,
+			UpstreamBaseURL: "https://example.test",
+			UpstreamAPIKey:  "test-key",
+			SupportsModels:  true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404 when default provider is disabled, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestMessagesRejectsProviderWithoutMessagesSupport(t *testing.T) {
 	server := NewServer(config.Config{
 		DefaultProvider:      "anthropic",
@@ -134,6 +156,32 @@ func TestMessagesRejectsProviderWithoutMessagesSupport(t *testing.T) {
 	status := fetchStatusForTest(t, server, "anthropic", rec.Header().Get("X-Request-Id"))
 	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
 		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
+	}
+}
+
+func TestMessagesRequiresAnthropicVersionHeader(t *testing.T) {
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           "https://example.test",
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 when anthropic-version is missing, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "anthropic-version") {
+		t.Fatalf("expected missing anthropic-version error, got %s", rec.Body.String())
 	}
 }
 

@@ -46,7 +46,10 @@ func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 		}
 		provider, err := cfg.DefaultProviderConfig()
 		if err != nil {
-			return routeInfo{}, err
+			return routeInfo{}, errors.New("route not found")
+		}
+		if !provider.Enabled {
+			return routeInfo{}, errors.New("route not found")
 		}
 		return routeInfo{ProviderID: provider.ID, Legacy: true, CanonicalPath: path}, nil
 	}

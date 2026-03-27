@@ -14,6 +14,11 @@ type request struct {
 	Stream             bool            `json:"stream"`
 	Store              *bool           `json:"store"`
 	Include            []string        `json:"include"`
+	PreviousResponseID string          `json:"previous_response_id"`
+	Metadata           json.RawMessage `json:"metadata"`
+	ParallelToolCalls  *bool           `json:"parallel_tool_calls"`
+	Truncation         json.RawMessage `json:"truncation"`
+	Text               json.RawMessage `json:"text"`
 	Instructions       json.RawMessage `json:"instructions"`
 	Input              requestInput    `json:"input"`
 	Tools              []tool          `json:"tools"`
@@ -63,6 +68,8 @@ type reasoning struct {
 	Raw     map[string]any `json:"-"`
 }
 
+const preservedResponsesTopLevelFieldsKey = "__openai_compat_responses_top_level"
+
 func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	var req request
 	if err := json.NewDecoder(r).Decode(&req); err != nil {
@@ -79,6 +86,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		TopP:            decodeOptionalFloat(req.TopP),
 		MaxOutputTokens: decodeOptionalInt(req.MaxOutputTokensRaw),
 		Stop:            req.Stop,
+	}
+
+	if preservedTopLevelFields := collectPreservedTopLevelFields(req); len(preservedTopLevelFields) > 0 {
+		canon.ResponseInputItems = append(canon.ResponseInputItems, map[string]any{
+			preservedResponsesTopLevelFieldsKey: preservedTopLevelFields,
+		})
 	}
 
 	if req.Reasoning != nil {
@@ -351,4 +364,35 @@ func decodeOptionalInt(raw json.RawMessage) *int {
 
 func isUndefinedString(value string) bool {
 	return value == "[undefined]" || value == "undefined" || value == ""
+}
+
+func collectPreservedTopLevelFields(req request) map[string]any {
+	fields := map[string]any{}
+	if req.PreviousResponseID != "" {
+		fields["previous_response_id"] = req.PreviousResponseID
+	}
+	if value := decodeOptionalAny(req.Metadata); value != nil {
+		fields["metadata"] = value
+	}
+	if req.ParallelToolCalls != nil {
+		fields["parallel_tool_calls"] = *req.ParallelToolCalls
+	}
+	if value := decodeOptionalAny(req.Truncation); value != nil {
+		fields["truncation"] = value
+	}
+	if value := decodeOptionalAny(req.Text); value != nil {
+		fields["text"] = value
+	}
+	return fields
+}
+
+func decodeOptionalAny(raw json.RawMessage) any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil
+	}
+	return value
 }

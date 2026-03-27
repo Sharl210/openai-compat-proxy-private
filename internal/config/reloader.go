@@ -47,17 +47,22 @@ func (s *RuntimeStore) Refresh() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current := s.active.Load()
-	snapshot, err := BuildRuntimeSnapshot(s.rootEnvPath)
+	if current == nil {
+		snapshot, err := BuildRuntimeSnapshot(s.rootEnvPath)
+		if err != nil {
+			return err
+		}
+		s.active.Store(snapshot)
+		return nil
+	}
+	snapshot, err := BuildRuntimeSnapshotForRefresh(s.rootEnvPath, current.Config)
 	if err != nil {
 		return err
 	}
-	if current != nil {
-		hotChanged := !snapshot.Config.hotReloadableRootEquals(current.Config)
-		snapshot.Config.applyStartupOnlyFrom(current.Config)
-		if !hotChanged {
-			snapshot.RootEnvMTime = current.RootEnvMTime
-			snapshot.RootEnvVersion = current.RootEnvVersion
-		}
+	hotChanged := !snapshot.Config.hotReloadableRootEquals(current.Config)
+	if !hotChanged {
+		snapshot.RootEnvMTime = current.RootEnvMTime
+		snapshot.RootEnvVersion = current.RootEnvVersion
 	}
 	s.active.Store(snapshot)
 	return nil

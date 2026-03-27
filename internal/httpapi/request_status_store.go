@@ -105,16 +105,29 @@ func (s *requestStatusStore) evictOldestLocked() {
 		return
 	}
 	var (
-		oldestID string
-		oldest   time.Time
+		oldestCompletedID string
+		oldestCompleted   time.Time
+		oldestActiveID    string
+		oldestActive      time.Time
 	)
 	for id, status := range s.items {
-		if oldestID == "" || status.UpdatedAt.Before(oldest) {
-			oldestID = id
-			oldest = status.UpdatedAt
+		if status.Completed {
+			if oldestCompletedID == "" || status.UpdatedAt.Before(oldestCompleted) {
+				oldestCompletedID = id
+				oldestCompleted = status.UpdatedAt
+			}
+			continue
+		}
+		if oldestActiveID == "" || status.UpdatedAt.Before(oldestActive) {
+			oldestActiveID = id
+			oldestActive = status.UpdatedAt
 		}
 	}
-	if oldestID != "" {
-		delete(s.items, oldestID)
+	if oldestCompletedID != "" {
+		delete(s.items, oldestCompletedID)
+		return
+	}
+	if oldestActiveID != "" {
+		delete(s.items, oldestActiveID)
 	}
 }

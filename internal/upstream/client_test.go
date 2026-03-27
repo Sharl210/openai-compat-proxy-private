@@ -217,6 +217,52 @@ func TestBuildRequestBodyPreservesInputFileAndStructuredToolOutput(t *testing.T)
 	}
 }
 
+func TestBuildRequestBodyForwardsAssistantReasoningContentAsReasoningSummary(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:             "assistant",
+			ReasoningContent: "先想一下",
+			Parts: []model.CanonicalContentPart{{
+				Type: "text",
+				Text: "最终答案",
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected reasoning item plus assistant message, got %#v", payload["input"])
+	}
+	reasoning, _ := input[0].(map[string]any)
+	if got, _ := reasoning["type"].(string); got != "reasoning" {
+		t.Fatalf("expected first item to be reasoning, got %#v", reasoning)
+	}
+	summary, _ := reasoning["summary"].([]any)
+	if len(summary) != 1 {
+		t.Fatalf("expected one reasoning summary part, got %#v", reasoning)
+	}
+	summaryPart, _ := summary[0].(map[string]any)
+	if got, _ := summaryPart["type"].(string); got != "summary_text" {
+		t.Fatalf("expected summary_text part, got %#v", summaryPart)
+	}
+	if got, _ := summaryPart["text"].(string); got != "先想一下" {
+		t.Fatalf("expected reasoning summary text preserved, got %#v", summaryPart)
+	}
+	message, _ := input[1].(map[string]any)
+	if got, _ := message["role"].(string); got != "assistant" {
+		t.Fatalf("expected second item assistant message, got %#v", message)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{

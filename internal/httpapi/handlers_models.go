@@ -63,6 +63,18 @@ func handleModels() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
+		if status == http.StatusNotFound && shouldFallbackModelsFromBody(body) {
+			if fallbackBody, fallbackOK := configuredModelsFallbackBody(provider); fallbackOK {
+				setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "health")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(fallbackBody)
+				if statusStore != nil {
+					statusStore.markCompleted(requestID)
+				}
+				return
+			}
+		}
 
 		if contentType == "" {
 			contentType = "application/json"
@@ -93,27 +105,32 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	data, _ := payload["data"].([]any)
 	baseIDs := make([]string, 0, len(data)+len(provider.ModelMap))
+	seenIDs := make(map[string]struct{}, len(data)+len(provider.ModelMap))
 	entriesByID := map[string]map[string]any{}
 	for _, item := range data {
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		if id != "" {
-			baseIDs = append(baseIDs, id)
+			if _, exists := seenIDs[id]; !exists {
+				baseIDs = append(baseIDs, id)
+				seenIDs[id] = struct{}{}
+			}
 			entriesByID[id] = cloneModelEntry(entry)
 		}
 	}
 	publicAliases := sortedPublicModelAliases(provider.ModelMap)
 	for _, publicModel := range publicAliases {
-		baseIDs = append(baseIDs, publicModel)
 		if _, exists := entriesByID[publicModel]; exists {
 			continue
 		}
 		if source := cloneSourceModelEntry(provider, publicModel, entriesByID); len(source) > 0 {
+			if _, exists := seenIDs[publicModel]; !exists {
+				baseIDs = append(baseIDs, publicModel)
+				seenIDs[publicModel] = struct{}{}
+			}
 			source["id"] = publicModel
 			entriesByID[publicModel] = source
-			continue
 		}
-		entriesByID[publicModel] = map[string]any{"id": publicModel}
 	}
 	expanded := baseIDs
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
@@ -139,6 +156,39 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		return body
 	}
 	return encoded
+}
+
+func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool) {
+	ids := sortedPublicModelAliases(provider.ModelMap)
+	if len(ids) == 0 {
+		return nil, false
+	}
+	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
+		ids = reasoning.ExpandModelIDs(ids, ids, true)
+	}
+	entries := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		entries = append(entries, map[string]any{
+			"id":     id,
+			"object": "model",
+		})
+	}
+	payload := map[string]any{
+		"object": "list",
+		"data":   entries,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, false
+	}
+	return encoded, true
+}
+
+func shouldFallbackModelsFromBody(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(body)), "models not supported")
 }
 
 func cloneModelEntry(entry map[string]any) map[string]any {

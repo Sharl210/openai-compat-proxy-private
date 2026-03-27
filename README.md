@@ -267,7 +267,7 @@ chmod +x scripts/*.sh
 ### 版本头语义
 
 - `X-Env-Version`：当前**已生效**根 `.env` 可热加载配置版本对应的文件修改时间
-- `X-Provider-Version`：当前请求命中的 provider `.env` **已生效**版本对应的文件修改时间
+- `X-Provider-Version`：当前请求命中的 provider **已生效版本**对应的修改时间。这个版本时间会取 provider `.env` 和该 provider 引用到的 system prompt 文件中的最新修改时间，所以仅修改 prompt 文件内容并热加载后，这个头也会更新。
 - `X-Provider-Name`：当前请求实际命中的 provider id
 - `X-SYSTEM-PROMPT-ATTACH`：当当前 provider 实际启用了非空系统提示词注入时返回，值格式为 `<position>:<paths>`，例如 `prepend:prompt.md, prompts/extra.md`。这里只暴露注入方向和配置路径，不会回传原始提示词文本。
 - `X-STATUS-CHECK-URL`：当前请求对应的状态查询地址，使用 provider 作用域路径，格式为 `/{providerId}/v1/requests/{requestId}`。这里不回显真实代理 key，也不再附带一次性 token。
@@ -382,6 +382,16 @@ http(s)://<host>/v1/<providerId>/xxx
 - `/openai/v1/chat/completions`
 - `/openai/v1/responses`
 - `/claude/v1/messages`
+
+### Anthropic Messages 请求头要求
+
+对 `/v1/messages` 和 `/{providerId}/v1/messages`，请求必须带：
+
+```text
+anthropic-version: 2023-06-01
+```
+
+如果缺少 `anthropic-version`，代理现在会直接返回 `400 invalid_request`，不会再继续向上游发请求。
 
 ### 默认 provider 路由
 

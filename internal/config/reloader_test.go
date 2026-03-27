@@ -118,6 +118,43 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 }
 
+func TestRuntimeStoreRefreshAppliesHotReloadableRootChangesDespiteInvalidStartupOnlyValues(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 9, 0, 0, 111000000, time.UTC)
+	updatedRootMTime := time.Date(2026, 3, 26, 9, 1, 0, 222000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_MAX_SIZE_MB=100\nPROXY_API_KEY=before\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 9, 0, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_MAX_SIZE_MB=0\nPROXY_API_KEY=after\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", updatedRootMTime)
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("expected hot-reloadable root change refresh to succeed despite invalid startup-only value, got %v", err)
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(updatedRootMTime) {
+		t.Fatalf("expected root version to update to %q, got %q", formatVersionTime(updatedRootMTime), got)
+	}
+	if got := active.Config.ProxyAPIKey; got != "after" {
+		t.Fatalf("expected proxy api key to update, got %q", got)
+	}
+	if got := active.Config.LogMaxSizeMB; got != 100 {
+		t.Fatalf("expected startup-only log max size to stay previous value, got %d", got)
+	}
+}
+
 func TestRuntimeStoreRefreshAppliesHotReloadableDownstreamNonStreamStrategy(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")
@@ -320,6 +357,33 @@ func TestBuildRuntimeSnapshotTreatsWhitespaceOnlySystemPromptFilesAsDisabled(t *
 	}
 	if provider.SystemPromptText != "" {
 		t.Fatalf("expected whitespace-only prompt file to disable injection, got %q", provider.SystemPromptText)
+	}
+}
+
+func TestBuildRuntimeSnapshotUsesNewestPromptFileTimeForEffectiveProviderVersion(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	promptPath := filepath.Join(providersDir, "prompt.md")
+	providerMTime := time.Date(2026, 3, 26, 14, 0, 0, 0, time.UTC)
+	promptMTime := time.Date(2026, 3, 26, 14, 1, 0, 0, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", time.Date(2026, 3, 26, 13, 59, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nSYSTEM_PROMPT_FILES=prompt.md\n", providerMTime)
+	writeConfigFileWithMTime(t, promptPath, "effective prompt\n", promptMTime)
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+
+	if got := snapshot.ProviderVersionByID["openai"]; got != formatVersionTime(promptMTime) {
+		t.Fatalf("expected provider version to use newest effective source time %q, got %q", formatVersionTime(promptMTime), got)
 	}
 }
 

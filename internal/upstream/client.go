@@ -36,6 +36,8 @@ type EventStream struct {
 var sseScannerInitialBufferSize = 64 * 1024
 var sseScannerMaxTokenSize = 8 * 1024 * 1024
 
+const preservedResponsesTopLevelFieldsKey = "__openai_compat_responses_top_level"
+
 type HTTPStatusError struct {
 	StatusCode       int
 	ContentType      string
@@ -603,6 +605,10 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		"model":  req.Model,
 		"stream": req.Stream,
 	}
+	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
+	for key, value := range preservedTopLevelFields {
+		payload[key] = cloneJSONValue(value)
+	}
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
 	}
@@ -624,9 +630,9 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
-	if len(req.ResponseInputItems) > 0 {
-		input := make([]map[string]any, 0, len(req.ResponseInputItems))
-		for _, item := range req.ResponseInputItems {
+	if len(responseInputItems) > 0 {
+		input := make([]map[string]any, 0, len(responseInputItems))
+		for _, item := range responseInputItems {
 			input = append(input, cloneMap(item))
 		}
 		payload["input"] = input
@@ -640,6 +646,10 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 					"output":  buildToolOutput(msg.Parts),
 				})
 				continue
+			}
+
+			if reasoningItem := buildReasoningInputItem(msg); len(reasoningItem) > 0 {
+				input = append(input, reasoningItem)
 			}
 
 			item := map[string]any{"role": msg.Role}
@@ -717,6 +727,19 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
+	if msg.Role != "assistant" || msg.ReasoningContent == "" {
+		return nil
+	}
+	return map[string]any{
+		"type": "reasoning",
+		"summary": []map[string]any{{
+			"type": "summary_text",
+			"text": msg.ReasoningContent,
+		}},
+	}
 }
 
 func buildStreamingRequestBody(req model.CanonicalRequest) ([]byte, error) {
@@ -819,6 +842,47 @@ func cloneMap(input map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func splitPreservedResponsesTopLevelFields(items []map[string]any) (map[string]any, []map[string]any) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	fields := map[string]any{}
+	filtered := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		preserved, ok := item[preservedResponsesTopLevelFieldsKey].(map[string]any)
+		if !ok {
+			filtered = append(filtered, item)
+			continue
+		}
+		for key, value := range preserved {
+			fields[key] = value
+		}
+	}
+	if len(fields) == 0 {
+		return nil, filtered
+	}
+	return fields, filtered
+}
+
+func cloneJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			cloned[key] = cloneJSONValue(nested)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			cloned = append(cloned, cloneJSONValue(nested))
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func textPartTypeForRole(role string) string {

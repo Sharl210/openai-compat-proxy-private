@@ -3,15 +3,13 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
-
-	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
+	"strings"
 )
 
 func handleRequestStatus(store *requestStatusStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		path, ok := parseRequestStatusPath(r.URL.Path, config.Config{})
+		path, ok := parseRequestStatusPath(r.URL.Path)
 		if !ok {
 			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "request not found")
 			return
@@ -35,18 +33,11 @@ type requestStatusPath struct {
 	RequestID  string
 }
 
-func parseRequestStatusPath(path string, cfg config.Config) (requestStatusPath, bool) {
+func parseRequestStatusPath(path string) (requestStatusPath, bool) {
 	trimmed := strings.Trim(path, "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 4 || parts[1] != "v1" || parts[2] != "requests" || parts[3] == "" {
 		return requestStatusPath{}, false
 	}
-	providerID := parts[0]
-	if cfg.ProvidersDir != "" || len(cfg.Providers) > 0 {
-		provider, err := cfg.ProviderByID(providerID)
-		if err != nil || !provider.Enabled {
-			return requestStatusPath{}, false
-		}
-	}
-	return requestStatusPath{ProviderID: providerID, RequestID: parts[3]}, true
+	return requestStatusPath{ProviderID: parts[0], RequestID: parts[3]}, true
 }

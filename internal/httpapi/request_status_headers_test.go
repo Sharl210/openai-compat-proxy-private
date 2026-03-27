@@ -197,6 +197,221 @@ func TestResponsesStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T)
 	}
 }
 
+func TestChatRequestSetsStatusHeadersOnSuccessfulNonStream(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "proxy-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer proxy-secret")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatalf("expected X-Request-Id header")
+	}
+	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
+	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
+		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
+	}
+	if strings.Contains(statusURL, "proxy-secret") {
+		t.Fatalf("expected status URL to hide real proxy key, got %q", statusURL)
+	}
+	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
+		t.Fatalf("expected health flag health, got %q", got)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
+	statusRec := httptest.NewRecorder()
+	server.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var status requestStatus
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
+	}
+	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" || status.HealthFlag != "health" {
+		t.Fatalf("unexpected status payload: %#v", status)
+	}
+}
+
+func TestChatStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "proxy-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer proxy-secret")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatalf("expected X-Request-Id header")
+	}
+	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
+	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
+		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
+	}
+	if strings.Contains(statusURL, "proxy-secret") {
+		t.Fatalf("expected status URL to hide real proxy key, got %q", statusURL)
+	}
+	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "streaming" {
+		t.Fatalf("expected health flag streaming, got %q", got)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
+	statusRec := httptest.NewRecorder()
+	server.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var status requestStatus
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
+	}
+	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" || status.HealthFlag != "health" {
+		t.Fatalf("unexpected status payload: %#v", status)
+	}
+}
+
+func TestRequestStatusLookupSurvivesProviderDisableAfterReload(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected initial request status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatalf("expected X-Request-Id header")
+	}
+
+	server.store = config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           false,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsResponses: true,
+		}},
+	})
+
+	status := fetchStatusForTest(t, server, "openai", requestID)
+	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" {
+		t.Fatalf("unexpected status after provider disable reload: %#v", status)
+	}
+}
+
+func TestRequestStatusLookupSurvivesProviderDeleteAfterReload(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected initial request status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatalf("expected X-Request-Id header")
+	}
+
+	server.store = config.NewStaticRuntimeStore(config.Config{
+		EnableLegacyV1Routes: true,
+		Providers:            nil,
+	})
+
+	status := fetchStatusForTest(t, server, "openai", requestID)
+	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" {
+		t.Fatalf("unexpected status after provider delete reload: %#v", status)
+	}
+}
+
 func TestUnauthorizedResponsesRequestDoesNotExposeStatusCheckHeaders(t *testing.T) {
 	server := NewServer(config.Config{
 		ProxyAPIKey:          "proxy-secret",
@@ -349,6 +564,9 @@ func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *t
 	var status requestStatus
 	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
+	}
+	if got := statusRec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != status.HealthFlag {
+		t.Fatalf("expected status response header health flag %q to match body, got %q", status.HealthFlag, got)
 	}
 	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_stream_broken" || status.ErrorCode != "upstream_stream_broken" {
 		t.Fatalf("unexpected failed status payload: %#v", status)

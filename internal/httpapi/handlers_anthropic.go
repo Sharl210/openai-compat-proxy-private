@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	anthropicadapter "openai-compat-proxy/internal/adapter/anthropic"
 	"openai-compat-proxy/internal/aggregate"
@@ -30,6 +31,14 @@ func handleAnthropicMessages() http.HandlerFunc {
 		statusStore, _ := requestStatusStoreFromRequest(r)
 		providerID := provider.ID
 		statusCheckKey := statusCheckProxyKeyForRequest(r, providerCfg, provider)
+		if strings.TrimSpace(r.Header.Get("anthropic-version")) == "" {
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "proxy_internal_error", "invalid_request", "missing anthropic-version header")
+			}
+			setRequestStatusHeaders(w, r, providerID, requestID, statusCheckKey, "proxy_internal_error")
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "missing anthropic-version header")
+			return
+		}
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			if statusStore != nil {

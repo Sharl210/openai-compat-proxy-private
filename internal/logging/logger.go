@@ -115,18 +115,20 @@ func (l *Logger) rotateIfNeeded(nextWrite int64) error {
 	if info.Size()+nextWrite <= l.maxSizeBytes {
 		return nil
 	}
-	if err := l.file.Close(); err != nil {
-		return err
-	}
+	current := l.file
 	rotatedPath := rotatedName(l.path)
 	if err := os.Rename(l.path, rotatedPath); err != nil {
 		return err
 	}
 	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		l.file = current
 		return err
 	}
 	l.file = file
+	if err := current.Close(); err != nil {
+		return err
+	}
 	return l.cleanupOldBackups()
 }
 
