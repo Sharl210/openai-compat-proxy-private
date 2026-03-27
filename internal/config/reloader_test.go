@@ -87,7 +87,7 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 	initialRootMTime := time.Date(2026, 3, 25, 10, 5, 0, 111000000, time.UTC)
 	startupOnlyMTime := time.Date(2026, 3, 25, 10, 6, 0, 222000000, time.UTC)
 
-	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_ENABLE=false\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", initialRootMTime)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_ENABLE=false\nCACHE_INFO_TIMEZONE=Asia/Shanghai\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", initialRootMTime)
 	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 25, 10, 5, 30, 0, time.UTC))
 
 	store, err := NewRuntimeStore(rootEnvPath)
@@ -95,7 +95,7 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
 
-	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nLOG_ENABLE=true\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", startupOnlyMTime)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nLOG_ENABLE=true\nCACHE_INFO_TIMEZONE=UTC\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", startupOnlyMTime)
 	if err := store.Refresh(); err != nil {
 		t.Fatalf("expected startup-only change refresh to succeed, got %v", err)
 	}
@@ -109,6 +109,9 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 	if got := active.Config.LogEnable; got {
 		t.Fatalf("expected log enable to stay false, got true")
+	}
+	if got := active.Config.CacheInfoTimezone; got != "Asia/Shanghai" {
+		t.Fatalf("expected cache info timezone to stay startup value, got %q", got)
 	}
 	if got := active.Config.ProxyAPIKey; got != "before" {
 		t.Fatalf("expected hot root value to stay loaded, got %q", got)

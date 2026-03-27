@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	ListenAddr                  string
+	CacheInfoTimezone           string
 	ProxyAPIKey                 string
 	UpstreamBaseURL             string
 	UpstreamAPIKey              string
@@ -40,6 +41,7 @@ const (
 func Default() Config {
 	return Config{
 		ListenAddr:                  ":21021",
+		CacheInfoTimezone:           "Asia/Shanghai",
 		LogEnable:                   false,
 		ConnectTimeout:              10 * time.Second,
 		FirstByteTimeout:            20 * time.Minute,
@@ -66,6 +68,9 @@ func loadFromLookup(lookup func(string) string) Config {
 	cfg := Default()
 	if value := lookup("LISTEN_ADDR"); value != "" {
 		cfg.ListenAddr = value
+	}
+	if value := lookup("CACHE_INFO_TIMEZONE"); value != "" {
+		cfg.CacheInfoTimezone = value
 	}
 	if value := lookup("PROXY_API_KEY"); value != "" {
 		cfg.ProxyAPIKey = value
@@ -231,6 +236,7 @@ func ResolveProvidersDir(rootEnvPath string, providersDir string) string {
 
 func (c *Config) applyStartupOnlyFrom(previous Config) {
 	c.ListenAddr = previous.ListenAddr
+	c.CacheInfoTimezone = previous.CacheInfoTimezone
 	c.LogEnable = previous.LogEnable
 	c.LogFilePath = previous.LogFilePath
 	c.LogIncludeBodies = previous.LogIncludeBodies

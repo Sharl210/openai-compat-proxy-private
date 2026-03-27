@@ -11,12 +11,27 @@ func TestDefaultDownstreamNonStreamStrategyIsProxyBuffer(t *testing.T) {
 	}
 }
 
+func TestDefaultCacheInfoTimezoneIsAsiaShanghai(t *testing.T) {
+	if got := Default().CacheInfoTimezone; got != "Asia/Shanghai" {
+		t.Fatalf("expected default cache info timezone %q, got %q", "Asia/Shanghai", got)
+	}
+}
+
 func TestLoadFromEnvParsesDownstreamNonStreamStrategy(t *testing.T) {
 	t.Setenv("DOWNSTREAM_NON_STREAM_STRATEGY", DownstreamNonStreamStrategyUpstreamNonStream)
 
 	cfg := LoadFromEnv()
 	if got := cfg.DownstreamNonStreamStrategy; got != DownstreamNonStreamStrategyUpstreamNonStream {
 		t.Fatalf("expected downstream non-stream strategy %q, got %q", DownstreamNonStreamStrategyUpstreamNonStream, got)
+	}
+}
+
+func TestLoadFromEnvParsesCacheInfoTimezone(t *testing.T) {
+	t.Setenv("CACHE_INFO_TIMEZONE", "UTC")
+
+	cfg := LoadFromEnv()
+	if got := cfg.CacheInfoTimezone; got != "UTC" {
+		t.Fatalf("expected cache info timezone %q, got %q", "UTC", got)
 	}
 }
 

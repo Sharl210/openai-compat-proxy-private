@@ -91,6 +91,7 @@ cp .env.example .env
 
 ```bash
 LISTEN_ADDR=:21021
+CACHE_INFO_TIMEZONE=Asia/Shanghai
 PROXY_API_KEY=
 
 PROVIDERS_DIR=./providers
@@ -256,6 +257,7 @@ chmod +x scripts/*.sh
 下面这些全局配置仍然只在进程启动时生效。运行中修改后会被忽略，仍以启动时加载值为准：
 
 - `LISTEN_ADDR`
+- `CACHE_INFO_TIMEZONE`
 - `LOG_ENABLE`
 - `LOG_FILE_PATH`
 - `LOG_INCLUDE_BODIES`
@@ -389,6 +391,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 基础字段
 
 - `LISTEN_ADDR`：监听地址，例如 `:21021`。**不能热加载**
+- `CACHE_INFO_TIMEZONE`：Cache_Info 统计展示使用的时区，默认 `Asia/Shanghai`。**不能热加载，修改后需要重启**
 - `PROXY_API_KEY`：根级代理访问 key，可选；provider 没有设置 `PROXY_API_KEY_OVERRIDE` 时会继承它。默认 provider 的裸 `/v1/*` 路由也使用这把 key。**可热加载**
 
 ### 多 provider 相关字段
