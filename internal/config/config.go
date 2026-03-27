@@ -36,7 +36,7 @@ func Default() Config {
 		ListenAddr:       ":21021",
 		LogEnable:        false,
 		ConnectTimeout:   10 * time.Second,
-		FirstByteTimeout: 90 * time.Second,
+		FirstByteTimeout: 20 * time.Minute,
 		IdleTimeout:      3 * time.Minute,
 		TotalTimeout:     time.Hour,
 		LogFilePath:      ".proxy.requests.jsonl",

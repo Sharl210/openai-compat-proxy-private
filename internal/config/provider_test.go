@@ -149,6 +149,34 @@ func TestLoadProviderFileUsesRetryDefaultsWhenUnset(t *testing.T) {
 	if provider.UpstreamRetryDelay != DefaultUpstreamRetryDelay {
 		t.Fatalf("expected default retry delay %v, got %v", DefaultUpstreamRetryDelay, provider.UpstreamRetryDelay)
 	}
+	if provider.UpstreamFirstByteTimeout != 0 {
+		t.Fatalf("expected provider first byte timeout to inherit root config by default, got %v", provider.UpstreamFirstByteTimeout)
+	}
+}
+
+func TestLoadProviderFileParsesFirstByteTimeoutOverride(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_FIRST_BYTE_TIMEOUT=20m\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamFirstByteTimeout != 20*time.Minute {
+		t.Fatalf("expected provider first byte timeout 20m, got %v", provider.UpstreamFirstByteTimeout)
+	}
+
+	providerBody = "PROVIDER_ID=openai\nUPSTREAM_FIRST_BYTE_TIMEOUT=bad\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	if _, err := loadProviderFile(providerEnvPath); err == nil {
+		t.Fatalf("expected invalid provider first byte timeout to fail validation")
+	}
 }
 
 func TestLoadProviderFileParsesRetryOverrides(t *testing.T) {

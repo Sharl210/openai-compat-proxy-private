@@ -90,6 +90,9 @@ func providerConfigForRequest(r *http.Request) config.Config {
 		if provider, err := snapshot.Config.ProviderByID(info.ProviderID); err == nil {
 			providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
 			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
+			if provider.UpstreamFirstByteTimeout > 0 {
+				providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout
+			}
 			providerCfg.UpstreamRetryCount = provider.UpstreamRetryCount
 			providerCfg.UpstreamRetryDelay = provider.UpstreamRetryDelay
 		}

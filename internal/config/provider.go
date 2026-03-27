@@ -25,6 +25,7 @@ type ProviderConfig struct {
 	ModelMap                    map[string]string
 	EnableReasoningEffortSuffix bool
 	ExposeReasoningSuffixModels bool
+	UpstreamFirstByteTimeout    time.Duration
 	UpstreamRetryCount          int
 	UpstreamRetryDelay          time.Duration
 	ProxyAPIKeyOverride         string
@@ -132,6 +133,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.EnableReasoningEffortSuffix = parseBool(value)
 		case "EXPOSE_REASONING_SUFFIX_MODELS":
 			provider.ExposeReasoningSuffixModels = parseBool(value)
+		case "UPSTREAM_FIRST_BYTE_TIMEOUT":
+			parsed, err := parseProviderPositiveDuration(value, "UPSTREAM_FIRST_BYTE_TIMEOUT", path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.UpstreamFirstByteTimeout = parsed
 		case "UPSTREAM_RETRY_COUNT":
 			provider.UpstreamRetryCount = parseProviderRetryCount(value)
 		case "UPSTREAM_RETRY_DELAY":
@@ -209,6 +216,18 @@ func parseProviderRetryCount(value string) int {
 		return DefaultUpstreamRetryCount
 	}
 	return normalizeProviderRetryCount(parsed)
+}
+
+func parseProviderPositiveDuration(value string, key string, path string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	parsed, err := time.ParseDuration(trimmed)
+	if err != nil || parsed <= 0 {
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
+	}
+	return parsed, nil
 }
 
 func normalizeProviderRetryCount(value int) int {

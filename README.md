@@ -87,7 +87,7 @@ DEFAULT_PROVIDER=openai
 ENABLE_LEGACY_V1_ROUTES=true
 
 CONNECT_TIMEOUT=10s
-FIRST_BYTE_TIMEOUT=90s
+FIRST_BYTE_TIMEOUT=20m
 IDLE_TIMEOUT=3m
 TOTAL_TIMEOUT=1h
 
@@ -353,7 +353,7 @@ http(s)://<host>/v1/<providerId>/xxx
 ### 超时字段
 
 - `CONNECT_TIMEOUT`：连接上游时的 TCP 建连超时。**可热加载**
-- `FIRST_BYTE_TIMEOUT`：等待上游响应头 / 首字节的超时。**可热加载**
+- `FIRST_BYTE_TIMEOUT`：等待上游响应头 / 首字节的超时。根级默认值是 `20m`；provider 没有单独覆写时会继承它。**可热加载**
 - `IDLE_TIMEOUT`：读取活跃上游响应体 / 流时允许的最长静默间隔。**可热加载**
 - `TOTAL_TIMEOUT`：单次请求总超时。**可热加载**
 
@@ -419,6 +419,17 @@ http(s)://<host>/v1/<providerId>/xxx
 - 只有在“请求上游后，尚未收到任何上游数据”时才会触发自动重试。
 - 一旦已经收到上游首个 event / chunk，后续中途断流、解析失败或其他读流错误都不会再重试，而是直接把当次上游错误返回给客户端。
 - 当所有重试都失败时，代理会在最终返回的上游错误信息前加上一句说明：已重试多少遍、每次间隔多少秒、总共重试了多少秒，然后再附上上游原始错误信息。
+
+### provider 级上游首字节超时字段
+
+- `UPSTREAM_FIRST_BYTE_TIMEOUT`：当前 provider 等待上游响应头 / 首字节的超时。留空表示继承根 `.env` 里的 `FIRST_BYTE_TIMEOUT`。
+
+行为说明：
+
+- 这个字段是 **provider 级** 配置，支持热加载。
+- 默认继承根级 `FIRST_BYTE_TIMEOUT=20m`。
+- 如果某个 provider 可能长时间思考、不出首字，可以只给这个 provider 单独放大，不影响其他 provider。
+- 这个字段必须是合法的 Go duration，且必须大于 `0`；写成非法值时，这次 provider 配置变更不会通过校验，也不会替换当前已生效快照。
 
 ### 能力开关
 

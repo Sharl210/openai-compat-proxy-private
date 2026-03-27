@@ -32,3 +32,9 @@ func TestValidateRootEnvValuesRejectsInvalidTimeout(t *testing.T) {
 		t.Fatalf("expected invalid TOTAL_TIMEOUT to fail validation")
 	}
 }
+
+func TestDefaultFirstByteTimeoutIsTwentyMinutes(t *testing.T) {
+	if got := Default().FirstByteTimeout; got != 20*time.Minute {
+		t.Fatalf("expected default FirstByteTimeout 20m, got %v", got)
+	}
+}
