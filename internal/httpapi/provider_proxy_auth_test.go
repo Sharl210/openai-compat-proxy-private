@@ -167,3 +167,43 @@ func TestProviderScopedProxyAPIKeyOverrideEmptyDisablesAuth(t *testing.T) {
 		t.Fatalf("expected empty override status route to require no auth, got %d body=%s", statusRec.Code, statusRec.Body.String())
 	}
 }
+
+func TestDefaultLegacyRouteWithEmptyOverrideStillRequiresRootProxyKey(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                     "openai",
+			Enabled:                true,
+			UpstreamBaseURL:        upstream.URL,
+			UpstreamAPIKey:         "test-key",
+			SupportsResponses:      true,
+			ProxyAPIKeyOverride:    "empty",
+			ProxyAPIKeyOverrideSet: true,
+		}},
+	})
+
+	unauthorizedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	unauthorizedReq.Header.Set("Content-Type", "application/json")
+	unauthorizedRec := httptest.NewRecorder()
+	server.ServeHTTP(unauthorizedRec, unauthorizedReq)
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected legacy default route to reject missing root key when override is empty, got %d body=%s", unauthorizedRec.Code, unauthorizedRec.Body.String())
+	}
+
+	authorizedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	authorizedReq.Header.Set("Content-Type", "application/json")
+	authorizedReq.Header.Set("Authorization", "Bearer root-secret")
+	authorizedRec := httptest.NewRecorder()
+	server.ServeHTTP(authorizedRec, authorizedReq)
+	if authorizedRec.Code != http.StatusOK {
+		t.Fatalf("expected legacy default route to accept root key even when override is empty, got %d body=%s", authorizedRec.Code, authorizedRec.Body.String())
+	}
+}

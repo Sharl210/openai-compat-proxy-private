@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+func TestDefaultDownstreamNonStreamStrategyIsProxyBuffer(t *testing.T) {
+	if got := Default().DownstreamNonStreamStrategy; got != DownstreamNonStreamStrategyProxyBuffer {
+		t.Fatalf("expected default downstream non-stream strategy %q, got %q", DownstreamNonStreamStrategyProxyBuffer, got)
+	}
+}
+
+func TestLoadFromEnvParsesDownstreamNonStreamStrategy(t *testing.T) {
+	t.Setenv("DOWNSTREAM_NON_STREAM_STRATEGY", DownstreamNonStreamStrategyUpstreamNonStream)
+
+	cfg := LoadFromEnv()
+	if got := cfg.DownstreamNonStreamStrategy; got != DownstreamNonStreamStrategyUpstreamNonStream {
+		t.Fatalf("expected downstream non-stream strategy %q, got %q", DownstreamNonStreamStrategyUpstreamNonStream, got)
+	}
+}
+
 func TestLoadFromEnvParsesTimeouts(t *testing.T) {
 	t.Setenv("CONNECT_TIMEOUT", "11s")
 	t.Setenv("FIRST_BYTE_TIMEOUT", "45s")
@@ -30,6 +45,13 @@ func TestValidateRootEnvValuesRejectsInvalidTimeout(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"TOTAL_TIMEOUT": "abc"})
 	if err == nil {
 		t.Fatalf("expected invalid TOTAL_TIMEOUT to fail validation")
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidDownstreamNonStreamStrategy(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"DOWNSTREAM_NON_STREAM_STRATEGY": "bad-mode"})
+	if err == nil {
+		t.Fatalf("expected invalid DOWNSTREAM_NON_STREAM_STRATEGY to fail validation")
 	}
 }
 

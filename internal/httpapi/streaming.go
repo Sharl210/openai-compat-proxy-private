@@ -41,7 +41,9 @@ type anthropicStreamState struct {
 	toolStatusSent   bool
 	toolItemID       string
 	toolDeltaSent    bool
+	pendingToolArgs  map[string]string
 	terminalSeen     bool
+	terminalFailure  *aggregate.TerminalFailureError
 }
 
 type responsesStreamState struct {
@@ -319,12 +321,17 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
-	state := anthropicStreamState{}
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState) error {
+	if state == nil {
+		state = &anthropicStreamState{}
+	}
+	if state.pendingToolArgs == nil {
+		state.pendingToolArgs = map[string]string{}
+	}
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := startAnthropicUnreasonedPlaceholder(w, flusher, &state); err != nil {
+	if err := startAnthropicUnreasonedPlaceholder(w, flusher, state); err != nil {
 		return err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
@@ -336,7 +343,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			if state.textStarted || state.realThinkingSeen {
 				return nil
 			}
-			if err := startAnthropicUnreasonedPlaceholder(w, flusher, &state); err != nil {
+			if err := startAnthropicUnreasonedPlaceholder(w, flusher, state); err != nil {
 				return err
 			}
 			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
@@ -347,7 +354,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
-			return writeAnthropicEvent(w, flusher, &state, evt)
+			return writeAnthropicEvent(w, flusher, state, evt)
 		},
 	)
 	if err != nil {
@@ -355,6 +362,9 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	}
 	if !state.terminalSeen {
 		return io.ErrUnexpectedEOF
+	}
+	if state.terminalFailure != nil {
+		return state.terminalFailure
 	}
 	return nil
 }
@@ -545,7 +555,11 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}); err != nil {
 			return err
 		}
-		arguments := stringValue(item["arguments"])
+		arguments := state.pendingToolArgs[itemID]
+		if directArguments := stringValue(item["arguments"]); directArguments != "" {
+			arguments += directArguments
+		}
+		delete(state.pendingToolArgs, itemID)
 		if arguments != "" {
 			state.toolDeltaSent = true
 			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
@@ -608,12 +622,13 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if itemID == "" {
 			return nil
 		}
+		partial := stringValue(evt.Data["delta"])
+		if partial == "" {
+			return nil
+		}
 		if itemID != "" && state.toolStarted && !state.toolStopped {
 			if state.toolItemID != "" && state.toolItemID != itemID {
-				return nil
-			}
-			partial := stringValue(evt.Data["delta"])
-			if partial == "" {
+				state.pendingToolArgs[itemID] += partial
 				return nil
 			}
 			state.toolDeltaSent = true
@@ -623,6 +638,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				"delta": map[string]any{"type": "input_json_delta", "partial_json": partial},
 			})
 		}
+		state.pendingToolArgs[itemID] += partial
 	case "response.completed", "response.done":
 		state.terminalSeen = true
 		if err := closeTextBlock(state, w, flusher); err != nil {
@@ -662,6 +678,20 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
 			return err
 		}
+	case "response.incomplete":
+		state.terminalSeen = true
+		terminalFailure := terminalFailureFromEventData(evt.Data)
+		state.terminalFailure = terminalFailure
+		if err := closeTextBlock(state, w, flusher); err != nil {
+			return err
+		}
+		if err := closeToolBlock(state, w, flusher); err != nil {
+			return err
+		}
+		if err := closeThinkingBlock(); err != nil {
+			return err
+		}
+		return writeAnthropicTerminalFailure(w, flusher, state, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message)
 	}
 	return nil
 }
@@ -707,7 +737,18 @@ func writeAnthropicSSEEvent(w http.ResponseWriter, flusher http.Flusher, event s
 	return nil
 }
 
-func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, requestID string, healthFlag string, message string) error {
+func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, requestID string, healthFlag string, message string) error {
+	if state != nil {
+		if err := closeTextBlock(state, w, flusher); err != nil {
+			return err
+		}
+		if err := closeToolBlock(state, w, flusher); err != nil {
+			return err
+		}
+		if err := closeThinkingBlockForFailure(state, w, flusher); err != nil {
+			return err
+		}
+	}
 	if err := writeAnthropicSSEEvent(w, flusher, "error", map[string]any{
 		"type":        "error",
 		"request_id":  requestID,
@@ -717,6 +758,17 @@ func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 		return err
 	}
 	return writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+}
+
+func closeThinkingBlockForFailure(state *anthropicStreamState, w http.ResponseWriter, flusher http.Flusher) error {
+	if state == nil || !state.thinkingStarted || state.thinkingStopped {
+		return nil
+	}
+	if err := writeAnthropicSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": state.thinkingIndex}); err != nil {
+		return err
+	}
+	state.thinkingStopped = true
+	return nil
 }
 
 func parseAnthropicToolArguments(arguments string) any {
@@ -805,6 +857,7 @@ type chatStreamState struct {
 	pendingToolArgs   map[string]string
 	nextToolIx        int
 	terminalSeen      bool
+	terminalFailure   *aggregate.TerminalFailureError
 }
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
@@ -841,6 +894,9 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	}
 	if !state.terminalSeen {
 		return io.ErrUnexpectedEOF
+	}
+	if state.terminalFailure != nil {
+		return state.terminalFailure
 	}
 	return nil
 }
@@ -1062,8 +1118,24 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if flusher != nil {
 			flusher.Flush()
 		}
+	case "response.incomplete":
+		state.terminalSeen = true
+		state.terminalFailure = terminalFailureFromEventData(evt.Data)
+		return writeChatTerminalFailure(w, flusher, state.terminalFailure.HealthFlag, state.terminalFailure.Message)
 	}
 	return nil
+}
+
+func terminalFailureFromEventData(data map[string]any) *aggregate.TerminalFailureError {
+	healthFlag, _ := data["health_flag"].(string)
+	message, _ := data["message"].(string)
+	if healthFlag == "" {
+		healthFlag = "upstream_stream_broken"
+	}
+	if message == "" {
+		message = "upstream response incomplete"
+	}
+	return &aggregate.TerminalFailureError{HealthFlag: healthFlag, Message: message}
 }
 
 func mapUsageForLogging(usage any) map[string]any {

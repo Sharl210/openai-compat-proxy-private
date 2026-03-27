@@ -14,26 +14,28 @@ import (
 )
 
 type ProviderConfig struct {
-	ID                          string
-	Enabled                     bool
-	UpstreamBaseURL             string
-	UpstreamAPIKey              string
-	SupportsChat                bool
-	SupportsResponses           bool
-	SupportsModels              bool
-	SupportsAnthropicMessages   bool
-	ModelMap                    map[string]string
-	EnableReasoningEffortSuffix bool
-	ExposeReasoningSuffixModels bool
-	UpstreamFirstByteTimeout    time.Duration
-	UpstreamRetryCount          int
-	UpstreamRetryDelay          time.Duration
-	ProxyAPIKeyOverride         string
-	ProxyAPIKeyOverrideSet      bool
-	SystemPromptFiles           []string
-	SystemPromptFilesRaw        string
-	SystemPromptPosition        string
-	SystemPromptText            string
+	ID                                     string
+	Enabled                                bool
+	UpstreamBaseURL                        string
+	UpstreamAPIKey                         string
+	SupportsChat                           bool
+	SupportsResponses                      bool
+	SupportsModels                         bool
+	SupportsAnthropicMessages              bool
+	ModelMap                               map[string]string
+	EnableReasoningEffortSuffix            bool
+	ExposeReasoningSuffixModels            bool
+	UpstreamFirstByteTimeout               time.Duration
+	UpstreamRetryCount                     int
+	UpstreamRetryDelay                     time.Duration
+	DownstreamNonStreamStrategyOverride    string
+	DownstreamNonStreamStrategyOverrideSet bool
+	ProxyAPIKeyOverride                    string
+	ProxyAPIKeyOverrideSet                 bool
+	SystemPromptFiles                      []string
+	SystemPromptFilesRaw                   string
+	SystemPromptPosition                   string
+	SystemPromptText                       string
 }
 
 const (
@@ -140,9 +142,28 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.UpstreamFirstByteTimeout = parsed
 		case "UPSTREAM_RETRY_COUNT":
-			provider.UpstreamRetryCount = parseProviderRetryCount(value)
+			parsed, err := parseProviderRetryCount(value, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.UpstreamRetryCount = parsed
 		case "UPSTREAM_RETRY_DELAY":
-			provider.UpstreamRetryDelay = parseProviderRetryDelay(value)
+			parsed, err := parseProviderRetryDelay(value, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.UpstreamRetryDelay = parsed
+		case "DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE":
+			provider.DownstreamNonStreamStrategyOverrideSet = true
+			if strings.TrimSpace(value) == "" {
+				provider.DownstreamNonStreamStrategyOverride = ""
+				break
+			}
+			normalized, err := normalizeDownstreamNonStreamStrategy(value)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE in %s: %q", path, value))
+			}
+			provider.DownstreamNonStreamStrategyOverride = normalized
 		case "PROXY_API_KEY_OVERRIDE":
 			provider.ProxyAPIKeyOverrideSet = true
 			provider.ProxyAPIKeyOverride = value
@@ -160,6 +181,20 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	provider.UpstreamRetryDelay = normalizeProviderRetryDelay(provider.UpstreamRetryDelay)
 	provider.SystemPromptPosition = normalizeSystemPromptPosition(provider.SystemPromptPosition)
 	return provider, nil
+}
+
+func (p ProviderConfig) EffectiveDownstreamNonStreamStrategy(rootStrategy string) string {
+	if p.DownstreamNonStreamStrategyOverrideSet {
+		if strings.TrimSpace(p.DownstreamNonStreamStrategyOverride) == "" {
+			return rootStrategy
+		}
+		return p.DownstreamNonStreamStrategyOverride
+	}
+	return rootStrategy
+}
+
+func (p ProviderConfig) UsesUpstreamNonStreamForDownstreamNonStream(rootStrategy string) bool {
+	return p.EffectiveDownstreamNonStreamStrategy(rootStrategy) == DownstreamNonStreamStrategyUpstreamNonStream
 }
 
 func (p ProviderConfig) ProxyAPIKeyDisabled() bool {
@@ -209,16 +244,19 @@ func parseBool(value string) bool {
 	return strings.EqualFold(value, "true") || value == "1"
 }
 
-func parseProviderRetryCount(value string) int {
+func parseProviderRetryCount(value string, path string) (int, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return DefaultUpstreamRetryCount
+		return DefaultUpstreamRetryCount, nil
 	}
 	parsed, err := strconv.Atoi(trimmed)
 	if err != nil {
-		return DefaultUpstreamRetryCount
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_RETRY_COUNT in %s: %q", path, value))
 	}
-	return normalizeProviderRetryCount(parsed)
+	if parsed < 0 {
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_RETRY_COUNT in %s: %q", path, value))
+	}
+	return parsed, nil
 }
 
 func parseProviderPositiveDuration(value string, key string, path string) (time.Duration, error) {
@@ -240,16 +278,19 @@ func normalizeProviderRetryCount(value int) int {
 	return value
 }
 
-func parseProviderRetryDelay(value string) time.Duration {
+func parseProviderRetryDelay(value string, path string) (time.Duration, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return DefaultUpstreamRetryDelay
+		return DefaultUpstreamRetryDelay, nil
 	}
 	parsed, err := time.ParseDuration(trimmed)
 	if err != nil {
-		return DefaultUpstreamRetryDelay
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_RETRY_DELAY in %s: %q", path, value))
 	}
-	return normalizeProviderRetryDelay(parsed)
+	if parsed < 0 {
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_RETRY_DELAY in %s: %q", path, value))
+	}
+	return parsed, nil
 }
 
 func normalizeProviderRetryDelay(value time.Duration) time.Duration {

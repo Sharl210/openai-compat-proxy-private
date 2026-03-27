@@ -25,6 +25,8 @@ func TestLoggerWritesJSONFileAndRedactsBodiesByDefault(t *testing.T) {
 
 	logger.Event("downstream_request_received", map[string]any{
 		"authorization": "Bearer secret",
+		"api_key":       "proxy-secret",
+		"x_api_key":     "proxy-secret-2",
 		"body":          "top secret body",
 		"body_hash":     "abc123",
 		"cached_tokens": 0,
@@ -46,6 +48,12 @@ func TestLoggerWritesJSONFileAndRedactsBodiesByDefault(t *testing.T) {
 	}
 	if record["authorization"] != "[REDACTED]" {
 		t.Fatalf("expected auth redaction, got %#v", record["authorization"])
+	}
+	if record["api_key"] != "[REDACTED]" {
+		t.Fatalf("expected api_key redaction, got %#v", record["api_key"])
+	}
+	if record["x_api_key"] != "[REDACTED]" {
+		t.Fatalf("expected x_api_key redaction, got %#v", record["x_api_key"])
 	}
 	if record["body_hash"] != "abc123" {
 		t.Fatalf("expected body hash to remain, got %#v", record["body_hash"])

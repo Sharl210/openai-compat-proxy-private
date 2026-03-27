@@ -16,13 +16,16 @@ func ValidateProxyAuth(r *http.Request, proxyKey string) error {
 }
 
 func ValidateProxyAuthForProvider(r *http.Request, rootKey string, provider config.ProviderConfig, allowRootFallback bool) error {
-	if provider.ProxyAPIKeyDisabled() {
-		return nil
-	}
 	if allowRootFallback && rootKey != "" {
 		if err := validateProxyAuthValue(r, rootKey, allowQueryProxyKey(r)); err == nil {
 			return nil
 		}
+		if provider.ProxyAPIKeyDisabled() {
+			return ErrUnauthorized
+		}
+	}
+	if provider.ProxyAPIKeyDisabled() {
+		return nil
 	}
 	return validateProxyAuthValue(r, provider.EffectiveProxyAPIKey(rootKey), allowQueryProxyKey(r))
 }

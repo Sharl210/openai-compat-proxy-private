@@ -10,38 +10,45 @@ import (
 )
 
 type Config struct {
-	ListenAddr           string
-	ProxyAPIKey          string
-	UpstreamBaseURL      string
-	UpstreamAPIKey       string
-	ProvidersDir         string
-	DefaultProvider      string
-	EnableLegacyV1Routes bool
-	Providers            []ProviderConfig
-	LogEnable            bool
-	ConnectTimeout       time.Duration
-	FirstByteTimeout     time.Duration
-	IdleTimeout          time.Duration
-	TotalTimeout         time.Duration
-	UpstreamRetryCount   int
-	UpstreamRetryDelay   time.Duration
-	LogFilePath          string
-	LogIncludeBodies     bool
-	LogMaxSizeMB         int
-	LogMaxBackups        int
+	ListenAddr                  string
+	ProxyAPIKey                 string
+	UpstreamBaseURL             string
+	UpstreamAPIKey              string
+	ProvidersDir                string
+	DefaultProvider             string
+	EnableLegacyV1Routes        bool
+	DownstreamNonStreamStrategy string
+	Providers                   []ProviderConfig
+	LogEnable                   bool
+	ConnectTimeout              time.Duration
+	FirstByteTimeout            time.Duration
+	IdleTimeout                 time.Duration
+	TotalTimeout                time.Duration
+	UpstreamRetryCount          int
+	UpstreamRetryDelay          time.Duration
+	LogFilePath                 string
+	LogIncludeBodies            bool
+	LogMaxSizeMB                int
+	LogMaxBackups               int
 }
+
+const (
+	DownstreamNonStreamStrategyProxyBuffer       = "proxy_buffer"
+	DownstreamNonStreamStrategyUpstreamNonStream = "upstream_non_stream"
+)
 
 func Default() Config {
 	return Config{
-		ListenAddr:       ":21021",
-		LogEnable:        false,
-		ConnectTimeout:   10 * time.Second,
-		FirstByteTimeout: 20 * time.Minute,
-		IdleTimeout:      3 * time.Minute,
-		TotalTimeout:     time.Hour,
-		LogFilePath:      ".proxy.requests.jsonl",
-		LogMaxSizeMB:     100,
-		LogMaxBackups:    10,
+		ListenAddr:                  ":21021",
+		LogEnable:                   false,
+		ConnectTimeout:              10 * time.Second,
+		FirstByteTimeout:            20 * time.Minute,
+		IdleTimeout:                 3 * time.Minute,
+		TotalTimeout:                time.Hour,
+		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
+		LogFilePath:                 ".proxy.requests.jsonl",
+		LogMaxSizeMB:                100,
+		LogMaxBackups:               10,
 	}
 }
 
@@ -71,6 +78,11 @@ func loadFromLookup(lookup func(string) string) Config {
 	}
 	if value := lookup("ENABLE_LEGACY_V1_ROUTES"); value != "" {
 		cfg.EnableLegacyV1Routes = strings.EqualFold(value, "true") || value == "1"
+	}
+	if value := lookup("DOWNSTREAM_NON_STREAM_STRATEGY"); value != "" {
+		if normalized, err := normalizeDownstreamNonStreamStrategy(value); err == nil {
+			cfg.DownstreamNonStreamStrategy = normalized
+		}
 	}
 	if value := lookup("LOG_ENABLE"); value != "" {
 		cfg.LogEnable = strings.EqualFold(value, "true") || value == "1"
@@ -127,6 +139,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validatePositiveDuration(values, "TOTAL_TIMEOUT"); err != nil {
 		return err
 	}
+	if err := validateDownstreamNonStreamStrategy(values, "DOWNSTREAM_NON_STREAM_STRATEGY"); err != nil {
+		return err
+	}
 	if err := validateMinInt(values, "LOG_MAX_SIZE_MB", 1); err != nil {
 		return err
 	}
@@ -134,6 +149,28 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	return nil
+}
+
+func validateDownstreamNonStreamStrategy(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	if _, err := normalizeDownstreamNonStreamStrategy(value); err != nil {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func normalizeDownstreamNonStreamStrategy(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case DownstreamNonStreamStrategyProxyBuffer:
+		return DownstreamNonStreamStrategyProxyBuffer, nil
+	case DownstreamNonStreamStrategyUpstreamNonStream:
+		return DownstreamNonStreamStrategyUpstreamNonStream, nil
+	default:
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid downstream non-stream strategy: %q", value))
+	}
 }
 
 func validatePositiveDuration(values map[string]string, key string) error {
@@ -206,6 +243,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.ProvidersDir == other.ProvidersDir &&
 		c.DefaultProvider == other.DefaultProvider &&
 		c.EnableLegacyV1Routes == other.EnableLegacyV1Routes &&
+		c.DownstreamNonStreamStrategy == other.DownstreamNonStreamStrategy &&
 		c.ConnectTimeout == other.ConnectTimeout &&
 		c.FirstByteTimeout == other.FirstByteTimeout &&
 		c.IdleTimeout == other.IdleTimeout &&

@@ -20,3 +20,24 @@ func TestRequestStatusStoreEvictsOldestEntryWhenCapacityExceeded(t *testing.T) {
 		t.Fatalf("expected newest request to remain")
 	}
 }
+
+func TestRequestStatusStoreMarkFailedKeepsFailedRequestAsCompletedTerminalState(t *testing.T) {
+	store := newRequestStatusStore()
+	store.start("req-failed", "openai", "/v1/responses")
+
+	store.markFailed("req-failed", "upstream_timeout", "upstream_timeout", "upstream request timed out")
+
+	status, ok := store.get("req-failed")
+	if !ok {
+		t.Fatalf("expected failed request status to remain in store")
+	}
+	if status.Status != "failed" {
+		t.Fatalf("expected failed terminal status, got %#v", status)
+	}
+	if !status.Completed {
+		t.Fatalf("expected failed terminal status to report completed=true, got %#v", status)
+	}
+	if status.Stage != "failed" || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
+		t.Fatalf("unexpected failed terminal status payload: %#v", status)
+	}
+}

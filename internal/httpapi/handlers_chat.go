@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	chatadapter "openai-compat-proxy/internal/adapter/chat"
 	"openai-compat-proxy/internal/aggregate"
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/upstream"
@@ -25,14 +27,26 @@ func handleChat() http.HandlerFunc {
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		setNormalizationVersionHeader(w)
+		requestID := w.Header().Get("X-Request-Id")
+		statusStore, _ := requestStatusStoreFromRequest(r)
+		providerID := provider.ID
+		statusCheckKey := statusCheckProxyKeyForRequest(r, providerCfg, provider)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "proxy_internal_error", "missing_upstream_auth", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, requestID, statusCheckKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
 
 		canon, err := chatadapter.DecodeRequest(r.Body)
 		if err != nil {
+			if statusStore != nil {
+				statusStore.markFailed(requestID, "proxy_internal_error", "invalid_request", err.Error())
+			}
+			setRequestStatusHeaders(w, r, providerID, requestID, statusCheckKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
@@ -42,11 +56,8 @@ func handleChat() http.HandlerFunc {
 			canon.Model = mappedModel
 			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		}
-		canon.RequestID = w.Header().Get("X-Request-Id")
+		canon.RequestID = requestID
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
-		statusStore, _ := requestStatusStoreFromRequest(r)
-		providerID := provider.ID
-		statusCheckKey := statusCheckProxyKeyForRequest(r, providerCfg, provider)
 		attrs := map[string]any{
 			"request_id":            canon.RequestID,
 			"route":                 "/v1/chat/completions",
@@ -98,10 +109,77 @@ func handleChat() http.HandlerFunc {
 			}
 			flusher := startSSE(w)
 			if err := writeChatSSELive(ctx, stream, w, flusher, canon); err != nil {
+				var terminalFailure *aggregate.TerminalFailureError
+				if errors.As(err, &terminalFailure) {
+					if statusStore != nil {
+						statusStore.markFailed(canon.RequestID, terminalFailure.HealthFlag, terminalFailure.HealthFlag, terminalFailure.Message)
+					}
+					return
+				}
+				if isUpstreamTimeout(err, ctx) {
+					if statusStore != nil {
+						statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+					}
+					_ = writeChatTerminalFailure(w, flusher, "upstream_timeout", "upstream request timed out")
+					return
+				}
 				if statusStore != nil {
 					statusStore.markFailed(canon.RequestID, "upstream_stream_broken", "upstream_stream_broken", err.Error())
 				}
 				_ = writeChatTerminalFailure(w, flusher, "upstream_stream_broken", err.Error())
+				return
+			}
+			if statusStore != nil {
+				statusStore.markCompleted(canon.RequestID)
+			}
+			return
+		}
+
+		if providerCfg.DownstreamNonStreamStrategy == config.DownstreamNonStreamStrategyUpstreamNonStream {
+			payload, err := client.Response(ctx, canon, authorization)
+			if err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+				}
+				if isUpstreamTimeout(err, ctx) {
+					setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "upstream_timeout")
+					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+					return
+				}
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_error", "upstream_error", err.Error())
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "upstream_error")
+				if writeUpstreamError(w, err) {
+					return
+				}
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+			result, err := aggregate.ResultFromResponsePayload(payload)
+			if err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "proxy_internal_error", "invalid_upstream_response", err.Error())
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "proxy_internal_error")
+				errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_response", err.Error())
+				return
+			}
+			if len(result.UnsupportedContentTypes) > 0 {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "proxy_internal_error", "unsupported_output_mapping", "upstream returned unsupported chat output content")
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "proxy_internal_error")
+				errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported chat output content")
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := writeJSON(w, chatadapter.BuildResponse(result)); err != nil {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "proxy_internal_error", "encode_error", err.Error())
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, "proxy_internal_error")
+				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 				return
 			}
 			if statusStore != nil {

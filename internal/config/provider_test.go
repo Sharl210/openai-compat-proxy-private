@@ -199,7 +199,7 @@ func TestLoadProviderFileParsesRetryOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadProviderFileAllowsZeroRetryOverrideAndFallsBackOnInvalidValues(t *testing.T) {
+func TestLoadProviderFileAllowsZeroRetryOverride(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")
 	providerBody := "PROVIDER_ID=openai\nUPSTREAM_RETRY_COUNT=0\nUPSTREAM_RETRY_DELAY=0s\n"
@@ -217,20 +217,48 @@ func TestLoadProviderFileAllowsZeroRetryOverrideAndFallsBackOnInvalidValues(t *t
 	if provider.UpstreamRetryDelay != 0 {
 		t.Fatalf("expected retry delay 0, got %v", provider.UpstreamRetryDelay)
 	}
+	if provider.UpstreamFirstByteTimeout != 0 {
+		t.Fatalf("expected provider first byte timeout to keep inheriting root config, got %v", provider.UpstreamFirstByteTimeout)
+	}
+}
 
-	providerBody = "PROVIDER_ID=openai\nUPSTREAM_RETRY_COUNT=-3\nUPSTREAM_RETRY_DELAY=bad\n"
+func TestLoadProviderFileRejectsInvalidRetryCount(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_RETRY_COUNT=-3\n"
 	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
-		t.Fatalf("rewrite provider env: %v", err)
+		t.Fatalf("write provider env: %v", err)
 	}
-	provider, err = loadProviderFile(providerEnvPath)
-	if err != nil {
-		t.Fatalf("loadProviderFile returned error after invalid values: %v", err)
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid retry count to fail validation")
 	}
-	if provider.UpstreamRetryCount != DefaultUpstreamRetryCount {
-		t.Fatalf("expected invalid retry count to fall back to %d, got %d", DefaultUpstreamRetryCount, provider.UpstreamRetryCount)
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid retry count, got %T", err)
 	}
-	if provider.UpstreamRetryDelay != DefaultUpstreamRetryDelay {
-		t.Fatalf("expected invalid retry delay to fall back to %v, got %v", DefaultUpstreamRetryDelay, provider.UpstreamRetryDelay)
+	if err.Error() != "invalid UPSTREAM_RETRY_COUNT in "+providerEnvPath+": \"-3\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidRetryDelay(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_RETRY_DELAY=bad\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	if _, err := loadProviderFile(providerEnvPath); err == nil {
+		t.Fatalf("expected invalid retry delay to fail validation")
+	} else {
+		if _, ok := err.(invalidConfigError); !ok {
+			t.Fatalf("expected invalidConfigError for invalid retry delay, got %T", err)
+		}
+		if err.Error() != "invalid UPSTREAM_RETRY_DELAY in "+providerEnvPath+": \"bad\"" {
+			t.Fatalf("unexpected error message: %v", err)
+		}
 	}
 }
 
@@ -300,5 +328,51 @@ func TestLoadProviderFileTreatsBlankProxyAPIKeyOverrideAsRootInheritance(t *test
 	}
 	if got := provider.StatusCheckProxyAPIKey("root-secret", false); got != "root-secret" {
 		t.Fatalf("expected provider-scoped status key to inherit root key, got %q", got)
+	}
+}
+
+func TestLoadProviderFileParsesDownstreamNonStreamStrategyOverride(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nDOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE=upstream_non_stream\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if !provider.DownstreamNonStreamStrategyOverrideSet {
+		t.Fatalf("expected downstream non-stream strategy override to be marked as set")
+	}
+	if got := provider.DownstreamNonStreamStrategyOverride; got != DownstreamNonStreamStrategyUpstreamNonStream {
+		t.Fatalf("expected provider override %q, got %q", DownstreamNonStreamStrategyUpstreamNonStream, got)
+	}
+	if got := provider.EffectiveDownstreamNonStreamStrategy(DownstreamNonStreamStrategyProxyBuffer); got != DownstreamNonStreamStrategyUpstreamNonStream {
+		t.Fatalf("expected provider override to win, got %q", got)
+	}
+
+	providerBody = "PROVIDER_ID=openai\nDOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE=\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	provider, err = loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error after blank override: %v", err)
+	}
+	if !provider.DownstreamNonStreamStrategyOverrideSet {
+		t.Fatalf("expected blank downstream non-stream strategy override to be marked as set")
+	}
+	if got := provider.EffectiveDownstreamNonStreamStrategy(DownstreamNonStreamStrategyProxyBuffer); got != DownstreamNonStreamStrategyProxyBuffer {
+		t.Fatalf("expected blank override to inherit root strategy, got %q", got)
+	}
+
+	providerBody = "PROVIDER_ID=openai\nDOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE=bad-mode\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env with invalid strategy: %v", err)
+	}
+	if _, err := loadProviderFile(providerEnvPath); err == nil {
+		t.Fatalf("expected invalid downstream non-stream strategy override to fail validation")
 	}
 }

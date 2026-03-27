@@ -171,6 +171,8 @@ func redactAttrs(attrs map[string]any, includeBodies bool) map[string]any {
 		switch {
 		case strings.Contains(lower, "authorization"):
 			clean[k] = "[REDACTED]"
+		case strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey"):
+			clean[k] = "[REDACTED]"
 		case strings.Contains(lower, "body") && lower == "body" && !includeBodies:
 			clean[k] = "[REDACTED]"
 		default:

@@ -90,6 +90,7 @@ func providerConfigForRequest(r *http.Request) config.Config {
 		if provider, err := snapshot.Config.ProviderByID(info.ProviderID); err == nil {
 			providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
 			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
+			providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)
 			if provider.UpstreamFirstByteTimeout > 0 {
 				providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout
 			}

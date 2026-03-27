@@ -22,14 +22,14 @@ func withRequestID(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-Id", id)
 		started := time.Now()
 		logging.Event("downstream_request_received", map[string]any{
-			"request_id":               id,
-			"method":                   r.Method,
-			"path":                     r.URL.Path,
-			"normalization_version":    normalizationVersion,
-			"content_length":           r.ContentLength,
-			"content_type":             r.Header.Get("Content-Type"),
-			"client_user_agent":        r.Header.Get("User-Agent"),
-			"x_upstream_authorization": r.Header.Get("X-Upstream-Authorization"),
+			"request_id":                       id,
+			"method":                           r.Method,
+			"path":                             r.URL.Path,
+			"normalization_version":            normalizationVersion,
+			"content_length":                   r.ContentLength,
+			"content_type":                     r.Header.Get("Content-Type"),
+			"client_user_agent":                r.Header.Get("User-Agent"),
+			"x_upstream_authorization_present": strings.TrimSpace(r.Header.Get("X-Upstream-Authorization")) != "",
 		})
 		cw := &captureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)

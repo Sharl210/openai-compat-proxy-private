@@ -73,7 +73,7 @@ func (s *requestStatusStore) markCompleted(requestID string) {
 func (s *requestStatusStore) markFailed(requestID, healthFlag, errorCode, errorMessage string) {
 	s.update(requestID, func(status requestStatus) requestStatus {
 		status.Status = "failed"
-		status.Completed = false
+		status.Completed = true
 		status.Stage = "failed"
 		status.HealthFlag = healthFlag
 		status.ErrorCode = errorCode

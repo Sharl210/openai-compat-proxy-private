@@ -96,6 +96,7 @@ PROXY_API_KEY=
 PROVIDERS_DIR=./providers
 DEFAULT_PROVIDER=openai
 ENABLE_LEGACY_V1_ROUTES=true
+DOWNSTREAM_NON_STREAM_STRATEGY=proxy_buffer
 
 CONNECT_TIMEOUT=10s
 FIRST_BYTE_TIMEOUT=20m
@@ -224,6 +225,7 @@ chmod +x scripts/*.sh
 - `PROVIDERS_DIR`
 - `DEFAULT_PROVIDER`
 - `ENABLE_LEGACY_V1_ROUTES`
+- `DOWNSTREAM_NON_STREAM_STRATEGY`
 - `CONNECT_TIMEOUT`
 - `FIRST_BYTE_TIMEOUT`
 - `IDLE_TIMEOUT`
@@ -242,6 +244,7 @@ chmod +x scripts/*.sh
   - `EXPOSE_REASONING_SUFFIX_MODELS`
   - `UPSTREAM_RETRY_COUNT`
   - `UPSTREAM_RETRY_DELAY`
+  - `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`
   - `SYSTEM_PROMPT_FILES`
   - `SYSTEM_PROMPT_POSITION`
 - provider 配置中 `SYSTEM_PROMPT_FILES` 引用到的文本文件内容
@@ -296,6 +299,12 @@ chmod +x scripts/*.sh
 - `updated_at`
 - `completed`
 - 失败时还会返回 `error_code` 和 `error_message`
+
+这里的 `completed` 表示“这个请求是否已经走到终态”，不是“是否成功完成”。
+
+- `status=completed` 时，`completed=true`
+- `status=failed` 时，`completed` 现在也会是 `true`，表示请求已经结束，只是结果失败
+- 只有仍在处理中、还没到终态时，`completed` 才会是 `false`
 
 当前 `status` / `health_flag` 的基础语义：
 
@@ -393,6 +402,19 @@ http(s)://<host>/v1/<providerId>/xxx
 - `IDLE_TIMEOUT`：读取活跃上游响应体 / 流时允许的最长静默间隔。**可热加载**
 - `TOTAL_TIMEOUT`：单次请求总超时。**可热加载**
 
+### 下游非流模式字段
+
+- `DOWNSTREAM_NON_STREAM_STRATEGY`：下游请求本身是非流式时，代理请求上游 `/responses` 的默认模式。支持：
+  - `proxy_buffer`：默认值，保持现状。代理继续向上游请求 SSE，再在本地聚合成非流式响应。
+  - `upstream_non_stream`：下游非流时，代理直接向上游请求非流式 JSON。
+
+行为说明：
+
+- 这个字段是 **根级** 配置，支持热加载。
+- 默认值是 `proxy_buffer`，所以升级后默认行为不变。
+- 只有下游请求本身是非流式时，这个字段才会参与裁决；下游流式请求仍然固定走上游 SSE。
+- provider 可以再通过 `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` 做覆盖。
+
 ### 日志字段
 
 - `LOG_ENABLE`：是否启用结构化日志。**不能热加载**
@@ -450,7 +472,7 @@ http(s)://<host>/v1/<providerId>/xxx
 
 - 这两个字段是 **provider 级** 配置，支持热加载。
 - `UPSTREAM_RETRY_COUNT` 必须是大于等于 `0` 的整数；`UPSTREAM_RETRY_DELAY` 必须是合法的 Go duration，且不能为负数。
-- 如果 provider 文件里把这两个字段写成非法值，这次 provider 配置变更不会通过校验，也不会替换当前已生效快照。
+- 如果 provider 文件里把这两个字段写成非法值，这次 provider 配置变更不会通过校验，不会静默回退到默认值，也不会替换当前已生效快照。
 - 重试同时适用于流式和非流式请求。
 - 只有在“请求上游后，尚未收到任何上游数据”时才会触发自动重试。
 - 一旦已经收到上游首个 event / chunk，后续中途断流、解析失败或其他读流错误都不会再重试，而是直接把当次上游错误返回给客户端。
@@ -466,6 +488,19 @@ http(s)://<host>/v1/<providerId>/xxx
 - 默认继承根级 `FIRST_BYTE_TIMEOUT=20m`。
 - 如果某个 provider 可能长时间思考、不出首字，可以只给这个 provider 单独放大，不影响其他 provider。
 - 这个字段必须是合法的 Go duration，且必须大于 `0`；写成非法值时，这次 provider 配置变更不会通过校验，也不会替换当前已生效快照。
+
+### provider 级下游非流模式覆写字段
+
+- `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`：当前 provider 的下游非流模式覆写。支持：
+  - 留空：继承根 `.env` 里的 `DOWNSTREAM_NON_STREAM_STRATEGY`
+  - `proxy_buffer`：当前 provider 的下游非流请求固定走代理缓冲
+  - `upstream_non_stream`：当前 provider 的下游非流请求固定走上游非流 JSON
+
+行为说明：
+
+- 这个字段是 **provider 级** 配置，支持热加载。
+- 只有下游请求本身是非流式时，这个字段才会生效；流式请求仍然固定走上游 SSE。
+- 留空表示继承根级默认，不额外改动当前 provider 的行为。
 
 ### 能力开关
 
@@ -516,6 +551,17 @@ http(s)://<host>/v1/<providerId>/xxx
 ```bash
 curl http://127.0.0.1:21021/healthz
 ```
+
+`/healthz` 现在表示“当前已生效配置至少具备接请求的基础条件”，不是单纯“进程活着”。
+
+当前会做本地静态检查，不会主动探测外部上游连通性。最小检查范围包括：
+
+- 运行时必须已有可用的 active snapshot
+- 至少要有一个启用的 provider
+- 启用的 provider 不能缺少 `UPSTREAM_BASE_URL`
+- 如果配置了 `DEFAULT_PROVIDER`，它必须存在、已启用，且具备 `UPSTREAM_BASE_URL`
+
+如果这些基础条件不满足，`/healthz` 会返回 `503` 和错误原因；部署脚本也会据此把服务视为未就绪。
 
 ## 鸣谢
 

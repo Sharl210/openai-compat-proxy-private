@@ -115,6 +115,40 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 }
 
+func TestRuntimeStoreRefreshAppliesHotReloadableDownstreamNonStreamStrategy(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 5, 0, 111000000, time.UTC)
+	updatedRootMTime := time.Date(2026, 3, 26, 10, 6, 0, 222000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nDOWNSTREAM_NON_STREAM_STRATEGY=proxy_buffer\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 5, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nDOWNSTREAM_NON_STREAM_STRATEGY=upstream_non_stream\n", updatedRootMTime)
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("expected downstream non-stream strategy refresh to succeed, got %v", err)
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(updatedRootMTime) {
+		t.Fatalf("expected root version to update to %q, got %q", formatVersionTime(updatedRootMTime), got)
+	}
+	if got := active.Config.DownstreamNonStreamStrategy; got != DownstreamNonStreamStrategyUpstreamNonStream {
+		t.Fatalf("expected downstream non-stream strategy to update, got %q", got)
+	}
+}
+
 func TestRuntimeStoreWatcherReloadsAfterProviderFileChange(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

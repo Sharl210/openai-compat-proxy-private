@@ -126,7 +126,7 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
-	body, err := buildRequestBody(req)
+	body, err := buildStreamingRequestBody(req)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 }
 
 func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest, authorization string) (*EventStream, error) {
-	body, err := buildRequestBody(req)
+	body, err := buildStreamingRequestBody(req)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +230,38 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
 	return stream, nil
+}
+
+func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, authorization string) (map[string]any, error) {
+	body, err := buildRequestBody(req)
+	if err != nil {
+		return nil, err
+	}
+	attrs := map[string]any{
+		"request_id":    req.RequestID,
+		"auth_mode":     req.AuthMode,
+		"model":         req.Model,
+		"stream":        false,
+		"body_hash":     hashBytes(body),
+		"body_size":     len(body),
+		"message_count": len(req.Messages),
+		"tool_count":    len(req.Tools),
+		"body":          string(body),
+	}
+	for k, v := range upstreamBodyLogAttrs(body) {
+		attrs[k] = v
+	}
+	logging.Event("upstream_request_built", attrs)
+	payload, err := c.responseWithRetry(ctx, body, authorization)
+	if err != nil {
+		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
+	}
+	logging.Event("upstream_response_completed", map[string]any{
+		"request_id": req.RequestID,
+		"attempt":    1,
+		"streaming":  false,
+	})
+	return payload, nil
 }
 
 func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {
@@ -291,6 +323,65 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, body []byte, auth
 		}
 	}
 	return nil, lastErr
+}
+
+func (c *Client) responseWithRetry(ctx context.Context, body []byte, authorization string) (map[string]any, error) {
+	retryCount := c.configuredRetryCount()
+	retryDelay := c.configuredRetryDelay()
+	var lastErr error
+	for attempt := 1; attempt <= retryCount+1; attempt++ {
+		payload, err := c.responseOnce(ctx, body, authorization)
+		if err == nil {
+			return payload, nil
+		}
+		lastErr = err
+		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		if retryDelay > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
+	}
+	return nil, lastErr
+}
+
+func (c *Client) responseOnce(ctx context.Context, body []byte, authorization string) (map[string]any, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if authorization != "" {
+		httpReq.Header.Set("Authorization", authorization)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, readHTTPStatusError(resp)
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (c *Client) openEventStream(ctx context.Context, body []byte, authorization string) (*EventStream, error) {
@@ -426,7 +517,7 @@ func formatRetrySeconds(delay time.Duration) string {
 func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	payload := map[string]any{
 		"model":  req.Model,
-		"stream": true,
+		"stream": req.Stream,
 	}
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
@@ -544,6 +635,11 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
+func buildStreamingRequestBody(req model.CanonicalRequest) ([]byte, error) {
+	req.Stream = true
+	return buildRequestBody(req)
+}
+
 func joinTextParts(parts []model.CanonicalContentPart) string {
 	var builder strings.Builder
 	for _, part := range parts {
@@ -603,6 +699,14 @@ func buildInputImageContent(part model.CanonicalContentPart) map[string]any {
 	entry := map[string]any{"type": "input_image"}
 	if rawImage, ok := part.Raw["image_url"].(map[string]any); ok && len(rawImage) > 0 {
 		image := cloneMap(rawImage)
+		if fileID, _ := image["file_id"].(string); fileID != "" {
+			entry["file_id"] = fileID
+			delete(image, "file_id")
+			for key, value := range image {
+				entry[key] = value
+			}
+			return entry
+		}
 		url, _ := image["url"].(string)
 		if url == "" {
 			url = part.ImageURL
