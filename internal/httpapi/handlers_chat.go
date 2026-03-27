@@ -8,7 +8,6 @@ import (
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
-	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -17,6 +16,10 @@ func handleChat() http.HandlerFunc {
 		providerCfg := providerConfigForRequest(r)
 		provider, ok := providerForRequest(r)
 		if !ok || !provider.SupportsChat {
+			if statusStore, _ := requestStatusStoreFromRequest(r); statusStore != nil {
+				statusStore.markFailed(w.Header().Get("X-Request-Id"), "proxy_internal_error", "unsupported_provider_contract", "provider does not support chat completions")
+			}
+			setRequestStatusHeaders(w, r, provider.ID, w.Header().Get("X-Request-Id"), statusCheckProxyKeyForRequest(r, providerCfg, provider), "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
 			return
 		}
@@ -37,14 +40,7 @@ func handleChat() http.HandlerFunc {
 		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 			canon.Model = mappedModel
-			if effort != "" {
-				if canon.Reasoning == nil {
-					canon.Reasoning = &modelpkg.CanonicalReasoning{}
-				}
-				canon.Reasoning.Effort = effort
-				canon.Reasoning.Raw = map[string]any{"effort": effort, "summary": "auto"}
-				canon.Reasoning.Summary = "auto"
-			}
+			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		}
 		canon.RequestID = w.Header().Get("X-Request-Id")
 		canon.AuthMode = authModeForUpstream(r, providerCfg)

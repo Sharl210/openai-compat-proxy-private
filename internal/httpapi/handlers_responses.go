@@ -2,13 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	responsesadapter "openai-compat-proxy/internal/adapter/responses"
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
-	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -17,6 +17,10 @@ func handleResponses() http.HandlerFunc {
 		providerCfg := providerConfigForRequest(r)
 		provider, ok := providerForRequest(r)
 		if !ok || !provider.SupportsResponses {
+			if statusStore, _ := requestStatusStoreFromRequest(r); statusStore != nil {
+				statusStore.markFailed(w.Header().Get("X-Request-Id"), "proxy_internal_error", "unsupported_provider_contract", "provider does not support responses")
+			}
+			setRequestStatusHeaders(w, r, provider.ID, w.Header().Get("X-Request-Id"), statusCheckProxyKeyForRequest(r, providerCfg, provider), "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support responses")
 			return
 		}
@@ -37,14 +41,7 @@ func handleResponses() http.HandlerFunc {
 		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 			canon.Model = mappedModel
-			if effort != "" {
-				if canon.Reasoning == nil {
-					canon.Reasoning = &modelpkg.CanonicalReasoning{}
-				}
-				canon.Reasoning.Effort = effort
-				canon.Reasoning.Raw = map[string]any{"effort": effort, "summary": "auto"}
-				canon.Reasoning.Summary = "auto"
-			}
+			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		}
 		canon.RequestID = w.Header().Get("X-Request-Id")
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
@@ -102,12 +99,22 @@ func handleResponses() http.HandlerFunc {
 			}
 			flusher := startSSE(w)
 			if err := writeResponsesSSELive(ctx, stream, w, flusher, canon); err != nil {
-				if statusStore != nil {
-					statusStore.markFailed(canon.RequestID, "upstream_stream_broken", "upstream_stream_broken", err.Error())
+				var terminalFailure *aggregate.TerminalFailureError
+				if errors.As(err, &terminalFailure) {
+					if statusStore != nil {
+						statusStore.markFailed(canon.RequestID, terminalFailure.HealthFlag, terminalFailure.HealthFlag, terminalFailure.Message)
+					}
+					return
 				}
 				if isUpstreamTimeout(err, ctx) {
+					if statusStore != nil {
+						statusStore.markFailed(canon.RequestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
+					}
 					_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_timeout", "upstream request timed out")
 					return
+				}
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, "upstream_stream_broken", "upstream_stream_broken", err.Error())
 				}
 				_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_stream_broken", err.Error())
 				return
@@ -146,6 +153,19 @@ func handleResponses() http.HandlerFunc {
 
 		result, err := collector.Result()
 		if err != nil {
+			var terminalFailure *aggregate.TerminalFailureError
+			if errors.As(err, &terminalFailure) {
+				if statusStore != nil {
+					statusStore.markFailed(canon.RequestID, terminalFailure.HealthFlag, terminalFailure.HealthFlag, terminalFailure.Message)
+				}
+				setRequestStatusHeaders(w, r, providerID, canon.RequestID, statusCheckKey, terminalFailure.HealthFlag)
+				statusCode := http.StatusBadGateway
+				if terminalFailure.HealthFlag == "upstream_timeout" {
+					statusCode = http.StatusGatewayTimeout
+				}
+				errorsx.WriteJSON(w, statusCode, terminalFailure.HealthFlag, terminalFailure.Message)
+				return
+			}
 			if statusStore != nil {
 				statusStore.markFailed(canon.RequestID, "proxy_internal_error", "invalid_upstream_stream", err.Error())
 			}

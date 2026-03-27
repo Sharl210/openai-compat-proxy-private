@@ -129,3 +129,52 @@ func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *t
 		t.Fatalf("unexpected failed status payload: %#v", status)
 	}
 }
+
+func TestResponsesStreamUpstreamIncompleteTimeoutPreservesTimeoutStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.output_text.delta\n"))
+		_, _ = w.Write([]byte("data: {\"delta\":\"hello\"}\n\n"))
+		flusher.Flush()
+		_, _ = w.Write([]byte("event: response.incomplete\n"))
+		_, _ = w.Write([]byte("data: {\"request_id\":\"upstream_req\",\"health_flag\":\"upstream_timeout\",\"message\":\"upstream request timed out\"}\n\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	requestID := rec.Header().Get("X-Request-Id")
+	if strings.Count(rec.Body.String(), "event: response.incomplete") != 1 {
+		t.Fatalf("expected exactly one response.incomplete passthrough event, got %s", rec.Body.String())
+	}
+	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
+	statusRec := httptest.NewRecorder()
+	server.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var status requestStatus
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
+	}
+	if status.Status != "failed" || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
+		t.Fatalf("unexpected timeout status payload: %#v", status)
+	}
+}

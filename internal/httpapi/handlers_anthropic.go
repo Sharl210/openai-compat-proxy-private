@@ -7,7 +7,6 @@ import (
 	anthropicadapter "openai-compat-proxy/internal/adapter/anthropic"
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/errorsx"
-	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -17,6 +16,10 @@ func handleAnthropicMessages() http.HandlerFunc {
 		setNormalizationVersionHeader(w)
 		provider, ok := providerForRequest(r)
 		if !ok || !provider.SupportsAnthropicMessages {
+			if statusStore, _ := requestStatusStoreFromRequest(r); statusStore != nil {
+				statusStore.markFailed(w.Header().Get("X-Request-Id"), "proxy_internal_error", "unsupported_provider_contract", "provider does not support anthropic messages")
+			}
+			setRequestStatusHeaders(w, r, provider.ID, w.Header().Get("X-Request-Id"), statusCheckProxyKeyForRequest(r, providerCfg, provider), "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
 			return
 		}
@@ -38,14 +41,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		statusCheckKey := statusCheckProxyKeyForRequest(r, providerCfg, provider)
 		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 		canon.Model = mappedModel
-		if effort != "" {
-			if canon.Reasoning == nil {
-				canon.Reasoning = &modelpkg.CanonicalReasoning{}
-			}
-			canon.Reasoning.Effort = effort
-			canon.Reasoning.Raw = map[string]any{"effort": effort, "summary": "auto"}
-			canon.Reasoning.Summary = "auto"
-		}
+		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 		ctx := r.Context()
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {

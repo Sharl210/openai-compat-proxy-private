@@ -276,3 +276,29 @@ func TestLoadProviderFileParsesProxyAPIKeyOverride(t *testing.T) {
 		t.Fatalf("expected disabled override to return empty effective proxy key")
 	}
 }
+
+func TestLoadProviderFileTreatsBlankProxyAPIKeyOverrideAsRootInheritance(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nPROXY_API_KEY_OVERRIDE=\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if !provider.ProxyAPIKeyOverrideSet {
+		t.Fatalf("expected blank proxy api key override to be marked as set")
+	}
+	if provider.ProxyAPIKeyDisabled() {
+		t.Fatalf("expected blank proxy api key override to inherit root key, not disable auth")
+	}
+	if got := provider.EffectiveProxyAPIKey("root-secret"); got != "root-secret" {
+		t.Fatalf("expected blank override to inherit root key, got %q", got)
+	}
+	if got := provider.StatusCheckProxyAPIKey("root-secret", false); got != "root-secret" {
+		t.Fatalf("expected provider-scoped status key to inherit root key, got %q", got)
+	}
+}

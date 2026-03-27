@@ -71,10 +71,17 @@ func handleModels() http.HandlerFunc {
 			body = rewriteModelsBody(body, provider)
 		}
 		w.Header().Set("Content-Type", contentType)
+		if status >= http.StatusBadRequest {
+			setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "upstream_error")
+		}
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
 		if statusStore != nil {
-			statusStore.markCompleted(requestID)
+			if status >= http.StatusBadRequest {
+				statusStore.markFailed(requestID, "upstream_error", "upstream_error", http.StatusText(status))
+			} else {
+				statusStore.markCompleted(requestID)
+			}
 		}
 	}
 }

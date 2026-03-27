@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
@@ -40,6 +41,7 @@ type anthropicStreamState struct {
 	toolStatusSent   bool
 	toolItemID       string
 	toolDeltaSent    bool
+	terminalSeen     bool
 }
 
 type responsesStreamState struct {
@@ -51,6 +53,7 @@ type responsesStreamState struct {
 	reasoningClosed   bool
 	syntheticSummary  strings.Builder
 	terminalSeen      bool
+	terminalFailure   *aggregate.TerminalFailureError
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -131,6 +134,9 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	}
 	if !state.terminalSeen {
 		return io.ErrUnexpectedEOF
+	}
+	if state.terminalFailure != nil {
+		return state.terminalFailure
 	}
 	return nil
 }
@@ -214,6 +220,20 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		if err := closeSyntheticReasoning(); err != nil {
+			return err
+		}
+	case "response.incomplete":
+		state.terminalSeen = true
+		healthFlag, _ := evt.Data["health_flag"].(string)
+		message, _ := evt.Data["message"].(string)
+		if healthFlag == "" {
+			healthFlag = "upstream_stream_broken"
+		}
+		if message == "" {
+			message = "upstream response incomplete"
+		}
+		state.terminalFailure = &aggregate.TerminalFailureError{HealthFlag: healthFlag, Message: message}
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
@@ -310,7 +330,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return streamLiveWithSyntheticTicks(ctx, stream.Consume,
+	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realThinkingSeen },
 		func() error {
 			if state.textStarted || state.realThinkingSeen {
@@ -330,6 +350,13 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			return writeAnthropicEvent(w, flusher, &state, evt)
 		},
 	)
+	if err != nil {
+		return err
+	}
+	if !state.terminalSeen {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }
 
 func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState) error {
@@ -597,6 +624,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			})
 		}
 	case "response.completed", "response.done":
+		state.terminalSeen = true
 		if err := closeTextBlock(state, w, flusher); err != nil {
 			return err
 		}
@@ -776,6 +804,7 @@ type chatStreamState struct {
 	toolSent          map[string]bool
 	pendingToolArgs   map[string]string
 	nextToolIx        int
+	terminalSeen      bool
 }
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest) error {
@@ -794,7 +823,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
-	return streamLiveWithSyntheticTicks(ctx, stream.Consume,
+	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realReasoningSeen },
 		func() error {
 			if state.textStarted || state.realReasoningSeen {
@@ -807,6 +836,13 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 			return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage)
 		},
 	)
+	if err != nil {
+		return err
+	}
+	if !state.terminalSeen {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }
 
 func waitSyntheticLeadTime(ctx context.Context) error {
@@ -995,6 +1031,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 	case "response.completed", "response.done":
+		state.terminalSeen = true
 		finishReason := "stop"
 		if len(state.toolSent) > 0 {
 			finishReason = "tool_calls"

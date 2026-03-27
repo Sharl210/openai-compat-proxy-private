@@ -24,6 +24,18 @@ type Result struct {
 	UnsupportedContentTypes []string
 }
 
+type TerminalFailureError struct {
+	HealthFlag string
+	Message    string
+}
+
+func (e *TerminalFailureError) Error() string {
+	if e == nil || e.Message == "" {
+		return "terminal failure"
+	}
+	return e.Message
+}
+
 type Collector struct {
 	text                    strings.Builder
 	toolCalls               map[string]*ToolCall
@@ -33,6 +45,7 @@ type Collector struct {
 	outputItems             []map[string]any
 	unsupportedContentTypes []string
 	completed               bool
+	terminalFailure         *TerminalFailureError
 }
 
 func NewCollector() *Collector {
@@ -116,6 +129,17 @@ func (c *Collector) Accept(evt upstream.Event) {
 			c.reasoning["usage"] = usage
 		}
 		c.completed = true
+	case "response.incomplete":
+		healthFlag, _ := evt.Data["health_flag"].(string)
+		message, _ := evt.Data["message"].(string)
+		if healthFlag == "" {
+			healthFlag = "upstream_stream_broken"
+		}
+		if message == "" {
+			message = "upstream response incomplete"
+		}
+		c.terminalFailure = &TerminalFailureError{HealthFlag: healthFlag, Message: message}
+		c.completed = true
 	case "response.reasoning.delta":
 		for k, v := range evt.Data {
 			if text, ok := v.(string); ok && shouldAppendReasoningKey(k) {
@@ -128,6 +152,9 @@ func (c *Collector) Accept(evt upstream.Event) {
 }
 
 func (c *Collector) Result() (Result, error) {
+	if c.terminalFailure != nil {
+		return Result{}, c.terminalFailure
+	}
 	if !c.completed {
 		return Result{}, errors.New("stream did not complete")
 	}

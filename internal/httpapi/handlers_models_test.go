@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
@@ -59,5 +61,38 @@ func TestExpandModelIDsKeepsExplicitAliasesAndSkipsWildcardPatterns(t *testing.T
 	}
 	if got["gpt-5.4-high-low"] {
 		t.Fatalf("expected already suffixed ids to stop expanding, got %#v", expanded)
+	}
+}
+
+func TestModelsUpstreamHTTPErrorMarksFailedStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream exploded"}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         true,
+			UpstreamBaseURL: upstream.URL,
+			UpstreamAPIKey:  "test-key",
+			SupportsModels:  true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected upstream status 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
+	if status.Status != "failed" || status.HealthFlag != "upstream_error" || status.ErrorCode != "upstream_error" {
+		t.Fatalf("expected upstream_error failed status, got %#v", status)
 	}
 }

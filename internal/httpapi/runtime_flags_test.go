@@ -30,6 +30,10 @@ func TestChatRejectsProviderWithoutChatSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support chat completions")
+	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
+	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
+		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
+	}
 }
 
 func TestResponsesRejectsProviderWithoutResponsesSupport(t *testing.T) {
@@ -51,6 +55,10 @@ func TestResponsesRejectsProviderWithoutResponsesSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support responses")
+	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
+	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
+		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
+	}
 }
 
 func TestModelsRejectsProviderWithoutModelsSupport(t *testing.T) {
@@ -71,6 +79,36 @@ func TestModelsRejectsProviderWithoutModelsSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support models")
+	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
+	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
+		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
+	}
+}
+
+func TestMessagesRejectsProviderWithoutMessagesSupport(t *testing.T) {
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           "https://example.test",
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: false,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	assertUnsupportedProviderContract(t, rec, "provider does not support anthropic messages")
+	status := fetchStatusForTest(t, server, "anthropic", rec.Header().Get("X-Request-Id"))
+	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
+		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
+	}
 }
 
 func TestLegacyV1RoutesDisabledReturnsNotFound(t *testing.T) {

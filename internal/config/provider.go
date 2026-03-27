@@ -171,6 +171,9 @@ func (p ProviderConfig) EffectiveProxyAPIKey(rootKey string) string {
 		return ""
 	}
 	if p.ProxyAPIKeyOverrideSet {
+		if strings.TrimSpace(p.ProxyAPIKeyOverride) == "" {
+			return rootKey
+		}
 		return p.ProxyAPIKeyOverride
 	}
 	return rootKey
