@@ -75,6 +75,18 @@ func previousResponseIDFromItems(items []map[string]any) string {
 	return ""
 }
 
+func shouldRestorePreviousConversation(messages []model.CanonicalMessage) bool {
+	if len(messages) == 0 {
+		return true
+	}
+	for _, msg := range messages {
+		if msg.Role != "tool" {
+			return false
+		}
+	}
+	return true
+}
+
 func assistantHistoryMessagesFromResult(result aggregate.Result) []model.CanonicalMessage {
 	parts := make([]model.CanonicalContentPart, 0, len(result.ResponseMessageContent))
 	for _, part := range result.ResponseMessageContent {

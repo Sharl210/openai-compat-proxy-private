@@ -37,7 +37,7 @@ func handleResponses() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
+		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
 			if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
 				if history := globalResponsesHistory.Load(providerID, previousResponseID); len(history) > 0 {
 					canon.Messages = append(history, canon.Messages...)
