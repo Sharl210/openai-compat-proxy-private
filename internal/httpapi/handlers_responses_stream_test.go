@@ -180,6 +180,23 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	}
 }
 
+func TestResponsesStreamCompletedCarriesStableResponseIDForToolFollowUp(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":"Quectel"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}, "stop_reason": "tool_use"}},
+	)
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	if !strings.Contains(body, `"id":"resp_call_1"`) {
+		t.Fatalf("expected completed response payload to include stable response id resp_call_1, got %s", body)
+	}
+	if !strings.Contains(body, `"object":"response"`) {
+		t.Fatalf("expected completed response payload to identify response object, got %s", body)
+	}
+}
+
 func testResponsesConfig(upstreamURL string) config.Config {
 	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
 }

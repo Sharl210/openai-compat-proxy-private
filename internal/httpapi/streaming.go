@@ -62,6 +62,7 @@ type responsesStreamState struct {
 	toolItems            map[string]*responsesToolItemState
 	toolOrder            []string
 	upstreamEndpointType string
+	requestID            string
 	terminalSeen         bool
 	terminalFailure      *aggregate.TerminalFailureError
 }
@@ -131,7 +132,7 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 }
 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
-	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: upstreamEndpointType}
+	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: upstreamEndpointType, requestID: req.RequestID}
 	collector := aggregate.NewCollector()
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return aggregate.Result{}, err
@@ -203,6 +204,24 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 	}
 	writeToolItemEvent := func(event string, item map[string]any) error {
 		return writeStreamEvent(event, map[string]any{"item": item})
+	}
+	currentResponseID := func() string {
+		for _, itemID := range state.toolOrder {
+			toolState := state.toolItems[itemID]
+			if toolState == nil || toolState.item == nil {
+				continue
+			}
+			if callID, _ := toolState.item["call_id"].(string); callID != "" {
+				return "resp_" + callID
+			}
+			if id, _ := toolState.item["id"].(string); id != "" {
+				return "resp_" + id
+			}
+		}
+		if state.requestID != "" {
+			return "resp_" + state.requestID
+		}
+		return "resp_proxy"
 	}
 	flushPendingFunctionCalls := func() error {
 		for _, itemID := range state.toolOrder {
@@ -322,6 +341,17 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if err := flushPendingFunctionCalls(); err != nil {
 				return err
 			}
+		}
+		response, _ := evt.Data["response"].(map[string]any)
+		if response == nil {
+			response = map[string]any{}
+			evt.Data["response"] = response
+		}
+		if _, ok := response["id"]; !ok {
+			response["id"] = currentResponseID()
+		}
+		if _, ok := response["object"]; !ok {
+			response["object"] = "response"
 		}
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
