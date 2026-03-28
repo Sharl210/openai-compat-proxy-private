@@ -1,10 +1,6 @@
 package responses
 
-import (
-	"fmt"
-
-	"openai-compat-proxy/internal/aggregate"
-)
+import "openai-compat-proxy/internal/aggregate"
 
 func BuildResponse(result aggregate.Result) map[string]any {
 	var output []map[string]any
@@ -81,15 +77,15 @@ func cloneOutputItems(input []map[string]any) []map[string]any {
 }
 
 func buildResponseID(result aggregate.Result) string {
-	if len(result.ToolCalls) > 0 && result.ToolCalls[0].CallID != "" {
-		return fmt.Sprintf("resp_%s", result.ToolCalls[0].CallID)
+	if result.ResponseID != "" {
+		return result.ResponseID
 	}
 	return "resp_proxy"
 }
 
 func buildOutputItemID(result aggregate.Result) string {
 	if len(result.ToolCalls) > 0 && result.ToolCalls[0].ID != "" {
-		return fmt.Sprintf("msg_%s", result.ToolCalls[0].ID)
+		return "msg_" + result.ToolCalls[0].ID
 	}
 	if result.Text != "" {
 		return "msg_proxy"

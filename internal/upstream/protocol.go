@@ -207,6 +207,7 @@ type chatNormalizationState struct {
 	toolIDsByIndex map[int]string
 	toolSent       map[string]bool
 	usage          map[string]any
+	createdSent    bool
 	completed      bool
 }
 
@@ -225,6 +226,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		state.usage = usage
 	}
 	var events []Event
+	if !state.createdSent {
+		if responseID := stringValue(payload["id"]); responseID != "" {
+			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID}}})
+			state.createdSent = true
+		}
+	}
 	choices, _ := payload["choices"].([]any)
 	for _, rawChoice := range choices {
 		choice, _ := rawChoice.(map[string]any)
@@ -322,6 +329,9 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	switch frame.Event {
 	case "message_start":
 		message, _ := payload["message"].(map[string]any)
+		if responseID := stringValue(message["id"]); responseID != "" {
+			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID}}})
+		}
 		mergeUsage(state.usage, normalizeAnthropicUsage(message["usage"]))
 	case "content_block_start":
 		index := int(numberValue(payload["index"]))
@@ -381,7 +391,11 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 }
 
 func normalizeChatPayload(payload map[string]any) map[string]any {
-	result := map[string]any{"id": "resp_proxy", "object": "response", "status": "completed"}
+	responseID := stringValue(payload["id"])
+	if responseID == "" {
+		responseID = "resp_proxy"
+	}
+	result := map[string]any{"id": responseID, "object": "response", "status": "completed"}
 	usage := normalizeChatUsage(payload)
 	if len(usage) > 0 {
 		result["usage"] = usage
@@ -394,7 +408,11 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 	choice, _ := choices[0].(map[string]any)
 	message, _ := choice["message"].(map[string]any)
 	output := make([]any, 0, 2)
-	messageItem := map[string]any{"id": "msg_proxy", "type": "message", "status": "completed", "role": "assistant"}
+	messageID := responseID
+	if messageID == "" {
+		messageID = "msg_proxy"
+	}
+	messageItem := map[string]any{"id": messageID, "type": "message", "status": "completed", "role": "assistant"}
 	content := normalizeChatMessageContent(message["content"])
 	if refusal := stringValue(message["refusal"]); refusal != "" {
 		content = append(content, map[string]any{"type": "refusal", "refusal": refusal})
@@ -462,7 +480,11 @@ func normalizeAnthropicPayload(payload map[string]any) map[string]any {
 		}
 	}
 	if len(messageContent) > 0 {
-		output = append([]any{map[string]any{"id": "msg_proxy", "type": "message", "status": "completed", "role": "assistant", "content": messageContent}}, output...)
+		messageID := stringValue(payload["id"])
+		if messageID == "" {
+			messageID = "msg_proxy"
+		}
+		output = append([]any{map[string]any{"id": messageID, "type": "message", "status": "completed", "role": "assistant", "content": messageContent}}, output...)
 	}
 	if stopReason := stringValue(payload["stop_reason"]); stopReason != "" {
 		result["stop_reason"] = stopReason
@@ -678,8 +700,8 @@ func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	} else {
 		payload["max_tokens"] = 1024
 	}
-	if req.Instructions != "" {
-		payload["system"] = req.Instructions
+	if system := buildAnthropicSystemPrompt(req); system != "" {
+		payload["system"] = system
 	}
 	if req.Reasoning != nil && len(req.Reasoning.Raw) > 0 {
 		if thinking, ok := req.Reasoning.Raw["thinking"]; ok {
@@ -723,7 +745,7 @@ func validateAnthropicRequest(req model.CanonicalRequest) error {
 func buildAnthropicMessages(req model.CanonicalRequest) []any {
 	messages := make([]any, 0, len(req.Messages))
 	for _, msg := range req.Messages {
-		if msg.Role == "system" || msg.Role == "developer" {
+		if isAnthropicInstructionRole(msg.Role) {
 			continue
 		}
 		if msg.Role == "tool" {
@@ -741,6 +763,36 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		messages = append(messages, map[string]any{"role": msg.Role, "content": content})
 	}
 	return messages
+}
+
+func buildAnthropicSystemPrompt(req model.CanonicalRequest) string {
+	parts := make([]string, 0, len(req.Messages)+1)
+	if req.Instructions != "" {
+		parts = append(parts, req.Instructions)
+	}
+	for _, msg := range req.Messages {
+		if !isAnthropicInstructionRole(msg.Role) {
+			continue
+		}
+		if text := joinAnthropicInstructionParts(msg.Parts); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func joinAnthropicInstructionParts(parts []model.CanonicalContentPart) string {
+	var builder strings.Builder
+	for _, part := range parts {
+		if part.Type == "text" {
+			builder.WriteString(part.Text)
+		}
+	}
+	return builder.String()
+}
+
+func isAnthropicInstructionRole(role string) bool {
+	return role == "system" || role == "developer"
 }
 
 func buildAnthropicContentParts(parts []model.CanonicalContentPart) []any {

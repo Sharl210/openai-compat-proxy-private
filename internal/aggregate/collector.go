@@ -15,6 +15,7 @@ type ToolCall struct {
 }
 
 type Result struct {
+	ResponseID              string
 	Text                    string
 	Refusal                 string
 	FinishReason            string
@@ -39,6 +40,7 @@ func (e *TerminalFailureError) Error() string {
 }
 
 type Collector struct {
+	responseID              string
 	text                    strings.Builder
 	toolCalls               map[string]*ToolCall
 	order                   []string
@@ -58,6 +60,12 @@ func NewCollector() *Collector {
 
 func (c *Collector) Accept(evt upstream.Event) {
 	switch evt.Event {
+	case "response.created":
+		if response, _ := evt.Data["response"].(map[string]any); response != nil {
+			if responseID, _ := response["id"].(string); responseID != "" {
+				c.responseID = responseID
+			}
+		}
 	case "response.output_text.delta":
 		if delta, _ := evt.Data["delta"].(string); delta != "" {
 			c.text.WriteString(delta)
@@ -176,6 +184,7 @@ func (c *Collector) Result() (Result, error) {
 	}
 
 	result := Result{Text: c.text.String()}
+	result.ResponseID = c.responseID
 	result.Refusal = c.refusal
 	result.FinishReason = c.finishReason
 	for _, id := range c.order {
