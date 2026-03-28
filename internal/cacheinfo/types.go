@@ -4,11 +4,12 @@ import "time"
 
 // TokenTotals 表示 token 累计
 type TokenTotals struct {
-	InputTokens  int64 `json:"input_tokens"`
-	CachedTokens int64 `json:"cached_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	TotalTokens  int64 `json:"total_tokens"`
-	RequestCount int64 `json:"request_count"`
+	InputTokens         int64 `json:"input_tokens"`
+	CachedTokens        int64 `json:"cached_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
+	OutputTokens        int64 `json:"output_tokens"`
+	TotalTokens         int64 `json:"total_tokens"`
+	RequestCount        int64 `json:"request_count"`
 }
 
 type DailyStats struct {

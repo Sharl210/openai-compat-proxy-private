@@ -84,8 +84,8 @@ func reasoningContentValue(reasoning map[string]any) string {
 
 func mapUsage(usage map[string]any) map[string]any {
 	out := map[string]any{}
-	if _, ok := usage["input_tokens"]; ok {
-		out["input_tokens"] = effectiveAnthropicInputTokens(usage)
+	if input, ok := usage["input_tokens"]; ok {
+		out["input_tokens"] = input
 	}
 	if output, ok := usage["output_tokens"]; ok {
 		out["output_tokens"] = output
@@ -102,30 +102,6 @@ func mapUsage(usage map[string]any) map[string]any {
 		return nil
 	}
 	return out
-}
-
-func effectiveAnthropicInputTokens(usage map[string]any) any {
-	input, ok := usage["input_tokens"]
-	if !ok {
-		return nil
-	}
-	inputFloat, ok := usageNumberAsFloat(input)
-	if !ok {
-		return input
-	}
-	remaining := inputFloat
-	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-		if cached, ok := usageNumberAsFloat(details["cached_tokens"]); ok {
-			remaining -= cached
-		}
-		if created, ok := usageNumberAsFloat(details["cache_creation_tokens"]); ok {
-			remaining -= created
-		}
-	}
-	if remaining < 0 {
-		remaining = 0
-	}
-	return int(remaining)
 }
 
 func usageNumberAsFloat(v any) (float64, bool) {

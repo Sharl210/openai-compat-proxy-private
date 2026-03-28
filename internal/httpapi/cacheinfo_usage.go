@@ -65,6 +65,10 @@ func cacheInfoUsageFromMap(usage map[string]any) (*cacheinfo.Usage, bool) {
 		parsed.CachedTokens = n
 		hasValues = true
 	}
+	if n, ok := cacheCreationTokensFromUsage(usage); ok {
+		parsed.CacheCreationTokens = n
+		hasValues = true
+	}
 	if !hasValues {
 		return nil, false
 	}
@@ -92,6 +96,26 @@ func cachedTokensFromUsage(usage map[string]any) (int64, bool) {
 		return n, true
 	}
 	if n, ok := usageNumberAsInt64(usage["cached_tokens"]); ok {
+		return n, true
+	}
+	return 0, false
+}
+
+func cacheCreationTokensFromUsage(usage map[string]any) (int64, bool) {
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if n, ok := usageNumberAsInt64(details["cache_creation_tokens"]); ok {
+			return n, true
+		}
+	}
+	if details, _ := usage["prompt_tokens_details"].(map[string]any); len(details) > 0 {
+		if n, ok := usageNumberAsInt64(details["cache_creation_tokens"]); ok {
+			return n, true
+		}
+	}
+	if n, ok := usageNumberAsInt64(usage["cache_creation_input_tokens"]); ok {
+		return n, true
+	}
+	if n, ok := usageNumberAsInt64(usage["cache_creation_tokens"]); ok {
 		return n, true
 	}
 	return 0, false

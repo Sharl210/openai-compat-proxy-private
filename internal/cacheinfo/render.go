@@ -12,6 +12,7 @@ func RenderProviderStats(stats ProviderStats) string {
 		fmt.Fprintf(&b, "[%s]\n", title)
 		fmt.Fprintf(&b, "输入Tokens：%s\n", formatTokenCount(totals.InputTokens))
 		fmt.Fprintf(&b, "缓存Tokens：%s\n", formatTokenCount(totals.CachedTokens))
+		fmt.Fprintf(&b, "缓存创建Tokens：%s\n", formatTokenCount(totals.CacheCreationTokens))
 		fmt.Fprintf(&b, "输出Tokens：%s\n", formatTokenCount(totals.OutputTokens))
 		fmt.Fprintf(&b, "总计Tokens：%s\n", formatTokenCount(totals.TotalTokens))
 		fmt.Fprintf(&b, "总调用次数：%s\n", formatTokenCount(totals.RequestCount))
@@ -79,6 +80,7 @@ func formatComparison(yesterday, today TokenTotals) string {
 	parts := []string{
 		formatChange("输入", yesterday.InputTokens, today.InputTokens),
 		formatChange("缓存", yesterday.CachedTokens, today.CachedTokens),
+		formatChange("缓存创建", yesterday.CacheCreationTokens, today.CacheCreationTokens),
 		formatChange("输出", yesterday.OutputTokens, today.OutputTokens),
 		formatChange("总计", yesterday.TotalTokens, today.TotalTokens),
 		formatRateChange(rateYesterday, rateToday),

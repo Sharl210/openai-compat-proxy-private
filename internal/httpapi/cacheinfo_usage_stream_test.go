@@ -120,6 +120,24 @@ func TestCacheInfoUsageFromMapSupportsChatUsageShape(t *testing.T) {
 	}
 }
 
+func TestCacheInfoUsageFromMapIncludesCacheCreationTokens(t *testing.T) {
+	parsed, ok := cacheInfoUsageFromMap(map[string]any{
+		"input_tokens":  12,
+		"output_tokens": 5,
+		"total_tokens":  17,
+		"input_tokens_details": map[string]any{
+			"cached_tokens":         3,
+			"cache_creation_tokens": 4,
+		},
+	})
+	if !ok {
+		t.Fatalf("expected usage shape to parse")
+	}
+	if parsed.CachedTokens != 3 || parsed.CacheCreationTokens != 4 {
+		t.Fatalf("unexpected parsed cache usage: %#v", parsed)
+	}
+}
+
 func TestCacheInfoUsageRecorderPersistsMappedChatUsageShape(t *testing.T) {
 	providersDir := t.TempDir()
 	manager := cacheinfo.NewManager(providersDir, time.UTC, []string{"openai"}, nil)
@@ -152,5 +170,36 @@ func TestCacheInfoUsageRecorderPersistsMappedChatUsageShape(t *testing.T) {
 	}
 	if stats.Today.RequestCount != 1 {
 		t.Fatalf("expected successful request count to be 1, got %#v", stats.Today)
+	}
+}
+
+func TestCacheInfoUsageRecorderPersistsCacheCreationTokens(t *testing.T) {
+	providersDir := t.TempDir()
+	manager := cacheinfo.NewManager(providersDir, time.UTC, []string{"openai"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(withCacheInfoManager(context.Background(), manager))
+	recorder := cacheInfoUsageRecorder(req, "req-creation", "openai")
+	if recorder == nil {
+		t.Fatalf("expected recorder to be created")
+	}
+
+	recorder(map[string]any{
+		"input_tokens":                20,
+		"output_tokens":               5,
+		"total_tokens":                25,
+		"cache_read_input_tokens":     6,
+		"cache_creation_input_tokens": 4,
+	})
+
+	cancel()
+	manager.Stop()
+	stats, err := cacheinfo.LoadProviderStats(providersDir, "openai")
+	if err != nil {
+		t.Fatalf("LoadProviderStats: %v", err)
+	}
+	if stats == nil || stats.Today.CachedTokens != 6 || stats.Today.CacheCreationTokens != 4 {
+		t.Fatalf("expected recorder to persist cache read and creation tokens, got %#v", stats)
 	}
 }

@@ -56,7 +56,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `/v1/responses` 下游的 `function_call_output` 在上游为 `responses/chat/anthropic` 时都能继续参与多轮工具调用回传
 - thinking / reasoning 映射
 - refusal 映射
-- usage 透传
+- usage 归一化映射与透传
 - provider prompt 注入
 - model map + reasoning suffix
 - 状态查询与流式失败终态补发
@@ -240,7 +240,7 @@ anthropic-version: 2023-06-01
 | `LISTEN_ADDR` | 监听地址 | 否，修改后需重启 |
 | `CACHE_INFO_TIMEZONE` | 统计展示时区 | 否，修改后需重启 |
 | `PROXY_API_KEY` | 根级代理鉴权 key | 是 |
-| `PROVIDERS_DIR` | provider 配置目录 | 是 |
+| `PROVIDERS_DIR` | provider 配置目录；修改后 provider 配置监听会切换，但 Cache_Info 落盘目录要重启后才会切换 | 部分，Cache_Info 路径切换需重启 |
 | `DEFAULT_PROVIDER` | 裸 `/v1/*` 默认 provider | 是 |
 | `ENABLE_LEGACY_V1_ROUTES` | 是否开启裸 `/v1/*`（必须写成合法布尔值） | 是 |
 | `DOWNSTREAM_NON_STREAM_STRATEGY` | 非流时走本地聚合还是直接请求上游非流 | 是 |
@@ -271,7 +271,7 @@ anthropic-version: 2023-06-01
 | `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
 | `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
 
-说明：provider 文件里的字段当前都支持热加载。
+说明：provider 文件里的字段当前都支持热加载；但 Cache_Info 统计文件始终写到进程启动时初始化的 `<PROVIDERS_DIR>/Cache_Info/` 下，修改根 `.env` 里的 `PROVIDERS_DIR` 后如果还要切换 Cache_Info 落盘目录，需要重启。
 
 ---
 
@@ -292,7 +292,6 @@ anthropic-version: 2023-06-01
 
 - 根 `.env` 中的：
   - `PROXY_API_KEY`
-  - `PROVIDERS_DIR`
   - `DEFAULT_PROVIDER`
   - `ENABLE_LEGACY_V1_ROUTES`
   - `DOWNSTREAM_NON_STREAM_STRATEGY`
@@ -300,6 +299,8 @@ anthropic-version: 2023-06-01
   - `FIRST_BYTE_TIMEOUT`
   - `IDLE_TIMEOUT`
   - `TOTAL_TIMEOUT`
+- 根 `.env` 中带条件生效的：
+  - `PROVIDERS_DIR`（provider 配置监听会切换；Cache_Info 落盘目录仍需重启后才会切换）
 - provider `.env` 中的大部分运行时字段，包括：
   - `UPSTREAM_BASE_URL`
   - `UPSTREAM_API_KEY`
@@ -354,7 +355,9 @@ anthropic-version: 2023-06-01
 
 ## Claude / Messages 兼容说明
 
-- `cache_control` 当前是**兼容输入**，不是对 Anthropic prompt caching 的真实上游支持
+- `cache_control` 当前是**兼容输入**，代理会接受这个字段，但不会把它继续透传给上游；它不是对 Anthropic prompt caching 的真实上游支持
+- Anthropic usage 对外会保留上游原始 `input_tokens`，并额外附带 `cache_read_input_tokens` / `cache_creation_input_tokens`；不会再把 `input_tokens` 改写成扣除缓存后的净值
+- Cache_Info 会分别记录缓存命中 token（`cached_tokens` / `cache_read_input_tokens`）和缓存创建 token（`cache_creation_input_tokens` / `cache_creation_tokens`）
 - Anthropic 上游当前支持 text / image / document / tool_use / tool_result 等主路径
 - 当下游入口使用 `/v1/responses` 时，`function_call_output` 会继续被归一成内部 tool result 语义；即使 provider 内部上游选的是 `chat` 或 `anthropic`，也能继续把工具结果回传给上游完成多轮工具调用
 - `/v1/messages` 兼容入口当前对 `input_audio` 走**显式拒绝**，不会再静默吞掉；这一限制与当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 无关

@@ -15,8 +15,8 @@ func TestMapUsageIncludesCacheCreationAndReadTokens(t *testing.T) {
 	}
 
 	mapped := mapUsage(usage)
-	if got := mapped["input_tokens"]; got != 0 {
-		t.Fatalf("expected effective input_tokens 0, got %#v", got)
+	if got := mapped["input_tokens"]; got != 66000 {
+		t.Fatalf("expected raw input_tokens 66000, got %#v", got)
 	}
 	if got := mapped["cache_read_input_tokens"]; got != 33000 {
 		t.Fatalf("expected cache_read_input_tokens 33000, got %#v", got)
