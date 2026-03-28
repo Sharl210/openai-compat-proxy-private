@@ -775,20 +775,6 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if err := closeThinkingBlock(); err != nil {
 			return err
 		}
-		for _, block := range []struct {
-			started bool
-			index   int
-		}{
-			{false, state.textIndex},
-			{false, state.toolIndex},
-		} {
-			if !block.started {
-				continue
-			}
-			if err := writeAnthropicSSEEvent(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": block.index}); err != nil {
-				return err
-			}
-		}
 		stopReason := anthropicStreamStopReason(state.stopReason, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		usage := anthropicUsageFromEvent(evt.Data)
@@ -931,8 +917,8 @@ func parseAnthropicToolArguments(arguments string) any {
 func anthropicUsageFromEvent(data map[string]any) map[string]any {
 	usage := usageFromEventData(data)
 	out := map[string]any{}
-	if _, ok := usage["input_tokens"]; ok {
-		out["input_tokens"] = effectiveAnthropicStreamingInputTokens(usage)
+	if input, ok := usage["input_tokens"]; ok {
+		out["input_tokens"] = input
 	}
 	if output, ok := usage["output_tokens"]; ok {
 		out["output_tokens"] = output
@@ -959,30 +945,6 @@ func anthropicStreamStopReason(current string, data map[string]any) string {
 		return current
 	}
 	return "end_turn"
-}
-
-func effectiveAnthropicStreamingInputTokens(usage map[string]any) any {
-	input, ok := usage["input_tokens"]
-	if !ok {
-		return nil
-	}
-	inputFloat, ok := usageNumberAsFloatForStreaming(input)
-	if !ok {
-		return input
-	}
-	remaining := inputFloat
-	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-		if cached, ok := usageNumberAsFloatForStreaming(details["cached_tokens"]); ok {
-			remaining -= cached
-		}
-		if created, ok := usageNumberAsFloatForStreaming(details["cache_creation_tokens"]); ok {
-			remaining -= created
-		}
-	}
-	if remaining < 0 {
-		remaining = 0
-	}
-	return int(remaining)
 }
 
 func usageNumberAsFloatForStreaming(v any) (float64, bool) {

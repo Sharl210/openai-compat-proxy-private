@@ -15,8 +15,8 @@ func TestAnthropicUsageFromEventIncludesCacheCreationAndReadTokens(t *testing.T)
 			},
 		},
 	})
-	if got := usage["input_tokens"]; got != 0 {
-		t.Fatalf("expected effective input_tokens 0, got %#v", got)
+	if got := usage["input_tokens"]; got != 66000 {
+		t.Fatalf("expected raw input_tokens 66000, got %#v", got)
 	}
 
 	if got := usage["cache_read_input_tokens"]; got != 33000 {
