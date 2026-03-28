@@ -37,6 +37,13 @@ func handleResponses() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
+			if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
+				if history := globalResponsesHistory.Load(providerID, previousResponseID); len(history) > 0 {
+					canon.Messages = append(history, canon.Messages...)
+				}
+			}
+		}
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
@@ -84,7 +91,8 @@ func handleResponses() http.HandlerFunc {
 			}
 			defer stream.Close()
 			flusher := startSSE(w)
-			if err := writeResponsesSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, usageRecorder); err != nil {
+			result, err := writeResponsesSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, usageRecorder)
+			if err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					statusCode := http.StatusBadGateway
@@ -100,6 +108,9 @@ func handleResponses() http.HandlerFunc {
 				}
 				_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_stream_broken", err.Error())
 				return
+			}
+			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
+				globalResponsesHistory.Save(providerID, responseID, assistantHistoryMessagesFromResult(result))
 			}
 			return
 		}
@@ -123,6 +134,9 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			normalized := responsesadapter.BuildResponse(result)
+			if responseID, _ := normalized["id"].(string); responseID != "" {
+				globalResponsesHistory.Save(providerID, responseID, assistantHistoryMessagesFromResult(result))
+			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set("Content-Type", "application/json")
 			if err := writeJSON(w, normalized); err != nil {
@@ -170,6 +184,9 @@ func handleResponses() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		normalized := responsesadapter.BuildResponse(result)
+		if responseID, _ := normalized["id"].(string); responseID != "" {
+			globalResponsesHistory.Save(providerID, responseID, assistantHistoryMessagesFromResult(result))
+		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		if err := writeJSON(w, normalized); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -290,6 +291,113 @@ func TestChatRouteUsesAnthropicUpstreamToolUseAsToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(body, `"arguments":"{\"query\":\"weather\"}"`) {
 		t.Fatalf("expected tool arguments preserved in chat output, got %s", body)
+	}
+}
+
+func TestResponsesRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T) {
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"call_1","name":"search_web","input":{"query":"weather"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstResp map[string]any
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("unmarshal first response: %v", err)
+	}
+	responseID, _ := firstResp["id"].(string)
+	if responseID == "" {
+		t.Fatalf("expected first responses output to include id, got %#v", firstResp)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) {
+		t.Fatalf("expected second anthropic request to restore previous assistant tool_use, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
+		t.Fatalf("expected second anthropic request to include current tool_result, got %s", secondBody)
+	}
+}
+
+func TestResponsesStreamRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T) {
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		bodyText := string(bodyBytes)
+		if strings.Contains(bodyText, `"tool_result"`) {
+			secondBody = string(bodyBytes)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: message_start\n" +
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n" +
+			"event: content_block_start\n" +
+			"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"search_web\"}}\n\n" +
+			"event: content_block_delta\n" +
+			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"weather\\\"}\"}}\n\n" +
+			"event: message_delta\n" +
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\n" +
+			"event: message_stop\n" +
+			"data: {\"type\":\"message_stop\"}\n\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	responseID := "resp_call_1"
+	if !strings.Contains(firstRec.Body.String(), `"call_id":"call_1"`) {
+		t.Fatalf("expected first stream to include tool call call_1, got %s", firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) {
+		t.Fatalf("expected second anthropic request to restore previous streamed tool_use, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
+		t.Fatalf("expected second anthropic request to include tool_result after streamed first round, got %s", secondBody)
 	}
 }
 

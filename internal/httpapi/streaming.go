@@ -130,32 +130,38 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	return nil
 }
 
-func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
 	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: upstreamEndpointType}
+	collector := aggregate.NewCollector()
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return true },
 		nil,
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
+			collector.Accept(evt)
 			return writeResponsesEvent(w, flusher, &state, evt, usageRecorder)
 		},
 	)
 	if err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	if !state.terminalSeen {
-		return io.ErrUnexpectedEOF
+		return aggregate.Result{}, io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return state.terminalFailure
+		return aggregate.Result{}, state.terminalFailure
 	}
-	return nil
+	result, err := collector.Result()
+	if err != nil {
+		return aggregate.Result{}, err
+	}
+	return result, nil
 }
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
