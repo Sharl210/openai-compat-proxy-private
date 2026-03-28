@@ -305,6 +305,7 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 				toolState.arguments.WriteString(delta)
 			}
 		}
+		return nil
 	case "response.completed", "response.done":
 		state.terminalSeen = true
 		if err := flushPendingFunctionCalls(); err != nil {
