@@ -44,6 +44,7 @@ func handleResponses() http.HandlerFunc {
 				}
 			}
 		}
+		canon.Messages = dedupeCanonicalToolMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)

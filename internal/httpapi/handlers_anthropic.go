@@ -39,6 +39,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		canon.Messages = dedupeCanonicalToolMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		canon.RequestID = requestID
 		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
