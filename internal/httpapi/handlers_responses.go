@@ -49,6 +49,9 @@ func handleResponses() http.HandlerFunc {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 			canon.Model = mappedModel
 			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking, canon.Model, canon.MaxOutputTokens)
+			}
 		}
 		canon.RequestID = requestID
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
@@ -95,11 +98,6 @@ func handleResponses() http.HandlerFunc {
 			if err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
-					statusCode := http.StatusBadGateway
-					if terminalFailure.HealthFlag == "upstream_timeout" {
-						statusCode = http.StatusGatewayTimeout
-					}
-					errorsx.WriteJSON(w, statusCode, terminalFailure.HealthFlag, terminalFailure.Message)
 					return
 				}
 				if isUpstreamTimeout(err, ctx) {
