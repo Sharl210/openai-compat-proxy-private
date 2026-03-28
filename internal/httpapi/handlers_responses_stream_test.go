@@ -180,6 +180,40 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	}
 }
 
+func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.incomplete\n" +
+			"data: {\"health_flag\":\"upstream_error\",\"message\":\"boom\"}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: response.incomplete") {
+		t.Fatalf("expected response.incomplete terminal SSE event, got %s", body)
+	}
+	if strings.Count(body, "event: response.incomplete") != 1 {
+		t.Fatalf("expected exactly one response.incomplete terminal SSE event, got %s", body)
+	}
+	if !strings.Contains(body, `"health_flag":"upstream_error","message":"boom"`) {
+		t.Fatalf("expected terminal failure payload in SSE body, got %s", body)
+	}
+	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
+		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	}
+}
+
 func testResponsesConfig(upstreamURL string) config.Config {
 	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
 }

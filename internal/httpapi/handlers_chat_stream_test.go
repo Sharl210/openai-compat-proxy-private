@@ -236,3 +236,48 @@ func TestChatStreamWritesIncludeUsageChunkAtTail(t *testing.T) {
 		t.Fatalf("expected include_usage chunk to be the final JSON chunk before DONE, got %s", body)
 	}
 }
+
+func TestChatStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.incomplete\n" +
+			"data: {\"health_flag\":\"upstream_error\",\"message\":\"boom\"}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"delta":{"error":{"health_flag":"upstream_error","message":"boom"}}`) {
+		t.Fatalf("expected terminal failure to stay in chat SSE chunk, got %s", body)
+	}
+	if strings.Count(body, `"delta":{"error":{"health_flag":"upstream_error","message":"boom"}}`) != 1 {
+		t.Fatalf("expected exactly one terminal failure SSE chunk, got %s", body)
+	}
+	if !strings.Contains(body, `data: [DONE]`) {
+		t.Fatalf("expected terminal failure to finish with DONE marker, got %s", body)
+	}
+	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
+		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	}
+}
