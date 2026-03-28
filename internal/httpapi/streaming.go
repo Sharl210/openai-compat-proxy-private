@@ -205,6 +205,12 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if toolState.arguments.Len() > 0 {
 				itemCopy["arguments"] = toolState.arguments.String()
 			}
+			if !toolState.addedSent {
+				if err := writeToolItemEvent("response.output_item.added", itemCopy); err != nil {
+					return err
+				}
+				toolState.addedSent = true
+			}
 			if err := writeToolItemEvent("response.output_item.done", itemCopy); err != nil {
 				return err
 			}
@@ -268,15 +274,6 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 				if args, _ := item["arguments"].(string); args != "" {
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
-				}
-				if !toolState.addedSent {
-					if err := writeToolItemEvent("response.output_item.added", toolState.item); err != nil {
-						return err
-					}
-					toolState.addedSent = true
-				}
-				if evt.Event == "response.output_item.added" {
-					return nil
 				}
 				return nil
 			}

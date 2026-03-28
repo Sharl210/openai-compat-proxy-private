@@ -118,7 +118,7 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	addedIdx := strings.Index(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
+	addedIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
 	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`)
 	completedIdx := strings.LastIndex(body, `event: response.completed`)
 
@@ -190,6 +190,9 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	body := rec.Body.String()
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress partial function_call_arguments.delta events, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected compatibility mode to delay added until full arguments are available, got %s", body)
 	}
 	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function_call item to retain full merged arguments, got %s", body)
