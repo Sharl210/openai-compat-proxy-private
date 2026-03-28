@@ -7,6 +7,9 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 		return Result{}, fmt.Errorf("empty upstream response payload")
 	}
 	result := Result{}
+	if responseID, _ := payload["id"].(string); responseID != "" {
+		result.ResponseID = responseID
+	}
 	if finishReason, _ := payload["finish_reason"].(string); finishReason != "" {
 		result.FinishReason = finishReason
 	}
