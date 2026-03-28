@@ -53,6 +53,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 - 流式与非流式双模式
 - tool / function calling 映射
+- `/v1/responses` 下游的 `function_call_output` 在上游为 `responses/chat/anthropic` 时都能继续参与多轮工具调用回传
 - thinking / reasoning 映射
 - refusal 映射
 - usage 透传
@@ -334,6 +335,7 @@ anthropic-version: 2023-06-01
 
 - `cache_control` 当前是**兼容输入**，不是对 Anthropic prompt caching 的真实上游支持
 - Anthropic 上游当前支持 text / image / document / tool_use / tool_result 等主路径
+- 当下游入口使用 `/v1/responses` 时，`function_call_output` 会继续被归一成内部 tool result 语义；即使 provider 内部上游选的是 `chat` 或 `anthropic`，也能继续把工具结果回传给上游完成多轮工具调用
 - Anthropic 上游对 `input_audio` 当前走**显式拒绝**，不会再静默吞掉
 
 ---
