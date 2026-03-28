@@ -9,18 +9,22 @@ import (
 
 type responsesHistoryStore struct {
 	mu      sync.RWMutex
-	entries map[string][]model.CanonicalMessage
+	entries map[string]responsesConversationSnapshot
 }
 
-var globalResponsesHistory = &responsesHistoryStore{entries: map[string][]model.CanonicalMessage{}}
+type responsesConversationSnapshot struct {
+	Messages []model.CanonicalMessage
+}
+
+var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}}
 
 func responsesHistoryKey(providerID, responseID string) string {
 	return providerID + "::" + responseID
 }
 
-func (s *responsesHistoryStore) Save(providerID, responseID string, messages []model.CanonicalMessage) {
-	if s == nil || providerID == "" || responseID == "" || len(messages) == 0 {
-		return
+func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
+	if len(messages) == 0 {
+		return nil
 	}
 	cloned := make([]model.CanonicalMessage, 0, len(messages))
 	for _, msg := range messages {
@@ -33,8 +37,15 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 		}
 		cloned = append(cloned, clone)
 	}
+	return cloned
+}
+
+func (s *responsesHistoryStore) Save(providerID, responseID string, messages []model.CanonicalMessage) {
+	if s == nil || providerID == "" || responseID == "" || len(messages) == 0 {
+		return
+	}
 	s.mu.Lock()
-	s.entries[responsesHistoryKey(providerID, responseID)] = cloned
+	s.entries[responsesHistoryKey(providerID, responseID)] = responsesConversationSnapshot{Messages: cloneCanonicalMessages(messages)}
 	s.mu.Unlock()
 }
 
@@ -43,23 +54,12 @@ func (s *responsesHistoryStore) Load(providerID, responseID string) []model.Cano
 		return nil
 	}
 	s.mu.RLock()
-	stored := s.entries[responsesHistoryKey(providerID, responseID)]
+	stored, ok := s.entries[responsesHistoryKey(providerID, responseID)]
 	s.mu.RUnlock()
-	if len(stored) == 0 {
+	if !ok || len(stored.Messages) == 0 {
 		return nil
 	}
-	cloned := make([]model.CanonicalMessage, 0, len(stored))
-	for _, msg := range stored {
-		clone := model.CanonicalMessage{Role: msg.Role, ToolCallID: msg.ToolCallID, ReasoningContent: msg.ReasoningContent}
-		if len(msg.Parts) > 0 {
-			clone.Parts = append([]model.CanonicalContentPart(nil), msg.Parts...)
-		}
-		if len(msg.ToolCalls) > 0 {
-			clone.ToolCalls = append([]model.CanonicalToolCall(nil), msg.ToolCalls...)
-		}
-		cloned = append(cloned, clone)
-	}
-	return cloned
+	return cloneCanonicalMessages(stored.Messages)
 }
 
 func previousResponseIDFromItems(items []map[string]any) string {
@@ -96,4 +96,11 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 		msg.ReasoningContent = summary
 	}
 	return []model.CanonicalMessage{msg}
+}
+
+func mergeConversationHistory(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
+	merged := make([]model.CanonicalMessage, 0, len(base)+len(assistant))
+	merged = append(merged, cloneCanonicalMessages(base)...)
+	merged = append(merged, cloneCanonicalMessages(assistant)...)
+	return merged
 }

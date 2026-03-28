@@ -343,6 +343,9 @@ func TestResponsesRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T)
 	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
 		t.Fatalf("expected second anthropic request to include current tool_result, got %s", secondBody)
 	}
+	if !strings.Contains(secondBody, `"role":"user"`) || !strings.Contains(secondBody, `"hello"`) {
+		t.Fatalf("expected second anthropic request to preserve original user question context, got %s", secondBody)
+	}
 }
 
 func TestResponsesStreamRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T) {
@@ -398,6 +401,9 @@ func TestResponsesStreamRouteRestoresPreviousToolUseForAnthropicFollowUp(t *test
 	}
 	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
 		t.Fatalf("expected second anthropic request to include tool_result after streamed first round, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"role":"user"`) || !strings.Contains(secondBody, `"hello"`) {
+		t.Fatalf("expected second anthropic streamed follow-up to preserve original user question context, got %s", secondBody)
 	}
 }
 

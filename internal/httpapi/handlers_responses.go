@@ -110,7 +110,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
-				globalResponsesHistory.Save(providerID, responseID, assistantHistoryMessagesFromResult(result))
+				globalResponsesHistory.Save(providerID, responseID, mergeConversationHistory(canon.Messages, assistantHistoryMessagesFromResult(result)))
 			}
 			return
 		}
@@ -135,7 +135,7 @@ func handleResponses() http.HandlerFunc {
 			}
 			normalized := responsesadapter.BuildResponse(result)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
-				globalResponsesHistory.Save(providerID, responseID, assistantHistoryMessagesFromResult(result))
+				globalResponsesHistory.Save(providerID, responseID, mergeConversationHistory(canon.Messages, assistantHistoryMessagesFromResult(result)))
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set("Content-Type", "application/json")
@@ -185,7 +185,7 @@ func handleResponses() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		normalized := responsesadapter.BuildResponse(result)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			globalResponsesHistory.Save(providerID, responseID, assistantHistoryMessagesFromResult(result))
+			globalResponsesHistory.Save(providerID, responseID, mergeConversationHistory(canon.Messages, assistantHistoryMessagesFromResult(result)))
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		if err := writeJSON(w, normalized); err != nil {
