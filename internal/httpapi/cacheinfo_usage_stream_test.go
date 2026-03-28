@@ -150,4 +150,7 @@ func TestCacheInfoUsageRecorderPersistsMappedChatUsageShape(t *testing.T) {
 	if stats == nil || stats.Today.InputTokens != 5 || stats.Today.OutputTokens != 4 || stats.Today.TotalTokens != 9 || stats.Today.CachedTokens != 1 {
 		t.Fatalf("expected recorder to persist mapped chat usage, got %#v", stats)
 	}
+	if stats.Today.RequestCount != 1 {
+		t.Fatalf("expected successful request count to be 1, got %#v", stats.Today)
+	}
 }

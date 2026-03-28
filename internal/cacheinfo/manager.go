@@ -114,10 +114,12 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	day.CachedTokens += usage.CachedTokens
 	day.OutputTokens += usage.OutputTokens
 	day.TotalTokens += usage.TotalTokens
+	day.RequestCount++
 	stats.HistoryTotal.InputTokens += usage.InputTokens
 	stats.HistoryTotal.CachedTokens += usage.CachedTokens
 	stats.HistoryTotal.OutputTokens += usage.OutputTokens
 	stats.HistoryTotal.TotalTokens += usage.TotalTokens
+	stats.HistoryTotal.RequestCount++
 	syncLegacyFields(stats)
 	stats.UpdatedAt = now
 

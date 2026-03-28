@@ -8,6 +8,7 @@ type TokenTotals struct {
 	CachedTokens int64 `json:"cached_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 	TotalTokens  int64 `json:"total_tokens"`
+	RequestCount int64 `json:"request_count"`
 }
 
 type DailyStats struct {

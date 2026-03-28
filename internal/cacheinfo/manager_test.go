@@ -62,11 +62,17 @@ func TestManager_SameDayMultipleRecords(t *testing.T) {
 	if stats.Today.InputTokens != 450 {
 		t.Errorf("Today.InputTokens = %d, want 450", stats.Today.InputTokens)
 	}
+	if stats.Today.RequestCount != 3 {
+		t.Errorf("Today.RequestCount = %d, want 3", stats.Today.RequestCount)
+	}
 	if stats.Today.CachedTokens != 180 {
 		t.Errorf("Today.CachedTokens = %d, want 180", stats.Today.CachedTokens)
 	}
 	if stats.HistoryTotal.InputTokens != 450 {
 		t.Errorf("HistoryTotal.InputTokens = %d, want 450", stats.HistoryTotal.InputTokens)
+	}
+	if stats.HistoryTotal.RequestCount != 3 {
+		t.Errorf("HistoryTotal.RequestCount = %d, want 3", stats.HistoryTotal.RequestCount)
 	}
 }
 
@@ -105,9 +111,15 @@ func TestManager_RolloverOneDay(t *testing.T) {
 	if stats.Today.InputTokens != 200 {
 		t.Errorf("Today.InputTokens = %d, want 200", stats.Today.InputTokens)
 	}
+	if stats.Today.RequestCount != 1 {
+		t.Errorf("Today.RequestCount = %d, want 1", stats.Today.RequestCount)
+	}
 	// history_total 累加
 	if stats.HistoryTotal.InputTokens != 300 {
 		t.Errorf("HistoryTotal.InputTokens = %d, want 300", stats.HistoryTotal.InputTokens)
+	}
+	if stats.HistoryTotal.RequestCount != 2 {
+		t.Errorf("HistoryTotal.RequestCount = %d, want 2", stats.HistoryTotal.RequestCount)
 	}
 }
 
@@ -143,6 +155,9 @@ func TestManager_RolloverTwoDaysOrMore(t *testing.T) {
 	if stats.HistoryTotal.InputTokens != 300 {
 		t.Errorf("HistoryTotal.InputTokens = %d, want 300", stats.HistoryTotal.InputTokens)
 	}
+	if stats.HistoryTotal.RequestCount != 2 {
+		t.Errorf("HistoryTotal.RequestCount = %d, want 2", stats.HistoryTotal.RequestCount)
+	}
 }
 
 func TestManager_MultiDayDowntimeClearsYesterday(t *testing.T) {
@@ -168,6 +183,9 @@ func TestManager_MultiDayDowntimeClearsYesterday(t *testing.T) {
 	}
 	if stats.Yesterday.TotalTokens != 0 {
 		t.Fatalf("Yesterday.TotalTokens = %d, want 0 for filled downtime day", stats.Yesterday.TotalTokens)
+	}
+	if stats.Today.RequestCount != 1 {
+		t.Fatalf("Today.RequestCount = %d, want 1", stats.Today.RequestCount)
 	}
 }
 
@@ -199,6 +217,9 @@ func TestManager_DateBeforeToday(t *testing.T) {
 	// 新的 usage 应该继续累加到 today
 	if stats.Today.InputTokens != 300 {
 		t.Errorf("Today.InputTokens = %d, want 300", stats.Today.InputTokens)
+	}
+	if stats.Today.RequestCount != 2 {
+		t.Errorf("Today.RequestCount = %d, want 2", stats.Today.RequestCount)
 	}
 }
 
