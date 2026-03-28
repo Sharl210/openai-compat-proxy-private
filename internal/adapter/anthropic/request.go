@@ -14,6 +14,7 @@ type request struct {
 	System        json.RawMessage `json:"system"`
 	MaxTokens     *int            `json:"max_tokens"`
 	StreamRaw     json.RawMessage `json:"stream"`
+	ThinkingRaw   json.RawMessage `json:"thinking"`
 	Tools         []tool          `json:"tools"`
 	ToolChoiceRaw json.RawMessage `json:"tool_choice"`
 }
@@ -59,6 +60,9 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		Stream:          decodeAnthropicOptionalBool(req.StreamRaw),
 		Instructions:    decodeAnthropicSystem(req.System),
 		MaxOutputTokens: req.MaxTokens,
+	}
+	if reasoning := decodeAnthropicThinking(req.ThinkingRaw); reasoning != nil {
+		canon.Reasoning = reasoning
 	}
 	for _, msg := range req.Messages {
 		parts, err := decodeContent(msg.Content)
@@ -324,6 +328,17 @@ func decodeAnthropicToolChoice(raw json.RawMessage) model.CanonicalToolChoice {
 		}
 	}
 	return model.CanonicalToolChoice{}
+}
+
+func decodeAnthropicThinking(raw json.RawMessage) *model.CanonicalReasoning {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil || len(value) == 0 {
+		return nil
+	}
+	return &model.CanonicalReasoning{Raw: map[string]any{"thinking": value}}
 }
 
 func isUndefinedString(value string) bool {

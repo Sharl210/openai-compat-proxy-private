@@ -51,3 +51,24 @@ func TestBuildResponsePreservesTextAlongsideToolUse(t *testing.T) {
 		t.Fatalf("expected second content block tool_use, got %#v", content)
 	}
 }
+
+func TestBuildResponseIncludesThinkingBlockBeforeText(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Text:      "最终答案",
+		Reasoning: map[string]any{"summary": "先想一下"},
+	}, "req_456", "claude-sonnet-4-5")
+
+	content, _ := resp["content"].([]map[string]any)
+	if len(content) != 2 {
+		t.Fatalf("expected thinking and text blocks, got %#v", resp)
+	}
+	if got, _ := content[0]["type"].(string); got != "thinking" {
+		t.Fatalf("expected first content block thinking, got %#v", content)
+	}
+	if got, _ := content[0]["thinking"].(string); got != "先想一下" {
+		t.Fatalf("expected thinking text preserved, got %#v", content[0])
+	}
+	if got, _ := content[1]["type"].(string); got != "text" {
+		t.Fatalf("expected second content block text, got %#v", content)
+	}
+}

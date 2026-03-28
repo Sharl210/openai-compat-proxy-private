@@ -18,6 +18,7 @@ type ProviderConfig struct {
 	Enabled                                bool
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
+	UpstreamEndpointType                   string
 	SupportsChat                           bool
 	SupportsResponses                      bool
 	SupportsModels                         bool
@@ -39,10 +40,13 @@ type ProviderConfig struct {
 }
 
 const (
-	SystemPromptPositionPrepend = "prepend"
-	SystemPromptPositionAppend  = "append"
-	DefaultUpstreamRetryCount   = 5
-	DefaultUpstreamRetryDelay   = 5 * time.Second
+	SystemPromptPositionPrepend   = "prepend"
+	SystemPromptPositionAppend    = "append"
+	DefaultUpstreamRetryCount     = 5
+	DefaultUpstreamRetryDelay     = 5 * time.Second
+	UpstreamEndpointTypeResponses = "responses"
+	UpstreamEndpointTypeChat      = "chat"
+	UpstreamEndpointTypeAnthropic = "anthropic"
 )
 
 type invalidConfigError string
@@ -92,8 +96,9 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	defer file.Close()
 
 	provider := ProviderConfig{
-		UpstreamRetryCount: DefaultUpstreamRetryCount,
-		UpstreamRetryDelay: DefaultUpstreamRetryDelay,
+		UpstreamRetryCount:   DefaultUpstreamRetryCount,
+		UpstreamRetryDelay:   DefaultUpstreamRetryDelay,
+		UpstreamEndpointType: UpstreamEndpointTypeResponses,
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -116,6 +121,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.UpstreamBaseURL = value
 		case "UPSTREAM_API_KEY":
 			provider.UpstreamAPIKey = value
+		case "UPSTREAM_ENDPOINT_TYPE":
+			normalized, err := normalizeUpstreamEndpointType(value)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_ENDPOINT_TYPE in %s: %q", path, value))
+			}
+			provider.UpstreamEndpointType = normalized
 		case "SUPPORTS_CHAT":
 			provider.SupportsChat, err = parseProviderSupportsBool(value, key, path)
 			if err != nil {
@@ -266,6 +277,23 @@ func parseProviderSupportsBool(value string, key string, path string) (bool, err
 		return false, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
 	}
 	return parsed, nil
+}
+
+func normalizeUpstreamEndpointType(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return UpstreamEndpointTypeResponses, nil
+	}
+	switch strings.ToLower(trimmed) {
+	case UpstreamEndpointTypeResponses:
+		return UpstreamEndpointTypeResponses, nil
+	case UpstreamEndpointTypeChat:
+		return UpstreamEndpointTypeChat, nil
+	case UpstreamEndpointTypeAnthropic:
+		return UpstreamEndpointTypeAnthropic, nil
+	default:
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid upstream endpoint type: %q", value))
+	}
 }
 
 func parseProviderRetryCount(value string, path string) (int, error) {

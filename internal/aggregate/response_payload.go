@@ -39,6 +39,10 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 					if text, _ := part["text"].(string); text != "" {
 						result.Text += text
 					}
+				} else if partType == "refusal" {
+					if refusal, _ := part["refusal"].(string); refusal != "" {
+						result.Refusal += refusal
+					}
 				} else if partType != "" {
 					result.UnsupportedContentTypes = append(result.UnsupportedContentTypes, partType)
 				}

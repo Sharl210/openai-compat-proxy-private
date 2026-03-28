@@ -444,3 +444,61 @@ func TestLoadProviderFileParsesDownstreamNonStreamStrategyOverride(t *testing.T)
 		t.Fatalf("expected invalid downstream non-stream strategy override to fail validation")
 	}
 }
+
+func TestLoadProviderFileUsesResponsesUpstreamEndpointByDefault(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamEndpointType != UpstreamEndpointTypeResponses {
+		t.Fatalf("expected default upstream endpoint type %q, got %q", UpstreamEndpointTypeResponses, provider.UpstreamEndpointType)
+	}
+}
+
+func TestLoadProviderFileParsesUpstreamEndpointType(t *testing.T) {
+	for _, endpointType := range []string{UpstreamEndpointTypeResponses, UpstreamEndpointTypeChat, UpstreamEndpointTypeAnthropic} {
+		t.Run(endpointType, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nUPSTREAM_ENDPOINT_TYPE=" + endpointType + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			provider, err := loadProviderFile(providerEnvPath)
+			if err != nil {
+				t.Fatalf("loadProviderFile returned error: %v", err)
+			}
+			if provider.UpstreamEndpointType != endpointType {
+				t.Fatalf("expected upstream endpoint type %q, got %q", endpointType, provider.UpstreamEndpointType)
+			}
+		})
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidUpstreamEndpointType(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_ENDPOINT_TYPE=invalid\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid upstream endpoint type to fail validation")
+	}
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid upstream endpoint type, got %T", err)
+	}
+	if err.Error() != "invalid UPSTREAM_ENDPOINT_TYPE in "+providerEnvPath+": \"invalid\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

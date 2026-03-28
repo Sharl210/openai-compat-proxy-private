@@ -215,3 +215,27 @@ func TestDecodeRequestPreservesToolResultMultimodalContent(t *testing.T) {
 		t.Fatalf("expected image tool result part preserved, got %#v", canon.Messages[0].Parts)
 	}
 }
+
+func TestDecodeRequestPreservesThinkingConfig(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"thinking":{"type":"enabled","budget_tokens":2048},
+		"messages":[{"role":"user","content":"继续思考"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.Reasoning == nil || len(canon.Reasoning.Raw) == 0 {
+		t.Fatalf("expected thinking config preserved in canonical reasoning, got %#v", canon.Reasoning)
+	}
+	thinking, _ := canon.Reasoning.Raw["thinking"].(map[string]any)
+	if got := thinking["type"]; got != "enabled" {
+		t.Fatalf("expected thinking.type enabled, got %#v", canon.Reasoning.Raw)
+	}
+	if got := thinking["budget_tokens"]; got != float64(2048) {
+		t.Fatalf("expected thinking.budget_tokens 2048, got %#v", canon.Reasoning.Raw)
+	}
+}

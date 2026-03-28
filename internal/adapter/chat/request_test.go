@@ -41,3 +41,47 @@ func TestDecodeRequestAcceptsStopAsSingleString(t *testing.T) {
 		t.Fatalf("expected single stop token END, got %#v", canon.Stop)
 	}
 }
+
+func TestDecodeRequestAcceptsFileContentPart(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"messages":[{"role":"user","content":[{"type":"file","file":{"file_id":"file_123"}}]}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 1 {
+		t.Fatalf("expected one file content part, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].Parts[0].Type; got != "input_file" {
+		t.Fatalf("expected input_file part, got %#v", canon.Messages[0].Parts[0])
+	}
+	fileRaw, _ := canon.Messages[0].Parts[0].Raw["input_file"].(map[string]any)
+	if got := fileRaw["file_id"]; got != "file_123" {
+		t.Fatalf("expected file_id preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+}
+
+func TestDecodeRequestAcceptsInputAudioContentPart(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"YWJj","format":"mp3"}}]}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 1 {
+		t.Fatalf("expected one audio content part, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].Parts[0].Type; got != "input_audio" {
+		t.Fatalf("expected input_audio part, got %#v", canon.Messages[0].Parts[0])
+	}
+	audioRaw, _ := canon.Messages[0].Parts[0].Raw["input_audio"].(map[string]any)
+	if got := audioRaw["format"]; got != "mp3" {
+		t.Fatalf("expected audio format preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+}

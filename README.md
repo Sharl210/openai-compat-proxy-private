@@ -11,7 +11,7 @@ send_timeout 1200s;
 
 改完重载 OpenResty，以避免网关超时。
 
-一个 Go 单二进制的 OpenAI 兼容代理。**这个项目上游只对接 `Responses` 接口**，代理内部统一把请求转给上游 `/responses`，然后再对外导出兼容端点，给不同客户端和协议风格使用。项目当前支持多提供商配置，主要导出三类接口：**Anthropic**、**OpenAI Responses**、**OpenAI Chat Completions（兼容接口）**，并附带模型列表接口。
+一个 Go 单二进制的 OpenAI 兼容代理。代理层会为每个 provider 统一选择一种正规上游协议，然后再对外导出兼容端点，给不同客户端和协议风格使用。项目当前支持多提供商配置，主要导出三类接口：**Anthropic**、**OpenAI Responses**、**OpenAI Chat Completions（兼容接口）**，并附带模型列表接口。
 
 #### 😇孩子们建议不要开日志记录，没啥用其实，之前调试一个问题加的没任何优化，开销很大而且心理上也会有强迫症🤣
 #### 还有没事不建议用cherry，（个人建议）bug有点多我自测，就是rikkahub没问题，最朴素的curl也没问题ai也看不出所以然但是cherry就是有问题，特别是极长思考下容易思考分块，且不显示正文，可能实现不一致。。。。而且这应用现在越更新越卡，给我卡飞力/没有贬低的意思，但是我体感就是卡飞了😭实在要用尽可能用chat兼容接口，思维链选项设置为关闭，用本代理层的模型推理强度后缀功能控制推理🥵（response和Anthropic他这边会把文件例如pdf直接透传，本地不做解析，但有的上游/中转站的不支持，所以说尽可能不要用这两个端口在这个APP里）
@@ -25,9 +25,9 @@ send_timeout 1200s;
 - 支持设置默认 provider，兼容裸 `/v1/*` 路由
 - 一个实例可以同时代理多个不同上游
 
-### 2. 统一包装上游 Responses
+### 2. 统一包装 provider 选定的上游协议
 
-- 代理内部统一请求上游 `/responses`
+- provider 可通过 `UPSTREAM_ENDPOINT_TYPE` 统一选择自己的上游正规协议：`responses` / `chat` / `anthropic`
 - **项目对外主线导出三个端点族**：
   - **Anthropic**：`POST /v1/messages`
   - **OpenAI Responses**：`POST /v1/responses`
@@ -238,6 +238,7 @@ chmod +x scripts/*.sh
   - `PROVIDER_ENABLED`
   - `UPSTREAM_BASE_URL`
   - `UPSTREAM_API_KEY`
+  - `UPSTREAM_ENDPOINT_TYPE`
   - `SUPPORTS_CHAT`
   - `SUPPORTS_RESPONSES`
   - `SUPPORTS_MODELS`
@@ -459,6 +460,7 @@ anthropic-version: 2023-06-01
 - `PROVIDER_ENABLED`：是否启用该 provider
 - `UPSTREAM_BASE_URL`：这个 provider 对应的上游基础地址
 - `UPSTREAM_API_KEY`：这个 provider 对应的上游 key
+- `UPSTREAM_ENDPOINT_TYPE`：这个 provider 内部统一使用的上游正规协议。支持 `responses`、`chat`、`anthropic`，默认 `responses`。这个字段只决定代理内部打哪个上游协议，不影响对外公开的三个兼容端口。**可热加载**
 - `PROXY_API_KEY_OVERRIDE`：这个 provider 的代理鉴权覆写值。留空表示继承根 `PROXY_API_KEY`；设置普通值表示该 provider 的分组路由只接受自己的 key；设置为 `empty` 表示这个 provider 不需要代理鉴权。
 
 ### provider 级代理鉴权字段

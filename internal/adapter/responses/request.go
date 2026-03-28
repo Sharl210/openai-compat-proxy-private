@@ -49,10 +49,11 @@ type toolCall struct {
 }
 
 type contentPart struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	ImageURL  string          `json:"image_url"`
-	InputFile json.RawMessage `json:"input_file"`
+	Type       string          `json:"type"`
+	Text       string          `json:"text"`
+	ImageURL   string          `json:"image_url"`
+	InputAudio json.RawMessage `json:"input_audio"`
+	InputFile  json.RawMessage `json:"input_file"`
 }
 
 type tool struct {
@@ -195,6 +196,13 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 				}
 				parts = append(parts, model.CanonicalContentPart{Type: "input_file", Raw: map[string]any{"input_file": rawFile}})
 				normalizedContent = append(normalizedContent, map[string]any{"type": "input_file", "input_file": rawFile})
+			case "input_audio":
+				var rawAudio map[string]any
+				if err := json.Unmarshal(part.InputAudio, &rawAudio); err != nil {
+					return nil, model.CanonicalMessage{}, false, err
+				}
+				parts = append(parts, model.CanonicalContentPart{Type: "input_audio", Raw: map[string]any{"input_audio": rawAudio}})
+				normalizedContent = append(normalizedContent, map[string]any{"type": "input_audio", "input_audio": rawAudio})
 			default:
 				return nil, model.CanonicalMessage{}, false, fmt.Errorf("unsupported content type: %s", part.Type)
 			}

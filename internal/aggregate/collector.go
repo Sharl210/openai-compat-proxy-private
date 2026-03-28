@@ -16,6 +16,7 @@ type ToolCall struct {
 
 type Result struct {
 	Text                    string
+	Refusal                 string
 	ToolCalls               []ToolCall
 	Reasoning               map[string]any
 	Usage                   map[string]any
@@ -44,6 +45,7 @@ type Collector struct {
 	responseMessageContent  []map[string]any
 	outputItems             []map[string]any
 	unsupportedContentTypes []string
+	refusal                 string
 	completed               bool
 	terminalFailure         *TerminalFailureError
 }
@@ -90,6 +92,12 @@ func (c *Collector) Accept(evt upstream.Event) {
 						c.responseMessageContent = append(c.responseMessageContent, clone)
 					}
 					partType, _ := part["type"].(string)
+					if partType == "refusal" {
+						if refusal, _ := part["refusal"].(string); refusal != "" {
+							c.refusal += refusal
+						}
+						continue
+					}
 					if partType != "" && partType != "output_text" {
 						c.unsupportedContentTypes = append(c.unsupportedContentTypes, partType)
 					}
@@ -160,6 +168,7 @@ func (c *Collector) Result() (Result, error) {
 	}
 
 	result := Result{Text: c.text.String()}
+	result.Refusal = c.refusal
 	for _, id := range c.order {
 		result.ToolCalls = append(result.ToolCalls, *c.toolCalls[id])
 	}

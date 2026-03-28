@@ -21,16 +21,18 @@ import (
 )
 
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	retryCount int
-	retryDelay time.Duration
+	baseURL              string
+	httpClient           *http.Client
+	retryCount           int
+	retryDelay           time.Duration
+	upstreamEndpointType string
 }
 
 type EventStream struct {
-	resp         *http.Response
-	scanner      *bufio.Scanner
-	pendingEvent *Event
+	resp          *http.Response
+	scanner       *bufio.Scanner
+	pendingEvents []Event
+	readNext      func(*bufio.Scanner) ([]Event, error)
 }
 
 var sseScannerInitialBufferSize = 64 * 1024
@@ -57,10 +59,11 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		cfg = cfgs[0]
 	}
 	return &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: newHTTPClient(cfg),
-		retryCount: cfg.UpstreamRetryCount,
-		retryDelay: cfg.UpstreamRetryDelay,
+		baseURL:              strings.TrimRight(baseURL, "/"),
+		httpClient:           newHTTPClient(cfg),
+		retryCount:           cfg.UpstreamRetryCount,
+		retryDelay:           cfg.UpstreamRetryDelay,
+		upstreamEndpointType: normalizeEndpointType(cfg.UpstreamEndpointType),
 	}
 }
 
@@ -128,7 +131,8 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
-	body, err := buildStreamingRequestBody(req)
+	endpointType := c.endpointType()
+	body, err := buildStreamingRequestBody(req, endpointType)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +151,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -220,7 +224,8 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 }
 
 func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest, authorization string) (*EventStream, error) {
-	body, err := buildStreamingRequestBody(req)
+	endpointType := c.endpointType()
+	body, err := buildStreamingRequestBody(req, endpointType)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +244,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -247,7 +252,8 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 }
 
 func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, authorization string) (map[string]any, error) {
-	body, err := buildRequestBody(req)
+	endpointType := c.endpointType()
+	body, err := buildRequestBodyForEndpoint(req, endpointType)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +272,7 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	payload, err := c.responseWithRetry(ctx, req.RequestID, body, authorization)
+	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -302,7 +308,7 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 }
 
 func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, requestID, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization)
 	if err != nil {
 		return err
 	}
@@ -310,12 +316,12 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, body []byte, authorization string) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, body, authorization)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization)
 		if err == nil {
 			return stream, nil
 		}
@@ -354,12 +360,12 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 	return nil, lastErr
 }
 
-func (c *Client) responseWithRetry(ctx context.Context, requestID string, body []byte, authorization string) (map[string]any, error) {
+func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string) (map[string]any, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		payload, err := c.responseOnce(ctx, body, authorization)
+		payload, err := c.responseOnce(ctx, endpointType, body, authorization)
 		if err == nil {
 			return payload, nil
 		}
@@ -398,15 +404,12 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, body [
 	return nil, lastErr
 }
 
-func (c *Client) responseOnce(ctx context.Context, body []byte, authorization string) (map[string]any, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
+func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string) (map[string]any, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if authorization != "" {
-		httpReq.Header.Set("Authorization", authorization)
-	}
+	applyUpstreamHeaders(httpReq, endpointType, authorization)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -425,18 +428,15 @@ func (c *Client) responseOnce(ctx context.Context, body []byte, authorization st
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		return nil, err
 	}
-	return payload, nil
+	return normalizeResponsePayload(endpointType, payload), nil
 }
 
-func (c *Client) openEventStream(ctx context.Context, body []byte, authorization string) (*EventStream, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(body))
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string) (*EventStream, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if authorization != "" {
-		httpReq.Header.Set("Authorization", authorization)
-	}
+	applyUpstreamHeaders(httpReq, endpointType, authorization)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -449,7 +449,7 @@ func (c *Client) openEventStream(ctx context.Context, body []byte, authorization
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType)}
 	if err := stream.prime(); err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -461,13 +461,14 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 	if s == nil || s.resp == nil {
 		return nil
 	}
-	if s.pendingEvent != nil {
-		if err := onEvent(*s.pendingEvent); err != nil {
+	for len(s.pendingEvents) > 0 {
+		evt := s.pendingEvents[0]
+		s.pendingEvents = s.pendingEvents[1:]
+		if err := onEvent(evt); err != nil {
 			return err
 		}
-		s.pendingEvent = nil
 	}
-	return consumeSSEScanner(s.scanner, onEvent)
+	return consumeSSEScannerWithReader(s.scanner, s.readNext, onEvent)
 }
 
 func (s *EventStream) Close() error {
@@ -481,14 +482,18 @@ func (s *EventStream) prime() error {
 	if s == nil || s.scanner == nil {
 		return nil
 	}
-	evt, err := readNextSSEEvent(s.scanner)
+	readNext := s.readNext
+	if readNext == nil {
+		readNext = readNextResponsesEventBatch
+	}
+	events, err := readNext(s.scanner)
 	if err != nil {
 		return err
 	}
-	if evt == nil {
+	if len(events) == 0 {
 		return io.ErrUnexpectedEOF
 	}
-	s.pendingEvent = evt
+	s.pendingEvents = append(s.pendingEvents, events...)
 	return nil
 }
 
@@ -664,6 +669,10 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 					if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
 						content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
 					}
+				case "input_audio":
+					if rawAudio, ok := part.Raw["input_audio"].(map[string]any); ok && len(rawAudio) > 0 {
+						content = append(content, map[string]any{"type": "input_audio", "input_audio": cloneMap(rawAudio)})
+					}
 				}
 			}
 			if len(content) > 0 {
@@ -742,11 +751,6 @@ func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
 	}
 }
 
-func buildStreamingRequestBody(req model.CanonicalRequest) ([]byte, error) {
-	req.Stream = true
-	return buildRequestBody(req)
-}
-
 func joinTextParts(parts []model.CanonicalContentPart) string {
 	var builder strings.Builder
 	for _, part := range parts {
@@ -796,6 +800,10 @@ func normalizeContentParts(parts []model.CanonicalContentPart) []map[string]any 
 		case "input_file":
 			if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
 				content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
+			}
+		case "input_audio":
+			if rawAudio, ok := part.Raw["input_audio"].(map[string]any); ok && len(rawAudio) > 0 {
+				content = append(content, map[string]any{"type": "input_audio", "input_audio": cloneMap(rawAudio)})
 			}
 		}
 	}

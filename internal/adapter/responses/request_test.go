@@ -168,6 +168,25 @@ func TestDecodeRequestAcceptsResponsesInputFileContent(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestAcceptsResponsesInputAudioContent(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"YWJj","format":"wav"}}]}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 1 {
+		t.Fatalf("expected one input_audio part, got %#v", canon.Messages)
+	}
+	audioRaw, _ := canon.Messages[0].Parts[0].Raw["input_audio"].(map[string]any)
+	if got := audioRaw["format"]; got != "wav" {
+		t.Fatalf("expected input_audio format preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+}
+
 func TestDecodeRequestPreservesPreviousResponseIDMetadataParallelToolCallsTruncationAndText(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

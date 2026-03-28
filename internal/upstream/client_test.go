@@ -356,6 +356,283 @@ func TestStreamRetriesBeforeAnyEventUsingProviderRetryConfig(t *testing.T) {
 	}
 }
 
+func TestResponseUsesChatEndpointAndNormalizesPayload(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello from chat"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	payload, err := client.Response(context.Background(), model.CanonicalRequest{Model: "gpt-5", Messages: []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}}}, "Bearer test-key")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if gotPath != "/chat/completions" {
+		t.Fatalf("expected chat endpoint path, got %q", gotPath)
+	}
+	output, _ := payload["output"].([]any)
+	if len(output) != 1 {
+		t.Fatalf("expected one normalized output item, got %#v", payload)
+	}
+	message, _ := output[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected one normalized content part, got %#v", message)
+	}
+	part, _ := content[0].(map[string]any)
+	if got := part["text"]; got != "hello from chat" {
+		t.Fatalf("expected normalized chat text, got %#v", got)
+	}
+	usage, _ := payload["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(3) {
+		t.Fatalf("expected input_tokens 3, got %#v", got)
+	}
+	if got := usage["output_tokens"]; got != float64(2) {
+		t.Fatalf("expected output_tokens 2, got %#v", got)
+	}
+}
+
+func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n" +
+			"data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "Bearer test-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if gotPath != "/chat/completions" {
+		t.Fatalf("expected chat endpoint path, got %q", gotPath)
+	}
+	if len(events) < 2 || events[0].Event != "response.output_text.delta" || events[1].Event != "response.completed" {
+		t.Fatalf("expected normalized response events, got %#v", events)
+	}
+	if got := events[0].Data["delta"]; got != "hello" {
+		t.Fatalf("expected delta hello, got %#v", got)
+	}
+	usage, _ := events[1].Data["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(3) {
+		t.Fatalf("expected input_tokens 3, got %#v", got)
+	}
+}
+
+func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) {
+	var gotPath string
+	var gotAPIKey string
+	var gotVersion string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotVersion = r.Header.Get("anthropic-version")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	payload, err := client.Response(context.Background(), model.CanonicalRequest{Model: "claude-sonnet-4-5", MaxOutputTokens: intPtrForClientTest(128), Messages: []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}}}, "Bearer anthropic-key")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if gotPath != "/messages" {
+		t.Fatalf("expected anthropic endpoint path, got %q", gotPath)
+	}
+	if gotAPIKey != "anthropic-key" {
+		t.Fatalf("expected x-api-key anthropic-key, got %q", gotAPIKey)
+	}
+	if gotVersion != "2023-06-01" {
+		t.Fatalf("expected anthropic-version header, got %q", gotVersion)
+	}
+	output, _ := payload["output"].([]any)
+	if len(output) != 1 {
+		t.Fatalf("expected one normalized output item, got %#v", payload)
+	}
+	message, _ := output[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected one normalized content part, got %#v", message)
+	}
+	part, _ := content[0].(map[string]any)
+	if got := part["text"]; got != "hello from anthropic" {
+		t.Fatalf("expected normalized anthropic text, got %#v", got)
+	}
+	usage, _ := payload["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(4) {
+		t.Fatalf("expected input_tokens 4, got %#v", got)
+	}
+	if got := usage["output_tokens"]; got != float64(2) {
+		t.Fatalf("expected output_tokens 2, got %#v", got)
+	}
+}
+
+func TestBuildChatRequestBodyPreservesFileContentPart(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "input_file",
+				Raw:  map[string]any{"input_file": map[string]any{"file_id": "file_123"}},
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	if got, _ := part["type"].(string); got != "file" {
+		t.Fatalf("expected chat file content part, got %#v", part)
+	}
+	fileRaw, _ := part["file"].(map[string]any)
+	if got := fileRaw["file_id"]; got != "file_123" {
+		t.Fatalf("expected file_id preserved, got %#v", part)
+	}
+}
+
+func TestBuildChatRequestBodyPreservesInputAudioContentPart(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "input_audio",
+				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "mp3"}},
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	if got, _ := part["type"].(string); got != "input_audio" {
+		t.Fatalf("expected chat input_audio content part, got %#v", part)
+	}
+	audioRaw, _ := part["input_audio"].(map[string]any)
+	if got := audioRaw["format"]; got != "mp3" {
+		t.Fatalf("expected audio format preserved, got %#v", part)
+	}
+}
+
+func TestBuildResponsesRequestBodyPreservesInputAudioContentPart(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "input_audio",
+				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "wav"}},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	message, _ := input[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	if got, _ := part["type"].(string); got != "input_audio" {
+		t.Fatalf("expected responses input_audio content part, got %#v", part)
+	}
+	audioRaw, _ := part["input_audio"].(map[string]any)
+	if got := audioRaw["format"]; got != "wav" {
+		t.Fatalf("expected audio format preserved, got %#v", part)
+	}
+}
+
+func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Reasoning:       &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
+	}, config.UpstreamEndpointTypeAnthropic)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	thinking, _ := payload["thinking"].(map[string]any)
+	if got := thinking["type"]; got != "enabled" {
+		t.Fatalf("expected thinking.type enabled, got %#v", payload)
+	}
+	if got := thinking["budget_tokens"]; got != float64(2048) {
+		t.Fatalf("expected thinking.budget_tokens 2048, got %#v", payload)
+	}
+}
+
+func TestStreamUsesAnthropicEndpointAndNormalizesEvents(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n" +
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n" +
+			"event: content_block_start\n" +
+			"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+			"event: content_block_delta\n" +
+			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n" +
+			"event: message_delta\n" +
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}\n\n" +
+			"event: message_stop\n" +
+			"data: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "claude-sonnet-4-5", MaxOutputTokens: intPtrForClientTest(128)}, "Bearer anthropic-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if gotPath != "/messages" {
+		t.Fatalf("expected anthropic endpoint path, got %q", gotPath)
+	}
+	if len(events) < 2 || events[0].Event != "response.output_text.delta" || events[1].Event != "response.completed" {
+		t.Fatalf("expected normalized response events, got %#v", events)
+	}
+	if got := events[0].Data["delta"]; got != "hello" {
+		t.Fatalf("expected delta hello, got %#v", got)
+	}
+}
+
+func intPtrForClientTest(v int) *int {
+	return &v
+}
+
 func TestOpenEventStreamRetriesBeforeAnyEventUsingProviderRetryConfig(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

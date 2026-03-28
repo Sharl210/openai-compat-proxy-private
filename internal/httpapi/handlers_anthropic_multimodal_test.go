@@ -69,7 +69,7 @@ func TestAnthropicMessagesAcceptsImageURLContent(t *testing.T) {
 	}
 }
 
-func TestAnthropicMessagesNonStreamUsesRequestIdentityAndRejectsUnsupportedOutputMapping(t *testing.T) {
+func TestAnthropicMessagesNonStreamMapsRefusalOutputAndUsesRequestIdentity(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","status":"completed","role":"assistant","content":[{"type":"refusal","refusal":"nope"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
@@ -101,11 +101,11 @@ func TestAnthropicMessagesNonStreamUsesRequestIdentityAndRejectsUnsupportedOutpu
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502 for unsupported anthropic output content, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for mapped refusal content, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"unsupported_output_mapping"`) {
-		t.Fatalf("expected unsupported_output_mapping response, got %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"type":"text"`) || !strings.Contains(rec.Body.String(), `"text":"nope"`) {
+		t.Fatalf("expected refusal to map into anthropic text block, got %s", rec.Body.String())
 	}
 	requestID := rec.Header().Get("X-Request-Id")
 	if requestID == "" {
@@ -215,5 +215,105 @@ func TestChatCompletionsAcceptsImageURLContent(t *testing.T) {
 	}
 	if strings.Contains(upstreamBody, `"image_url":{"url"`) {
 		t.Fatalf("expected image_url to be flattened to string, got %s", upstreamBody)
+	}
+}
+
+func TestChatCompletionsAcceptsInputAudioContent(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		upstreamBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"收到音频"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsChat:         true,
+			SupportsResponses:    true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"messages":[{
+			"role":"user",
+			"content":[{"type":"input_audio","input_audio":{"data":"YWJj","format":"mp3"}}]
+		}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected chat audio request to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(upstreamBody, `"type":"input_audio"`) || !strings.Contains(upstreamBody, `"format":"mp3"`) {
+		t.Fatalf("expected upstream body to include input_audio, got %s", upstreamBody)
+	}
+}
+
+func TestResponsesAcceptsInputAudioContent(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		upstreamBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"收到音频"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"YWJj","format":"wav"}}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected responses audio request to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(upstreamBody, `"type":"input_audio"`) || !strings.Contains(upstreamBody, `"format":"wav"`) {
+		t.Fatalf("expected upstream body to include input_audio, got %s", upstreamBody)
 	}
 }

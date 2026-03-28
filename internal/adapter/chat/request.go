@@ -49,9 +49,11 @@ type toolCall struct {
 }
 
 type contentPart struct {
-	Type     string         `json:"type"`
-	Text     string         `json:"text"`
-	ImageURL map[string]any `json:"image_url"`
+	Type       string         `json:"type"`
+	Text       string         `json:"text"`
+	ImageURL   map[string]any `json:"image_url"`
+	InputAudio map[string]any `json:"input_audio"`
+	File       map[string]any `json:"file"`
 }
 
 type tool struct {
@@ -174,6 +176,16 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 				return nil, errors.New("image_url.url is required")
 			}
 			result = append(result, model.CanonicalContentPart{Type: "image_url", ImageURL: url, Raw: map[string]any{"image_url": part.ImageURL}})
+		case "input_audio":
+			if len(part.InputAudio) == 0 {
+				return nil, errors.New("input_audio is required")
+			}
+			result = append(result, model.CanonicalContentPart{Type: "input_audio", Raw: map[string]any{"input_audio": cloneMap(part.InputAudio)}})
+		case "file":
+			if len(part.File) == 0 {
+				return nil, errors.New("file is required")
+			}
+			result = append(result, model.CanonicalContentPart{Type: "input_file", Raw: map[string]any{"input_file": cloneMap(part.File)}})
 		default:
 			return nil, fmt.Errorf("unsupported content type: %s", part.Type)
 		}

@@ -15,6 +15,7 @@ type Config struct {
 	ProxyAPIKey                 string
 	UpstreamBaseURL             string
 	UpstreamAPIKey              string
+	UpstreamEndpointType        string
 	ProvidersDir                string
 	DefaultProvider             string
 	EnableLegacyV1Routes        bool
@@ -47,6 +48,7 @@ func Default() Config {
 		FirstByteTimeout:            20 * time.Minute,
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
+		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 ".proxy.requests.jsonl",
 		LogMaxSizeMB:                100,

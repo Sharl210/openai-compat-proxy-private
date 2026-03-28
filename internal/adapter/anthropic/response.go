@@ -8,10 +8,21 @@ import (
 
 func BuildResponse(result aggregate.Result, requestID string, modelName string) map[string]any {
 	content := make([]map[string]any, 0, len(result.ToolCalls)+1)
+	if thinking := reasoningContentValue(result.Reasoning); thinking != "" {
+		content = append(content, map[string]any{
+			"type":     "thinking",
+			"thinking": thinking,
+		})
+	}
 	if result.Text != "" {
 		content = append(content, map[string]any{
 			"type": "text",
 			"text": result.Text,
+		})
+	} else if result.Refusal != "" {
+		content = append(content, map[string]any{
+			"type": "text",
+			"text": result.Refusal,
 		})
 	}
 	if len(result.ToolCalls) > 0 {
@@ -43,6 +54,18 @@ func BuildResponse(result aggregate.Result, requestID string, modelName string) 
 		"stop_sequence": nil,
 		"usage":         mapUsage(result.Usage),
 	}
+}
+
+func reasoningContentValue(reasoning map[string]any) string {
+	if len(reasoning) == 0 {
+		return ""
+	}
+	for _, key := range []string{"thinking", "reasoning_content", "summary", "content", "delta"} {
+		if text, _ := reasoning[key].(string); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func mapUsage(usage map[string]any) map[string]any {

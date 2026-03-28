@@ -11,6 +11,12 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		"role":    "assistant",
 		"content": content,
 	}
+	if result.Refusal != "" {
+		message["refusal"] = result.Refusal
+		if result.Text == "" {
+			message["content"] = nil
+		}
+	}
 	if reasoningContent := reasoningContentValue(result.Reasoning); reasoningContent != "" {
 		message["reasoning_content"] = reasoningContent
 	}

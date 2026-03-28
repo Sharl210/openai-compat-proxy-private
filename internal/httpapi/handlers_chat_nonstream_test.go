@@ -9,7 +9,7 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
-func TestChatUpstreamNonStreamRejectsUnsupportedOutputMapping(t *testing.T) {
+func TestChatUpstreamNonStreamMapsRefusalOutput(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","status":"completed","role":"assistant","content":[{"type":"refusal","refusal":"nope"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
@@ -35,10 +35,10 @@ func TestChatUpstreamNonStreamRejectsUnsupportedOutputMapping(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"unsupported_output_mapping"`) {
-		t.Fatalf("expected unsupported_output_mapping response, got %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"refusal":"nope"`) {
+		t.Fatalf("expected refusal to survive chat mapping, got %s", rec.Body.String())
 	}
 }
