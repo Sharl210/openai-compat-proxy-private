@@ -28,10 +28,12 @@ type Manager struct {
 	providersDir string
 	location     *time.Location
 	clock        Clock
+	enabledFn    func() []string
 
-	mu        sync.RWMutex
-	stats     map[string]*ProviderStats
-	submitted map[string]bool
+	mu              sync.RWMutex
+	stats           map[string]*ProviderStats
+	submitted       map[string]bool
+	enabledProvider map[string]struct{}
 
 	ticker *time.Ticker
 	stopCh chan struct{}
@@ -46,12 +48,13 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 	}
 
 	m := &Manager{
-		providersDir: providersDir,
-		location:     location,
-		clock:        clock,
-		stats:        make(map[string]*ProviderStats),
-		submitted:    make(map[string]bool),
-		stopCh:       make(chan struct{}),
+		providersDir:    providersDir,
+		location:        location,
+		clock:           clock,
+		stats:           make(map[string]*ProviderStats),
+		submitted:       make(map[string]bool),
+		enabledProvider: make(map[string]struct{}),
+		stopCh:          make(chan struct{}),
 	}
 
 	tzName := location.String()
@@ -60,6 +63,10 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 	yesterdayStr := now.AddDate(0, 0, -1).Format("2006-01-02")
 
 	for _, pid := range enabledProviders {
+		if pid == "" {
+			continue
+		}
+		m.enabledProvider[pid] = struct{}{}
 		loaded, err := LoadProviderStats(providersDir, pid)
 		if err != nil {
 			log.Printf("[cacheinfo] 加载 provider %s 失败，使用空状态: %v", pid, err)
@@ -92,6 +99,13 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 	return m
 }
 
+func (m *Manager) SetEnabledProvidersSource(fn func() []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.enabledFn = fn
+	m.syncEnabledProvidersLocked()
+}
+
 func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -102,6 +116,10 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	}
 
 	stats, ok := m.stats[providerID]
+	if !ok {
+		m.syncEnabledProvidersLocked()
+		stats, ok = m.stats[providerID]
+	}
 	if !ok {
 		return nil
 	}
@@ -281,6 +299,7 @@ func (m *Manager) Stop() {
 func (m *Manager) flushAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.syncEnabledProvidersLocked()
 
 	for pid := range m.stats {
 		m.checkCrossDayAndReset(pid)
@@ -289,4 +308,60 @@ func (m *Manager) flushAll() {
 	for pid, stats := range m.stats {
 		_ = SaveProviderStats(m.providersDir, pid, stats)
 	}
+	if err := writeAggregateTXTFiles(m.providersDir, m.enabledStatsSnapshotLocked(), m.clock.Now().In(m.location), m.location.String()); err != nil {
+		log.Printf("[cacheinfo] 写入聚合 TXT 失败: %v", err)
+	}
+}
+
+func (m *Manager) enabledStatsSnapshotLocked() map[string]*ProviderStats {
+	stats := make(map[string]*ProviderStats, len(m.enabledProvider))
+	for providerID := range m.enabledProvider {
+		if providerStats, ok := m.stats[providerID]; ok {
+			stats[providerID] = providerStats
+		}
+	}
+	return stats
+}
+
+func (m *Manager) syncEnabledProvidersLocked() {
+	if m.enabledFn == nil {
+		return
+	}
+	m.setEnabledProvidersLocked(m.enabledFn())
+}
+
+func (m *Manager) setEnabledProvidersLocked(enabledProviders []string) {
+	next := make(map[string]struct{}, len(enabledProviders))
+	now := m.clock.Now().In(m.location)
+	todayStr := now.Format("2006-01-02")
+	yesterdayStr := now.AddDate(0, 0, -1).Format("2006-01-02")
+	tzName := m.location.String()
+	for _, pid := range enabledProviders {
+		if pid == "" {
+			continue
+		}
+		next[pid] = struct{}{}
+		if _, ok := m.stats[pid]; ok {
+			continue
+		}
+		loaded, err := LoadProviderStats(m.providersDir, pid)
+		if err != nil {
+			log.Printf("[cacheinfo] 加载 provider %s 失败，使用空状态: %v", pid, err)
+			loaded = nil
+		}
+		if loaded != nil {
+			normalizeRecentDays(loaded, todayStr)
+			m.stats[pid] = loaded
+			continue
+		}
+		m.stats[pid] = &ProviderStats{
+			Timezone:      tzName,
+			TodayDate:     todayStr,
+			YesterdayDate: yesterdayStr,
+			RecentDays:    []DailyStats{{Date: todayStr}},
+			UpdatedAt:     now,
+		}
+		syncLegacyFields(m.stats[pid])
+	}
+	m.enabledProvider = next
 }

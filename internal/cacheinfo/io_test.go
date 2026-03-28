@@ -21,6 +21,10 @@ func expectedCacheInfoTXTPath(root, providerID string) string {
 	return filepath.Join(expectedCacheInfoDir(root), providerID+".txt")
 }
 
+func expectedAggregateCacheInfoTXTPath(root, name string) string {
+	return filepath.Join(expectedCacheInfoDir(root), name)
+}
+
 func TestEnsureCacheInfoDir(t *testing.T) {
 	tmp := t.TempDir()
 
@@ -355,5 +359,55 @@ func TestSaveProviderStats_CustomProvidersDir(t *testing.T) {
 	txtPath := expectedCacheInfoTXTPath(customDir, "test-provider")
 	if _, err := os.Stat(txtPath); err != nil {
 		t.Fatalf("TXT file not at expected path %s: %v", txtPath, err)
+	}
+}
+
+func TestManagerFlushAll_WritesAggregateTXTFiles(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+
+	legacyAnthropic := ProviderStats{
+		Timezone: loc.String(),
+		RecentDays: []DailyStats{
+			{Date: "2026-03-26", Totals: TokenTotals{InputTokens: 20, CachedTokens: 5, OutputTokens: 10, TotalTokens: 30, RequestCount: 1}},
+			{Date: "2026-03-27", Totals: TokenTotals{InputTokens: 40, CachedTokens: 8, OutputTokens: 20, TotalTokens: 60, RequestCount: 2}},
+		},
+		HistoryTotal: TokenTotals{InputTokens: 60, CachedTokens: 13, OutputTokens: 30, TotalTokens: 90, RequestCount: 3},
+		UpdatedAt:    time.Date(2026, 3, 27, 9, 0, 0, 0, loc),
+	}
+	if err := SaveProviderStats(tmp, "anthropic", &legacyAnthropic); err != nil {
+		t.Fatalf("SaveProviderStats anthropic: %v", err)
+	}
+
+	usage := Usage{InputTokens: 100, CachedTokens: 25, OutputTokens: 50, TotalTokens: 150}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatalf("RecordFinalUsage openai: %v", err)
+	}
+
+	m.flushAll()
+
+	enabledTXT, err := os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "已启用提供商总计.txt"))
+	if err != nil {
+		t.Fatalf("read enabled aggregate txt: %v", err)
+	}
+	enabledStr := string(enabledTXT)
+	if !strings.Contains(enabledStr, "[今天]") || !strings.Contains(enabledStr, "输入Tokens：100") || !strings.Contains(enabledStr, "总调用次数：1") {
+		t.Fatalf("unexpected enabled aggregate txt:\n%s", enabledStr)
+	}
+	if strings.Contains(enabledStr, "输入Tokens：140") {
+		t.Fatalf("enabled aggregate should not include disabled provider totals:\n%s", enabledStr)
+	}
+
+	allTXT, err := os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "全提供商总计.txt"))
+	if err != nil {
+		t.Fatalf("read all aggregate txt: %v", err)
+	}
+	allStr := string(allTXT)
+	for _, want := range []string{"[前一天]", "输入Tokens：20", "[今天]", "输入Tokens：140", "总调用次数：3", "[提供商历史以来总计]", "总计Tokens：240", "总调用次数：4"} {
+		if !strings.Contains(allStr, want) {
+			t.Fatalf("all aggregate txt missing %q:\n%s", want, allStr)
+		}
 	}
 }

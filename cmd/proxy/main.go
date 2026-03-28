@@ -45,6 +45,19 @@ func main() {
 			log.Printf("warning: failed to initialize cache info directory %q: %v", cfg.ProvidersDir, err)
 		} else {
 			cacheMgr = cacheinfo.NewManager(cfg.ProvidersDir, location, enabledProviders, nil)
+			cacheMgr.SetEnabledProvidersSource(func() []string {
+				snapshot := store.Active()
+				if snapshot == nil {
+					return nil
+				}
+				ids := make([]string, 0, len(snapshot.Config.Providers))
+				for _, provider := range snapshot.Config.Providers {
+					if provider.Enabled {
+						ids = append(ids, provider.ID)
+					}
+				}
+				return ids
+			})
 			cacheMgr.Start(context.Background())
 			defer cacheMgr.Stop()
 		}

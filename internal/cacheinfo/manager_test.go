@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -653,5 +654,59 @@ func TestManager_RecentDaysTrimToSeven(t *testing.T) {
 	}
 	if stats.RecentDays[6].Date != "2026-03-28" {
 		t.Fatalf("last RecentDays date = %s, want 2026-03-28", stats.RecentDays[6].Date)
+	}
+}
+
+func TestManager_EnabledProvidersAggregateFollowsSource(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+
+	enabled := []string{"openai"}
+	m.SetEnabledProvidersSource(func() []string {
+		return append([]string(nil), enabled...)
+	})
+
+	usage := Usage{InputTokens: 100, TotalTokens: 100}
+	if err := m.RecordFinalUsage("req-openai", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	legacyAnthropic := ProviderStats{
+		Timezone:     loc.String(),
+		RecentDays:   []DailyStats{{Date: "2026-03-27", Totals: TokenTotals{InputTokens: 50, TotalTokens: 50, RequestCount: 1}}},
+		HistoryTotal: TokenTotals{InputTokens: 50, TotalTokens: 50, RequestCount: 1},
+		UpdatedAt:    time.Date(2026, 3, 27, 9, 0, 0, 0, loc),
+	}
+	if err := SaveProviderStats(tmp, "anthropic", &legacyAnthropic); err != nil {
+		t.Fatal(err)
+	}
+
+	m.flushAll()
+	enabledPath := expectedAggregateCacheInfoTXTPath(tmp, "已启用提供商总计.txt")
+	data, err := os.ReadFile(enabledPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "输入Tokens：150") {
+		t.Fatalf("enabled aggregate unexpectedly included anthropic before source update:\n%s", string(data))
+	}
+
+	enabled = []string{"openai", "anthropic"}
+	m.flushAll()
+	data, err = os.ReadFile(enabledPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "输入Tokens：150") {
+		t.Fatalf("enabled aggregate did not follow updated source:\n%s", string(data))
+	}
+
+	if err := m.RecordFinalUsage("req-anthropic", "anthropic", &Usage{InputTokens: 20, TotalTokens: 20}); err != nil {
+		t.Fatal(err)
+	}
+	if m.stats["anthropic"].Today.InputTokens != 70 {
+		t.Fatalf("anthropic Today.InputTokens = %d, want 70", m.stats["anthropic"].Today.InputTokens)
 	}
 }
