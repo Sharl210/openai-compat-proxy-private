@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/aggregate"
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
@@ -51,17 +52,18 @@ type anthropicStreamState struct {
 }
 
 type responsesStreamState struct {
-	textStarted       bool
-	realReasoningSeen bool
-	planningSent      bool
-	toolStatusSent    bool
-	reasoningStarted  bool
-	reasoningClosed   bool
-	syntheticSummary  strings.Builder
-	toolItems         map[string]*responsesToolItemState
-	toolOrder         []string
-	terminalSeen      bool
-	terminalFailure   *aggregate.TerminalFailureError
+	textStarted          bool
+	realReasoningSeen    bool
+	planningSent         bool
+	toolStatusSent       bool
+	reasoningStarted     bool
+	reasoningClosed      bool
+	syntheticSummary     strings.Builder
+	toolItems            map[string]*responsesToolItemState
+	toolOrder            []string
+	upstreamEndpointType string
+	terminalSeen         bool
+	terminalFailure      *aggregate.TerminalFailureError
 }
 
 type responsesToolItemState struct {
@@ -128,8 +130,8 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	return nil
 }
 
-func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder usageRecorderFunc) error {
-	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}}
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
+	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: upstreamEndpointType}
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return err
 	}
@@ -157,6 +159,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 }
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
+	compatCompleteToolArgs := state != nil && state.upstreamEndpointType != config.UpstreamEndpointTypeResponses
 	item, _ := evt.Data["item"].(map[string]any)
 	ensureToolItemState := func(itemID string) *responsesToolItemState {
 		if state.toolItems == nil {
@@ -205,7 +208,7 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if toolState.arguments.Len() > 0 {
 				itemCopy["arguments"] = toolState.arguments.String()
 			}
-			if !toolState.addedSent {
+			if compatCompleteToolArgs && !toolState.addedSent {
 				if err := writeToolItemEvent("response.output_item.added", itemCopy); err != nil {
 					return err
 				}
@@ -275,7 +278,9 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
 				}
-				return nil
+				if compatCompleteToolArgs {
+					return nil
+				}
 			}
 		}
 	case "response.output_text.delta":
@@ -302,19 +307,25 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 				toolState.arguments.WriteString(delta)
 			}
 		}
-		return nil
+		if compatCompleteToolArgs {
+			return nil
+		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
-		if err := flushPendingFunctionCalls(); err != nil {
-			return err
+		if compatCompleteToolArgs {
+			if err := flushPendingFunctionCalls(); err != nil {
+				return err
+			}
 		}
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
 	case "response.incomplete":
 		state.terminalSeen = true
-		if err := flushPendingFunctionCalls(); err != nil {
-			return err
+		if compatCompleteToolArgs {
+			if err := flushPendingFunctionCalls(); err != nil {
+				return err
+			}
 		}
 		healthFlag, _ := evt.Data["health_flag"].(string)
 		message, _ := evt.Data["message"].(string)

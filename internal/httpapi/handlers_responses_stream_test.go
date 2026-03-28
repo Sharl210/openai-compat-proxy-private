@@ -8,6 +8,7 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
+	"openai-compat-proxy/internal/upstream"
 )
 
 func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
@@ -95,18 +96,20 @@ func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 	}
 }
 
-func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClients(t *testing.T) {
+func TestResponsesStreamPreservesNativeFunctionCallArgumentDeltasForResponsesUpstream(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
-		"event: response.output_item.done\n" +
+		"event: response.output_item.added\n" +
 			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
 		"event: response.function_call_arguments.delta\n" +
 			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}}\n\n",
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
 	})
 	defer upstream.Close()
 
-	server := NewServer(testResponsesConfig(upstream.URL))
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
 		"model":"gpt-5",
 		"stream":true,
@@ -117,6 +120,20 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
+	if !strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
+		t.Fatalf("expected responses upstream to preserve native arguments delta events, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected responses upstream to preserve early added event, got %s", body)
+	}
+}
+
+func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClients(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "get_weather"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"city":"Shanghai"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
 
 	addedIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
 	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`)
@@ -134,60 +151,24 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 }
 
 func TestResponsesStreamAccumulatesMultipleFunctionCallArgumentDeltasBeforeDone(t *testing.T) {
-	upstream := testutil.NewStreamingUpstream(t, []string{
-		"event: response.output_item.done\n" +
-			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search_web\"}}\n\n",
-		"event: response.function_call_arguments.delta\n" +
-			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"query\\\":\\\"Quectel\\\"\"}\n\n",
-		"event: response.function_call_arguments.delta\n" +
-			"data: {\"item_id\":\"fc_1\",\"delta\":\",\\\"topic\\\":\\\"finance\\\"}\"}\n\n",
-		"event: response.completed\n" +
-			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1," +
-			"\"total_tokens\":2}}}\n\n",
-	})
-	defer upstream.Close()
-
-	server := NewServer(testResponsesConfig(upstream.URL))
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
-		"model":"gpt-5",
-		"stream":true,
-		"input":[{"role":"user","content":"hello"}]
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-	body := rec.Body.String()
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":"Quectel"`}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"topic":"finance"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
 	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function call item to contain merged arguments, got %s", body)
 	}
 }
 
 func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t *testing.T) {
-	upstream := testutil.NewStreamingUpstream(t, []string{
-		"event: response.output_item.done\n" +
-			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search_web\"}}\n\n",
-		"event: response.function_call_arguments.delta\n" +
-			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"query\\\":\\\"Quectel\\\"\"}\n\n",
-		"event: response.function_call_arguments.delta\n" +
-			"data: {\"item_id\":\"fc_1\",\"delta\":\",\\\"topic\\\":\\\"finance\\\"}\"}\n\n",
-		"event: response.completed\n" +
-			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1," +
-			"\"total_tokens\":2}}}\n\n",
-	})
-	defer upstream.Close()
-
-	server := NewServer(testResponsesConfig(upstream.URL))
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
-		"model":"gpt-5",
-		"stream":true,
-		"input":[{"role":"user","content":"hello"}]
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-	body := rec.Body.String()
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":"Quectel"`}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"topic":"finance"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress partial function_call_arguments.delta events, got %s", body)
 	}
@@ -200,16 +181,33 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 }
 
 func testResponsesConfig(upstreamURL string) config.Config {
+	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
+}
+
+func renderResponsesWriterEvents(t *testing.T, endpointType string, events ...upstream.Event) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	state := &responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: endpointType}
+	for _, evt := range events {
+		if err := writeResponsesEvent(rec, nil, state, evt, nil); err != nil {
+			t.Fatalf("writeResponsesEvent error: %v", err)
+		}
+	}
+	return rec.Body.String()
+}
+
+func testResponsesConfigWithEndpoint(upstreamURL string, endpointType string) config.Config {
 	return config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:                "openai",
-			Enabled:           true,
-			UpstreamBaseURL:   upstreamURL,
-			UpstreamAPIKey:    "test-key",
-			SupportsModels:    true,
-			SupportsResponses: true,
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstreamURL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: endpointType,
+			SupportsModels:       true,
+			SupportsResponses:    true,
 		}},
 	}
 }
