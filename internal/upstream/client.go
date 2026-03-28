@@ -144,6 +144,8 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		"model":         req.Model,
 		"stream":        true,
 		"body":          string(body),
+		"body_probe":    "enabled",
+		"body_preview":  previewBodyForLog(body),
 		"body_hash":     hashBytes(body),
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
@@ -237,6 +239,8 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		"model":         req.Model,
 		"stream":        true,
 		"body":          string(body),
+		"body_probe":    "enabled",
+		"body_preview":  previewBodyForLog(body),
 		"body_hash":     hashBytes(body),
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
@@ -265,6 +269,8 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		"model":         req.Model,
 		"stream":        false,
 		"body":          string(body),
+		"body_probe":    "enabled",
+		"body_preview":  previewBodyForLog(body),
 		"body_hash":     hashBytes(body),
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
@@ -1005,6 +1011,14 @@ func upstreamBodyLogAttrs(body []byte) map[string]any {
 		attrs["tool_names"] = toolNames
 	}
 	return attrs
+}
+
+func previewBodyForLog(body []byte) string {
+	const max = 512
+	if len(body) <= max {
+		return string(body)
+	}
+	return string(body[:max])
 }
 
 func hashAny(v any) string {
