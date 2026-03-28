@@ -117,19 +117,20 @@ func handleResponses() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 				return
 			}
-			normalized := payload
-			if result, err := aggregate.ResultFromResponsePayload(payload); err == nil {
-				normalized = responsesadapter.BuildResponse(result)
+			result, err := aggregate.ResultFromResponsePayload(payload)
+			if err != nil {
+				errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_response", err.Error())
+				return
 			}
+			normalized := responsesadapter.BuildResponse(result)
+			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set("Content-Type", "application/json")
 			if err := writeJSON(w, normalized); err != nil {
 				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 				return
 			}
-			if usageRecorder != nil && len(payload) > 0 {
-				if result, err := aggregate.ResultFromResponsePayload(payload); err == nil {
-					usageRecorder(result.Usage)
-				}
+			if usageRecorder != nil {
+				usageRecorder(result.Usage)
 			}
 			return
 		}
@@ -168,7 +169,9 @@ func handleResponses() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if err := writeJSON(w, responsesadapter.BuildResponse(result)); err != nil {
+		normalized := responsesadapter.BuildResponse(result)
+		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
+		if err := writeJSON(w, normalized); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
 		}
@@ -180,5 +183,39 @@ func handleResponses() http.HandlerFunc {
 			"cached_tokens": nestedCachedTokens(result.Usage),
 			"usage_present": len(result.Usage) > 0,
 		})
+	}
+}
+
+func mergePreservedResponsesTopLevelFields(payload map[string]any, items []map[string]any) {
+	if len(payload) == 0 || len(items) == 0 {
+		return
+	}
+	for _, item := range items {
+		preserved, ok := item["__openai_compat_responses_top_level"].(map[string]any)
+		if !ok {
+			continue
+		}
+		for key, value := range preserved {
+			payload[key] = cloneJSONValueForResponse(value)
+		}
+	}
+}
+
+func cloneJSONValueForResponse(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			cloned[key] = cloneJSONValueForResponse(nested)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			cloned = append(cloned, cloneJSONValueForResponse(nested))
+		}
+		return cloned
+	default:
+		return value
 	}
 }

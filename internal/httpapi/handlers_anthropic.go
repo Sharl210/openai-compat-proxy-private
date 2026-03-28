@@ -45,6 +45,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
 		canon.Model = mappedModel
 		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
+		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking, canon.Model, canon.MaxOutputTokens)
 		ctx := r.Context()
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {

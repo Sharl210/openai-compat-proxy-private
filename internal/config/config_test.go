@@ -101,6 +101,24 @@ func TestValidateRootEnvValuesRejectsInvalidDownstreamNonStreamStrategy(t *testi
 	}
 }
 
+func TestValidateRootEnvValuesRejectsInvalidEnableLegacyV1RoutesBoolean(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"ENABLE_LEGACY_V1_ROUTES": "enabled"})
+	if err == nil {
+		t.Fatalf("expected invalid ENABLE_LEGACY_V1_ROUTES to fail validation")
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidStartupBoolValues(t *testing.T) {
+	for _, key := range []string{"LOG_ENABLE", "LOG_INCLUDE_BODIES"} {
+		t.Run(key, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{key: "enabled"})
+			if err == nil {
+				t.Fatalf("expected invalid %s to fail validation", key)
+			}
+		})
+	}
+}
+
 func TestDefaultFirstByteTimeoutIsTwentyMinutes(t *testing.T) {
 	if got := Default().FirstByteTimeout; got != 20*time.Minute {
 		t.Fatalf("expected default FirstByteTimeout 20m, got %v", got)

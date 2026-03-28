@@ -85,7 +85,7 @@ func loadFromLookup(lookup func(string) string) Config {
 		cfg.DefaultProvider = value
 	}
 	if value := lookup("ENABLE_LEGACY_V1_ROUTES"); value != "" {
-		cfg.EnableLegacyV1Routes = strings.EqualFold(value, "true") || value == "1"
+		cfg.EnableLegacyV1Routes = parseRootBool(value)
 	}
 	if value := lookup("DOWNSTREAM_NON_STREAM_STRATEGY"); value != "" {
 		if normalized, err := normalizeDownstreamNonStreamStrategy(value); err == nil {
@@ -93,13 +93,13 @@ func loadFromLookup(lookup func(string) string) Config {
 		}
 	}
 	if value := lookup("LOG_ENABLE"); value != "" {
-		cfg.LogEnable = strings.EqualFold(value, "true") || value == "1"
+		cfg.LogEnable = parseRootBool(value)
 	}
 	if value := lookup("LOG_FILE_PATH"); value != "" {
 		cfg.LogFilePath = value
 	}
 	if value := lookup("LOG_INCLUDE_BODIES"); value != "" {
-		cfg.LogIncludeBodies = strings.EqualFold(value, "true") || value == "1"
+		cfg.LogIncludeBodies = parseRootBool(value)
 	}
 	if value := lookup("LOG_MAX_SIZE_MB"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
@@ -151,6 +151,15 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateDownstreamNonStreamStrategy(values, "DOWNSTREAM_NON_STREAM_STRATEGY"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "LOG_ENABLE"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "LOG_INCLUDE_BODIES"); err != nil {
 		return err
 	}
 	if err := validateMinInt(values, "LOG_MAX_SIZE_MB", 1); err != nil {
@@ -220,6 +229,25 @@ func validateMinInt(values map[string]string, key string, min int) error {
 		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
 	}
 	return nil
+}
+
+func validateStrictBool(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	if _, err := strconv.ParseBool(value); err != nil {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func parseRootBool(value string) bool {
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	return parsed
 }
 
 func validateProvidersDir(values map[string]string, key string) error {

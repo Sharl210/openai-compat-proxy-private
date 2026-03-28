@@ -58,8 +58,17 @@ type responsesStreamState struct {
 	reasoningStarted  bool
 	reasoningClosed   bool
 	syntheticSummary  strings.Builder
+	toolItems         map[string]*responsesToolItemState
+	toolOrder         []string
 	terminalSeen      bool
 	terminalFailure   *aggregate.TerminalFailureError
+}
+
+type responsesToolItemState struct {
+	item      map[string]any
+	arguments strings.Builder
+	addedSent bool
+	doneSent  bool
 }
 
 func startSSE(w http.ResponseWriter) http.Flusher {
@@ -120,7 +129,7 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 }
 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder usageRecorderFunc) error {
-	state := responsesStreamState{}
+	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}}
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return err
 	}
@@ -149,6 +158,18 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	item, _ := evt.Data["item"].(map[string]any)
+	ensureToolItemState := func(itemID string) *responsesToolItemState {
+		if state.toolItems == nil {
+			state.toolItems = map[string]*responsesToolItemState{}
+		}
+		toolState, ok := state.toolItems[itemID]
+		if !ok {
+			toolState = &responsesToolItemState{}
+			state.toolItems[itemID] = toolState
+			state.toolOrder = append(state.toolOrder, itemID)
+		}
+		return toolState
+	}
 	writeStreamEvent := func(event string, data map[string]any) error {
 		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
 			return err
@@ -168,6 +189,26 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		}
 		if flusher != nil {
 			flusher.Flush()
+		}
+		return nil
+	}
+	writeToolItemEvent := func(event string, item map[string]any) error {
+		return writeStreamEvent(event, map[string]any{"item": item})
+	}
+	flushPendingFunctionCalls := func() error {
+		for _, itemID := range state.toolOrder {
+			toolState := state.toolItems[itemID]
+			if toolState == nil || toolState.doneSent || toolState.item == nil {
+				continue
+			}
+			itemCopy := cloneJSONValueForResponse(toolState.item).(map[string]any)
+			if toolState.arguments.Len() > 0 {
+				itemCopy["arguments"] = toolState.arguments.String()
+			}
+			if err := writeToolItemEvent("response.output_item.done", itemCopy); err != nil {
+				return err
+			}
+			toolState.doneSent = true
 		}
 		return nil
 	}
@@ -214,23 +255,69 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if err := markRealReasoningSeen(); err != nil {
 				return err
 			}
+			break
+		}
+		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			itemID, _ := item["id"].(string)
+			if itemID == "" {
+				itemID, _ = item["call_id"].(string)
+			}
+			if itemID != "" {
+				toolState := ensureToolItemState(itemID)
+				toolState.item = cloneJSONValueForResponse(item).(map[string]any)
+				if args, _ := item["arguments"].(string); args != "" {
+					toolState.arguments.Reset()
+					toolState.arguments.WriteString(args)
+				}
+				if !toolState.addedSent {
+					if err := writeToolItemEvent("response.output_item.added", toolState.item); err != nil {
+						return err
+					}
+					toolState.addedSent = true
+				}
+				if evt.Event == "response.output_item.added" {
+					return nil
+				}
+				return nil
+			}
 		}
 	case "response.output_text.delta":
+		if err := flushPendingFunctionCalls(); err != nil {
+			return err
+		}
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
 		state.textStarted = true
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		if err := flushPendingFunctionCalls(); err != nil {
+			return err
+		}
 		if err := markRealReasoningSeen(); err != nil {
 			return err
 		}
+	case "response.function_call_arguments.delta":
+		itemID, _ := evt.Data["item_id"].(string)
+		delta, _ := evt.Data["delta"].(string)
+		if itemID != "" {
+			toolState := ensureToolItemState(itemID)
+			if delta != "" {
+				toolState.arguments.WriteString(delta)
+			}
+		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		if err := flushPendingFunctionCalls(); err != nil {
+			return err
+		}
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}
 	case "response.incomplete":
 		state.terminalSeen = true
+		if err := flushPendingFunctionCalls(); err != nil {
+			return err
+		}
 		healthFlag, _ := evt.Data["health_flag"].(string)
 		message, _ := evt.Data["message"].(string)
 		if healthFlag == "" {

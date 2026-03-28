@@ -159,6 +159,89 @@ func TestLoadProviderFileRejectsInvalidSupportsBooleanValues(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileRejectsInvalidProviderEnabledBooleanValue(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=enabled",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid PROVIDER_ENABLED to fail validation")
+	}
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid PROVIDER_ENABLED, got %T", err)
+	}
+	if err.Error() != "invalid PROVIDER_ENABLED in "+providerEnvPath+": \"enabled\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidReasoningSuffixBooleanValues(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"ENABLE_REASONING_EFFORT_SUFFIX=maybe",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid ENABLE_REASONING_EFFORT_SUFFIX to fail validation")
+	}
+	if err.Error() != "invalid ENABLE_REASONING_EFFORT_SUFFIX in "+providerEnvPath+": \"maybe\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+
+	providerBody = strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"EXPOSE_REASONING_SUFFIX_MODELS=on",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+
+	_, err = loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid EXPOSE_REASONING_SUFFIX_MODELS to fail validation")
+	}
+	if err.Error() != "invalid EXPOSE_REASONING_SUFFIX_MODELS in "+providerEnvPath+": \"on\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidThinkingMappingBooleanValue(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=sometimes",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING to fail validation")
+	}
+	if err.Error() != "invalid MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING in "+providerEnvPath+": \"sometimes\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestLoadProviderFileSupportsFlagsKeepWeakSemantics(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

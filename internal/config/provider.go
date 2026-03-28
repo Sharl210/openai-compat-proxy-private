@@ -26,6 +26,7 @@ type ProviderConfig struct {
 	ModelMap                               map[string]string
 	EnableReasoningEffortSuffix            bool
 	ExposeReasoningSuffixModels            bool
+	MapReasoningSuffixToAnthropicThinking  bool
 	UpstreamFirstByteTimeout               time.Duration
 	UpstreamRetryCount                     int
 	UpstreamRetryDelay                     time.Duration
@@ -117,7 +118,10 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		case "PROVIDER_ID":
 			provider.ID = value
 		case "PROVIDER_ENABLED":
-			provider.Enabled = parseBool(value)
+			provider.Enabled, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "UPSTREAM_BASE_URL":
 			provider.UpstreamBaseURL = value
 		case "UPSTREAM_API_KEY":
@@ -156,9 +160,20 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				}
 			}
 		case "ENABLE_REASONING_EFFORT_SUFFIX":
-			provider.EnableReasoningEffortSuffix = parseBool(value)
+			provider.EnableReasoningEffortSuffix, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "EXPOSE_REASONING_SUFFIX_MODELS":
-			provider.ExposeReasoningSuffixModels = parseBool(value)
+			provider.ExposeReasoningSuffixModels, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING":
+			provider.MapReasoningSuffixToAnthropicThinking, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "UPSTREAM_FIRST_BYTE_TIMEOUT":
 			parsed, err := parseProviderPositiveDuration(value, "UPSTREAM_FIRST_BYTE_TIMEOUT", path)
 			if err != nil {
@@ -272,11 +287,19 @@ func (c Config) DefaultProviderConfig() (ProviderConfig, error) {
 	return ProviderConfig{}, errors.New("default provider not found")
 }
 
-func parseBool(value string) bool {
-	return strings.EqualFold(value, "true") || value == "1"
+func parseProviderSupportsBool(value string, key string, path string) (bool, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(trimmed)
+	if err != nil {
+		return false, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
+	}
+	return parsed, nil
 }
 
-func parseProviderSupportsBool(value string, key string, path string) (bool, error) {
+func parseProviderStrictBool(value string, key string, path string) (bool, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return false, nil

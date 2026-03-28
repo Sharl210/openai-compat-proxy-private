@@ -68,7 +68,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - file
 - OpenAI 侧 input audio
 
-说明：Anthropic 上游目前对 `input_audio` 走**显式拒绝**，不会再静默吞掉。
+说明：`/v1/messages` 兼容入口当前对 `input_audio` 走**显式拒绝**，不会再静默吞掉；这一限制与当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 无关。
 
 ---
 
@@ -208,6 +208,9 @@ anthropic-version: 2023-06-01
 
 缺少这个头会直接返回 `400 invalid_request`。
 
+说明：这是 `/v1/messages` 这个下游兼容端口本身的契约要求。
+无论当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 是 `anthropic`、`responses` 还是 `chat`，这个头都必须带。
+
 ---
 
 ## 鉴权约定
@@ -239,7 +242,7 @@ anthropic-version: 2023-06-01
 | `PROXY_API_KEY` | 根级代理鉴权 key | 是 |
 | `PROVIDERS_DIR` | provider 配置目录 | 是 |
 | `DEFAULT_PROVIDER` | 裸 `/v1/*` 默认 provider | 是 |
-| `ENABLE_LEGACY_V1_ROUTES` | 是否开启裸 `/v1/*` | 是 |
+| `ENABLE_LEGACY_V1_ROUTES` | 是否开启裸 `/v1/*`（必须写成合法布尔值） | 是 |
 | `DOWNSTREAM_NON_STREAM_STRATEGY` | 非流时走本地聚合还是直接请求上游非流 | 是 |
 | `CONNECT_TIMEOUT` / `FIRST_BYTE_TIMEOUT` / `IDLE_TIMEOUT` / `TOTAL_TIMEOUT` | 上游超时控制 | 是 |
 | `LOG_*` | 结构化日志配置 | 否，修改后需重启 |
@@ -251,7 +254,7 @@ anthropic-version: 2023-06-01
 | 字段 | 说明 |
 |---|---|
 | `PROVIDER_ID` | provider 唯一 id |
-| `PROVIDER_ENABLED` | 是否启用 |
+| `PROVIDER_ENABLED` | 是否启用（必须写成合法布尔值） |
 | `UPSTREAM_BASE_URL` | 上游站点根地址 |
 | `UPSTREAM_API_KEY` | 默认上游 key |
 | `UPSTREAM_ENDPOINT_TYPE` | 当前 provider 内部统一使用的上游协议：`responses/chat/anthropic` |
@@ -264,8 +267,9 @@ anthropic-version: 2023-06-01
 | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` | provider 级非流模式覆写 |
 | `SYSTEM_PROMPT_FILES` / `SYSTEM_PROMPT_POSITION` | provider 级系统提示词注入 |
 | `MODEL_MAP_JSON` | 模型映射 |
-| `ENABLE_REASONING_EFFORT_SUFFIX` | 是否启用 `-low/-medium/-high/-xhigh` suffix 解析 |
-| `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名 |
+| `ENABLE_REASONING_EFFORT_SUFFIX` | 是否启用 `-low/-medium/-high/-xhigh` suffix 解析（必须写成合法布尔值） |
+| `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
+| `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
 
 说明：provider 文件里的字段当前都支持热加载。
 
@@ -310,6 +314,8 @@ anthropic-version: 2023-06-01
 - `CACHE_INFO_TIMEZONE`
 - 所有 `LOG_*`
 
+说明：根 `.env` 和 provider `.env` 中的布尔字段现在都要求写成合法布尔值；写成非法值时，配置校验会失败，不会再静默按 `false` 处理。
+
 ---
 
 ## 模型映射与 suffix
@@ -329,6 +335,21 @@ anthropic-version: 2023-06-01
 
 解析成 reasoning effort。
 
+如果某个 provider 还打开了 `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true`，并且该 provider 的 `UPSTREAM_ENDPOINT_TYPE=anthropic`，那么代理会在请求本身没有显式 `thinking` 时，把解析出的 suffix effort 自动映射成 Anthropic 上游 `thinking` 配置。
+当前映射规则：
+
+- 如果目标模型支持自适应思考（当前优先按 `claude-opus-4-6` 识别），则发送：
+  - `thinking: {"type":"adaptive"}`
+  - `output_config.effort` 分别映射为 `low / medium / high / max`
+- 其余模型走手动 `budget_tokens`：
+  - `low` → 约 `max_tokens * 25%`
+  - `medium` → 约 `max_tokens * 40%`
+  - `high` → 约 `max_tokens * 60%`
+  - `xhigh` → 约 `max_tokens * 80%`
+- 手动 budget 还会再做上下限保护，避免预算过小或过大。
+
+这个映射默认关闭，避免改变旧请求语义。
+
 ---
 
 ## Claude / Messages 兼容说明
@@ -336,7 +357,7 @@ anthropic-version: 2023-06-01
 - `cache_control` 当前是**兼容输入**，不是对 Anthropic prompt caching 的真实上游支持
 - Anthropic 上游当前支持 text / image / document / tool_use / tool_result 等主路径
 - 当下游入口使用 `/v1/responses` 时，`function_call_output` 会继续被归一成内部 tool result 语义；即使 provider 内部上游选的是 `chat` 或 `anthropic`，也能继续把工具结果回传给上游完成多轮工具调用
-- Anthropic 上游对 `input_audio` 当前走**显式拒绝**，不会再静默吞掉
+- `/v1/messages` 兼容入口当前对 `input_audio` 走**显式拒绝**，不会再静默吞掉；这一限制与当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 无关
 
 ---
 
@@ -356,3 +377,5 @@ anthropic-version: 2023-06-01
 ## 一个务实建议
 
 如果你的客户端本身对 Responses / Anthropic 的细节实现不稳定，优先先用 `chat/completions` 兼容接口测通；复杂推理强度可以优先通过模型后缀来控，不一定要依赖客户端自己的“思维链开关”。
+
+另外，当前 `/v1/responses` 在跨到 `chat` 或 `anthropic` 上游时，会尽量保留 `previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation` 这些高价值顶层字段到下游响应里；但这仍不等于三套协议已经做到完全保真互转。

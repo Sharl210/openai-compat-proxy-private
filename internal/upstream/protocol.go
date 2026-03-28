@@ -684,6 +684,11 @@ func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	if req.Reasoning != nil && len(req.Reasoning.Raw) > 0 {
 		if thinking, ok := req.Reasoning.Raw["thinking"]; ok {
 			payload["thinking"] = thinking
+			for _, key := range []string{"output_config"} {
+				if value, exists := req.Reasoning.Raw[key]; exists {
+					payload[key] = value
+				}
+			}
 		} else {
 			for k, v := range req.Reasoning.Raw {
 				payload[k] = v

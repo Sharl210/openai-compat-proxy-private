@@ -96,6 +96,9 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 }
 
 func validateHotReloadableRootEnvValues(values map[string]string) error {
+	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
+		return err
+	}
 	if err := validatePositiveDuration(values, "CONNECT_TIMEOUT"); err != nil {
 		return err
 	}

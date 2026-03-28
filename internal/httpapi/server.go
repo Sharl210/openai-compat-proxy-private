@@ -45,6 +45,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/healthz" {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
 	if s.store == nil {
 		errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
 		return
@@ -54,11 +58,6 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
 		return
 	}
-	if r.URL.Path == "/healthz" {
-		s.mux.ServeHTTP(w, r)
-		return
-	}
-
 	if info, err := resolveRouteInfo(r.URL.Path, snapshot.Config); err == nil {
 		provider, err := snapshot.Config.ProviderByID(info.ProviderID)
 		if err != nil {

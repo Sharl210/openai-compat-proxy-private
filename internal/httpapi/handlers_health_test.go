@@ -27,6 +27,9 @@ func TestHealthzReturnsServiceUnavailableWhenStoreNil(t *testing.T) {
 	if errBody == nil {
 		t.Fatalf("expected error object, got %#v", payload)
 	}
+	if got, _ := payload["status"].(string); got != "error" {
+		t.Fatalf("expected error status, got %#v", payload)
+	}
 	if msg, _ := errBody["message"].(string); msg != "runtime config unavailable" {
 		t.Fatalf("unexpected error message: %#v", errBody)
 	}
@@ -41,6 +44,17 @@ func TestHealthzReturnsServiceUnavailableWhenSnapshotNil(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v body=%s", err, rec.Body.String())
+	}
+	errBody, _ := payload["error"].(map[string]any)
+	if errBody == nil {
+		t.Fatalf("expected error object, got %#v", payload)
+	}
+	if msg, _ := errBody["message"].(string); msg != "runtime config unavailable" {
+		t.Fatalf("unexpected error message: %#v", errBody)
 	}
 }
 
@@ -68,7 +82,11 @@ func TestHealthzReturnsServiceUnavailableWhenDefaultProviderMissingUpstreamBaseU
 	if got, _ := payload["status"].(string); got != "error" {
 		t.Fatalf("expected error status, got %#v", payload)
 	}
-	if got, _ := payload["error"].(string); got != "default provider must define UPSTREAM_BASE_URL" {
+	errBody, _ := payload["error"].(map[string]any)
+	if errBody == nil {
+		t.Fatalf("expected error object, got %#v", payload)
+	}
+	if got, _ := errBody["message"].(string); got != "default provider must define UPSTREAM_BASE_URL" {
 		t.Fatalf("unexpected error payload: %#v", payload)
 	}
 }

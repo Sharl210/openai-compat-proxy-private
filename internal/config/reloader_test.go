@@ -189,6 +189,38 @@ func TestRuntimeStoreRefreshAppliesHotReloadableDownstreamNonStreamStrategy(t *t
 	}
 }
 
+func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidEnableLegacyV1RoutesValue(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 10, 0, 111000000, time.UTC)
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 10, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=enabled\n", time.Date(2026, 3, 26, 10, 11, 0, 222000000, time.UTC))
+	if err := store.Refresh(); err == nil {
+		t.Fatalf("expected invalid ENABLE_LEGACY_V1_ROUTES to fail refresh")
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(initialRootMTime) {
+		t.Fatalf("expected root version to remain %q, got %q", formatVersionTime(initialRootMTime), got)
+	}
+	if got := active.Config.EnableLegacyV1Routes; !got {
+		t.Fatalf("expected last good ENABLE_LEGACY_V1_ROUTES value to remain true")
+	}
+}
+
 func TestRuntimeStoreWatcherReloadsAfterProviderFileChange(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

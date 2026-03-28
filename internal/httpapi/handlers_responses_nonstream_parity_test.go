@@ -99,6 +99,40 @@ func TestResponsesNonStreamStrategiesAlignCoreSemantics(t *testing.T) {
 	}
 }
 
+func TestResponsesUpstreamNonStreamRejectsEmptyUpstreamPayload(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithStrategy(upstream.URL, config.DownstreamNonStreamStrategyUpstreamNonStream))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	errMap, _ := payload["error"].(map[string]any)
+	if got, _ := errMap["code"].(string); got != "invalid_upstream_response" {
+		t.Fatalf("expected invalid_upstream_response code, got %#v", payload)
+	}
+}
+
 func performResponsesNonStreamRequest(t *testing.T, upstreamURL string, strategy string) map[string]any {
 	t.Helper()
 
