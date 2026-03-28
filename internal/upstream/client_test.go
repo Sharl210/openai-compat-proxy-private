@@ -638,11 +638,46 @@ func TestStreamUsesAnthropicEndpointAndNormalizesEvents(t *testing.T) {
 	if gotPath != "/messages" {
 		t.Fatalf("expected anthropic endpoint path, got %q", gotPath)
 	}
-	if len(events) < 2 || events[0].Event != "response.output_text.delta" || events[1].Event != "response.completed" {
+	if len(events) < 3 || events[0].Event != "response.created" || events[1].Event != "response.output_text.delta" || events[2].Event != "response.completed" {
 		t.Fatalf("expected normalized response events, got %#v", events)
 	}
-	if got := events[0].Data["delta"]; got != "hello" {
+	if got := events[0].Data["response"].(map[string]any)["id"]; got != "msg_123" {
+		t.Fatalf("expected response.created to keep anthropic message id msg_123, got %#v", got)
+	}
+	if got := events[1].Data["delta"]; got != "hello" {
 		t.Fatalf("expected delta hello, got %#v", got)
+	}
+}
+
+func TestStreamUsesChatEndpointEmitsResponseCreatedOnlyOnce(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"llo\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "Bearer test-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	createdCount := 0
+	for _, evt := range events {
+		if evt.Event == "response.created" {
+			createdCount++
+			if got := evt.Data["response"].(map[string]any)["id"]; got != "chatcmpl_123" {
+				t.Fatalf("expected response.created to keep chat id chatcmpl_123, got %#v", got)
+			}
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("expected exactly one response.created event, got %d events=%#v", createdCount, events)
 	}
 }
 
