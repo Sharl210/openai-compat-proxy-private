@@ -159,6 +159,13 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
 		return nil, model.CanonicalMessage{}, false, err
 	}
+	if itemType, _ := rawMap["type"].(string); itemType == "function_call_output" {
+		msg, ok, err := decodeFunctionCallOutput(rawMap)
+		if err != nil {
+			return nil, model.CanonicalMessage{}, false, err
+		}
+		return cloneMapAny(rawMap), msg, ok, nil
+	}
 	if role, _ := rawMap["role"].(string); role != "" {
 		var msg message
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -236,6 +243,33 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID}, true, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, nil
+}
+
+func decodeFunctionCallOutput(rawMap map[string]any) (model.CanonicalMessage, bool, error) {
+	callID, _ := rawMap["call_id"].(string)
+	if callID == "" {
+		return model.CanonicalMessage{}, false, nil
+	}
+	parts, err := decodeFunctionCallOutputParts(rawMap["output"])
+	if err != nil {
+		return model.CanonicalMessage{}, false, err
+	}
+	return model.CanonicalMessage{Role: "tool", ToolCallID: callID, Parts: parts}, true, nil
+}
+
+func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error) {
+	switch typed := raw.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return []model.CanonicalContentPart{{Type: "text", Text: typed}}, nil
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return nil, err
+		}
+		return []model.CanonicalContentPart{{Type: "text", Text: string(encoded)}}, nil
+	}
 }
 
 func decodeMessageContent(raw json.RawMessage) ([]contentPart, error) {

@@ -98,8 +98,46 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	if got, _ := canon.ResponseInputItems[2]["call_id"].(string); got != "call_123" {
 		t.Fatalf("expected function_call_output call_id to be preserved, got %#v", canon.ResponseInputItems[2])
 	}
-	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
-		t.Fatalf("expected canonical user message to still be decoded, got %#v", canon.Messages)
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected canonical user message plus tool result message, got %#v", canon.Messages)
+	}
+	if canon.Messages[0].Role != "user" {
+		t.Fatalf("expected first canonical message to remain user, got %#v", canon.Messages)
+	}
+	if canon.Messages[1].Role != "tool" || canon.Messages[1].ToolCallID != "call_123" {
+		t.Fatalf("expected function_call_output to also become canonical tool message, got %#v", canon.Messages[1])
+	}
+}
+
+func TestDecodeRequestTurnsFunctionCallOutputIntoCanonicalToolMessage(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"assistant","content":[],"tool_calls":[{"id":"call_123","type":"function","function":{"name":"search_web","arguments":"{\"query\":\"weather\"}"}}]},
+			{"type":"function_call_output","call_id":"call_123","output":"{\"temperature\":26}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected assistant message plus canonical tool result message, got %#v", canon.Messages)
+	}
+	toolMsg := canon.Messages[1]
+	if toolMsg.Role != "tool" {
+		t.Fatalf("expected canonical tool role, got %#v", toolMsg)
+	}
+	if toolMsg.ToolCallID != "call_123" {
+		t.Fatalf("expected canonical tool call id call_123, got %#v", toolMsg)
+	}
+	if len(toolMsg.Parts) != 1 || toolMsg.Parts[0].Type != "text" || toolMsg.Parts[0].Text != `{"temperature":26}` {
+		t.Fatalf("expected canonical tool text output preserved, got %#v", toolMsg)
+	}
+	if len(canon.ResponseInputItems) != 2 {
+		t.Fatalf("expected original response input items preserved too, got %#v", canon.ResponseInputItems)
 	}
 }
 
