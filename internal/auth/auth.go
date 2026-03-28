@@ -67,7 +67,8 @@ func validateProxyAuthValue(r *http.Request, proxyKey string, allowQueryKey bool
 }
 
 func allowQueryProxyKey(r *http.Request) bool {
-	return strings.Contains(r.URL.Path, "/v1/requests/")
+	_ = r
+	return false
 }
 
 func ResolveUpstreamAuthorization(r *http.Request, cfg config.Config) (string, error) {

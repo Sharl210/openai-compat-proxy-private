@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
 	"openai-compat-proxy/internal/auth"
 	"openai-compat-proxy/internal/cacheinfo"
@@ -28,13 +29,40 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
-	mux.HandleFunc("/v1/models", handleModels())
-	mux.HandleFunc("/v1/responses", handleResponses())
-	mux.HandleFunc("/v1/chat/completions", handleChat())
-	mux.HandleFunc("/v1/messages", handleAnthropicMessages())
+	mux.HandleFunc("/v1/models", allowMethods(handleModels(), http.MethodGet))
+	mux.HandleFunc("/v1/responses", allowMethods(handleResponses(), http.MethodPost))
+	mux.HandleFunc("/v1/chat/completions", allowMethods(handleChat(), http.MethodPost))
+	mux.HandleFunc("/v1/messages", allowMethods(handleAnthropicMessages(), http.MethodPost))
 	srv.mux = mux
 	srv.handler = withRequestID(http.HandlerFunc(srv.serveHTTP))
 	return srv
+}
+
+func allowMethods(next http.HandlerFunc, methods ...string) http.HandlerFunc {
+	allowed := make(map[string]struct{}, len(methods))
+	normalized := make([]string, 0, len(methods))
+	for _, method := range methods {
+		method = strings.TrimSpace(method)
+		if method == "" {
+			continue
+		}
+		if _, ok := allowed[method]; ok {
+			continue
+		}
+		allowed[method] = struct{}{}
+		normalized = append(normalized, method)
+	}
+	allowHeader := strings.Join(normalized, ", ")
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := allowed[r.Method]; !ok {
+			if allowHeader != "" {
+				w.Header().Set("Allow", allowHeader)
+			}
+			errorsx.WriteJSON(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +92,6 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
-		setConfigVersionHeaders(w, snapshot, info.ProviderID)
 		ctx := r.Context()
 		if s.CacheInfo != nil {
 			ctx = withCacheInfoManager(ctx, s.CacheInfo)
@@ -75,6 +102,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 			return
 		}
+		setConfigVersionHeaders(w, snapshot, info.ProviderID)
 		s.mux.ServeHTTP(w, r)
 		return
 	}

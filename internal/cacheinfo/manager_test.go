@@ -347,6 +347,78 @@ func TestManager_StartupNormalizesMixedLegacyAndRecentDays(t *testing.T) {
 	}
 }
 
+func TestManager_DuplicateRequestIDIgnoredBeforeEviction(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	m := NewManager(tmp, loc, []string{"openai"}, nil)
+	m.submittedLimit = 2
+
+	usage := Usage{InputTokens: 100, TotalTokens: 100}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := m.stats["openai"]
+	if stats.Today.RequestCount != 1 {
+		t.Fatalf("Today.RequestCount = %d, want 1", stats.Today.RequestCount)
+	}
+}
+
+func TestManager_EvictsOldSubmittedKeysWhenCapacityExceeded(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	m := NewManager(tmp, loc, []string{"openai"}, nil)
+	m.submittedLimit = 2
+
+	usage := Usage{InputTokens: 100, TotalTokens: 100}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-2", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-3", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(m.submitted) != 2 {
+		t.Fatalf("len(submitted) = %d, want 2", len(m.submitted))
+	}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := m.stats["openai"]
+	if stats.Today.RequestCount != 4 {
+		t.Fatalf("Today.RequestCount = %d, want 4 after evicted key is accepted again", stats.Today.RequestCount)
+	}
+}
+
+func TestManager_DuplicateRequestIDScopedByProviderWithBoundedSubmittedSet(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	m := NewManager(tmp, loc, []string{"openai", "claude"}, nil)
+	m.submittedLimit = 4
+
+	usage := Usage{InputTokens: 100, TotalTokens: 100}
+	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-1", "claude", &usage); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := m.stats["openai"].Today.RequestCount; got != 1 {
+		t.Fatalf("openai Today.RequestCount = %d, want 1", got)
+	}
+	if got := m.stats["claude"].Today.RequestCount; got != 1 {
+		t.Fatalf("claude Today.RequestCount = %d, want 1", got)
+	}
+}
+
 func TestManager_DuplicateRequestID(t *testing.T) {
 	tmp := t.TempDir()
 	loc := time.FixedZone("CST", 8*3600)

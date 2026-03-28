@@ -34,12 +34,16 @@ type Manager struct {
 	mu              sync.RWMutex
 	stats           map[string]*ProviderStats
 	submitted       map[string]bool
+	submittedOrder  []string
+	submittedLimit  int
 	enabledProvider map[string]struct{}
 
 	ticker *time.Ticker
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 }
+
+const defaultSubmittedLimit = 4096
 
 func NewManager(providersDir string, location *time.Location, enabledProviders []string, clock Clock) *Manager {
 	_ = EnsureCacheInfoDir(providersDir)
@@ -54,6 +58,7 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 		clock:           clock,
 		stats:           make(map[string]*ProviderStats),
 		submitted:       make(map[string]bool),
+		submittedLimit:  defaultSubmittedLimit,
 		enabledProvider: make(map[string]struct{}),
 		stopCh:          make(chan struct{}),
 	}
@@ -145,7 +150,21 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	stats.UpdatedAt = now
 
 	m.submitted[submissionKey] = true
+	m.submittedOrder = append(m.submittedOrder, submissionKey)
+	m.pruneSubmittedLocked()
 	return nil
+}
+
+func (m *Manager) pruneSubmittedLocked() {
+	limit := m.submittedLimit
+	if limit <= 0 {
+		limit = defaultSubmittedLimit
+	}
+	for len(m.submittedOrder) > limit {
+		oldest := m.submittedOrder[0]
+		m.submittedOrder = m.submittedOrder[1:]
+		delete(m.submitted, oldest)
+	}
 }
 
 func (m *Manager) checkCrossDayAndReset(providerID string) {

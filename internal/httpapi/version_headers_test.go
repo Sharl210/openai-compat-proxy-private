@@ -281,6 +281,43 @@ func TestProviderScopedResponsesRequestExposesVersionAndStatusHeadersTogether(t 
 	}
 }
 
+func TestUnauthorizedRequestDoesNotExposeVersionHeaders(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	rootMTime := time.Date(2026, 3, 26, 10, 30, 0, 123000000, time.UTC)
+	providerMTime := time.Date(2026, 3, 26, 10, 31, 0, 456000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROXY_API_KEY=proxy-secret\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nTOTAL_TIMEOUT=1h\n", rootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.com/v1\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", providerMTime)
+
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	server := NewServerWithStore(store, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthorized request, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH"} {
+		if got := rec.Header().Get(header); got != "" {
+			t.Fatalf("expected %s to be omitted on unauthorized response, got %q", header, got)
+		}
+	}
+}
+
 func performResponsesRequest(t *testing.T, server http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))

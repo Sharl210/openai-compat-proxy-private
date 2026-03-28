@@ -10,13 +10,17 @@ import (
 type responsesHistoryStore struct {
 	mu      sync.RWMutex
 	entries map[string]responsesConversationSnapshot
+	order   []string
+	maxSize int
 }
 
 type responsesConversationSnapshot struct {
 	Messages []model.CanonicalMessage
 }
 
-var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}}
+const defaultResponsesHistoryMaxSize = 512
+
+var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: defaultResponsesHistoryMaxSize}
 
 func responsesHistoryKey(providerID, responseID string) string {
 	return providerID + "::" + responseID
@@ -44,8 +48,21 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 	if s == nil || providerID == "" || responseID == "" || len(messages) == 0 {
 		return
 	}
+	if s.maxSize <= 0 {
+		s.maxSize = defaultResponsesHistoryMaxSize
+	}
+	key := responsesHistoryKey(providerID, responseID)
 	s.mu.Lock()
-	s.entries[responsesHistoryKey(providerID, responseID)] = responsesConversationSnapshot{Messages: cloneCanonicalMessages(messages)}
+	if _, exists := s.entries[key]; exists {
+		s.removeKeyLocked(key)
+	}
+	s.entries[key] = responsesConversationSnapshot{Messages: cloneCanonicalMessages(messages)}
+	s.order = append(s.order, key)
+	for len(s.order) > s.maxSize {
+		oldest := s.order[0]
+		s.order = s.order[1:]
+		delete(s.entries, oldest)
+	}
 	s.mu.Unlock()
 }
 
@@ -60,6 +77,16 @@ func (s *responsesHistoryStore) Load(providerID, responseID string) []model.Cano
 		return nil
 	}
 	return cloneCanonicalMessages(stored.Messages)
+}
+
+func (s *responsesHistoryStore) removeKeyLocked(target string) {
+	for idx, key := range s.order {
+		if key != target {
+			continue
+		}
+		s.order = append(s.order[:idx], s.order[idx+1:]...)
+		return
+	}
 }
 
 func previousResponseIDFromItems(items []map[string]any) string {
