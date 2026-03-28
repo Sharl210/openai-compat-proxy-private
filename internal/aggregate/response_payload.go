@@ -7,6 +7,12 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 		return Result{}, fmt.Errorf("empty upstream response payload")
 	}
 	result := Result{}
+	if finishReason, _ := payload["finish_reason"].(string); finishReason != "" {
+		result.FinishReason = finishReason
+	}
+	if stopReason, _ := payload["stop_reason"].(string); stopReason != "" {
+		result.FinishReason = stopReason
+	}
 	if usage, _ := payload["usage"].(map[string]any); len(usage) > 0 {
 		result.Usage = cloneMap(usage)
 	}

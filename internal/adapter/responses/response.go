@@ -41,13 +41,28 @@ func BuildResponse(result aggregate.Result) map[string]any {
 	}
 
 	return map[string]any{
-		"id":        buildResponseID(result),
-		"object":    "response",
-		"status":    "completed",
-		"output":    output,
-		"reasoning": result.Reasoning,
-		"usage":     cloneMap(result.Usage),
+		"id":                 buildResponseID(result),
+		"object":             "response",
+		"status":             responsesStatus(result),
+		"output":             output,
+		"reasoning":          result.Reasoning,
+		"usage":              cloneMap(result.Usage),
+		"incomplete_details": responsesIncompleteDetails(result),
 	}
+}
+
+func responsesStatus(result aggregate.Result) string {
+	if reason := result.FinishReason; reason != "" && reason != "stop" && reason != "tool_calls" && reason != "tool_use" && reason != "end_turn" {
+		return "incomplete"
+	}
+	return "completed"
+}
+
+func responsesIncompleteDetails(result aggregate.Result) any {
+	if responsesStatus(result) != "incomplete" {
+		return nil
+	}
+	return map[string]any{"reason": result.FinishReason}
 }
 
 func cloneOutputItems(input []map[string]any) []map[string]any {

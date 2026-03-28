@@ -266,7 +266,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		}
 		if finishReason := stringValue(choice["finish_reason"]); finishReason != "" && !state.completed {
 			state.completed = true
-			data := map[string]any{}
+			data := map[string]any{"finish_reason": finishReason}
 			if len(state.usage) > 0 {
 				data["usage"] = cloneMap(state.usage)
 			}
@@ -363,7 +363,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 		delta, _ := payload["delta"].(map[string]any)
 		if stopReason := stringValue(delta["stop_reason"]); stopReason != "" && !state.completed {
 			state.completed = true
-			events = append(events, Event{Event: "response.completed", Data: map[string]any{"usage": cloneMap(state.usage)}})
+			events = append(events, Event{Event: "response.completed", Data: map[string]any{"usage": cloneMap(state.usage), "stop_reason": stopReason}})
 		}
 	case "message_stop":
 		if !state.completed {
@@ -394,6 +394,9 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 	output := make([]any, 0, 2)
 	messageItem := map[string]any{"id": "msg_proxy", "type": "message", "status": "completed", "role": "assistant"}
 	content := normalizeChatMessageContent(message["content"])
+	if refusal := stringValue(message["refusal"]); refusal != "" {
+		content = append(content, map[string]any{"type": "refusal", "refusal": refusal})
+	}
 	if len(content) > 0 {
 		messageItem["content"] = content
 		output = append(output, messageItem)
@@ -410,6 +413,9 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 	}
 	if reasoning := stringValue(message["reasoning_content"]); reasoning != "" {
 		result["reasoning"] = map[string]any{"summary": reasoning}
+	}
+	if finishReason := stringValue(choice["finish_reason"]); finishReason != "" {
+		result["finish_reason"] = finishReason
 	}
 	result["output"] = output
 	return result
@@ -455,6 +461,9 @@ func normalizeAnthropicPayload(payload map[string]any) map[string]any {
 	}
 	if len(messageContent) > 0 {
 		output = append([]any{map[string]any{"id": "msg_proxy", "type": "message", "status": "completed", "role": "assistant", "content": messageContent}}, output...)
+	}
+	if stopReason := stringValue(payload["stop_reason"]); stopReason != "" {
+		result["stop_reason"] = stopReason
 	}
 	result["output"] = output
 	return result
@@ -658,6 +667,9 @@ func buildChatContentParts(parts []model.CanonicalContentPart) []any {
 }
 
 func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
+	if err := validateAnthropicRequest(req); err != nil {
+		return nil, err
+	}
 	payload := map[string]any{"model": req.Model, "stream": req.Stream}
 	if req.MaxOutputTokens != nil {
 		payload["max_tokens"] = *req.MaxOutputTokens
@@ -688,6 +700,17 @@ func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	}
 	payload["messages"] = buildAnthropicMessages(req)
 	return json.Marshal(payload)
+}
+
+func validateAnthropicRequest(req model.CanonicalRequest) error {
+	for _, msg := range req.Messages {
+		for _, part := range msg.Parts {
+			if part.Type == "input_audio" {
+				return fmt.Errorf("input_audio is not supported for anthropic upstream")
+			}
+		}
+	}
+	return nil
 }
 
 func buildAnthropicMessages(req model.CanonicalRequest) []any {

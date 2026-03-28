@@ -17,6 +17,7 @@ type ToolCall struct {
 type Result struct {
 	Text                    string
 	Refusal                 string
+	FinishReason            string
 	ToolCalls               []ToolCall
 	Reasoning               map[string]any
 	Usage                   map[string]any
@@ -46,6 +47,7 @@ type Collector struct {
 	outputItems             []map[string]any
 	unsupportedContentTypes []string
 	refusal                 string
+	finishReason            string
 	completed               bool
 	terminalFailure         *TerminalFailureError
 }
@@ -133,6 +135,12 @@ func (c *Collector) Accept(evt upstream.Event) {
 			call.Arguments = arguments
 		}
 	case "response.completed", "response.done":
+		if finishReason, _ := evt.Data["finish_reason"].(string); finishReason != "" {
+			c.finishReason = finishReason
+		}
+		if stopReason, _ := evt.Data["stop_reason"].(string); stopReason != "" {
+			c.finishReason = stopReason
+		}
 		if usage := usageFromEventData(evt.Data); len(usage) > 0 {
 			c.reasoning["usage"] = usage
 		}
@@ -169,6 +177,7 @@ func (c *Collector) Result() (Result, error) {
 
 	result := Result{Text: c.text.String()}
 	result.Refusal = c.refusal
+	result.FinishReason = c.finishReason
 	for _, id := range c.order {
 		result.ToolCalls = append(result.ToolCalls, *c.toolCalls[id])
 	}

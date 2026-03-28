@@ -72,3 +72,10 @@ func TestBuildResponseIncludesThinkingBlockBeforeText(t *testing.T) {
 		t.Fatalf("expected second content block text, got %#v", content)
 	}
 }
+
+func TestBuildResponsePreservesExplicitStopReason(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{FinishReason: "max_tokens"}, "req_456", "claude-sonnet-4-5")
+	if got, _ := resp["stop_reason"].(string); got != "max_tokens" {
+		t.Fatalf("expected stop_reason max_tokens, got %#v", resp["stop_reason"])
+	}
+}

@@ -49,3 +49,11 @@ func TestBuildResponseUsesNullContentForToolCallTurns(t *testing.T) {
 		t.Fatalf("expected finish_reason tool_calls, got %#v", choices[0]["finish_reason"])
 	}
 }
+
+func TestBuildResponsePreservesExplicitFinishReason(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{FinishReason: "length"})
+	choices, _ := resp["choices"].([]map[string]any)
+	if got, _ := choices[0]["finish_reason"].(string); got != "length" {
+		t.Fatalf("expected finish_reason length, got %#v", choices[0]["finish_reason"])
+	}
+}

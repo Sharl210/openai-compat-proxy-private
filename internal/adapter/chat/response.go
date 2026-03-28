@@ -35,10 +35,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		}
 		message["tool_calls"] = toolCalls
 	}
-	finishReason := "stop"
-	if len(result.ToolCalls) > 0 {
-		finishReason = "tool_calls"
-	}
+	finishReason := chatFinishReason(result)
 
 	return map[string]any{
 		"object": "chat.completion",
@@ -49,6 +46,23 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		}},
 		"usage": chatUsage(result.Usage),
 	}
+}
+
+func chatFinishReason(result aggregate.Result) string {
+	if result.FinishReason != "" {
+		switch result.FinishReason {
+		case "tool_use":
+			return "tool_calls"
+		case "max_tokens":
+			return "length"
+		default:
+			return result.FinishReason
+		}
+	}
+	if len(result.ToolCalls) > 0 {
+		return "tool_calls"
+	}
+	return "stop"
 }
 
 func reasoningContentValue(reasoning map[string]any) string {

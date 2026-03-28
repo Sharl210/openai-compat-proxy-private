@@ -40,10 +40,7 @@ func BuildResponse(result aggregate.Result, requestID string, modelName string) 
 			"text": result.Text,
 		})
 	}
-	stopReason := "end_turn"
-	if len(result.ToolCalls) > 0 {
-		stopReason = "tool_use"
-	}
+	stopReason := anthropicStopReason(result)
 	return map[string]any{
 		"id":            requestID,
 		"type":          "message",
@@ -54,6 +51,23 @@ func BuildResponse(result aggregate.Result, requestID string, modelName string) 
 		"stop_sequence": nil,
 		"usage":         mapUsage(result.Usage),
 	}
+}
+
+func anthropicStopReason(result aggregate.Result) string {
+	if result.FinishReason != "" {
+		switch result.FinishReason {
+		case "tool_calls":
+			return "tool_use"
+		case "length":
+			return "max_tokens"
+		default:
+			return result.FinishReason
+		}
+	}
+	if len(result.ToolCalls) > 0 {
+		return "tool_use"
+	}
+	return "end_turn"
 }
 
 func reasoningContentValue(reasoning map[string]any) string {

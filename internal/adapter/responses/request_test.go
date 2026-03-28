@@ -187,6 +187,28 @@ func TestDecodeRequestAcceptsResponsesInputAudioContent(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesInputImageStructuredFields(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[{"role":"user","content":[{"type":"input_image","image_url":{"url":"https://example.com/image.png","detail":"high","file_id":"file_123"}}]}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 1 {
+		t.Fatalf("expected one input_image part, got %#v", canon.Messages)
+	}
+	imageRaw, _ := canon.Messages[0].Parts[0].Raw["image_url"].(map[string]any)
+	if got := imageRaw["detail"]; got != "high" {
+		t.Fatalf("expected detail preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+	if got := imageRaw["file_id"]; got != "file_123" {
+		t.Fatalf("expected file_id preserved, got %#v", canon.Messages[0].Parts[0])
+	}
+}
+
 func TestDecodeRequestPreservesPreviousResponseIDMetadataParallelToolCallsTruncationAndText(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

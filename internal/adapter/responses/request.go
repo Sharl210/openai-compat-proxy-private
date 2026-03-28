@@ -51,7 +51,7 @@ type toolCall struct {
 type contentPart struct {
 	Type       string          `json:"type"`
 	Text       string          `json:"text"`
-	ImageURL   string          `json:"image_url"`
+	ImageURL   json.RawMessage `json:"image_url"`
 	InputAudio json.RawMessage `json:"input_audio"`
 	InputFile  json.RawMessage `json:"input_file"`
 }
@@ -187,8 +187,12 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 				}
 				normalizedContent = append(normalizedContent, map[string]any{"type": normalizedType, "text": part.Text})
 			case "input_image", "image_url":
-				parts = append(parts, model.CanonicalContentPart{Type: "input_image", ImageURL: part.ImageURL})
-				normalizedContent = append(normalizedContent, map[string]any{"type": "input_image", "image_url": part.ImageURL})
+				imagePart, normalizedImage, err := decodeResponsesInputImage(part.ImageURL)
+				if err != nil {
+					return nil, model.CanonicalMessage{}, false, err
+				}
+				parts = append(parts, imagePart)
+				normalizedContent = append(normalizedContent, map[string]any{"type": "input_image", "image_url": normalizedImage})
 			case "input_file":
 				var rawFile map[string]any
 				if err := json.Unmarshal(part.InputFile, &rawFile); err != nil {
@@ -250,6 +254,19 @@ func decodeMessageContent(raw json.RawMessage) ([]contentPart, error) {
 		return nil, err
 	}
 	return parts, nil
+}
+
+func decodeResponsesInputImage(raw json.RawMessage) (model.CanonicalContentPart, any, error) {
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return model.CanonicalContentPart{Type: "input_image", ImageURL: asString}, asString, nil
+	}
+	var asMap map[string]any
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		return model.CanonicalContentPart{}, nil, err
+	}
+	url, _ := asMap["url"].(string)
+	return model.CanonicalContentPart{Type: "input_image", ImageURL: url, Raw: map[string]any{"image_url": cloneMapAny(asMap)}}, cloneMapAny(asMap), nil
 }
 
 func (ri *requestInput) UnmarshalJSON(data []byte) error {

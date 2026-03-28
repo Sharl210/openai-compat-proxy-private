@@ -595,6 +595,23 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicRequestBodyRejectsInputAudio(t *testing.T) {
+	_, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "input_audio",
+				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "mp3"}},
+			}},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic)
+	if err == nil {
+		t.Fatalf("expected anthropic request builder to reject input_audio")
+	}
+}
+
 func TestStreamUsesAnthropicEndpointAndNormalizesEvents(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -657,10 +657,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				return err
 			}
 		}
-		stopReason := "end_turn"
-		if state.stopReason != "" {
-			stopReason = state.stopReason
-		}
+		stopReason := anthropicStreamStopReason(state.stopReason, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		usage := anthropicUsageFromEvent(evt.Data)
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
@@ -820,6 +817,16 @@ func anthropicUsageFromEvent(data map[string]any) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func anthropicStreamStopReason(current string, data map[string]any) string {
+	if stopReason, _ := data["stop_reason"].(string); stopReason != "" {
+		return stopReason
+	}
+	if current != "" {
+		return current
+	}
+	return "end_turn"
 }
 
 func effectiveAnthropicStreamingInputTokens(usage map[string]any) any {
@@ -1008,6 +1015,16 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 	return nil
 }
 
+func chatStreamFinishReason(state *chatStreamState, data map[string]any) string {
+	if finishReason, _ := data["finish_reason"].(string); finishReason != "" {
+		return finishReason
+	}
+	if len(state.toolSent) > 0 {
+		return "tool_calls"
+	}
+	return "stop"
+}
+
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder usageRecorderFunc) error {
 	ensureRoleSent := func() error {
 		if state.roleSent {
@@ -1105,10 +1122,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
-		finishReason := "stop"
-		if len(state.toolSent) > 0 {
-			finishReason = "tool_calls"
-		}
+		finishReason := chatStreamFinishReason(state, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		cachedTokens := nestedCachedTokens(rawUsage)
 		logging.Event("upstream_stream_usage_observed", map[string]any{
