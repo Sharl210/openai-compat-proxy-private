@@ -59,7 +59,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - usage 归一化映射与透传
 - provider prompt 注入
 - model map + reasoning suffix
-- 状态查询与流式失败终态补发
+- 流式失败终态补发
 
 ### 5. 多模态支持（当前已接通的主路径）
 

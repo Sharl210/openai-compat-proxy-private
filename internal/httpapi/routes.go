@@ -20,8 +20,6 @@ type routeContextKey string
 
 const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
-const requestStatusStoreKey routeContextKey = "request-status-store"
-const requestStatusIDKey routeContextKey = "request-status-id"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 
 func withCacheInfoManager(ctx context.Context, manager *cacheinfo.Manager) context.Context {
@@ -88,15 +86,6 @@ func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool)
 	snapshot, ok := r.Context().Value(runtimeSnapshotKey).(*config.RuntimeSnapshot)
 	return snapshot, ok
 }
-
-// request status store 已移除，这些函数保留占位以避免调用方编译错误
-func withRequestStatusStore(ctx context.Context, _ any) context.Context { return ctx }
-
-func requestStatusStoreFromRequest(_ *http.Request) (any, bool) { return nil, false }
-
-func withRequestStatusID(ctx context.Context, _ string) context.Context { return ctx }
-
-func requestStatusIDFromRequest(_ *http.Request) (string, bool) { return "", false }
 
 func providerConfigForRequest(r *http.Request) config.Config {
 	snapshot, ok := runtimeSnapshotFromRequest(r)
