@@ -137,10 +137,6 @@ func TestModelsUpstreamHTTPErrorMarksFailedStatus(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected upstream status 502, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.HealthFlag != "upstream_error" || status.ErrorCode != "upstream_error" {
-		t.Fatalf("expected upstream_error failed status, got %#v", status)
-	}
 }
 
 func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
@@ -188,13 +184,6 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 	}
 	if _, exists := entry["owned_by"]; exists {
 		t.Fatalf("expected synthetic fallback entry without upstream-only fields, got %#v", entry)
-	}
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "completed" || status.HealthFlag != "health" {
-		t.Fatalf("expected completed status for fallback models response, got %#v", status)
-	}
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
-		t.Fatalf("expected fallback models response health flag health, got %q", got)
 	}
 }
 

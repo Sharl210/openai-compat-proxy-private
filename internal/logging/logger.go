@@ -38,7 +38,7 @@ func New(cfg config.Config, stdout io.Writer) (*Logger, func() error, error) {
 	if path == "" {
 		path = ".proxy.requests.jsonl"
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -120,7 +120,7 @@ func (l *Logger) rotateIfNeeded(nextWrite int64) error {
 	if err := os.Rename(l.path, rotatedPath); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		l.file = current
 		return err
@@ -176,7 +176,7 @@ func redactAttrs(attrs map[string]any, includeBodies bool) map[string]any {
 			clean[k] = "[REDACTED]"
 		case strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey"):
 			clean[k] = "[REDACTED]"
-		case strings.Contains(lower, "body") && lower == "body" && !includeBodies:
+		case lower == "body" && !includeBodies:
 			clean[k] = "[REDACTED]"
 		default:
 			clean[k] = normalizeAttrValue(v)

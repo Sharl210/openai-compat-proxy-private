@@ -27,6 +27,10 @@ func TestChatStreamRecordsUsageToCacheInfoWithoutIncludeUsage(t *testing.T) {
 
 	providersDir := t.TempDir()
 	manager := cacheinfo.NewManager(providersDir, time.UTC, []string{"openai"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+	defer manager.Stop()
 	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
@@ -49,6 +53,8 @@ func TestChatStreamRecordsUsageToCacheInfoWithoutIncludeUsage(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
+	cancel()
+	manager.Stop()
 
 	stats, err := cacheinfo.LoadProviderStats(providersDir, "openai")
 	if err != nil {
@@ -117,6 +123,9 @@ func TestCacheInfoUsageFromMapSupportsChatUsageShape(t *testing.T) {
 func TestCacheInfoUsageRecorderPersistsMappedChatUsageShape(t *testing.T) {
 	providersDir := t.TempDir()
 	manager := cacheinfo.NewManager(providersDir, time.UTC, []string{"openai"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(withCacheInfoManager(context.Background(), manager))
 	recorder := cacheInfoUsageRecorder(req, "req-1", "openai")
 	if recorder == nil {
@@ -132,6 +141,8 @@ func TestCacheInfoUsageRecorderPersistsMappedChatUsageShape(t *testing.T) {
 		},
 	})
 
+	cancel()
+	manager.Stop()
 	stats, err := cacheinfo.LoadProviderStats(providersDir, "openai")
 	if err != nil {
 		t.Fatalf("LoadProviderStats: %v", err)

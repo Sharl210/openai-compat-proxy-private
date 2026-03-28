@@ -40,12 +40,8 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	if legacyRec.Code != http.StatusOK {
 		t.Fatalf("expected default legacy route to accept root key, got %d body=%s", legacyRec.Code, legacyRec.Body.String())
 	}
-	legacyStatusURL := legacyRec.Header().Get("X-STATUS-CHECK-URL")
-	if strings.Contains(legacyStatusURL, "provider-secret") || strings.Contains(legacyStatusURL, "root-secret") {
-		t.Fatalf("expected legacy status URL to hide proxy keys, got %q", legacyStatusURL)
-	}
-	if legacyStatusURL != "http://example.com/openai/v1/requests/"+legacyRec.Header().Get("X-Request-Id") {
-		t.Fatalf("expected legacy status URL to use provider-scoped path without token, got %q", legacyStatusURL)
+	if got := legacyRec.Header().Get("X-STATUS-CHECK-URL"); got != "" {
+		t.Fatalf("expected no X-STATUS-CHECK-URL header on legacy route, got %q", got)
 	}
 	requestID := legacyRec.Header().Get("X-Request-Id")
 
@@ -57,12 +53,8 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	if providerRec.Code != http.StatusOK {
 		t.Fatalf("expected provider route to accept override key, got %d body=%s", providerRec.Code, providerRec.Body.String())
 	}
-	providerStatusURL := providerRec.Header().Get("X-STATUS-CHECK-URL")
-	if strings.Contains(providerStatusURL, "provider-secret") || strings.Contains(providerStatusURL, "root-secret") {
-		t.Fatalf("expected provider status URL to hide proxy keys, got %q", providerStatusURL)
-	}
-	if providerStatusURL != "http://example.com/openai/v1/requests/"+providerRec.Header().Get("X-Request-Id") {
-		t.Fatalf("expected provider status URL to omit token and key query, got %q", providerStatusURL)
+	if got := providerRec.Header().Get("X-STATUS-CHECK-URL"); got != "" {
+		t.Fatalf("expected no X-STATUS-CHECK-URL header on provider route, got %q", got)
 	}
 
 	providerRootReq := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
@@ -82,27 +74,7 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 		t.Fatalf("expected provider route to reject query key auth, got %d body=%s", providerQueryRec.Code, providerQueryRec.Body.String())
 	}
 
-	statusRootReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=root-secret", nil)
-	statusRootRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRootRec, statusRootReq)
-	if statusRootRec.Code != http.StatusOK {
-		t.Fatalf("expected provider-scoped status route to ignore query key and stay public, got %d body=%s", statusRootRec.Code, statusRootRec.Body.String())
-	}
-
-	statusProviderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	statusProviderRec := httptest.NewRecorder()
-	server.ServeHTTP(statusProviderRec, statusProviderReq)
-	if statusProviderRec.Code != http.StatusOK {
-		t.Fatalf("expected default provider status route to allow unauthenticated lookup, got %d body=%s", statusProviderRec.Code, statusProviderRec.Body.String())
-	}
-
-	statusHeaderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	statusHeaderReq.Header.Set("Authorization", "Bearer provider-secret")
-	statusHeaderRec := httptest.NewRecorder()
-	server.ServeHTTP(statusHeaderRec, statusHeaderReq)
-	if statusHeaderRec.Code != http.StatusOK {
-		t.Fatalf("expected default provider status route to stay accessible even with auth header present, got %d body=%s", statusHeaderRec.Code, statusHeaderRec.Body.String())
-	}
+	_ = requestID
 }
 
 func TestProviderScopedProxyAPIKeyOverrideEmptyAllowsAuthorizationPassthrough(t *testing.T) {
@@ -171,16 +143,8 @@ func TestProviderScopedProxyAPIKeyOverrideEmptyDisablesAuth(t *testing.T) {
 	if providerRec.Code != http.StatusOK {
 		t.Fatalf("expected empty override to disable auth for provider route, got %d body=%s", providerRec.Code, providerRec.Body.String())
 	}
-	requestID := providerRec.Header().Get("X-Request-Id")
-	if got := providerRec.Header().Get("X-STATUS-CHECK-URL"); strings.Contains(got, "?key=") {
-		t.Fatalf("expected empty override status URL to omit key, got %q", got)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected empty override status route to require no auth, got %d body=%s", statusRec.Code, statusRec.Body.String())
+	if got := providerRec.Header().Get("X-STATUS-CHECK-URL"); got != "" {
+		t.Fatalf("expected no X-STATUS-CHECK-URL when override is empty, got %q", got)
 	}
 }
 

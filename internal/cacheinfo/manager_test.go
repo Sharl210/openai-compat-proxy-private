@@ -406,7 +406,10 @@ func TestManager_ProviderRenameCreatesNewFile(t *testing.T) {
 	// 先用旧名字记录
 	m := NewManager(tmp, loc, []string{"old-name"}, nil)
 	usage := Usage{InputTokens: 100, TotalTokens: 100}
-	m.RecordFinalUsage("req-1", "old-name", &usage)
+	if err := m.RecordFinalUsage("req-1", "old-name", &usage); err != nil {
+		t.Fatalf("RecordFinalUsage old-name error: %v", err)
+	}
+	m.flushAll()
 
 	// 文件应该存在
 	if _, err := os.Stat(expectedCacheInfoJSONPath(tmp, "old-name")); os.IsNotExist(err) {
@@ -415,7 +418,10 @@ func TestManager_ProviderRenameCreatesNewFile(t *testing.T) {
 
 	// 创建新 manager，provider 改名
 	m2 := NewManager(tmp, loc, []string{"new-name"}, nil)
-	m2.RecordFinalUsage("req-2", "new-name", &usage)
+	if err := m2.RecordFinalUsage("req-2", "new-name", &usage); err != nil {
+		t.Fatalf("RecordFinalUsage new-name error: %v", err)
+	}
+	m2.flushAll()
 
 	// 新文件应该存在
 	if _, err := os.Stat(expectedCacheInfoJSONPath(tmp, "new-name")); os.IsNotExist(err) {
@@ -436,6 +442,7 @@ func TestManager_FlushWritesFile(t *testing.T) {
 	if err := m.RecordFinalUsage("req-1", "openai", &usage); err != nil {
 		t.Fatal(err)
 	}
+	m.flushAll()
 
 	// 检查文件是否写入
 	jsonPath := expectedCacheInfoJSONPath(tmp, "openai")

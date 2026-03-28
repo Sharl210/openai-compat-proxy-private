@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,7 +29,7 @@ func mustStatusRequestPathFromHeader(t *testing.T, statusURL string) string {
 	return parsed.RequestURI()
 }
 
-func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *testing.T) {
+func TestResponsesRequestSetsRequestIDOnSuccess(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
@@ -63,77 +62,7 @@ func TestResponsesRequestSetsProviderScopedStatusHeadersAndStatusEndpoint(t *tes
 	if requestID == "" {
 		t.Fatalf("expected X-Request-Id header")
 	}
-	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
-	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
-		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
-	}
-	if strings.Contains(statusURL, "proxy-secret") {
-		t.Fatalf("expected status URL to hide real proxy key, got %q", statusURL)
-	}
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
-		t.Fatalf("expected health flag health, got %q", got)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	if nextStatusURL := statusRec.Header().Get("X-STATUS-CHECK-URL"); nextStatusURL != statusURL {
-		t.Fatalf("expected status response to keep same unauthenticated status URL, got %q", nextStatusURL)
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" || status.HealthFlag != "health" {
-		t.Fatalf("unexpected status payload: %#v", status)
-	}
-
-	repeatedStatusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
-	repeatedStatusRec := httptest.NewRecorder()
-	server.ServeHTTP(repeatedStatusRec, repeatedStatusReq)
-	if repeatedStatusRec.Code != http.StatusOK {
-		t.Fatalf("expected repeated unauthenticated lookup to stay 200, got %d body=%s", repeatedStatusRec.Code, repeatedStatusRec.Body.String())
-	}
-
-	wrongProviderReq := httptest.NewRequest(http.MethodGet, "/other/v1/requests/"+requestID, nil)
-	wrongProviderRec := httptest.NewRecorder()
-	server.ServeHTTP(wrongProviderRec, wrongProviderReq)
-	if wrongProviderRec.Code != http.StatusNotFound {
-		t.Fatalf("expected wrong provider scoped status lookup to 404, got %d body=%s", wrongProviderRec.Code, wrongProviderRec.Body.String())
-	}
-
-	rawKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID+"?key=proxy-secret", nil)
-	rawKeyRec := httptest.NewRecorder()
-	server.ServeHTTP(rawKeyRec, rawKeyReq)
-	if rawKeyRec.Code != http.StatusOK {
-		t.Fatalf("expected status lookup with ignored raw key query to stay 200, got %d body=%s", rawKeyRec.Code, rawKeyRec.Body.String())
-	}
-
-	missingKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	missingKeyRec := httptest.NewRecorder()
-	server.ServeHTTP(missingKeyRec, missingKeyReq)
-	if missingKeyRec.Code != http.StatusOK {
-		t.Fatalf("expected missing auth status lookup to 200, got %d body=%s", missingKeyRec.Code, missingKeyRec.Body.String())
-	}
-
-	authHeaderReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	authHeaderReq.Header.Set("Authorization", "Bearer definitely-not-needed")
-	authHeaderRec := httptest.NewRecorder()
-	server.ServeHTTP(authHeaderRec, authHeaderReq)
-	if authHeaderRec.Code != http.StatusOK {
-		t.Fatalf("expected authorization header to be ignored for status lookup, got %d body=%s", authHeaderRec.Code, authHeaderRec.Body.String())
-	}
-
-	xAPIKeyReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	xAPIKeyReq.Header.Set("X-API-Key", "also-not-needed")
-	xAPIKeyRec := httptest.NewRecorder()
-	server.ServeHTTP(xAPIKeyRec, xAPIKeyReq)
-	if xAPIKeyRec.Code != http.StatusOK {
-		t.Fatalf("expected X-API-Key to be ignored for status lookup, got %d body=%s", xAPIKeyRec.Code, xAPIKeyRec.Body.String())
-	}
+	_ = requestID
 }
 
 func TestResponsesStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T) {
@@ -167,37 +96,10 @@ func TestResponsesStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	requestID := rec.Header().Get("X-Request-Id")
-	if requestID == "" {
-		t.Fatalf("expected X-Request-Id header")
-	}
-	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
-	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
-		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
-	}
-	if strings.Contains(statusURL, "proxy-secret") {
-		t.Fatalf("expected status URL to hide real proxy key, got %q", statusURL)
-	}
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "streaming" {
-		t.Fatalf("expected health flag streaming for active stream response, got %q", got)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" || status.HealthFlag != "health" {
-		t.Fatalf("unexpected status payload: %#v", status)
-	}
+	_ = rec.Header().Get("X-Request-Id")
 }
 
-func TestChatRequestSetsStatusHeadersOnSuccessfulNonStream(t *testing.T) {
+func TestChatRequestSetsRequestIDOnSuccessfulNonStream(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -233,33 +135,15 @@ func TestChatRequestSetsStatusHeadersOnSuccessfulNonStream(t *testing.T) {
 	if requestID == "" {
 		t.Fatalf("expected X-Request-Id header")
 	}
-	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
-	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
-		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
+	if got := rec.Header().Get("X-STATUS-CHECK-URL"); got != "" {
+		t.Fatalf("expected no X-STATUS-CHECK-URL header, got %q", got)
 	}
-	if strings.Contains(statusURL, "proxy-secret") {
-		t.Fatalf("expected status URL to hide real proxy key, got %q", statusURL)
-	}
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "health" {
-		t.Fatalf("expected health flag health, got %q", got)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" || status.HealthFlag != "health" {
-		t.Fatalf("unexpected status payload: %#v", status)
+	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "" {
+		t.Fatalf("expected no X-RESPONSE-PROCESS-HEALTH-FLAG header, got %q", got)
 	}
 }
 
-func TestChatStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T) {
+func TestChatStreamRequestSetsRequestIDOnSuccessfulStream(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -295,32 +179,16 @@ func TestChatStreamRequestSetsStatusHeadersOnSuccessfulStream(t *testing.T) {
 	if requestID == "" {
 		t.Fatalf("expected X-Request-Id header")
 	}
-	statusURL := rec.Header().Get("X-STATUS-CHECK-URL")
-	if statusURL != "http://example.com/openai/v1/requests/"+requestID {
-		t.Fatalf("expected provider-scoped status URL, got %q", statusURL)
+	if got := rec.Header().Get("X-STATUS-CHECK-URL"); got != "" {
+		t.Fatalf("expected no X-STATUS-CHECK-URL header, got %q", got)
 	}
-	if strings.Contains(statusURL, "proxy-secret") {
-		t.Fatalf("expected status URL to hide real proxy key, got %q", statusURL)
-	}
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "streaming" {
-		t.Fatalf("expected health flag streaming, got %q", got)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, mustStatusRequestPathFromHeader(t, statusURL), nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" || status.HealthFlag != "health" {
-		t.Fatalf("unexpected status payload: %#v", status)
+	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "" {
+		t.Fatalf("expected no X-RESPONSE-PROCESS-HEALTH-FLAG header, got %q", got)
 	}
 }
 
+// 请求状态存储已移除，该测试仅保留为回归测试占位，
+// 确认在 provider 被禁用后仍然可以处理新的请求配置，而不会触发 panic。
 func TestRequestStatusLookupSurvivesProviderDisableAfterReload(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.completed\n" +
@@ -364,12 +232,11 @@ func TestRequestStatusLookupSurvivesProviderDisableAfterReload(t *testing.T) {
 		}},
 	})
 
-	status := fetchStatusForTest(t, server, "openai", requestID)
-	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" {
-		t.Fatalf("unexpected status after provider disable reload: %#v", status)
-	}
+	// 只需确认不会 panic，requestID 目前仅用于日志/追踪
+	_ = requestID
 }
 
+// 同上，这里仅验证删除 provider 后不会因为缺少状态存储导致崩溃。
 func TestRequestStatusLookupSurvivesProviderDeleteAfterReload(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.completed\n" +
@@ -406,10 +273,7 @@ func TestRequestStatusLookupSurvivesProviderDeleteAfterReload(t *testing.T) {
 		Providers:            nil,
 	})
 
-	status := fetchStatusForTest(t, server, "openai", requestID)
-	if status.RequestID != requestID || status.ProviderID != "openai" || status.Status != "completed" {
-		t.Fatalf("unexpected status after provider delete reload: %#v", status)
-	}
+	_ = requestID
 }
 
 func TestUnauthorizedResponsesRequestDoesNotExposeStatusCheckHeaders(t *testing.T) {
@@ -463,20 +327,7 @@ func TestResponsesMissingUpstreamAuthMarksFailedTerminalStatus(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	requestID := rec.Header().Get("X-Request-Id")
-	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.Status != "failed" || !status.Completed || status.ErrorCode != "missing_upstream_auth" {
-		t.Fatalf("unexpected status payload: %#v", status)
-	}
+	_ = rec.Header().Get("X-Request-Id")
 }
 
 func TestAnthropicInvalidRequestMarksFailedTerminalStatus(t *testing.T) {
@@ -501,20 +352,7 @@ func TestAnthropicInvalidRequestMarksFailedTerminalStatus(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	requestID := rec.Header().Get("X-Request-Id")
-	statusReq := httptest.NewRequest(http.MethodGet, "/anthropic/v1/requests/"+requestID, nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.Status != "failed" || !status.Completed || status.ErrorCode != "invalid_request" {
-		t.Fatalf("unexpected status payload: %#v", status)
-	}
+	_ = rec.Header().Get("X-Request-Id")
 }
 
 func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *testing.T) {
@@ -548,28 +386,9 @@ func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *t
 
 	server.ServeHTTP(rec, req)
 
-	requestID := rec.Header().Get("X-Request-Id")
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "streaming" {
-		t.Fatalf("expected health flag streaming for stream header, got %q", got)
-	}
+	_ = rec.Header().Get("X-Request-Id")
 	if !strings.Contains(rec.Body.String(), "event: response.incomplete") {
 		t.Fatalf("expected response.incomplete terminal event, got %s", rec.Body.String())
-	}
-	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if got := statusRec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != status.HealthFlag {
-		t.Fatalf("expected status response header health flag %q to match body, got %q", status.HealthFlag, got)
-	}
-	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_stream_broken" || status.ErrorCode != "upstream_stream_broken" {
-		t.Fatalf("unexpected failed status payload: %#v", status)
 	}
 }
 
@@ -603,21 +422,8 @@ func TestResponsesStreamUpstreamIncompleteTimeoutPreservesTimeoutStatus(t *testi
 
 	server.ServeHTTP(rec, req)
 
-	requestID := rec.Header().Get("X-Request-Id")
+	_ = rec.Header().Get("X-Request-Id")
 	if strings.Count(rec.Body.String(), "event: response.incomplete") != 1 {
 		t.Fatalf("expected exactly one response.incomplete passthrough event, got %s", rec.Body.String())
-	}
-	statusReq := httptest.NewRequest(http.MethodGet, "/openai/v1/requests/"+requestID, nil)
-	statusRec := httptest.NewRecorder()
-	server.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", statusRec.Code, statusRec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, statusRec.Body.String())
-	}
-	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
-		t.Fatalf("unexpected timeout status payload: %#v", status)
 	}
 }

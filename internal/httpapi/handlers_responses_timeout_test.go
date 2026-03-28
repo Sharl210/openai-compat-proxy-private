@@ -49,9 +49,6 @@ func TestResponsesStreamFirstByteTimeoutReturnsGatewayTimeoutJSON(t *testing.T) 
 	if got, _ := errMap["code"].(string); got != "upstream_timeout" {
 		t.Fatalf("expected upstream_timeout code, got %#v", payload)
 	}
-	if got := rec.Header().Get("X-RESPONSE-PROCESS-HEALTH-FLAG"); got != "upstream_timeout" {
-		t.Fatalf("expected upstream_timeout health flag, got %q", got)
-	}
 }
 
 func TestResponsesStreamUsesProviderScopedFirstByteTimeoutOverride(t *testing.T) {
@@ -119,10 +116,6 @@ func TestResponsesStreamIdleTimeoutStoresUpstreamTimeoutStatus(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"health_flag":"upstream_timeout"`) {
 		t.Fatalf("expected response.incomplete timeout health flag, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
-		t.Fatalf("expected upstream_timeout status, got %#v", status)
-	}
 }
 
 func TestResponsesNonStreamUpstreamIncompleteTimeoutReturnsGatewayTimeout(t *testing.T) {
@@ -160,9 +153,5 @@ func TestResponsesNonStreamUpstreamIncompleteTimeoutReturnsGatewayTimeout(t *tes
 	errMap, _ := payload["error"].(map[string]any)
 	if got, _ := errMap["code"].(string); got != "upstream_timeout" {
 		t.Fatalf("expected upstream_timeout code, got %#v", payload)
-	}
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
-		t.Fatalf("expected upstream_timeout status, got %#v", status)
 	}
 }

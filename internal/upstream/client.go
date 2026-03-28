@@ -26,6 +26,7 @@ type Client struct {
 	retryCount           int
 	retryDelay           time.Duration
 	upstreamEndpointType string
+	anthropicVersion     string
 }
 
 type EventStream struct {
@@ -64,6 +65,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		retryCount:           cfg.UpstreamRetryCount,
 		retryDelay:           cfg.UpstreamRetryDelay,
 		upstreamEndpointType: normalizeEndpointType(cfg.UpstreamEndpointType),
+		anthropicVersion:     strings.TrimSpace(cfg.AnthropicVersion),
 	}
 }
 
@@ -145,7 +147,6 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
 		"tool_count":    len(req.Tools),
-		"body":          string(body),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
 		attrs[k] = v
@@ -238,7 +239,6 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
 		"tool_count":    len(req.Tools),
-		"body":          string(body),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
 		attrs[k] = v
@@ -266,7 +266,6 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
 		"tool_count":    len(req.Tools),
-		"body":          string(body),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
 		attrs[k] = v
@@ -409,7 +408,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -436,7 +435,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

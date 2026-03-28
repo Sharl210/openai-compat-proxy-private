@@ -12,8 +12,6 @@ import (
 	"openai-compat-proxy/internal/model"
 )
 
-const anthropicVersion = "2023-06-01"
-
 func (c *Client) endpointType() string {
 	if c == nil {
 		return config.UpstreamEndpointTypeResponses
@@ -43,13 +41,17 @@ func endpointPathForType(endpointType string) string {
 	}
 }
 
-func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string) {
+func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string) {
 	if httpReq == nil {
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
-		httpReq.Header.Set("anthropic-version", anthropicVersion)
+		version := strings.TrimSpace(anthropicVersion)
+		if version == "" {
+			version = "2023-06-01"
+		}
+		httpReq.Header.Set("anthropic-version", version)
 		if apiKey := upstreamAPIKeyFromAuthorization(authorization); apiKey != "" {
 			httpReq.Header.Set("x-api-key", apiKey)
 		}

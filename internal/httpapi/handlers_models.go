@@ -17,24 +17,13 @@ func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		providerCfg := providerConfigForRequest(r)
 		provider, ok := providerForRequest(r)
-		requestID := w.Header().Get("X-Request-Id")
-		statusStore, _ := requestStatusStoreFromRequest(r)
-		statusCheckKey := statusCheckProxyKeyForRequest(r, providerCfg, provider)
 		if !ok || !provider.SupportsModels {
-			if statusStore != nil {
-				statusStore.markFailed(requestID, "proxy_internal_error", "unsupported_provider_contract", "provider does not support models")
-			}
-			setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support models")
 			return
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
-			if statusStore != nil {
-				statusStore.markFailed(requestID, "proxy_internal_error", "missing_upstream_auth", err.Error())
-			}
-			setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "proxy_internal_error")
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
@@ -48,31 +37,21 @@ func handleModels() http.HandlerFunc {
 
 		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
-			if statusStore != nil {
-				statusStore.markFailed(requestID, "upstream_timeout", "upstream_timeout", "upstream request timed out")
-			}
 			if isUpstreamTimeout(err, ctx) {
-				setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "upstream_timeout")
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
-			if statusStore != nil {
-				statusStore.markFailed(requestID, "upstream_error", "upstream_error", err.Error())
-			}
-			setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "upstream_error")
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-		if status == http.StatusNotFound && shouldFallbackModelsFromBody(body) {
-			if fallbackBody, fallbackOK := configuredModelsFallbackBody(provider); fallbackOK {
-				setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "health")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(fallbackBody)
-				if statusStore != nil {
-					statusStore.markCompleted(requestID)
+		if status == http.StatusNotFound {
+			if shouldFallbackModelsFromBody(body) {
+				if fallbackBody, fallbackOK := configuredModelsFallbackBody(provider); fallbackOK {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(fallbackBody)
+					return
 				}
-				return
 			}
 		}
 
@@ -83,18 +62,8 @@ func handleModels() http.HandlerFunc {
 			body = rewriteModelsBody(body, provider)
 		}
 		w.Header().Set("Content-Type", contentType)
-		if status >= http.StatusBadRequest {
-			setRequestStatusHeaders(w, r, provider.ID, requestID, statusCheckKey, "upstream_error")
-		}
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
-		if statusStore != nil {
-			if status >= http.StatusBadRequest {
-				statusStore.markFailed(requestID, "upstream_error", "upstream_error", http.StatusText(status))
-			} else {
-				statusStore.markCompleted(requestID)
-			}
-		}
 	}
 }
 
@@ -188,7 +157,14 @@ func shouldFallbackModelsFromBody(body []byte) bool {
 	if len(body) == 0 {
 		return false
 	}
-	return strings.Contains(strings.ToLower(string(body)), "models not supported")
+	text := strings.ToLower(string(body))
+	if strings.Contains(text, "models not supported") {
+		return true
+	}
+	if strings.Contains(text, "models endpoint") && strings.Contains(text, "not supported") {
+		return true
+	}
+	return false
 }
 
 func cloneModelEntry(entry map[string]any) map[string]any {

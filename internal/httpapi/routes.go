@@ -89,23 +89,14 @@ func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool)
 	return snapshot, ok
 }
 
-func withRequestStatusStore(ctx context.Context, store *requestStatusStore) context.Context {
-	return context.WithValue(ctx, requestStatusStoreKey, store)
-}
+// request status store 已移除，这些函数保留占位以避免调用方编译错误
+func withRequestStatusStore(ctx context.Context, _ any) context.Context { return ctx }
 
-func requestStatusStoreFromRequest(r *http.Request) (*requestStatusStore, bool) {
-	store, ok := r.Context().Value(requestStatusStoreKey).(*requestStatusStore)
-	return store, ok
-}
+func requestStatusStoreFromRequest(_ *http.Request) (any, bool) { return nil, false }
 
-func withRequestStatusID(ctx context.Context, requestID string) context.Context {
-	return context.WithValue(ctx, requestStatusIDKey, requestID)
-}
+func withRequestStatusID(ctx context.Context, _ string) context.Context { return ctx }
 
-func requestStatusIDFromRequest(r *http.Request) (string, bool) {
-	requestID, ok := r.Context().Value(requestStatusIDKey).(string)
-	return requestID, ok
-}
+func requestStatusIDFromRequest(_ *http.Request) (string, bool) { return "", false }
 
 func providerConfigForRequest(r *http.Request) config.Config {
 	snapshot, ok := runtimeSnapshotFromRequest(r)
@@ -118,6 +109,7 @@ func providerConfigForRequest(r *http.Request) config.Config {
 			providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
 			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
 			providerCfg.UpstreamEndpointType = provider.UpstreamEndpointType
+			providerCfg.AnthropicVersion = provider.AnthropicVersion
 			providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)
 			if provider.UpstreamFirstByteTimeout > 0 {
 				providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout

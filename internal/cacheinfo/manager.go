@@ -122,8 +122,6 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	stats.UpdatedAt = now
 
 	m.submitted[submissionKey] = true
-
-	_ = SaveProviderStats(m.providersDir, providerID, stats)
 	return nil
 }
 
@@ -267,7 +265,11 @@ func (m *Manager) Start(ctx context.Context) {
 }
 
 func (m *Manager) Stop() {
-	close(m.stopCh)
+	select {
+	case <-m.stopCh:
+	default:
+		close(m.stopCh)
+	}
 	if m.ticker != nil {
 		m.ticker.Stop()
 	}

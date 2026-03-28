@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +9,7 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
-func TestChatStreamFailureWritesTerminalChunkAndFailedStatus(t *testing.T) {
+func TestChatStreamFailureWritesTerminalChunk(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -33,13 +32,10 @@ func TestChatStreamFailureWritesTerminalChunkAndFailedStatus(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"finish_reason":"error"`) {
 		t.Fatalf("expected terminal error finish_reason in chat stream, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "openai", requestID)
-	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_stream_broken" {
-		t.Fatalf("unexpected chat failed status: %#v", status)
-	}
+	_ = requestID // status endpoint removed; we only assert stream output
 }
 
-func TestMessagesStreamFailureWritesTerminalEventAndFailedStatus(t *testing.T) {
+func TestMessagesStreamFailureWritesTerminalEvent(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -63,13 +59,10 @@ func TestMessagesStreamFailureWritesTerminalEventAndFailedStatus(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `event: error`) {
 		t.Fatalf("expected explicit error event in messages stream, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "anthropic", requestID)
-	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_stream_broken" {
-		t.Fatalf("unexpected messages failed status: %#v", status)
-	}
+	_ = requestID // status endpoint removed; we only assert stream output
 }
 
-func TestChatStreamMissingTerminalEventWritesTerminalChunkAndFailedStatus(t *testing.T) {
+func TestChatStreamMissingTerminalEventWritesTerminalChunk(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -89,13 +82,10 @@ func TestChatStreamMissingTerminalEventWritesTerminalChunkAndFailedStatus(t *tes
 	if !strings.Contains(rec.Body.String(), `"finish_reason":"error"`) {
 		t.Fatalf("expected terminal error finish_reason in chat stream, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "openai", requestID)
-	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_stream_broken" {
-		t.Fatalf("unexpected chat failed status: %#v", status)
-	}
+	_ = requestID // status endpoint removed; we only assert stream output
 }
 
-func TestMessagesStreamMissingTerminalEventWritesTerminalEventAndFailedStatus(t *testing.T) {
+func TestMessagesStreamMissingTerminalEventWritesTerminalEvent(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -116,13 +106,10 @@ func TestMessagesStreamMissingTerminalEventWritesTerminalEventAndFailedStatus(t 
 	if !strings.Contains(rec.Body.String(), `event: error`) || !strings.Contains(rec.Body.String(), `event: message_stop`) {
 		t.Fatalf("expected explicit error and message_stop events in messages stream, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "anthropic", requestID)
-	if status.Status != "failed" || !status.Completed || status.HealthFlag != "upstream_stream_broken" {
-		t.Fatalf("unexpected messages failed status: %#v", status)
-	}
+	_ = requestID // status endpoint removed; we only assert stream output
 }
 
-func TestChatStreamUpstreamIncompleteTimeoutPreservesTerminalFailureStatus(t *testing.T) {
+func TestChatStreamUpstreamIncompleteTimeoutPreservesTerminalFailureFlagInStream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -145,13 +132,10 @@ func TestChatStreamUpstreamIncompleteTimeoutPreservesTerminalFailureStatus(t *te
 	if !strings.Contains(rec.Body.String(), `"health_flag":"upstream_timeout"`) {
 		t.Fatalf("expected chat terminal chunk to preserve upstream_timeout, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "openai", requestID)
-	if status.Status != "failed" || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
-		t.Fatalf("unexpected chat timeout status: %#v", status)
-	}
+	_ = requestID // status endpoint removed; we only assert stream output
 }
 
-func TestMessagesStreamUpstreamIncompleteTimeoutPreservesTerminalFailureStatus(t *testing.T) {
+func TestMessagesStreamUpstreamIncompleteTimeoutPreservesTerminalFailureFlagInStream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -175,23 +159,5 @@ func TestMessagesStreamUpstreamIncompleteTimeoutPreservesTerminalFailureStatus(t
 	if !strings.Contains(rec.Body.String(), `"health_flag":"upstream_timeout"`) {
 		t.Fatalf("expected messages error event to preserve upstream_timeout, got %s", rec.Body.String())
 	}
-	status := fetchStatusForTest(t, server, "anthropic", requestID)
-	if status.Status != "failed" || status.HealthFlag != "upstream_timeout" || status.ErrorCode != "upstream_timeout" {
-		t.Fatalf("unexpected messages timeout status: %#v", status)
-	}
-}
-
-func fetchStatusForTest(t *testing.T, server http.Handler, providerID string, requestID string) requestStatus {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/"+providerID+"/v1/requests/"+requestID, nil)
-	rec := httptest.NewRecorder()
-	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status endpoint 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var status requestStatus
-	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status response: %v body=%s", err, rec.Body.String())
-	}
-	return status
+	_ = requestID // status endpoint removed; we only assert stream output
 }

@@ -16,6 +16,7 @@ type Config struct {
 	UpstreamBaseURL             string
 	UpstreamAPIKey              string
 	UpstreamEndpointType        string
+	AnthropicVersion            string
 	ProvidersDir                string
 	DefaultProvider             string
 	EnableLegacyV1Routes        bool
@@ -158,6 +159,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateMinInt(values, "LOG_MAX_BACKUPS", 0); err != nil {
 		return err
 	}
+	if err := validateProvidersDir(values, "PROVIDERS_DIR"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -218,12 +222,36 @@ func validateMinInt(values map[string]string, key string, min int) error {
 	return nil
 }
 
+func validateProvidersDir(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	info, err := os.Stat(value)
+	if err != nil {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %v", key, err))
+	}
+	if !info.IsDir() {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q is not a directory", key, value))
+	}
+	return nil
+}
+
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.ProvidersDir) == "" {
 		return ErrInvalidConfig("providers dir is required")
 	}
 	if len(c.Providers) == 0 {
 		return ErrInvalidConfig("at least one provider must be configured")
+	}
+	enabledCount := 0
+	for _, p := range c.Providers {
+		if p.Enabled {
+			enabledCount++
+		}
+	}
+	if enabledCount == 0 {
+		return ErrInvalidConfig("at least one provider must be enabled")
 	}
 	if strings.TrimSpace(c.DefaultProvider) != "" {
 		provider, err := c.DefaultProviderConfig()

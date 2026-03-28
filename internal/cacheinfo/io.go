@@ -21,10 +21,10 @@ func cacheInfoDir(providersDir string) string {
 }
 
 func EnsureCacheInfoDir(providersDir string) error {
-	if err := os.MkdirAll(cacheInfoDir(providersDir), 0755); err != nil {
+	if err := os.MkdirAll(cacheInfoDir(providersDir), 0o700); err != nil {
 		return err
 	}
-	return os.MkdirAll(systemJSONDir(providersDir), 0755)
+	return os.MkdirAll(systemJSONDir(providersDir), 0o700)
 }
 
 func LoadProviderStats(providersDir, providerID string) (*ProviderStats, error) {
@@ -61,11 +61,11 @@ func loadProviderStatsFromPath(path string) (*ProviderStats, error) {
 
 func SaveProviderStats(providersDir, providerID string, stats *ProviderStats) error {
 	dir := cacheInfoDir(providersDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 	jsonDir := systemJSONDir(providersDir)
-	if err := os.MkdirAll(jsonDir, 0755); err != nil {
+	if err := os.MkdirAll(jsonDir, 0o755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func atomicWriteTXT(path, content string) error {
 func atomicWrite(path string, data []byte) error {
 	tmpPath := path + ".tmp"
 
-	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("创建临时文件 %s 失败: %w", tmpPath, err)
 	}

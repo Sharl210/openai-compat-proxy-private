@@ -948,6 +948,9 @@ func streamLiveWithSyntheticTicks(
 	onHeartbeat func() error,
 	onEvent func(upstream.Event) error,
 ) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	signals := make(chan streamSignal, 32)
 	go func() {
 		err := consumeFn(func(evt upstream.Event) error {
@@ -958,8 +961,12 @@ func streamLiveWithSyntheticTicks(
 				return nil
 			}
 		})
-		signals <- streamSignal{err: err, done: true}
-		close(signals)
+		select {
+		case <-ctx.Done():
+		default:
+			signals <- streamSignal{err: err, done: true}
+			close(signals)
+		}
 	}()
 
 	ticker := time.NewTicker(syntheticReasoningTickInterval)

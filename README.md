@@ -311,22 +311,6 @@ anthropic-version: 2023-06-01
 
 ---
 
-## 请求状态与流式失败终态
-
-请求状态查询使用 **provider 作用域路径**：
-
-- `GET /{providerId}/v1/requests/{requestId}`
-
-状态查询接口当前不做鉴权。
-
-流式失败时，代理会补明确终态：
-
-- `responses`：补 `response.incomplete`
-- `chat/completions`：补 `finish_reason="error"` 的最终 chunk，再发 `[DONE]`
-- `messages`：补 `event: error`，再补 `message_stop`
-
----
-
 ## 模型映射与 suffix
 
 `MODEL_MAP_JSON` 支持：

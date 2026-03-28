@@ -10,11 +10,9 @@ import (
 )
 
 type Server struct {
-	store         *config.RuntimeStore
-	statusStore   *requestStatusStore
-	statusHandler http.Handler
-	mux           *http.ServeMux
-	handler       http.Handler
+	store   *config.RuntimeStore
+	mux     *http.ServeMux
+	handler http.Handler
 
 	CacheInfo *cacheinfo.Manager
 }
@@ -25,9 +23,8 @@ func NewServer(cfg config.Config) *Server {
 
 func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *Server {
 	srv := &Server{
-		store:       store,
-		statusStore: newRequestStatusStore(),
-		CacheInfo:   cacheMgr,
+		store:     store,
+		CacheInfo: cacheMgr,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
@@ -36,7 +33,6 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 	mux.HandleFunc("/v1/chat/completions", handleChat())
 	mux.HandleFunc("/v1/messages", handleAnthropicMessages())
 	srv.mux = mux
-	srv.statusHandler = handleRequestStatus(srv.statusStore)
 	srv.handler = withRequestID(http.HandlerFunc(srv.serveHTTP))
 	return srv
 }
@@ -62,17 +58,6 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mux.ServeHTTP(w, r)
 		return
 	}
-	if statusPath, ok := parseRequestStatusPath(r.URL.Path); ok {
-		healthFlag := "health"
-		if status, ok := s.statusStore.get(statusPath.RequestID); ok && status.ProviderID == statusPath.ProviderID && status.HealthFlag != "" {
-			healthFlag = status.HealthFlag
-		}
-		r = r.Clone(withRequestStatusID(withRequestStatusStore(r.Context(), s.statusStore), statusPath.RequestID))
-		setConfigVersionHeaders(w, snapshot, statusPath.ProviderID)
-		setRequestStatusHeaders(w, r, statusPath.ProviderID, statusPath.RequestID, "", healthFlag)
-		s.statusHandler.ServeHTTP(w, r)
-		return
-	}
 
 	if info, err := resolveRouteInfo(r.URL.Path, snapshot.Config); err == nil {
 		provider, err := snapshot.Config.ProviderByID(info.ProviderID)
@@ -81,20 +66,16 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		setConfigVersionHeaders(w, snapshot, info.ProviderID)
-		requestID := w.Header().Get("X-Request-Id")
 		ctx := r.Context()
 		if s.CacheInfo != nil {
 			ctx = withCacheInfoManager(ctx, s.CacheInfo)
 		}
-		r = r.Clone(withRequestStatusID(withRequestStatusStore(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot), s.statusStore), requestID))
+		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
 		if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 			return
 		}
-		s.statusStore.start(requestID, info.ProviderID, info.CanonicalPath)
-		setRequestStatusHeaders(w, r, info.ProviderID, requestID, statusCheckProxyKeyForRequest(r, snapshot.Config, provider), "health")
-
 		s.mux.ServeHTTP(w, r)
 		return
 	}

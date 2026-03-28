@@ -37,6 +37,7 @@ type ProviderConfig struct {
 	SystemPromptFilesRaw                   string
 	SystemPromptPosition                   string
 	SystemPromptText                       string
+	AnthropicVersion                       string
 }
 
 const (
@@ -195,6 +196,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.SystemPromptFiles = resolveProviderRelativePaths(path, value)
 		case "SYSTEM_PROMPT_POSITION":
 			provider.SystemPromptPosition = normalizeSystemPromptPosition(value)
+		case "ANTHROPIC_VERSION":
+			provider.AnthropicVersion = value
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -203,6 +206,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	provider.UpstreamRetryCount = normalizeProviderRetryCount(provider.UpstreamRetryCount)
 	provider.UpstreamRetryDelay = normalizeProviderRetryDelay(provider.UpstreamRetryDelay)
 	provider.SystemPromptPosition = normalizeSystemPromptPosition(provider.SystemPromptPosition)
+	if provider.AnthropicVersion == "" {
+		provider.AnthropicVersion = "2023-06-01"
+	}
+	if provider.Enabled && strings.TrimSpace(provider.UpstreamBaseURL) == "" {
+		return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("UPSTREAM_BASE_URL is required for enabled provider %q", provider.ID))
+	}
 	return provider, nil
 }
 

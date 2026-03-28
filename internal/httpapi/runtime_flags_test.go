@@ -34,10 +34,6 @@ func TestChatRejectsProviderWithoutChatSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support chat completions")
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
-		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
-	}
 }
 
 func TestNewServerWithStoreAcceptsCacheManager(t *testing.T) {
@@ -81,10 +77,6 @@ func TestResponsesRejectsProviderWithoutResponsesSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support responses")
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
-		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
-	}
 }
 
 func TestModelsRejectsProviderWithoutModelsSupport(t *testing.T) {
@@ -105,10 +97,6 @@ func TestModelsRejectsProviderWithoutModelsSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support models")
-	status := fetchStatusForTest(t, server, "openai", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
-		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
-	}
 }
 
 func TestDisabledDefaultProviderLegacyModelsRouteReturnsNotFound(t *testing.T) {
@@ -153,10 +141,6 @@ func TestMessagesRejectsProviderWithoutMessagesSupport(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	assertUnsupportedProviderContract(t, rec, "provider does not support anthropic messages")
-	status := fetchStatusForTest(t, server, "anthropic", rec.Header().Get("X-Request-Id"))
-	if status.Status != "failed" || status.ErrorCode != "unsupported_provider_contract" {
-		t.Fatalf("expected failed unsupported_provider_contract status, got %#v", status)
-	}
 }
 
 func TestMessagesRequiresAnthropicVersionHeader(t *testing.T) {

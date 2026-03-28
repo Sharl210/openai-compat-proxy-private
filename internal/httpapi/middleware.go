@@ -70,14 +70,6 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 }
 
 func setRequestStatusHeaders(w http.ResponseWriter, r *http.Request, providerID string, requestID string, statusToken string, healthFlag string) {
-	if requestID == "" || providerID == "" {
-		return
-	}
-	w.Header().Set("X-STATUS-CHECK-URL", buildStatusCheckURL(r, providerID, requestID, statusToken))
-	if healthFlag == "" {
-		healthFlag = "health"
-	}
-	w.Header().Set("X-RESPONSE-PROCESS-HEALTH-FLAG", healthFlag)
 }
 
 func buildStatusCheckURL(r *http.Request, providerID string, requestID string, statusToken string) string {
