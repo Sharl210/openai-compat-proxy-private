@@ -627,7 +627,7 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 	}
 	for _, msg := range req.Messages {
 		if msg.Role == "tool" {
-			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": msg.ToolCallID, "content": stringifyToolOutput(buildToolOutput(msg.Parts))})
+			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": msg.ToolCallID, "content": truncateChatToolOutput(stringifyToolOutput(buildToolOutput(msg.Parts)))})
 			continue
 		}
 		entry := map[string]any{"role": msg.Role}
@@ -660,6 +660,20 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 		messages = append(messages, entry)
 	}
 	return messages
+}
+
+const chatToolOutputMaxChars = 16000
+
+func truncateChatToolOutput(content string) string {
+	if len(content) <= chatToolOutputMaxChars {
+		return content
+	}
+	marker := "\n\n[truncated by openai-compat-proxy]"
+	trimmed := chatToolOutputMaxChars - len(marker)
+	if trimmed < 0 {
+		trimmed = 0
+	}
+	return content[:trimmed] + marker
 }
 
 func buildChatContentParts(parts []model.CanonicalContentPart) []any {

@@ -291,6 +291,22 @@ func TestBuildAnthropicMessagesMergesAdjacentToolResultsIntoSingleUserMessage(t 
 	}
 }
 
+func TestBuildChatMessagesTruncatesLargeToolOutput(t *testing.T) {
+	large := strings.Repeat("x", 120000)
+	messages := buildChatMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: large}}}}})
+	if len(messages) != 1 {
+		t.Fatalf("expected one tool message, got %#v", messages)
+	}
+	toolMsg, _ := messages[0].(map[string]any)
+	content, _ := toolMsg["content"].(string)
+	if len(content) >= len(large) {
+		t.Fatalf("expected chat tool output to be truncated for very large payloads")
+	}
+	if !strings.Contains(content, `[truncated by openai-compat-proxy]`) {
+		t.Fatalf("expected truncation marker in tool output, got %q", content[:120])
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{
