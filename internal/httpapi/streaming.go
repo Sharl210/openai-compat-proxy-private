@@ -60,6 +60,7 @@ type responsesStreamState struct {
 	reasoningClosed      bool
 	syntheticSummary     strings.Builder
 	toolItems            map[string]*responsesToolItemState
+	toolIDAliases        map[string]string
 	toolOrder            []string
 	upstreamEndpointType string
 	requestID            string
@@ -132,7 +133,7 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 }
 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
-	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: upstreamEndpointType, requestID: req.RequestID}
+	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: upstreamEndpointType, requestID: req.RequestID}
 	collector := aggregate.NewCollector()
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return aggregate.Result{}, err
@@ -179,6 +180,17 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			state.toolOrder = append(state.toolOrder, itemID)
 		}
 		return toolState
+	}
+	canonicalToolItemID := func(itemID string) string {
+		if itemID == "" {
+			return itemID
+		}
+		if state.toolIDAliases != nil {
+			if mapped, ok := state.toolIDAliases[itemID]; ok && mapped != "" {
+				return mapped
+			}
+		}
+		return itemID
 	}
 	writeStreamEvent := func(event string, data map[string]any) error {
 		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
@@ -242,6 +254,14 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if err := writeToolItemEvent("response.output_item.done", itemCopy); err != nil {
 				return err
 			}
+			if compatCompleteToolArgs && toolState.arguments.Len() > 0 {
+				if err := writeStreamEvent("response.function_call_arguments.done", map[string]any{
+					"item_id":   itemID,
+					"arguments": toolState.arguments.String(),
+				}); err != nil {
+					return err
+				}
+			}
 			toolState.doneSent = true
 		}
 		return nil
@@ -296,19 +316,29 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if itemID == "" {
 				itemID, _ = item["call_id"].(string)
 			}
+			if callID, _ := item["call_id"].(string); callID != "" {
+				if rawID, _ := item["id"].(string); rawID != "" && rawID != callID {
+					state.toolIDAliases[rawID] = callID
+				}
+				itemID = callID
+			}
 			if itemID != "" {
 				toolState := ensureToolItemState(itemID)
 				toolState.item = cloneJSONValueForResponse(item).(map[string]any)
+				if callID, _ := toolState.item["call_id"].(string); callID != "" {
+					toolState.item["id"] = callID
+					itemID = callID
+				}
 				if args, _ := item["arguments"].(string); args != "" {
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
-					if evt.Event == "response.output_item.done" && state.upstreamEndpointType == config.UpstreamEndpointTypeResponses {
-						if err := writeStreamEvent("response.function_call_arguments.done", map[string]any{
-							"item_id":   itemID,
-							"arguments": args,
-						}); err != nil {
-							return err
-						}
+				}
+				if evt.Event == "response.output_item.done" && toolState.arguments.Len() > 0 {
+					if err := writeStreamEvent("response.function_call_arguments.done", map[string]any{
+						"item_id":   itemID,
+						"arguments": toolState.arguments.String(),
+					}); err != nil {
+						return err
 					}
 				}
 				if compatCompleteToolArgs {
@@ -333,6 +363,10 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		}
 	case "response.function_call_arguments.delta":
 		itemID, _ := evt.Data["item_id"].(string)
+		itemID = canonicalToolItemID(itemID)
+		if itemID != "" {
+			evt.Data["item_id"] = itemID
+		}
 		delta, _ := evt.Data["delta"].(string)
 		if itemID != "" {
 			toolState := ensureToolItemState(itemID)
@@ -896,7 +930,6 @@ func anthropicMessageStartMessage(state *anthropicStreamState) map[string]any {
 		"content":       []any{},
 		"stop_reason":   nil,
 		"stop_sequence": nil,
-		"usage":         map[string]any{"input_tokens": 0, "output_tokens": 0},
 	}
 }
 
