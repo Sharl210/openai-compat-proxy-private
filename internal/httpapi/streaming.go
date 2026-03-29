@@ -328,10 +328,6 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 			if itemID != "" {
 				toolState := ensureToolItemState(itemID)
 				toolState.item = cloneJSONValueForResponse(item).(map[string]any)
-				if callID, _ := toolState.item["call_id"].(string); callID != "" {
-					toolState.item["id"] = callID
-					itemID = callID
-				}
 				if args, _ := item["arguments"].(string); args != "" {
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
