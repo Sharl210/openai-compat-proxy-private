@@ -169,8 +169,8 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	addedIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
-	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`)
+	addedIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"call_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
+	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"call_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`)
 	completedIdx := strings.LastIndex(body, `event: response.completed`)
 
 	if addedIdx == -1 || doneIdx == -1 || completedIdx == -1 {
@@ -178,6 +178,9 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 	}
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress raw arguments delta events, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"city\":\"Shanghai\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected function_call_arguments.done with stable call_id, got %s", body)
 	}
 	if !(addedIdx < doneIdx && doneIdx < completedIdx) {
 		t.Fatalf("expected function call lifecycle added -> done -> completed, got %s", body)
@@ -191,8 +194,11 @@ func TestResponsesStreamAccumulatesMultipleFunctionCallArgumentDeltasBeforeDone(
 		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"topic":"finance"}`}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"call_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function call item to contain merged arguments, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected merged arguments done event, got %s", body)
 	}
 }
 
@@ -206,11 +212,14 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress partial function_call_arguments.delta events, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"call_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
 		t.Fatalf("expected compatibility mode to delay added until full arguments are available, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"call_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function_call item to retain full merged arguments, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected done event with stable call_id, got %s", body)
 	}
 }
 
@@ -272,7 +281,7 @@ func testResponsesConfig(upstreamURL string) config.Config {
 func renderResponsesWriterEvents(t *testing.T, endpointType string, events ...upstream.Event) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	state := &responsesStreamState{toolItems: map[string]*responsesToolItemState{}, upstreamEndpointType: endpointType}
+	state := &responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: endpointType}
 	for _, evt := range events {
 		if err := writeResponsesEvent(rec, nil, state, evt, nil); err != nil {
 			t.Fatalf("writeResponsesEvent error: %v", err)

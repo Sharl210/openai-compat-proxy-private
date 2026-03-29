@@ -168,6 +168,9 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 
 func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	compatCompleteToolArgs := state != nil && state.upstreamEndpointType != config.UpstreamEndpointTypeResponses
+	if state != nil && state.toolIDAliases == nil {
+		state.toolIDAliases = map[string]string{}
+	}
 	item, _ := evt.Data["item"].(map[string]any)
 	ensureToolItemState := func(itemID string) *responsesToolItemState {
 		if state.toolItems == nil {

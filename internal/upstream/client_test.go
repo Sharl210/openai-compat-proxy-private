@@ -455,6 +455,44 @@ func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
 	}
 }
 
+func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"prompt_tokens_details\":{\"cached_tokens\":1}}}\n\n" +
+			"data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "Bearer test-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected at least delta + completed events, got %#v", events)
+	}
+	completed := events[len(events)-1]
+	if completed.Event != "response.completed" {
+		t.Fatalf("expected final event response.completed, got %#v", completed)
+	}
+	usage, _ := completed.Data["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(3) {
+		t.Fatalf("expected completed usage.input_tokens 3, got %#v events=%#v", got, events)
+	}
+	details, _ := usage["input_tokens_details"].(map[string]any)
+	if got := details["cached_tokens"]; got != float64(1) {
+		t.Fatalf("expected completed usage.input_tokens_details.cached_tokens 1, got %#v events=%#v", got, events)
+	}
+	if got := completed.Data["finish_reason"]; got != "stop" {
+		t.Fatalf("expected finish_reason stop on completed event, got %#v events=%#v", got, events)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected no extra terminal event after usage-only frame, got %#v", events)
+	}
+}
+
 func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) {
 	var gotPath string
 	var gotAPIKey string
@@ -674,6 +712,47 @@ func TestStreamUsesAnthropicEndpointAndNormalizesEvents(t *testing.T) {
 	}
 	if got := events[1].Data["delta"]; got != "hello" {
 		t.Fatalf("expected delta hello, got %#v", got)
+	}
+}
+
+func TestStreamUsesAnthropicEndpointPrefersFinalUsageOverMessageStartZeroes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n" +
+			"data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n" +
+			"event: content_block_start\n" +
+			"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+			"event: content_block_delta\n" +
+			"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n" +
+			"event: message_delta\n" +
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":12,\"output_tokens\":7,\"cache_read_input_tokens\":5}}\n\n" +
+			"event: message_stop\n" +
+			"data: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "claude-sonnet-4-5", MaxOutputTokens: intPtrForClientTest(128)}, "Bearer anthropic-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if len(events) < 3 {
+		t.Fatalf("expected response.created/output_text/completed events, got %#v", events)
+	}
+	completed := events[len(events)-1]
+	if completed.Event != "response.completed" {
+		t.Fatalf("expected final event response.completed, got %#v", completed)
+	}
+	usage, _ := completed.Data["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(12) {
+		t.Fatalf("expected final anthropic usage.input_tokens 12, got %#v events=%#v", got, events)
+	}
+	if got := usage["output_tokens"]; got != float64(7) {
+		t.Fatalf("expected final anthropic usage.output_tokens 7, got %#v events=%#v", got, events)
+	}
+	details, _ := usage["input_tokens_details"].(map[string]any)
+	if got := details["cached_tokens"]; got != float64(5) {
+		t.Fatalf("expected final anthropic usage.input_tokens_details.cached_tokens 5, got %#v events=%#v", got, events)
 	}
 }
 

@@ -209,6 +209,7 @@ type chatNormalizationState struct {
 	usage          map[string]any
 	createdSent    bool
 	completed      bool
+	pendingFinish  string
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
@@ -222,10 +223,17 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 	if err := json.Unmarshal([]byte(frame.Data), &payload); err != nil {
 		return nil, false, fmt.Errorf("parse chat sse frame: %w", err)
 	}
+	var events []Event
 	if usage := normalizeChatUsage(payload); len(usage) > 0 {
 		state.usage = usage
+		if state.pendingFinish != "" && !state.completed {
+			state.completed = true
+			data := map[string]any{"finish_reason": state.pendingFinish}
+			data["usage"] = cloneMap(state.usage)
+			events = append(events, Event{Event: "response.completed", Data: data})
+			state.pendingFinish = ""
+		}
 	}
-	var events []Event
 	if !state.createdSent {
 		if responseID := stringValue(payload["id"]); responseID != "" {
 			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID}}})
@@ -274,12 +282,13 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 			}
 		}
 		if finishReason := stringValue(choice["finish_reason"]); finishReason != "" && !state.completed {
-			state.completed = true
-			data := map[string]any{"finish_reason": finishReason}
 			if len(state.usage) > 0 {
-				data["usage"] = cloneMap(state.usage)
+				state.completed = true
+				data := map[string]any{"finish_reason": finishReason, "usage": cloneMap(state.usage)}
+				events = append(events, Event{Event: "response.completed", Data: data})
+			} else {
+				state.pendingFinish = finishReason
 			}
-			events = append(events, Event{Event: "response.completed", Data: data})
 		}
 	}
 	return events, false, nil
@@ -332,7 +341,6 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 		if responseID := stringValue(message["id"]); responseID != "" {
 			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID}}})
 		}
-		mergeUsage(state.usage, normalizeAnthropicUsage(message["usage"]))
 	case "content_block_start":
 		index := int(numberValue(payload["index"]))
 		block, _ := payload["content_block"].(map[string]any)
