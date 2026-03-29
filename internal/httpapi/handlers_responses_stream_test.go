@@ -128,7 +128,7 @@ func TestResponsesStreamPreservesNativeFunctionCallArgumentDeltasForResponsesUps
 	}
 }
 
-func TestResponsesStreamEmitsFunctionCallArgumentsDoneForResponsesUpstream(t *testing.T) {
+func TestResponsesStreamDoesNotEmitSyntheticFunctionCallArgumentsDoneForResponsesUpstream(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.created\n" +
 			"data: {\"response\":{\"id\":\"resp_1\"}}\n\n",
@@ -154,11 +154,14 @@ func TestResponsesStreamEmitsFunctionCallArgumentsDoneForResponsesUpstream(t *te
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
-		t.Fatalf("expected responses upstream stream to emit function_call_arguments.done for RikkaHub, got %s", body)
+	if strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
+		t.Fatalf("expected native responses upstream stream to avoid synthetic function_call_arguments.done, got %s", body)
 	}
-	if !strings.Contains(body, `"arguments":"{\"query\":\"weather\"}"`) {
-		t.Fatalf("expected done event to carry full arguments, got %s", body)
+	if !strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
+		t.Fatalf("expected native responses upstream stream to keep raw function_call_arguments.delta, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"weather\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected native responses upstream stream to keep final function_call output_item.done, got %s", body)
 	}
 }
 

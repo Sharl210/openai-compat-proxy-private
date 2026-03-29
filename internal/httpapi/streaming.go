@@ -332,7 +332,7 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
 				}
-				if evt.Event == "response.output_item.done" && toolState.arguments.Len() > 0 {
+				if compatCompleteToolArgs && evt.Event == "response.output_item.done" && toolState.arguments.Len() > 0 {
 					if err := writeStreamEvent("response.function_call_arguments.done", map[string]any{
 						"item_id":   itemID,
 						"arguments": toolState.arguments.String(),
