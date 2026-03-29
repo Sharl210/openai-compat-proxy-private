@@ -57,3 +57,30 @@ func TestBuildResponsePreservesExplicitFinishReason(t *testing.T) {
 		t.Fatalf("expected finish_reason length, got %#v", choices[0]["finish_reason"])
 	}
 }
+
+func TestBuildResponsePromotesCachedTokenUsageFields(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{Usage: map[string]any{
+		"input_tokens":  12,
+		"output_tokens": 3,
+		"total_tokens":  15,
+		"input_tokens_details": map[string]any{
+			"cached_tokens":         5,
+			"cache_creation_tokens": 2,
+		},
+	}})
+
+	usage, _ := resp["usage"].(map[string]any)
+	if got := usage["cached_tokens"]; got != 5 {
+		t.Fatalf("expected usage.cached_tokens 5, got %#v", got)
+	}
+	if got := usage["cache_creation_tokens"]; got != 2 {
+		t.Fatalf("expected usage.cache_creation_tokens 2, got %#v", got)
+	}
+	details, _ := usage["prompt_tokens_details"].(map[string]any)
+	if got := details["cached_tokens"]; got != 5 {
+		t.Fatalf("expected prompt_tokens_details.cached_tokens 5, got %#v", got)
+	}
+	if got := details["cache_creation_tokens"]; got != 2 {
+		t.Fatalf("expected prompt_tokens_details.cache_creation_tokens 2, got %#v", got)
+	}
+}

@@ -199,7 +199,7 @@ func TestChatStreamWritesIncludeUsageChunkAtTail(t *testing.T) {
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
 		"event: response.completed\n" +
-			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2,\"input_tokens_details\":{\"cached_tokens\":4,\"cache_creation_tokens\":2}}}}\n\n",
 	})
 	defer upstream.Close()
 
@@ -227,10 +227,19 @@ func TestChatStreamWritesIncludeUsageChunkAtTail(t *testing.T) {
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 	finishIdx := strings.LastIndex(body, `"finish_reason":"stop"`)
-	usageIdx := strings.LastIndex(body, `"choices":[],"object":"chat.completion.chunk","usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}`)
+	usageIdx := strings.LastIndex(body, `"choices":[],"object":"chat.completion.chunk","usage":{`)
 	doneIdx := strings.LastIndex(body, `data: [DONE]`)
 	if finishIdx == -1 || usageIdx == -1 || doneIdx == -1 {
 		t.Fatalf("expected finish chunk, usage tail chunk and DONE marker, got %s", body)
+	}
+	if !strings.Contains(body, `"cached_tokens":4`) {
+		t.Fatalf("expected include_usage chunk to expose cached_tokens, got %s", body)
+	}
+	if !strings.Contains(body, `"cache_creation_tokens":2`) {
+		t.Fatalf("expected include_usage chunk to expose cache_creation_tokens, got %s", body)
+	}
+	if !strings.Contains(body, `"prompt_tokens_details":{`) {
+		t.Fatalf("expected include_usage chunk to preserve prompt_tokens_details, got %s", body)
 	}
 	if !(finishIdx < usageIdx && usageIdx < doneIdx) {
 		t.Fatalf("expected include_usage chunk to be the final JSON chunk before DONE, got %s", body)

@@ -355,12 +355,19 @@ anthropic-version: 2023-06-01
 
 ## Claude / Messages 兼容说明
 
+- `chat/completions` 对外除了保留 `usage.prompt_tokens_details.cached_tokens` / `usage.prompt_tokens_details.cache_creation_tokens` 之外，也会额外显式返回顶层 `usage.cached_tokens` / `usage.cache_creation_tokens`，方便不继续解析 details 的客户端直接读取缓存统计
 - `cache_control` 当前是**兼容输入**，代理会接受这个字段，但不会把它继续透传给上游；它不是对 Anthropic prompt caching 的真实上游支持
 - Anthropic usage 对外会保留上游原始 `input_tokens`，并额外附带 `cache_read_input_tokens` / `cache_creation_input_tokens`；不会再把 `input_tokens` 改写成扣除缓存后的净值
 - Cache_Info 会分别记录缓存命中 token（`cached_tokens` / `cache_read_input_tokens`）和缓存创建 token（`cache_creation_input_tokens` / `cache_creation_tokens`）
 - Anthropic 上游当前支持 text / image / document / tool_use / tool_result 等主路径
 - 当下游入口使用 `/v1/responses` 时，`function_call_output` 会继续被归一成内部 tool result 语义；即使 provider 内部上游选的是 `chat` 或 `anthropic`，也能继续把工具结果回传给上游完成多轮工具调用
 - `/v1/messages` 兼容入口当前对 `input_audio` 走**显式拒绝**，不会再静默吞掉；这一限制与当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 无关
+
+## Responses / Chat / Anthropic 对齐边界
+
+- `/v1/responses` 仍然是代理内部能力最完整的基线入口；`previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation`、`store`、`include` 这类高层字段优先在这条链完整保留
+- 当 provider 内部上游是 `responses` 时，上述字段会继续向上游透传；相关回归测试见 `internal/adapter/responses/request_test.go` 与 `internal/httpapi/upstream_endpoint_type_integration_test.go`
+- 当 provider 内部上游是 `chat` 或 `anthropic` 时，代理会尽量保留高价值语义，但这不等于三套协议已经做到完全保真互转；`chat` / `messages` 更偏兼容出口，不承诺一比一承接所有 `responses` 顶层控制字段
 
 ---
 

@@ -1417,6 +1417,12 @@ func chatUsage(usage map[string]any) any {
 	}
 	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
 		result["prompt_tokens_details"] = cloneMap(details)
+		if cachedTokens, ok := details["cached_tokens"]; ok {
+			result["cached_tokens"] = cachedTokens
+		}
+		if cacheCreationTokens, ok := details["cache_creation_tokens"]; ok {
+			result["cache_creation_tokens"] = cacheCreationTokens
+		}
 	}
 	if details, _ := usage["output_tokens_details"].(map[string]any); len(details) > 0 {
 		result["completion_tokens_details"] = cloneMap(details)
