@@ -58,3 +58,35 @@ func TestResponsesHistoryLoadReturnsClone(t *testing.T) {
 		t.Fatalf("expected stored history to stay immutable, got %#v", reloaded)
 	}
 }
+
+func TestBuildResponsesHistorySnapshotKeepsOnlyFollowUpRelevantMessages(t *testing.T) {
+	base := []model.CanonicalMessage{
+		{Role: "developer", Parts: []model.CanonicalContentPart{{Type: "text", Text: "tool registry and developer prompt"}}},
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "what is the weather"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"weather"}`}}},
+		{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "plain assistant text that should not be persisted"}}},
+	}
+	assistant := []model.CanonicalMessage{{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "done"}}}}
+
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+	if len(snapshot) != 3 {
+		t.Fatalf("expected 3 messages in narrow snapshot, got %#v", snapshot)
+	}
+	if snapshot[0].Role != "user" || snapshot[0].Parts[0].Text != "what is the weather" {
+		t.Fatalf("expected original user message to remain, got %#v", snapshot)
+	}
+	if snapshot[1].Role != "assistant" || len(snapshot[1].ToolCalls) != 1 || snapshot[1].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected assistant tool call message to remain, got %#v", snapshot)
+	}
+	if snapshot[2].Role != "assistant" || snapshot[2].Parts[0].Text != "done" {
+		t.Fatalf("expected new assistant output to remain, got %#v", snapshot)
+	}
+	for _, msg := range snapshot {
+		if len(msg.Parts) > 0 && msg.Parts[0].Text == "tool registry and developer prompt" {
+			t.Fatalf("expected developer message to be excluded, got %#v", snapshot)
+		}
+		if len(msg.Parts) > 0 && msg.Parts[0].Text == "plain assistant text that should not be persisted" {
+			t.Fatalf("expected plain assistant text to be excluded, got %#v", snapshot)
+		}
+	}
+}

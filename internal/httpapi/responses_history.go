@@ -137,6 +137,22 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 	return []model.CanonicalMessage{msg}
 }
 
+func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
+	snapshot := make([]model.CanonicalMessage, 0, len(base)+len(assistant))
+	for _, msg := range base {
+		switch msg.Role {
+		case "user", "tool":
+			snapshot = append(snapshot, cloneCanonicalMessages([]model.CanonicalMessage{msg})...)
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				snapshot = append(snapshot, cloneCanonicalMessages([]model.CanonicalMessage{msg})...)
+			}
+		}
+	}
+	snapshot = append(snapshot, cloneCanonicalMessages(assistant)...)
+	return snapshot
+}
+
 func mergeConversationHistory(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
 	merged := make([]model.CanonicalMessage, 0, len(base)+len(assistant))
 	merged = append(merged, cloneCanonicalMessages(base)...)
