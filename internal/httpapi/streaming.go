@@ -398,6 +398,11 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		if _, ok := response["object"]; !ok {
 			response["object"] = "response"
 		}
+		if usage, _ := evt.Data["usage"].(map[string]any); len(usage) > 0 {
+			if _, ok := response["usage"]; !ok {
+				response["usage"] = cloneMap(usage)
+			}
+		}
 		if err := closeSyntheticReasoning(); err != nil {
 			return err
 		}

@@ -240,6 +240,36 @@ func TestResponsesStreamCompletedCarriesStableResponseIDForToolFollowUp(t *testi
 	}
 }
 
+func TestResponsesStreamCompletedMirrorsTopLevelUsageIntoResponseUsageForCompatibility(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.completed", Data: map[string]any{
+			"usage": map[string]any{"input_tokens": 3, "output_tokens": 5, "total_tokens": 8},
+		}},
+	)
+
+	if !strings.Contains(body, `"usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}`) {
+		t.Fatalf("expected top-level usage to stay in completed event, got %s", body)
+	}
+	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`) {
+		t.Fatalf("expected completed event to also include response.usage for compatibility, got %s", body)
+	}
+}
+
+func TestResponsesStreamDoneMirrorsTopLevelUsageIntoResponseUsageForCompatibility(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
+		upstream.Event{Event: "response.done", Data: map[string]any{
+			"usage": map[string]any{"input_tokens": 2, "output_tokens": 4, "total_tokens": 6},
+		}},
+	)
+
+	if !strings.Contains(body, `event: response.done`) {
+		t.Fatalf("expected response.done event, got %s", body)
+	}
+	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}`) {
+		t.Fatalf("expected done event to also include response.usage for compatibility, got %s", body)
+	}
+}
+
 func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
