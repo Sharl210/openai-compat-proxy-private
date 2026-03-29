@@ -302,6 +302,14 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 				if args, _ := item["arguments"].(string); args != "" {
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
+					if evt.Event == "response.output_item.done" && state.upstreamEndpointType == config.UpstreamEndpointTypeResponses {
+						if err := writeStreamEvent("response.function_call_arguments.done", map[string]any{
+							"item_id":   itemID,
+							"arguments": args,
+						}); err != nil {
+							return err
+						}
+					}
 				}
 				if compatCompleteToolArgs {
 					return nil
