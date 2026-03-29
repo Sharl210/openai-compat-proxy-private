@@ -263,6 +263,34 @@ func TestBuildRequestBodyForwardsAssistantReasoningContentAsReasoningSummary(t *
 	}
 }
 
+func TestBuildAnthropicMessagesMergesAdjacentToolResultsIntoSingleUserMessage(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "scrape_web", Arguments: `{"url":"https://github.com/code-yeongyu/oh-my-openagent"}`}, {ID: "call_2", Type: "function", Name: "search_web", Arguments: `{"query":"oh-my-openagent releases","topic":"general"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"title":"repo page"}`}}},
+		{Role: "tool", ToolCallID: "call_2", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"items":[{"id":"v1"}]}`}}},
+	}})
+
+	if len(messages) != 2 {
+		t.Fatalf("expected assistant tool_use message plus single user tool_result message, got %#v", messages)
+	}
+	userMsg, _ := messages[1].(map[string]any)
+	if got, _ := userMsg["role"].(string); got != "user" {
+		t.Fatalf("expected second message role user, got %#v", userMsg)
+	}
+	content, _ := userMsg["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected merged user tool_result content blocks, got %#v", userMsg)
+	}
+	first, _ := content[0].(map[string]any)
+	second, _ := content[1].(map[string]any)
+	if first["type"] != "tool_result" || second["type"] != "tool_result" {
+		t.Fatalf("expected both merged blocks to be tool_result, got %#v", userMsg)
+	}
+	if first["tool_use_id"] != "call_1" || second["tool_use_id"] != "call_2" {
+		t.Fatalf("expected merged tool_result order preserved, got %#v", userMsg)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{

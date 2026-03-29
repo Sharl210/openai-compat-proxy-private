@@ -744,14 +744,23 @@ func validateAnthropicRequest(req model.CanonicalRequest) error {
 
 func buildAnthropicMessages(req model.CanonicalRequest) []any {
 	messages := make([]any, 0, len(req.Messages))
+	appendPendingToolResults := func(blocks []any) []any {
+		if len(blocks) == 0 {
+			return nil
+		}
+		messages = append(messages, map[string]any{"role": "user", "content": blocks})
+		return nil
+	}
+	var pendingToolResults []any
 	for _, msg := range req.Messages {
 		if isAnthropicInstructionRole(msg.Role) {
 			continue
 		}
 		if msg.Role == "tool" {
-			messages = append(messages, map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": buildAnthropicToolResultContent(msg.Parts)}}})
+			pendingToolResults = append(pendingToolResults, map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": buildAnthropicToolResultContent(msg.Parts)})
 			continue
 		}
+		pendingToolResults = appendPendingToolResults(pendingToolResults)
 		content := buildAnthropicContentParts(msg.Parts)
 		for _, call := range msg.ToolCalls {
 			callID := call.ID
@@ -762,6 +771,7 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		}
 		messages = append(messages, map[string]any{"role": msg.Role, "content": content})
 	}
+	pendingToolResults = appendPendingToolResults(pendingToolResults)
 	return messages
 }
 
