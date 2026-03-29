@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -194,7 +195,7 @@ func TestChatStreamMapsReasoningSummaryDeltaToReasoningContent(t *testing.T) {
 	}
 }
 
-func TestChatStreamWritesIncludeUsageChunkAtTail(t *testing.T) {
+func TestChatStreamMergesIncludeUsageIntoTerminalFinishChunk(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -226,23 +227,52 @@ func TestChatStreamWritesIncludeUsageChunkAtTail(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	finishIdx := strings.LastIndex(body, `"finish_reason":"stop"`)
-	usageIdx := strings.LastIndex(body, `"choices":[],"object":"chat.completion.chunk","usage":{`)
-	doneIdx := strings.LastIndex(body, `data: [DONE]`)
-	if finishIdx == -1 || usageIdx == -1 || doneIdx == -1 {
-		t.Fatalf("expected finish chunk, usage tail chunk and DONE marker, got %s", body)
+	if !strings.Contains(body, `data: [DONE]`) {
+		t.Fatalf("expected DONE marker, got %s", body)
 	}
-	if !strings.Contains(body, `"cached_tokens":4`) {
-		t.Fatalf("expected include_usage chunk to expose cached_tokens, got %s", body)
+
+	var finishChunk map[string]any
+	for _, frame := range strings.Split(body, "\n\n") {
+		frame = strings.TrimSpace(frame)
+		if !strings.HasPrefix(frame, "data: ") || frame == "data: [DONE]" {
+			continue
+		}
+		payload := strings.TrimPrefix(frame, "data: ")
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		choices, _ := chunk["choices"].([]any)
+		if len(choices) == 0 {
+			if _, hasUsage := chunk["usage"]; hasUsage {
+				t.Fatalf("expected no usage-only trailing chunk, got %s", body)
+			}
+			continue
+		}
+		choice, _ := choices[0].(map[string]any)
+		if finishReason, _ := choice["finish_reason"].(string); finishReason == "stop" {
+			finishChunk = chunk
+		}
 	}
-	if !strings.Contains(body, `"cache_creation_tokens":2`) {
-		t.Fatalf("expected include_usage chunk to expose cache_creation_tokens, got %s", body)
+	if finishChunk == nil {
+		t.Fatalf("expected a terminal finish chunk, got %s", body)
 	}
-	if !strings.Contains(body, `"prompt_tokens_details":{`) {
-		t.Fatalf("expected include_usage chunk to preserve prompt_tokens_details, got %s", body)
+	usage, _ := finishChunk["usage"].(map[string]any)
+	if len(usage) == 0 {
+		t.Fatalf("expected terminal finish chunk to carry usage payload, got %s", body)
 	}
-	if !(finishIdx < usageIdx && usageIdx < doneIdx) {
-		t.Fatalf("expected include_usage chunk to be the final JSON chunk before DONE, got %s", body)
+	if got := usage["cached_tokens"]; got != float64(4) {
+		t.Fatalf("expected cached_tokens 4 in terminal finish chunk, got %#v body=%s", got, body)
+	}
+	if got := usage["cache_creation_tokens"]; got != float64(2) {
+		t.Fatalf("expected cache_creation_tokens 2 in terminal finish chunk, got %#v body=%s", got, body)
+	}
+	details, _ := usage["prompt_tokens_details"].(map[string]any)
+	if got := details["cached_tokens"]; got != float64(4) {
+		t.Fatalf("expected prompt_tokens_details.cached_tokens 4, got %#v body=%s", got, body)
+	}
+	if got := details["cache_creation_tokens"]; got != float64(2) {
+		t.Fatalf("expected prompt_tokens_details.cache_creation_tokens 2, got %#v body=%s", got, body)
 	}
 }
 

@@ -1231,19 +1231,18 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			"cached_tokens":        cachedTokens,
 			"stream_include_usage": includeUsage,
 		})
-		if err := writeChatChunk(w, flusher, map[string]any{}, finishReason, nil); err != nil {
-			return err
-		}
+		var usagePayload any
 		if includeUsage {
 			if usage := chatUsage(rawUsage); usage != nil {
 				logging.Event("downstream_stream_usage_mapped", map[string]any{
 					"upstream_event": evt.Event,
 					"cached_tokens":  nestedCachedTokens(mapUsageForLogging(usage)),
 				})
-				if err := writeChatChunk(w, flusher, nil, "", usage); err != nil {
-					return err
-				}
+				usagePayload = usage
 			}
+		}
+		if err := writeChatChunk(w, flusher, map[string]any{}, finishReason, usagePayload); err != nil {
+			return err
 		}
 		if usageRecorder != nil && len(rawUsage) > 0 {
 			usageRecorder(rawUsage)

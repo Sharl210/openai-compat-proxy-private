@@ -755,6 +755,111 @@ func TestResponsesRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T)
 	}
 }
 
+func TestResponsesRouteUsesResponsesUpstreamForFunctionCallFollowUp(t *testing.T) {
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_2","object":"response","output":[{"id":"msg_2","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "resp", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "resp", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello","tools":[{"type":"function","name":"search_web","description":"Search","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstResp map[string]any
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("unmarshal first response: %v", err)
+	}
+	responseID, _ := firstResp["id"].(string)
+	if responseID != "resp_1" {
+		t.Fatalf("expected first responses output to keep upstream response id resp_1, got %#v", firstResp["id"])
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"previous_response_id":"resp_1"`) {
+		t.Fatalf("expected responses upstream follow-up to preserve previous_response_id, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"function_call_output"`) || !strings.Contains(secondBody, `"call_id":"call_1"`) {
+		t.Fatalf("expected responses upstream follow-up to preserve function_call_output, got %s", secondBody)
+	}
+}
+
+func TestResponsesRouteUsesResponsesUpstreamForComplexFunctionCallFollowUp(t *testing.T) {
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_2","object":"response","output":[{"id":"msg_2","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "resp", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "resp", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello","tools":[{"type":"function","name":"search_web","description":"Search","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstResp map[string]any
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("unmarshal first response: %v", err)
+	}
+	responseID, _ := firstResp["id"].(string)
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","parallel_tool_calls":true,"metadata":{"trace_id":"trace_123"},"input":[{"role":"user","content":"hello"},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"search_web","arguments":"{\"query\":\"weather\"}"}}]},{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"previous_response_id":"resp_1"`) {
+		t.Fatalf("expected complex responses follow-up to preserve previous_response_id, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"parallel_tool_calls":true`) || !strings.Contains(secondBody, `"trace_id":"trace_123"`) {
+		t.Fatalf("expected complex responses follow-up to preserve top-level stateful fields, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"role":"assistant"`) || !strings.Contains(secondBody, `"tool_calls"`) {
+		t.Fatalf("expected complex responses follow-up to preserve assistant tool_call history, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"function_call_output"`) || !strings.Contains(secondBody, `"call_id":"call_1"`) {
+		t.Fatalf("expected complex responses follow-up to preserve function_call_output, got %s", secondBody)
+	}
+}
+
 func TestResponsesStreamRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T) {
 	var secondBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
