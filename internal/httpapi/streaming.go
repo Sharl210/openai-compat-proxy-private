@@ -1165,6 +1165,9 @@ func chatStreamFinishReason(state *chatStreamState, data map[string]any) string 
 	if finishReason, _ := data["finish_reason"].(string); finishReason != "" {
 		return finishReason
 	}
+	if state.textStarted {
+		return "stop"
+	}
 	if len(state.toolSent) > 0 {
 		return "tool_calls"
 	}
