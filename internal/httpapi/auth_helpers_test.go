@@ -59,3 +59,23 @@ func TestAuthModeForUpstreamPrefersXUpstreamAuthorization(t *testing.T) {
 		t.Fatalf("expected x_upstream_authorization mode, got %q", got)
 	}
 }
+
+func TestAuthModeForUpstreamProviderEmptyOverrideUsesXAPIKeyPassthrough(t *testing.T) {
+	cfg := config.Config{
+		ProxyAPIKey:     "root-secret",
+		DefaultProvider: "claude",
+		Providers: []config.ProviderConfig{{
+			ID:                     "claude",
+			Enabled:                true,
+			ProxyAPIKeyOverride:    "empty",
+			ProxyAPIKeyOverrideSet: true,
+		}},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/claude/v1/messages", nil)
+	req.Header.Set("x-api-key", "real-upstream-token")
+	req = req.Clone(withRouteInfo(req.Context(), routeInfo{ProviderID: "claude", Legacy: false}))
+
+	if got := authModeForUpstream(req, cfg); got != "x_api_key_passthrough" {
+		t.Fatalf("expected provider route with empty override to passthrough x-api-key, got %q", got)
+	}
+}

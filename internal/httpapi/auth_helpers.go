@@ -19,6 +19,11 @@ func authModeForUpstream(r *http.Request, cfg config.Config) string {
 	if cfg.ProxyAPIKey == "" && r.Header.Get("Authorization") != "" {
 		return "authorization_passthrough"
 	}
+	if cfg.ProxyAPIKey == "" {
+		if r.Header.Get("X-API-Key") != "" || r.Header.Get("x-api-key") != "" {
+			return "x_api_key_passthrough"
+		}
+	}
 	if cfg.UpstreamAPIKey != "" {
 		return "server_default_key"
 	}

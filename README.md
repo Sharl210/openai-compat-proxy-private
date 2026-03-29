@@ -207,6 +207,7 @@ anthropic-version: 2023-06-01
 ```
 
 缺少这个头会直接返回 `400 invalid_request`。
+当前代码只校验这个头**存在且非空**；如果你想和 Anthropic 官方默认契约保持一致，建议仍然传 `2023-06-01`。
 
 说明：这是 `/v1/messages` 这个下游兼容端口本身的契约要求。
 无论当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 是 `anthropic`、`responses` 还是 `chat`，这个头都必须带。
@@ -225,7 +226,11 @@ anthropic-version: 2023-06-01
 
 - `X-Upstream-Authorization: Bearer <real-upstream-key>`
 
-如果请求里没有传 `X-Upstream-Authorization`，则回退到当前 provider 的 `UPSTREAM_API_KEY`。
+如果请求里没有传 `X-Upstream-Authorization`：
+
+- 当当前路由实际不要求代理鉴权时，`Authorization: Bearer ...` 会直接作为上游鉴权透传
+- 对 Anthropic / Claude 风格客户端，如果当前路由实际不要求代理鉴权，`X-API-Key` / `x-api-key` 也会被当成上游 key 使用
+- 否则回退到当前 provider 的 `UPSTREAM_API_KEY`
 
 ---
 
@@ -271,7 +276,7 @@ anthropic-version: 2023-06-01
 | `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
 | `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
 
-说明：provider 文件里的字段当前都支持热加载；但 Cache_Info 统计文件始终写到进程启动时初始化的 `<PROVIDERS_DIR>/Cache_Info/` 下，修改根 `.env` 里的 `PROVIDERS_DIR` 后如果还要切换 Cache_Info 落盘目录，需要重启。
+说明：provider 文件里的字段当前都支持热加载；但 Cache_Info 统计文件会写到进程启动时初始化的 `<PROVIDERS_DIR>/Cache_Info/` 下，其中 JSON 快照实际落在 `SYSTEM_JSON_FILES/` 子目录里。修改根 `.env` 里的 `PROVIDERS_DIR` 后如果还要切换 Cache_Info 落盘目录，需要重启。
 
 ---
 
@@ -315,7 +320,7 @@ anthropic-version: 2023-06-01
 - `CACHE_INFO_TIMEZONE`
 - 所有 `LOG_*`
 
-说明：根 `.env` 和 provider `.env` 中的布尔字段现在都要求写成合法布尔值；写成非法值时，配置校验会失败，不会再静默按 `false` 处理。
+说明：启动时根 `.env` 和 provider `.env` 中要求严格布尔值的字段都必须写成合法布尔值；写成非法值时，配置校验会失败，不会再静默按 `false` 处理。运行时热加载阶段，只有实际参与热更新校验的根字段会重新按这个规则检查。
 
 ---
 
@@ -324,7 +329,7 @@ anthropic-version: 2023-06-01
 `MODEL_MAP_JSON` 支持：
 
 - 精确匹配
-- `*-suffix` 通配 key
+- `*-suffix` 后缀模式 key
 - `*` 兜底
 
 `ENABLE_REASONING_EFFORT_SUFFIX=true` 时，支持把模型名后缀：
@@ -339,7 +344,7 @@ anthropic-version: 2023-06-01
 如果某个 provider 还打开了 `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true`，并且该 provider 的 `UPSTREAM_ENDPOINT_TYPE=anthropic`，那么代理会在请求本身没有显式 `thinking` 时，把解析出的 suffix effort 自动映射成 Anthropic 上游 `thinking` 配置。
 当前映射规则：
 
-- 如果目标模型支持自适应思考（当前优先按 `claude-opus-4-6` 识别），则发送：
+- 如果目标模型命中当前内置的自适应识别规则（目前主要按模型名包含 `opus-4-6` 或 `opus-4.6` 判断），则发送：
   - `thinking: {"type":"adaptive"}`
   - `output_config.effort` 分别映射为 `low / medium / high / max`
 - 其余模型走手动 `budget_tokens`：
@@ -367,7 +372,7 @@ anthropic-version: 2023-06-01
 
 - `/v1/responses` 仍然是代理内部能力最完整的基线入口；`previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation`、`store`、`include` 这类高层字段优先在这条链完整保留
 - 当 provider 内部上游是 `responses` 时，上述字段会继续向上游透传；相关回归测试见 `internal/adapter/responses/request_test.go` 与 `internal/httpapi/upstream_endpoint_type_integration_test.go`
-- 当 provider 内部上游是 `chat` 或 `anthropic` 时，代理会尽量保留高价值语义，但这不等于三套协议已经做到完全保真互转；`chat` / `messages` 更偏兼容出口，不承诺一比一承接所有 `responses` 顶层控制字段
+- 当 provider 内部上游是 `chat` 或 `anthropic` 时，代理会尽量保留高价值语义，但这不等于三套协议已经做到完全保真互转；`chat` / `messages` 更偏兼容出口，不承诺一比一承接所有 `responses` 顶层控制字段。像 `store`、`include` 这类字段在跨到非 responses 上游时尤其不应按“继续透传”理解。
 
 ---
 

@@ -45,13 +45,11 @@ func handleModels() http.HandlerFunc {
 			return
 		}
 		if status == http.StatusNotFound {
-			if shouldFallbackModelsFromBody(body) {
-				if fallbackBody, fallbackOK := configuredModelsFallbackBody(provider); fallbackOK {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write(fallbackBody)
-					return
-				}
+			if fallbackBody, fallbackOK := configuredModelsFallbackBody(provider); fallbackOK {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(fallbackBody)
+				return
 			}
 		}
 
@@ -151,20 +149,6 @@ func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool)
 		return nil, false
 	}
 	return encoded, true
-}
-
-func shouldFallbackModelsFromBody(body []byte) bool {
-	if len(body) == 0 {
-		return false
-	}
-	text := strings.ToLower(string(body))
-	if strings.Contains(text, "models not supported") {
-		return true
-	}
-	if strings.Contains(text, "models endpoint") && strings.Contains(text, "not supported") {
-		return true
-	}
-	return false
 }
 
 func cloneModelEntry(entry map[string]any) map[string]any {

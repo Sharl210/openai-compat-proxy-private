@@ -80,6 +80,12 @@ func ResolveUpstreamAuthorization(r *http.Request, cfg config.Config) (string, e
 		if value := strings.TrimSpace(r.Header.Get("Authorization")); value != "" {
 			return value, nil
 		}
+		if value := strings.TrimSpace(r.Header.Get("X-API-Key")); value != "" {
+			return "Bearer " + value, nil
+		}
+		if value := strings.TrimSpace(r.Header.Get("x-api-key")); value != "" {
+			return "Bearer " + value, nil
+		}
 	}
 
 	if cfg.UpstreamAPIKey != "" {

@@ -187,7 +187,7 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 	}
 }
 
-func TestModelsDoesNotFallbackOnGenericNotFound(t *testing.T) {
+func TestModelsFallsBackOnGenericNotFoundWhenConfiguredAliasesExist(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -214,7 +214,19 @@ func TestModelsDoesNotFallbackOnGenericNotFound(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected generic upstream 404 to stay 404, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected generic upstream 404 to fallback to configured aliases, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode fallback models response: %v body=%s", err, rec.Body.String())
+	}
+	data, _ := payload["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("expected exactly one configured public alias, got %#v", data)
+	}
+	entry, _ := data[0].(map[string]any)
+	if got, _ := entry["id"].(string); got != "public-gpt" {
+		t.Fatalf("expected fallback alias public-gpt, got %#v", entry)
 	}
 }
