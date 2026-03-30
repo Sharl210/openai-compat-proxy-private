@@ -105,6 +105,12 @@ func providerConfigForRequest(r *http.Request) config.Config {
 			}
 			providerCfg.UpstreamRetryCount = provider.UpstreamRetryCount
 			providerCfg.UpstreamRetryDelay = provider.UpstreamRetryDelay
+			if provider.UpstreamUserAgent != "" {
+				providerCfg.UpstreamUserAgent = provider.UpstreamUserAgent
+			}
+			if provider.MasqueradeTarget != "" {
+				providerCfg.MasqueradeTarget = provider.MasqueradeTarget
+			}
 		}
 	}
 	return providerCfg
