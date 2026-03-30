@@ -12,6 +12,16 @@ import (
 	"openai-compat-proxy/internal/model"
 )
 
+const (
+	opencodeUserAgent      = "opencode/local/1.0.0/true"
+	opencodeOriginator     = "Opencode"
+	claudeCodeUserAgent    = "claude-cli/2.1.22 (external, cli)"
+	claudeCodeXApp         = "cli"
+	claudeCodeBeta         = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
+	codexUserAgent         = "codex_cli_rs/0.104.0"
+	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+)
+
 func (c *Client) endpointType() string {
 	if c == nil {
 		return config.UpstreamEndpointTypeResponses
@@ -41,11 +51,32 @@ func endpointPathForType(endpointType string) string {
 	}
 }
 
-func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string) {
+func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string, userAgent string, masqueradeTarget string) {
 	if httpReq == nil {
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	switch masqueradeTarget {
+	case config.MasqueradeTargetOpenAI:
+		httpReq.Header.Set("User-Agent", opencodeUserAgent)
+		httpReq.Header.Set("originator", opencodeOriginator)
+	case config.MasqueradeTargetClaude:
+		httpReq.Header.Set("User-Agent", claudeCodeUserAgent)
+		httpReq.Header.Set("X-App", claudeCodeXApp)
+		httpReq.Header.Set("anthropic-beta", claudeCodeBeta)
+		httpReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
+		httpReq.Header.Set("X-Stainless-Lang", "js")
+		httpReq.Header.Set("X-Stainless-Package-Version", "0.70.0")
+		httpReq.Header.Set("X-Stainless-OS", "Linux")
+		httpReq.Header.Set("X-Stainless-Arch", "arm64")
+		httpReq.Header.Set("X-Stainless-Runtime", "node")
+		httpReq.Header.Set("X-Stainless-Runtime-Version", "v24.13.0")
+	case config.MasqueradeTargetCodex:
+		httpReq.Header.Set("User-Agent", codexUserAgent)
+	}
+	if userAgent != "" {
+		httpReq.Header.Set("User-Agent", userAgent)
+	}
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
 		version := strings.TrimSpace(anthropicVersion)
 		if version == "" {
@@ -73,20 +104,20 @@ func upstreamAPIKeyFromAuthorization(authorization string) string {
 	return trimmed
 }
 
-func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string) ([]byte, error) {
+func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
 		return buildChatRequestBody(req)
 	case config.UpstreamEndpointTypeAnthropic:
-		return buildAnthropicRequestBody(req)
+		return buildAnthropicRequestBody(req, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
 	default:
 		return buildRequestBody(req)
 	}
 }
 
-func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string) ([]byte, error) {
+func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
 	req.Stream = true
-	return buildRequestBodyForEndpoint(req, endpointType)
+	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
 }
 
 func normalizeResponsePayload(endpointType string, payload map[string]any) map[string]any {
@@ -698,7 +729,7 @@ func buildChatContentParts(parts []model.CanonicalContentPart) []any {
 	return content
 }
 
-func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
+func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
 	if err := validateAnthropicRequest(req); err != nil {
 		return nil, err
 	}
@@ -708,7 +739,9 @@ func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	} else {
 		payload["max_tokens"] = 1024
 	}
-	if system := buildAnthropicSystemPrompt(req); system != "" {
+	if injectSystemPrompt && masqueradeTarget == config.MasqueradeTargetClaude {
+		payload["system"] = claudeCodeSystemPrompt
+	} else if system := buildAnthropicSystemPrompt(req); system != "" {
 		payload["system"] = system
 	}
 	if req.Reasoning != nil && len(req.Reasoning.Raw) > 0 {
@@ -736,6 +769,13 @@ func buildAnthropicRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		payload["tool_choice"] = choice
 	}
 	payload["messages"] = buildAnthropicMessages(req)
+
+	if injectMetadataUserID && masqueradeTarget == config.MasqueradeTargetClaude {
+		payload["metadata"] = map[string]any{
+			"user_id": "user_" + strings.Repeat("deadbeef", 8) + "_account__session_" + "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdead",
+		}
+	}
+
 	return json.Marshal(payload)
 }
 

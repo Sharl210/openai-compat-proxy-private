@@ -19,6 +19,9 @@ type ProviderConfig struct {
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
 	UpstreamEndpointType                   string
+	MasqueradeTarget                       string
+	InjectClaudeCodeMetadataUserID         bool
+	InjectClaudeCodeSystemPrompt           bool
 	SupportsChat                           bool
 	SupportsResponses                      bool
 	SupportsModels                         bool
@@ -49,6 +52,14 @@ const (
 	UpstreamEndpointTypeResponses = "responses"
 	UpstreamEndpointTypeChat      = "chat"
 	UpstreamEndpointTypeAnthropic = "anthropic"
+)
+
+// MasqueradeTarget 表示向上游请求时，代理层要模拟的目标客户端标识。
+// 用于绕过 sub2api 等代理服务的客户端限制。
+const (
+	MasqueradeTargetOpenAI = "openai" // 模拟 OpenAI 官方客户端
+	MasqueradeTargetClaude = "claude" // 模拟 Claude Code 客户端
+	MasqueradeTargetCodex  = "codex"  // 模拟 OpenAI Codex CLI 客户端
 )
 
 type invalidConfigError string
@@ -213,6 +224,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.SystemPromptPosition = normalizeSystemPromptPosition(value)
 		case "ANTHROPIC_VERSION":
 			provider.AnthropicVersion = value
+		case "MASQUERADE_TARGET":
+			provider.MasqueradeTarget = strings.ToLower(value)
+		case "INJECT_CLAUDE_CODE_METADATA_USER_ID":
+			provider.InjectClaudeCodeMetadataUserID, _ = parseProviderStrictBool(value, key, path)
+		case "INJECT_CLAUDE_CODE_SYSTEM_PROMPT":
+			provider.InjectClaudeCodeSystemPrompt, _ = parseProviderStrictBool(value, key, path)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -223,6 +240,9 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	provider.SystemPromptPosition = normalizeSystemPromptPosition(provider.SystemPromptPosition)
 	if provider.AnthropicVersion == "" {
 		provider.AnthropicVersion = "2023-06-01"
+	}
+	if err := normalizeMasqueradeTarget(&provider, path); err != nil {
+		return ProviderConfig{}, err
 	}
 	if provider.Enabled && strings.TrimSpace(provider.UpstreamBaseURL) == "" {
 		return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("UPSTREAM_BASE_URL is required for enabled provider %q", provider.ID))
@@ -382,6 +402,21 @@ func normalizeProviderRetryDelay(value time.Duration) time.Duration {
 		return DefaultUpstreamRetryDelay
 	}
 	return value
+}
+
+func normalizeMasqueradeTarget(provider *ProviderConfig, path string) error {
+	trimmed := strings.TrimSpace(provider.MasqueradeTarget)
+	if trimmed == "" {
+		provider.MasqueradeTarget = ""
+		return nil
+	}
+	switch trimmed {
+	case MasqueradeTargetOpenAI, MasqueradeTargetClaude, MasqueradeTargetCodex:
+		provider.MasqueradeTarget = trimmed
+		return nil
+	default:
+		return ErrInvalidConfig(fmt.Sprintf("invalid MASQUERADE_TARGET in %s: %q (allowed: openai, claude, codex)", path, trimmed))
+	}
 }
 
 func normalizeSystemPromptPosition(value string) string {

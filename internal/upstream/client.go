@@ -21,12 +21,16 @@ import (
 )
 
 type Client struct {
-	baseURL              string
-	httpClient           *http.Client
-	retryCount           int
-	retryDelay           time.Duration
-	upstreamEndpointType string
-	anthropicVersion     string
+	baseURL                        string
+	httpClient                     *http.Client
+	retryCount                     int
+	retryDelay                     time.Duration
+	upstreamEndpointType           string
+	anthropicVersion               string
+	upstreamUserAgent              string
+	masqueradeTarget               string
+	injectClaudeCodeMetadataUserID bool
+	injectClaudeCodeSystemPrompt   bool
 }
 
 type EventStream struct {
@@ -60,12 +64,16 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		cfg = cfgs[0]
 	}
 	return &Client{
-		baseURL:              strings.TrimRight(baseURL, "/"),
-		httpClient:           newHTTPClient(cfg),
-		retryCount:           cfg.UpstreamRetryCount,
-		retryDelay:           cfg.UpstreamRetryDelay,
-		upstreamEndpointType: normalizeEndpointType(cfg.UpstreamEndpointType),
-		anthropicVersion:     strings.TrimSpace(cfg.AnthropicVersion),
+		baseURL:                        strings.TrimRight(baseURL, "/"),
+		httpClient:                     newHTTPClient(cfg),
+		retryCount:                     cfg.UpstreamRetryCount,
+		retryDelay:                     cfg.UpstreamRetryDelay,
+		upstreamEndpointType:           normalizeEndpointType(cfg.UpstreamEndpointType),
+		anthropicVersion:               strings.TrimSpace(cfg.AnthropicVersion),
+		upstreamUserAgent:              strings.TrimSpace(cfg.UpstreamUserAgent),
+		masqueradeTarget:               cfg.MasqueradeTarget,
+		injectClaudeCodeMetadataUserID: cfg.InjectClaudeCodeMetadataUserID,
+		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
 	}
 }
 
@@ -134,7 +142,7 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
 	endpointType := c.endpointType()
-	body, err := buildStreamingRequestBody(req, endpointType)
+	body, err := buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +237,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 
 func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest, authorization string) (*EventStream, error) {
 	endpointType := c.endpointType()
-	body, err := buildStreamingRequestBody(req, endpointType)
+	body, err := buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +267,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 
 func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, authorization string) (map[string]any, error) {
 	endpointType := c.endpointType()
-	body, err := buildRequestBodyForEndpoint(req, endpointType)
+	body, err := buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +425,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, c.upstreamUserAgent, c.masqueradeTarget)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -444,7 +452,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, c.upstreamUserAgent, c.masqueradeTarget)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

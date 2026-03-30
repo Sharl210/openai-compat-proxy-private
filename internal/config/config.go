@@ -10,29 +10,33 @@ import (
 )
 
 type Config struct {
-	ListenAddr                  string
-	CacheInfoTimezone           string
-	ProxyAPIKey                 string
-	UpstreamBaseURL             string
-	UpstreamAPIKey              string
-	UpstreamEndpointType        string
-	AnthropicVersion            string
-	ProvidersDir                string
-	DefaultProvider             string
-	EnableLegacyV1Routes        bool
-	DownstreamNonStreamStrategy string
-	Providers                   []ProviderConfig
-	LogEnable                   bool
-	ConnectTimeout              time.Duration
-	FirstByteTimeout            time.Duration
-	IdleTimeout                 time.Duration
-	TotalTimeout                time.Duration
-	UpstreamRetryCount          int
-	UpstreamRetryDelay          time.Duration
-	LogFilePath                 string
-	LogIncludeBodies            bool
-	LogMaxSizeMB                int
-	LogMaxBackups               int
+	ListenAddr                     string
+	CacheInfoTimezone              string
+	ProxyAPIKey                    string
+	UpstreamBaseURL                string
+	UpstreamAPIKey                 string
+	UpstreamEndpointType           string
+	AnthropicVersion               string
+	UpstreamUserAgent              string
+	MasqueradeTarget               string
+	InjectClaudeCodeMetadataUserID bool
+	InjectClaudeCodeSystemPrompt   bool
+	ProvidersDir                   string
+	DefaultProvider                string
+	EnableLegacyV1Routes           bool
+	DownstreamNonStreamStrategy    string
+	Providers                      []ProviderConfig
+	LogEnable                      bool
+	ConnectTimeout                 time.Duration
+	FirstByteTimeout               time.Duration
+	IdleTimeout                    time.Duration
+	TotalTimeout                   time.Duration
+	UpstreamRetryCount             int
+	UpstreamRetryDelay             time.Duration
+	LogFilePath                    string
+	LogIncludeBodies               bool
+	LogMaxSizeMB                   int
+	LogMaxBackups                  int
 }
 
 const (
@@ -131,6 +135,14 @@ func loadFromLookup(lookup func(string) string) Config {
 			cfg.TotalTimeout = parsed
 		}
 	}
+	if value := lookup("UPSTREAM_USER_AGENT"); value != "" {
+		cfg.UpstreamUserAgent = value
+	}
+	if value := lookup("UPSTREAM_MASQUERADE_TARGET"); value != "" {
+		cfg.MasqueradeTarget = strings.ToLower(value)
+	}
+	cfg.InjectClaudeCodeMetadataUserID = strings.ToLower(lookup("UPSTREAM_INJECT_METADATA_USER_ID")) == "true"
+	cfg.InjectClaudeCodeSystemPrompt = strings.ToLower(lookup("UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT")) == "true"
 	return cfg
 }
 
@@ -160,6 +172,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateStrictBool(values, "LOG_INCLUDE_BODIES"); err != nil {
+		return err
+	}
+	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
 		return err
 	}
 	if err := validateMinInt(values, "LOG_MAX_SIZE_MB", 1); err != nil {
@@ -229,6 +244,19 @@ func validateMinInt(values map[string]string, key string, min int) error {
 		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
 	}
 	return nil
+}
+
+func validateMasqueradeTarget(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	switch strings.ToLower(value) {
+	case MasqueradeTargetOpenAI, MasqueradeTargetClaude, MasqueradeTargetCodex:
+		return nil
+	default:
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q (allowed: openai, claude, codex)", key, value))
+	}
 }
 
 func validateStrictBool(values map[string]string, key string) error {

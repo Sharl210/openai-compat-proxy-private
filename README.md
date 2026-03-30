@@ -251,6 +251,10 @@ anthropic-version: 2023-06-01
 | `DOWNSTREAM_NON_STREAM_STRATEGY` | 非流时走本地聚合还是直接请求上游非流 | 是 |
 | `CONNECT_TIMEOUT` / `FIRST_BYTE_TIMEOUT` / `IDLE_TIMEOUT` / `TOTAL_TIMEOUT` | 上游超时控制 | 是 |
 | `LOG_*` | 结构化日志配置 | 否，修改后需重启 |
+| `UPSTREAM_USER_AGENT` | 上游请求时发送的自定义 User-Agent 头 | 是 |
+| `UPSTREAM_MASQUERADE_TARGET` | 伪装目标客户端：`openai`/`claude`/`codex` | 是 |
+| `UPSTREAM_INJECT_METADATA_USER_ID` | 注入 `metadata.user_id` 以绕过 Claude Code 校验 | 是 |
+| `UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | 注入 Claude Code 真实 system prompt 以绕过 Dice 系数校验 | 是 |
 
 ### provider `.env`
 
@@ -275,6 +279,9 @@ anthropic-version: 2023-06-01
 | `ENABLE_REASONING_EFFORT_SUFFIX` | 是否启用 `-low/-medium/-high/-xhigh` suffix 解析（必须写成合法布尔值） |
 | `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
 | `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
+| `MASQUERADE_TARGET` | 伪装目标客户端标识，用于绕过 sub2api 等代理服务的客户端限制。可选：`openai`（伪装 opencode）、`claude`（伪装 Claude Code）、`codex`（伪装 OpenAI Codex CLI） |
+| `INJECT_CLAUDE_CODE_METADATA_USER_ID` | 是否注入 `metadata.user_id` 以绕过 sub2api 的 `messages` 路径校验 | |
+| `INJECT_CLAUDE_CODE_SYSTEM_PROMPT` | 是否注入 Claude Code 真实 system prompt 以绕过 sub2api 的 Dice 系数相似度校验 | |
 
 说明：provider 文件里的字段当前都支持热加载；但 Cache_Info 统计文件会写到进程启动时初始化的 `<PROVIDERS_DIR>/Cache_Info/` 下，其中 JSON 快照实际落在 `SYSTEM_JSON_FILES/` 子目录里。修改根 `.env` 里的 `PROVIDERS_DIR` 后如果还要切换 Cache_Info 落盘目录，需要重启。
 
@@ -304,12 +311,19 @@ anthropic-version: 2023-06-01
   - `FIRST_BYTE_TIMEOUT`
   - `IDLE_TIMEOUT`
   - `TOTAL_TIMEOUT`
+  - `UPSTREAM_USER_AGENT`
+  - `UPSTREAM_MASQUERADE_TARGET`
+  - `UPSTREAM_INJECT_METADATA_USER_ID`
+  - `UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT`
 - 根 `.env` 中带条件生效的：
   - `PROVIDERS_DIR`（provider 配置监听会切换；Cache_Info 落盘目录仍需重启后才会切换）
 - provider `.env` 中的大部分运行时字段，包括：
   - `UPSTREAM_BASE_URL`
   - `UPSTREAM_API_KEY`
   - `UPSTREAM_ENDPOINT_TYPE`
+  - `MASQUERADE_TARGET`
+  - `INJECT_CLAUDE_CODE_METADATA_USER_ID`
+  - `INJECT_CLAUDE_CODE_SYSTEM_PROMPT`
   - 能力开关
   - 重试 / timeout / model map / suffix / system prompt 相关字段
 - `SYSTEM_PROMPT_FILES` 引用到的文本文件内容

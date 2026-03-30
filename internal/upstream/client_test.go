@@ -552,7 +552,7 @@ func TestBuildChatRequestBodyPreservesFileContentPart(t *testing.T) {
 				Raw:  map[string]any{"input_file": map[string]any{"file_id": "file_123"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat)
+	}, config.UpstreamEndpointTypeChat, "", false, false)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestBuildChatRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "mp3"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat)
+	}, config.UpstreamEndpointTypeChat, "", false, false)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 		Model:           "claude-sonnet-4-5",
 		MaxOutputTokens: intPtrForClientTest(128),
 		Reasoning:       &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
-	}, config.UpstreamEndpointTypeAnthropic)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -672,7 +672,7 @@ func TestBuildAnthropicRequestBodyRejectsInputAudio(t *testing.T) {
 				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "mp3"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
 	if err == nil {
 		t.Fatalf("expected anthropic request builder to reject input_audio")
 	}
