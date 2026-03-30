@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
@@ -93,6 +94,58 @@ func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 	}
 	if strings.Contains(body, `{"item":{"id":"rs_proxy","summary":[{"text":"alpha"`) {
 		t.Fatalf("expected real reasoning content to stay on real item instead of being merged into rs_proxy, got %s", body)
+	}
+}
+
+func TestResponsesStreamEmitsContinuousSyntheticReasoningBeforeFirstUpstreamEvent(t *testing.T) {
+	oldLeadTime := initialSyntheticReasoningLeadTime
+	oldTickInterval := syntheticReasoningTickInterval
+	initialSyntheticReasoningLeadTime = 5 * time.Millisecond
+	syntheticReasoningTickInterval = 10 * time.Millisecond
+	defer func() {
+		initialSyntheticReasoningLeadTime = oldLeadTime
+		syntheticReasoningTickInterval = oldTickInterval
+	}()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatalf("response writer does not support flushing")
+		}
+		flusher.Flush()
+		time.Sleep(60 * time.Millisecond)
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	textIdx := strings.Index(body, `"type":"response.output_text.delta"`)
+	if textIdx == -1 {
+		t.Fatalf("expected upstream text event, got %s", body)
+	}
+	beforeText := body[:textIdx]
+	if count := strings.Count(beforeText, `"type":"response.reasoning.delta"`); count < 2 {
+		t.Fatalf("expected at least 2 synthetic reasoning deltas before first upstream text, got %d body=%s", count, body)
 	}
 }
 
@@ -238,6 +291,22 @@ func TestResponsesStreamCompatibilityKeepsOriginalItemIDWhilePreservingCallID(t 
 	}
 	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected arguments.done to keep stable call_id for follow-up, got %s", body)
+	}
+}
+
+func TestResponsesStreamCompatibilityDedupesRepeatedCompleteFunctionCallArguments(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":"移远通信 IoT SoC Linux 部门 MTK ASR 展锐 RTOS 业务 2025 2026","topic":"general"}`}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":"移远通信 IoT SoC Linux 部门 MTK ASR 展锐 RTOS 业务 2025 2026","topic":"general"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+	duplicated := `{"query":"移远通信 IoT SoC Linux 部门 MTK ASR 展锐 RTOS 业务 2025 2026","topic":"general"}{"query":"移远通信 IoT SoC Linux 部门 MTK ASR 展锐 RTOS 业务 2025 2026","topic":"general"}`
+	if strings.Contains(body, duplicated) {
+		t.Fatalf("expected repeated complete arguments to be deduped, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"移远通信 IoT SoC Linux 部门 MTK ASR 展锐 RTOS 业务 2025 2026\",\"topic\":\"general\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected final function_call item to keep one complete arguments JSON, got %s", body)
 	}
 }
 

@@ -457,12 +457,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType)}
-	if err := stream.prime(); err != nil {
-		_ = stream.Close()
-		return nil, err
-	}
-	return stream, nil
+	return &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType)}, nil
 }
 
 func (s *EventStream) Consume(onEvent func(Event) error) error {

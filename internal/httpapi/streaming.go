@@ -16,7 +16,7 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
-const initialSyntheticReasoningLeadTime = 350 * time.Millisecond
+var initialSyntheticReasoningLeadTime = 350 * time.Millisecond
 
 var syntheticReasoningTickInterval = 250 * time.Millisecond
 var sseHeartbeatInterval = 15 * time.Second
@@ -71,6 +71,7 @@ type responsesStreamState struct {
 type responsesToolItemState struct {
 	item      map[string]any
 	arguments strings.Builder
+	lastDelta string
 	addedSent bool
 	doneSent  bool
 }
@@ -138,12 +139,18 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return aggregate.Result{}, err
 	}
-	if err := waitSyntheticLeadTime(ctx); err != nil {
-		return aggregate.Result{}, err
-	}
+	consumeStartedAt := time.Now()
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
-		func() bool { return true },
-		nil,
+		func() bool { return state.textStarted || state.realReasoningSeen || len(state.toolItems) > 0 },
+		func() error {
+			if time.Since(consumeStartedAt) < initialSyntheticReasoningLeadTime {
+				return nil
+			}
+			if state.textStarted || state.realReasoningSeen || len(state.toolItems) > 0 {
+				return nil
+			}
+			return writeSyntheticResponsesReasoningWithState(w, flusher, &state, "\u200b")
+		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
 			collector.Accept(evt)
@@ -370,7 +377,10 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		if itemID != "" {
 			toolState := ensureToolItemState(itemID)
 			if delta != "" {
-				toolState.arguments.WriteString(delta)
+				if toolState.arguments.Len() == 0 || toolState.lastDelta != delta {
+					toolState.arguments.WriteString(delta)
+					toolState.lastDelta = delta
+				}
 			}
 		}
 		if compatCompleteToolArgs {
