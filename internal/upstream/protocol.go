@@ -73,6 +73,8 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 		httpReq.Header.Set("X-Stainless-Runtime-Version", "v24.13.0")
 	case config.MasqueradeTargetCodex:
 		httpReq.Header.Set("User-Agent", codexUserAgent)
+	case config.MasqueradeTargetNone:
+		// no-op：不注入任何伪装 header
 	}
 	if userAgent != "" {
 		httpReq.Header.Set("User-Agent", userAgent)

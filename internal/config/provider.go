@@ -54,12 +54,11 @@ const (
 	UpstreamEndpointTypeAnthropic = "anthropic"
 )
 
-// MasqueradeTarget 表示向上游请求时，代理层要模拟的目标客户端标识。
-// 用于绕过 sub2api 等代理服务的客户端限制。
 const (
 	MasqueradeTargetOpenAI = "openai" // 模拟 OpenAI 官方客户端
 	MasqueradeTargetClaude = "claude" // 模拟 Claude Code 客户端
 	MasqueradeTargetCodex  = "codex"  // 模拟 OpenAI Codex CLI 客户端
+	MasqueradeTargetNone   = "none"   // 不做任何伪装
 )
 
 type invalidConfigError string
@@ -411,11 +410,11 @@ func normalizeMasqueradeTarget(provider *ProviderConfig, path string) error {
 		return nil
 	}
 	switch trimmed {
-	case MasqueradeTargetOpenAI, MasqueradeTargetClaude, MasqueradeTargetCodex:
+	case MasqueradeTargetOpenAI, MasqueradeTargetClaude, MasqueradeTargetCodex, MasqueradeTargetNone:
 		provider.MasqueradeTarget = trimmed
 		return nil
 	default:
-		return ErrInvalidConfig(fmt.Sprintf("invalid MASQUERADE_TARGET in %s: %q (allowed: openai, claude, codex)", path, trimmed))
+		return ErrInvalidConfig(fmt.Sprintf("invalid MASQUERADE_TARGET in %s: %q (allowed: openai, claude, codex, none)", path, trimmed))
 	}
 }
 
