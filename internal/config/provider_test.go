@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T) {
-	p := ProviderConfig{ModelMap: map[string]string{"gpt-5": "claude-sonnet-4-5-low"}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5-low"}}}
 
 	model, effort := p.ResolveModelAndEffort("gpt-5-high", true)
 	if model != "claude-sonnet-4-5" {
@@ -21,7 +21,7 @@ func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T)
 }
 
 func TestResolveModelAndEffortDoesNotParseSuffixWhenDisabled(t *testing.T) {
-	p := ProviderConfig{ModelMap: map[string]string{"*": "claude-sonnet-4-5-low"}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "*", Target: "claude-sonnet-4-5-low"}}}
 
 	model, effort := p.ResolveModelAndEffort("gpt-5-high", false)
 	if model != "claude-sonnet-4-5-low" {
@@ -33,7 +33,7 @@ func TestResolveModelAndEffortDoesNotParseSuffixWhenDisabled(t *testing.T) {
 }
 
 func TestResolveModelAndEffortUsesMappedSuffixWhenNoRequestSuffix(t *testing.T) {
-	p := ProviderConfig{ModelMap: map[string]string{"gpt-5": "claude-sonnet-4-5-low"}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5-low"}}}
 
 	model, effort := p.ResolveModelAndEffort("gpt-5", true)
 	if model != "claude-sonnet-4-5" {

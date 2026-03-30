@@ -71,8 +71,10 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		return body
 	}
 	data, _ := payload["data"].([]any)
-	baseIDs := make([]string, 0, len(data)+len(provider.ModelMap))
-	seenIDs := make(map[string]struct{}, len(data)+len(provider.ModelMap))
+	mapLen := len(provider.ModelMap)
+	manualLen := len(provider.ManualModels)
+	baseIDs := make([]string, 0, len(data)+mapLen+manualLen)
+	seenIDs := make(map[string]struct{}, len(data)+mapLen+manualLen)
 	entriesByID := map[string]map[string]any{}
 	for _, item := range data {
 		entry, _ := item.(map[string]any)
@@ -99,12 +101,15 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 			entriesByID[publicModel] = source
 		}
 	}
+	for _, manualModel := range provider.ManualModels {
+		if _, exists := seenIDs[manualModel]; !exists {
+			baseIDs = append(baseIDs, manualModel)
+			seenIDs[manualModel] = struct{}{}
+		}
+	}
 	expanded := baseIDs
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
-		modelMapKeys := make([]string, 0, len(provider.ModelMap))
-		for k := range provider.ModelMap {
-			modelMapKeys = append(modelMapKeys, k)
-		}
+		modelMapKeys := modelMapKeysFromEntries(provider.ModelMap)
 		expanded = reasoning.ExpandModelIDs(baseIDs, modelMapKeys, true)
 	}
 	entries := make([]map[string]any, 0, len(expanded))
@@ -162,13 +167,13 @@ func cloneModelEntry(entry map[string]any) map[string]any {
 	return cloned
 }
 
-func sortedPublicModelAliases(modelMap map[string]string) []string {
-	aliases := make([]string, 0, len(modelMap))
-	for key := range modelMap {
-		if shouldHideModelAlias(key) {
+func sortedPublicModelAliases(entries []config.ModelMapEntry) []string {
+	aliases := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if shouldHideModelAlias(entry.Key) {
 			continue
 		}
-		aliases = append(aliases, key)
+		aliases = append(aliases, entry.Key)
 	}
 	sort.Strings(aliases)
 	return aliases
@@ -180,7 +185,7 @@ func shouldHideModelAlias(id string) bool {
 }
 
 func cloneSourceModelEntry(provider config.ProviderConfig, publicModel string, entriesByID map[string]map[string]any) map[string]any {
-	mapped := strings.TrimSpace(provider.ModelMap[publicModel])
+	mapped := resolveModelMapTarget(provider.ModelMap, publicModel)
 	if mapped == "" {
 		return nil
 	}
@@ -194,4 +199,21 @@ func cloneSourceModelEntry(provider config.ProviderConfig, publicModel string, e
 		return cloneModelEntry(entriesByID[publicModel])
 	}
 	return nil
+}
+
+func resolveModelMapTarget(entries []config.ModelMapEntry, model string) string {
+	for _, entry := range entries {
+		if !entry.HasWildcard && entry.Key == model {
+			return entry.Target
+		}
+	}
+	return ""
+}
+
+func modelMapKeysFromEntries(entries []config.ModelMapEntry) []string {
+	keys := make([]string, 0, len(entries))
+	for _, e := range entries {
+		keys = append(keys, e.Key)
+	}
+	return keys
 }

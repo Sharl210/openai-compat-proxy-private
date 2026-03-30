@@ -13,9 +13,9 @@ import (
 func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersWildcardAliases(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model","owned_by":"openai"}]}`)
 	provider := config.ProviderConfig{
-		ModelMap: map[string]string{
-			"public-gpt": "gpt-5.4",
-			"*":          "gpt-5.4",
+		ModelMap: []config.ModelMapEntry{
+			{Key: "public-gpt", Target: "gpt-5.4"},
+			{Key: "*", Target: "gpt-5.4"},
 		},
 	}
 
@@ -47,8 +47,8 @@ func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersWildcardAliases(t *te
 func TestRewriteModelsBodyDoesNotEmitDuplicateIDsWhenAliasAlreadyExistsUpstream(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model"},{"id":"public-gpt","object":"model","owned_by":"proxy"}]}`)
 	provider := config.ProviderConfig{
-		ModelMap: map[string]string{
-			"public-gpt": "gpt-5.4",
+		ModelMap: []config.ModelMapEntry{
+			{Key: "public-gpt", Target: "gpt-5.4"},
 		},
 	}
 
@@ -71,8 +71,8 @@ func TestRewriteModelsBodyDoesNotEmitDuplicateIDsWhenAliasAlreadyExistsUpstream(
 func TestRewriteModelsBodyHidesAliasWhenMappedTargetIsMissing(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model"}]}`)
 	provider := config.ProviderConfig{
-		ModelMap: map[string]string{
-			"ghost-alias": "missing-upstream-model",
+		ModelMap: []config.ModelMapEntry{
+			{Key: "ghost-alias", Target: "missing-upstream-model"},
 		},
 	}
 
@@ -156,9 +156,9 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 			UpstreamBaseURL: upstream.URL,
 			UpstreamAPIKey:  "test-key",
 			SupportsModels:  true,
-			ModelMap: map[string]string{
-				"public-gpt": "gpt-5.4",
-				"*":          "gpt-5.4",
+			ModelMap: []config.ModelMapEntry{
+				{Key: "public-gpt", Target: "gpt-5.4"},
+				{Key: "*", Target: "gpt-5.4"},
 			},
 		}},
 	})
@@ -204,8 +204,8 @@ func TestModelsFallsBackOnGenericNotFoundWhenConfiguredAliasesExist(t *testing.T
 			UpstreamBaseURL: upstream.URL,
 			UpstreamAPIKey:  "test-key",
 			SupportsModels:  true,
-			ModelMap: map[string]string{
-				"public-gpt": "gpt-5.4",
+			ModelMap: []config.ModelMapEntry{
+				{Key: "public-gpt", Target: "gpt-5.4"},
 			},
 		}},
 	})

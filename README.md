@@ -275,7 +275,8 @@ anthropic-version: 2023-06-01
 | `UPSTREAM_FIRST_BYTE_TIMEOUT` | provider 级首字节超时 |
 | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` | provider 级非流模式覆写 |
 | `SYSTEM_PROMPT_FILES` / `SYSTEM_PROMPT_POSITION` | provider 级系统提示词注入 |
-| `MODEL_MAP_JSON` | 模型映射 |
+| `MODEL_MAP` | 模型映射（逗号分隔格式，支持 $0/$1/$2 占位符和通配符） |
+| `MANUAL_MODELS` | 手动补充的模型名列表（逗号分隔），用于上游未提供模型列表时 |
 | `ENABLE_REASONING_EFFORT_SUFFIX` | 是否启用 `-low/-medium/-high/-xhigh` suffix 解析（必须写成合法布尔值） |
 | `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
 | `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
@@ -341,11 +342,14 @@ anthropic-version: 2023-06-01
 
 ## 模型映射与 suffix
 
-`MODEL_MAP_JSON` 支持：
+`MODEL_MAP` 格式为逗号分隔的 `src:target` 对，支持：
 
-- 精确匹配
-- `*-suffix` 后缀模式 key
-- `*` 兜底
+- 精确 key 匹配
+- 通配符 key：`prefix*`、`*suffix`、`prefix*suffix`、`*`（兜底）
+- 多个 `*` 捕获：`key*with*multiple` 会产生多次捕获
+- 目标占位符：`$0`（完整原始模型）、`$1`（第 1 个 `*` 捕获）、`$2`（第 2 个 `*`）等
+- 转义：`\*` 表示真实星号，`\$` 表示真实美元符号
+- 示例：`gpt-4*:gpt-o1-$1` 把 `gpt-4o` 映射为 `gpt-o1-o`
 
 `ENABLE_REASONING_EFFORT_SUFFIX=true` 时，支持把模型名后缀：
 

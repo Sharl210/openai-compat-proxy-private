@@ -2,7 +2,6 @@ package config
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,7 +26,8 @@ type ProviderConfig struct {
 	SupportsResponses                      bool
 	SupportsModels                         bool
 	SupportsAnthropicMessages              bool
-	ModelMap                               map[string]string
+	ModelMap                               []ModelMapEntry
+	ManualModels                           []string
 	EnableReasoningEffortSuffix            bool
 	ExposeReasoningSuffixModels            bool
 	MapReasoningSuffixToAnthropicThinking  bool
@@ -43,6 +43,17 @@ type ProviderConfig struct {
 	SystemPromptPosition                   string
 	SystemPromptText                       string
 	AnthropicVersion                       string
+}
+
+type ModelMapEntry struct {
+	Key               string
+	Target            string
+	UnescapedKey      string
+	UnescapedTarget   string
+	HasWildcard       bool
+	KeyParts          []string
+	TargetHasCaptures bool
+	CaptureCount      int
 }
 
 const (
@@ -163,13 +174,13 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			if err != nil {
 				return ProviderConfig{}, err
 			}
-		case "MODEL_MAP_JSON":
-			if value != "" {
-				provider.ModelMap = map[string]string{}
-				if err := json.Unmarshal([]byte(value), &provider.ModelMap); err != nil {
-					return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP_JSON in %s: %v", path, err))
-				}
+		case "MODEL_MAP":
+			provider.ModelMap, err = parseModelMap(value, path)
+			if err != nil {
+				return ProviderConfig{}, err
 			}
+		case "MANUAL_MODELS":
+			provider.ManualModels = parseCommaSeparatedList(value)
 		case "ENABLE_REASONING_EFFORT_SUFFIX":
 			provider.EnableReasoningEffortSuffix, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
@@ -430,6 +441,85 @@ func normalizeSystemPromptPosition(value string) string {
 	}
 }
 
+func parseModelMap(raw string, path string) ([]ModelMapEntry, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ','
+	})
+	entries := make([]ModelMapEntry, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" || strings.TrimSpace(kv[1]) == "" {
+			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP entry in %s: %q (expected format: src:target,src2:target2)", path, part))
+		}
+		key := strings.TrimSpace(kv[0])
+		target := strings.TrimSpace(kv[1])
+		entries = append(entries, NewModelMapEntry(key, target))
+	}
+	return entries, nil
+}
+
+func parseCommaSeparatedList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ','
+	})
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, unescapeString(trimmed))
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func unescapeString(s string) string {
+	var result []byte
+	i := 0
+	for i < len(s) {
+		if s[i] == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			if next == '\\' || next == '*' || next == '$' {
+				result = append(result, next)
+				i += 2
+				continue
+			}
+		}
+		result = append(result, s[i])
+		i++
+	}
+	return string(result)
+}
+
+func NewModelMapEntry(key, target string) ModelMapEntry {
+	entry := ModelMapEntry{Key: key, Target: target}
+	entry.UnescapedKey = unescapeString(key)
+	entry.UnescapedTarget = unescapeString(target)
+	entry.HasWildcard = strings.Contains(entry.UnescapedKey, "*")
+	parts := strings.Split(entry.UnescapedKey, "*")
+	entry.KeyParts = make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			entry.KeyParts = append(entry.KeyParts, p)
+		}
+	}
+	entry.CaptureCount = len(parts) - 1
+	entry.TargetHasCaptures = strings.Contains(entry.UnescapedTarget, "$")
+	return entry
+}
+
 func resolveProviderRelativePaths(providerEnvPath string, raw string) []string {
 	parts := strings.FieldsFunc(raw, func(r rune) bool {
 		switch r {
@@ -461,22 +551,8 @@ func resolveProviderRelativePaths(providerEnvPath string, raw string) []string {
 }
 
 func (p ProviderConfig) ResolveModel(model string, enableSuffix bool) string {
-	if mapped, ok := p.ModelMap[model]; ok && mapped != "" {
+	if mapped := p.resolveModel(model, enableSuffix); mapped != "" {
 		return mapped
-	}
-	if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
-		return mapped
-	}
-	if enableSuffix {
-		baseModel, _, ok := splitReasoningSuffix(model)
-		if ok && baseModel != model {
-			if mapped, ok := p.ModelMap[baseModel]; ok && mapped != "" {
-				return mapped
-			}
-			if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
-				return mapped
-			}
-		}
 	}
 	return model
 }
@@ -490,23 +566,96 @@ func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (
 			requestedEffort = effort
 		}
 	}
-	for key, mapped := range p.ModelMap {
-		if strings.HasPrefix(key, "*-") {
-			if strings.HasSuffix(model, key[1:]) {
-				return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
-			}
+	if mapped := p.resolveModel(model, enableSuffix); mapped != "" {
+		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
+	}
+	if enableSuffix && requestedModel != model {
+		if mapped := p.resolveModel(requestedModel, false); mapped != "" {
+			return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
 		}
 	}
-	if mapped, ok := p.ModelMap[model]; ok && mapped != "" {
-		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
-	}
-	if mapped, ok := p.ModelMap[requestedModel]; ok && mapped != "" {
-		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
-	}
-	if mapped, ok := p.ModelMap["*"]; ok && mapped != "" {
-		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
-	}
 	return finalizeResolvedModelAndEffort(requestedModel, requestedEffort, enableSuffix)
+}
+
+func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
+	if p.ModelMap == nil {
+		return ""
+	}
+	for _, entry := range p.ModelMap {
+		if matchModelWildcard(model, entry) {
+			return applyCaptureReplacement(model, entry)
+		}
+	}
+	return ""
+}
+
+func matchModelWildcard(model string, entry ModelMapEntry) bool {
+	actualKey := entry.UnescapedKey
+	if actualKey == "" {
+		actualKey = entry.Key
+	}
+	if actualKey == "*" {
+		return true
+	}
+	if !entry.HasWildcard {
+		return model == actualKey
+	}
+
+	parts := entry.KeyParts
+	if len(parts) == 0 {
+		return false
+	}
+
+	if !strings.HasPrefix(model, parts[0]) {
+		return false
+	}
+
+	pos := len(parts[0])
+	for i := 1; i < len(parts); i++ {
+		idx := strings.Index(model[pos:], parts[i])
+		if idx < 0 {
+			return false
+		}
+		pos += idx + len(parts[i])
+	}
+
+	lastPart := parts[len(parts)-1]
+	suffixStart := len(model) - len(lastPart)
+	if suffixStart < pos {
+		return false
+	}
+
+	return true
+}
+
+func applyCaptureReplacement(model string, entry ModelMapEntry) string {
+	target := entry.UnescapedTarget
+	if target == "" {
+		target = entry.Target
+	}
+	if !entry.TargetHasCaptures {
+		return target
+	}
+
+	parts := entry.KeyParts
+	captures := make([]string, 0, entry.CaptureCount)
+	pos := len(parts[0])
+
+	for i := 1; i < len(parts); i++ {
+		idx := strings.Index(model[pos:], parts[i])
+		if idx < 0 {
+			break
+		}
+		captures = append(captures, model[pos:pos+idx])
+		pos += idx + len(parts[i])
+	}
+
+	result := entry.UnescapedTarget
+	result = strings.Replace(result, "$0", model, -1)
+	for i, cap := range captures {
+		result = strings.Replace(result, fmt.Sprintf("$%d", i+1), cap, -1)
+	}
+	return result
 }
 
 func finalizeResolvedModelAndEffort(model string, requestedEffort string, enableSuffix bool) (string, string) {
