@@ -20,6 +20,7 @@ type ProviderConfig struct {
 	UpstreamAPIKey                         string
 	UpstreamEndpointType                   string
 	MasqueradeTarget                       string
+	UpstreamUserAgent                      string
 	InjectClaudeCodeMetadataUserID         bool
 	InjectClaudeCodeSystemPrompt           bool
 	SupportsChat                           bool
@@ -225,6 +226,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.AnthropicVersion = value
 		case "MASQUERADE_TARGET":
 			provider.MasqueradeTarget = strings.ToLower(value)
+		case "UPSTREAM_USER_AGENT":
+			provider.UpstreamUserAgent = value
 		case "INJECT_CLAUDE_CODE_METADATA_USER_ID":
 			provider.InjectClaudeCodeMetadataUserID, _ = parseProviderStrictBool(value, key, path)
 		case "INJECT_CLAUDE_CODE_SYSTEM_PROMPT":

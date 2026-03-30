@@ -13,13 +13,26 @@ import (
 )
 
 const (
-	opencodeUserAgent      = "opencode/local/1.0.0/true"
-	opencodeOriginator     = "Opencode"
-	claudeCodeUserAgent    = "claude-cli/2.1.22 (external, cli)"
-	claudeCodeXApp         = "cli"
+	// opencode 伪装：来自 @ai-sdk/provider-utils 的真实 User-Agent 格式
+	// 格式：opencode/{version} ai-sdk/provider-utils/{version} runtime/{runtime}/{version}
+	// 验证来源：issue #8444 (anomalyco/opencode), issue #12799/PR #12800 (vercel/ai)
+	opencodeUserAgent  = "opencode/1.3.7 ai-sdk/provider-utils/4.0.21 runtime/bun/1.3.11"
+	opencodeOriginator = "opencode"
+
+	// claude 伪装：必须用 claude-cli/ 格式才能通过 sub2api 的 isClaudeCodeClient 检测
+	// sub2api 的检测 regex：^claude-cli/\d+\.\d+\.\d+（需同时有 metadata.user_id）
+	// 真实 Claude Code CLI 发的是 claude-code/（不匹配），但 sub2api 接受 claude-cli/ 作为有效标识
+	// 来源：sub2api gateway_service.go 的 claudeCliUserAgentRe + DefaultHeaders (constants.go)
+	claudeCodeUserAgent = "claude-cli/2.1.22 (external, cli)"
+	claudeCodeXApp      = "cli"
+	// beta header：与 sub2api 的 DefaultBetaHeader 对齐
 	claudeCodeBeta         = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
-	codexUserAgent         = "codex_cli_rs/0.104.0"
 	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+
+	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
+	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
+	// 示例：codex_cli_rs/0.117.0 (Linux 6.1; x86_64) iTerm.app
+	codexUserAgent = "codex_cli_rs/0.117.0 (Linux 6.1; x86_64) iTerm.app"
 )
 
 func (c *Client) endpointType() string {
@@ -64,15 +77,21 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 		httpReq.Header.Set("User-Agent", claudeCodeUserAgent)
 		httpReq.Header.Set("X-App", claudeCodeXApp)
 		httpReq.Header.Set("anthropic-beta", claudeCodeBeta)
-		httpReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
 		httpReq.Header.Set("X-Stainless-Lang", "js")
-		httpReq.Header.Set("X-Stainless-Package-Version", "0.70.0")
+		httpReq.Header.Set("X-Stainless-Package-Version", "0.75.0")
 		httpReq.Header.Set("X-Stainless-OS", "Linux")
 		httpReq.Header.Set("X-Stainless-Arch", "arm64")
 		httpReq.Header.Set("X-Stainless-Runtime", "node")
-		httpReq.Header.Set("X-Stainless-Runtime-Version", "v24.13.0")
+		httpReq.Header.Set("X-Stainless-Runtime-Version", "v24.3.0")
+		httpReq.Header.Set("X-Stainless-Timeout", "600")
+		httpReq.Header.Set("X-Stainless-Retry-Count", "0")
+		httpReq.Header.Set("Accept", "application/json")
+		httpReq.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+		// 注意：Anthropic-Dangerous-Direct-Browser-Access 在 HTTP/2 时不发送
 	case config.MasqueradeTargetCodex:
 		httpReq.Header.Set("User-Agent", codexUserAgent)
+		httpReq.Header.Set("originator", "codex_cli_rs")
+		httpReq.Header.Set("x-openai-internal-codex-residency", "us")
 	case config.MasqueradeTargetNone:
 		// no-op：不注入任何伪装 header
 	}
