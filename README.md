@@ -252,7 +252,7 @@ anthropic-version: 2023-06-01
 | `CONNECT_TIMEOUT` / `FIRST_BYTE_TIMEOUT` / `IDLE_TIMEOUT` / `TOTAL_TIMEOUT` | 上游超时控制 | 是 |
 | `LOG_*` | 结构化日志配置 | 否，修改后需重启 |
 | `UPSTREAM_USER_AGENT` | 上游请求时发送的自定义 User-Agent 头 | 是 |
-| `UPSTREAM_MASQUERADE_TARGET` | 伪装目标客户端：`openai`/`claude`/`codex`/`none` | 是 |
+| `UPSTREAM_MASQUERADE_TARGET` | 伪装目标客户端：`opencode`/`claude`/`codex`/`none` | 是 |
 | `UPSTREAM_INJECT_METADATA_USER_ID` | 注入 `metadata.user_id` 以绕过 Claude Code 校验 | 是 |
 | `UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | 注入 Claude Code 真实 system prompt 以绕过 Dice 系数校验 | 是 |
 
@@ -279,7 +279,7 @@ anthropic-version: 2023-06-01
 | `ENABLE_REASONING_EFFORT_SUFFIX` | 是否启用 `-low/-medium/-high/-xhigh` suffix 解析（必须写成合法布尔值） |
 | `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
 | `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
-| `MASQUERADE_TARGET` | 伪装目标客户端标识：`openai`/`claude`/`codex`/`none` |
+| `MASQUERADE_TARGET` | 伪装目标客户端标识：`opencode`/`claude`/`codex`/`none` |
 | `INJECT_CLAUDE_CODE_METADATA_USER_ID` | 是否注入 `metadata.user_id` 以绕过 sub2api 的 `messages` 路径校验 | |
 | `INJECT_CLAUDE_CODE_SYSTEM_PROMPT` | 是否注入 Claude Code 真实 system prompt 以绕过 sub2api 的 Dice 系数相似度校验 | |
 

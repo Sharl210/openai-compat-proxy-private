@@ -55,10 +55,10 @@ const (
 )
 
 const (
-	MasqueradeTargetOpenAI = "openai" // 模拟 OpenAI 官方客户端
-	MasqueradeTargetClaude = "claude" // 模拟 Claude Code 客户端
-	MasqueradeTargetCodex  = "codex"  // 模拟 OpenAI Codex CLI 客户端
-	MasqueradeTargetNone   = "none"   // 不做任何伪装
+	MasqueradeTargetOpenCode = "opencode"
+	MasqueradeTargetClaude   = "claude" // 模拟 Claude Code 客户端
+	MasqueradeTargetCodex    = "codex"  // 模拟 OpenAI Codex CLI 客户端
+	MasqueradeTargetNone     = "none"   // 不做任何伪装
 )
 
 type invalidConfigError string
@@ -410,7 +410,7 @@ func normalizeMasqueradeTarget(provider *ProviderConfig, path string) error {
 		return nil
 	}
 	switch trimmed {
-	case MasqueradeTargetOpenAI, MasqueradeTargetClaude, MasqueradeTargetCodex, MasqueradeTargetNone:
+	case MasqueradeTargetOpenCode, MasqueradeTargetClaude, MasqueradeTargetCodex, MasqueradeTargetNone:
 		provider.MasqueradeTarget = trimmed
 		return nil
 	default:

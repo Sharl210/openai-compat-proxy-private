@@ -252,10 +252,10 @@ func validateMasqueradeTarget(values map[string]string, key string) error {
 		return nil
 	}
 	switch strings.ToLower(value) {
-	case MasqueradeTargetOpenAI, MasqueradeTargetClaude, MasqueradeTargetCodex, MasqueradeTargetNone:
+	case MasqueradeTargetOpenCode, MasqueradeTargetClaude, MasqueradeTargetCodex, MasqueradeTargetNone:
 		return nil
 	default:
-		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q (allowed: openai, claude, codex, none)", key, value))
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q (allowed: opencode, claude, codex, none)", key, value))
 	}
 }
 

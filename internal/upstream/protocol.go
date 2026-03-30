@@ -57,7 +57,7 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	switch masqueradeTarget {
-	case config.MasqueradeTargetOpenAI:
+	case config.MasqueradeTargetOpenCode:
 		httpReq.Header.Set("User-Agent", opencodeUserAgent)
 		httpReq.Header.Set("originator", opencodeOriginator)
 	case config.MasqueradeTargetClaude:
