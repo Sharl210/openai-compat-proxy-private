@@ -414,7 +414,7 @@ func normalizeMasqueradeTarget(provider *ProviderConfig, path string) error {
 		provider.MasqueradeTarget = trimmed
 		return nil
 	default:
-		return ErrInvalidConfig(fmt.Sprintf("invalid MASQUERADE_TARGET in %s: %q (allowed: openai, claude, codex, none)", path, trimmed))
+		return ErrInvalidConfig(fmt.Sprintf("invalid MASQUERADE_TARGET in %s: %q (allowed: opencode, claude, codex, none)", path, trimmed))
 	}
 }
 
