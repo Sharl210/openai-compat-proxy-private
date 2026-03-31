@@ -30,7 +30,7 @@
 每个 provider 通过一个字段决定自己内部统一走哪条上游链：
 
 ```env
-UPSTREAM_ENDPOINT_TYPE=responses
+UPSTREAM_ENDPOINT_TYPE=response
 ```
 
 可选值：
@@ -151,7 +151,7 @@ PROVIDER_ENABLED=true
 
 UPSTREAM_BASE_URL=https://example-provider.com/v1
 UPSTREAM_API_KEY=
-UPSTREAM_ENDPOINT_TYPE=responses
+UPSTREAM_ENDPOINT_TYPE=response
 
 SUPPORTS_CHAT=true
 SUPPORTS_RESPONSES=true

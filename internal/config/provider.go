@@ -61,7 +61,7 @@ const (
 	SystemPromptPositionAppend    = "append"
 	DefaultUpstreamRetryCount     = 5
 	DefaultUpstreamRetryDelay     = 5 * time.Second
-	UpstreamEndpointTypeResponses = "responses"
+	UpstreamEndpointTypeResponses = "response"
 	UpstreamEndpointTypeChat      = "chat"
 	UpstreamEndpointTypeAnthropic = "anthropic"
 )
