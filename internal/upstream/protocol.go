@@ -578,7 +578,13 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 	}
 	existingReasoning := stringValue(message["reasoning_content"])
 	if existingReasoning != "" {
-		reasoningContent = existingReasoning
+		// Process through extraction to strip any raw thinking tags that might be in reasoning_content
+		_, cleanReasoning, _, _ := extractContentAndReasoningTagsWithState(existingReasoning, "", "")
+		if cleanReasoning != "" {
+			reasoningContent = cleanReasoning
+		} else {
+			reasoningContent = existingReasoning
+		}
 	}
 	if reasoningContent != "" {
 		result["reasoning"] = map[string]any{"summary": reasoningContent}
