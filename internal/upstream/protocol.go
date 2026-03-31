@@ -256,13 +256,15 @@ func newChatEventBatchReader() func(*bufio.Scanner) ([]Event, error) {
 }
 
 type chatNormalizationState struct {
-	toolIDsByIndex map[int]string
-	toolSent       map[string]bool
-	usage          map[string]any
-	createdSent    bool
-	completed      bool
-	pendingFinish  string
-	pendingItems   map[string]map[string]any
+	toolIDsByIndex     map[int]string
+	toolSent           map[string]bool
+	usage              map[string]any
+	createdSent        bool
+	completed          bool
+	pendingFinish      string
+	pendingItems       map[string]map[string]any
+	pendingThinkingTag string // incomplete thinking tag waiting for close tag (e.g., "<think>" or "<thinking>")
+	pendingThinking    string // accumulated thinking content for the current pending tag
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
@@ -302,7 +304,9 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		delta, _ := choice["delta"].(map[string]any)
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
-				cleanText, reasoningContent := extractContentAndReasoningTags(text)
+				cleanText, reasoningContent, pendingTag, pendingContent := extractContentAndReasoningTagsWithState(text, state.pendingThinkingTag, state.pendingThinking)
+				state.pendingThinkingTag = pendingTag
+				state.pendingThinking = pendingContent
 				if reasoningContent != "" {
 					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
 				}
@@ -528,13 +532,19 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 		output = append(output, map[string]any{"id": callID, "type": "function_call", "status": "completed", "call_id": callID, "name": stringValue(function["name"]), "arguments": stringValue(function["arguments"])})
 	}
 	var reasoningContent string
+	var pendingTag, pendingContent string
 	for _, rawItem := range content {
 		if item, ok := rawItem.(map[string]any); ok && stringValue(item["type"]) == "output_text" {
 			text := stringValue(item["text"])
-			cleanText, extracted := extractContentAndReasoningTags(text)
+			cleanText, extracted, newPendingTag, newPendingContent := extractContentAndReasoningTagsWithState(text, pendingTag, pendingContent)
+			pendingTag = newPendingTag
+			pendingContent = newPendingContent
 			reasoningContent += extracted
 			item["text"] = cleanText
 		}
+	}
+	if pendingTag != "" && pendingContent != "" {
+		reasoningContent += pendingContent
 	}
 	existingReasoning := stringValue(message["reasoning_content"])
 	if existingReasoning != "" {
@@ -1111,4 +1121,81 @@ func extractContentAndReasoningTags(text string) (cleanText string, reasoningCon
 	}
 
 	return cleanText, reasoningContent
+}
+
+// extractContentAndReasoningTagsWithState extracts <think>...</think> and <thinking>...</thinking>
+// tags from text, handling tags that span across multiple deltas.
+// Returns: cleanText, reasoningContent, pendingTag, pendingThinking
+// pendingTag is "" if no tag is open, otherwise "<think>" or "<thinking>"
+// pendingThinking is the accumulated content waiting for a close tag
+func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking string) (cleanText, reasoningContent, newPendingTag, newPendingThinking string) {
+	cleanText = text
+	newPendingTag = pendingTag
+	newPendingThinking = pendingThinking
+
+	if pendingTag != "" {
+		var closeTag string
+		if pendingTag == "<think>" {
+			closeTag = `
+</think>
+
+`
+		} else {
+			closeTag = "</thinking>"
+		}
+		closeIdx := strings.Index(cleanText, closeTag)
+		if closeIdx == -1 {
+			newPendingThinking += cleanText
+			cleanText = ""
+			return
+		}
+		reasoningContent += newPendingThinking + cleanText[:closeIdx]
+		cleanText = cleanText[closeIdx+len(closeTag):]
+		newPendingTag = ""
+		newPendingThinking = ""
+	}
+
+	const thinkTagOpen = "<think>"
+	const thinkTagClose = `
+</think>
+
+`
+	const thinTagOpen = "<thinking>"
+	const thinTagClose = "</thinking>"
+
+	for {
+		var openTag, closeTag string
+		openIdx := strings.Index(cleanText, thinkTagOpen)
+		if openIdx == -1 {
+			openIdx = strings.Index(cleanText, thinTagOpen)
+			if openIdx == -1 {
+				break
+			}
+			openTag = thinTagOpen
+			closeTag = thinTagClose
+		} else {
+			thinIdx := strings.Index(cleanText, thinTagOpen)
+			if thinIdx != -1 && thinIdx < openIdx {
+				openIdx = thinIdx
+				openTag = thinTagOpen
+				closeTag = thinTagClose
+			} else {
+				openTag = thinkTagOpen
+				closeTag = thinkTagClose
+			}
+		}
+
+		closeIdx := strings.Index(cleanText[openIdx+len(openTag):], closeTag)
+		if closeIdx == -1 {
+			newPendingTag = openTag
+			newPendingThinking = cleanText[openIdx+len(openTag):]
+			cleanText = cleanText[:openIdx]
+			break
+		}
+		closeIdx += openIdx + len(openTag)
+		reasoningContent += cleanText[openIdx+len(openTag) : closeIdx]
+		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(closeTag):]
+	}
+
+	return cleanText, reasoningContent, newPendingTag, newPendingThinking
 }
