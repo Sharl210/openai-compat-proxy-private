@@ -219,7 +219,6 @@ func TestNormalizeChatFrame_ReasoningContent(t *testing.T) {
 }
 
 func TestNormalizeChatFrame_Done(t *testing.T) {
-	// 测试 [DONE] 帧
 	frame := &sseFrame{Event: "", Data: "[DONE]"}
 	state := &chatNormalizationState{}
 
@@ -230,8 +229,11 @@ func TestNormalizeChatFrame_Done(t *testing.T) {
 	if !done {
 		t.Fatal("expected done=true for [DONE]")
 	}
-	if len(events) != 0 {
-		t.Errorf("expected 0 events for [DONE], got %d", len(events))
+	if len(events) != 1 {
+		t.Errorf("expected 1 event (response.completed) for [DONE], got %d", len(events))
+	}
+	if events[0].Event != "response.completed" {
+		t.Errorf("expected event type 'response.completed', got '%s'", events[0].Event)
 	}
 }
 
@@ -269,7 +271,7 @@ data: [DONE]
 `
 
 	reader := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader()
+	readNext := newChatEventBatchReader(false, nil)
 
 	var allEvents []Event
 	for {

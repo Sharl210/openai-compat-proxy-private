@@ -125,6 +125,22 @@ func upstreamAPIKeyFromAuthorization(authorization string) string {
 	return trimmed
 }
 
+// extractOriginalToolIDs extracts tool call IDs from the request messages by index order.
+// This is used to preserve original tool IDs when upstream reassigns them.
+func extractOriginalToolIDs(req model.CanonicalRequest) map[int]string {
+	result := make(map[int]string)
+	index := 0
+	for _, msg := range req.Messages {
+		for _, call := range msg.ToolCalls {
+			if call.ID != "" {
+				result[index] = call.ID
+			}
+			index++
+		}
+	}
+	return result
+}
+
 func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
@@ -152,10 +168,10 @@ func normalizeResponsePayload(endpointType string, payload map[string]any, style
 	}
 }
 
-func eventBatchReaderForType(endpointType string, styleTwo bool) func(*bufio.Scanner) ([]Event, error) {
+func eventBatchReaderForType(endpointType string, styleTwo bool, originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return newChatEventBatchReader(styleTwo)
+		return newChatEventBatchReader(styleTwo, originalToolIDs)
 	case config.UpstreamEndpointTypeAnthropic:
 		return newAnthropicEventBatchReader()
 	default:
@@ -229,8 +245,14 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 	return nil, nil
 }
 
-func newChatEventBatchReader(styleTwo bool) func(*bufio.Scanner) ([]Event, error) {
-	state := &chatNormalizationState{toolIDsByIndex: map[int]string{}, toolSent: map[string]bool{}, pendingItems: map[string]map[string]any{}, thinkingTagStyleTwo: styleTwo}
+func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
+	state := &chatNormalizationState{
+		toolIDsByIndex:      map[int]string{},
+		toolSent:            map[string]bool{},
+		pendingItems:        map[string]map[string]any{},
+		thinkingTagStyleTwo: styleTwo,
+		originalToolIDs:     originalToolIDs,
+	}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
 			frame, err := readNextSSEFrame(scanner)
@@ -266,6 +288,7 @@ type chatNormalizationState struct {
 	pendingThinkingTag  string
 	pendingThinking     string
 	thinkingTagStyleTwo bool
+	originalToolIDs     map[int]string
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
@@ -273,9 +296,8 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		return nil, true, nil
 	}
 	if strings.TrimSpace(frame.Data) == "[DONE]" {
-		// If we have a pending finish reason or usage that hasn't been emitted yet,
-		// emit response.completed before signaling end of stream
-		if !state.completed && (state.pendingFinish != "" || len(state.usage) > 0) {
+		// Always emit response.completed to prevent "stream did not complete" error.
+		if !state.completed {
 			state.completed = true
 			data := map[string]any{}
 			if state.pendingFinish != "" {
@@ -358,6 +380,9 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				itemID := strings.TrimSpace(stringValue(tool["id"]))
 				if itemID == "" {
 					itemID = state.toolIDsByIndex[index]
+				}
+				if itemID == "" {
+					itemID = state.originalToolIDs[index]
 				}
 				if itemID == "" {
 					itemID = fmt.Sprintf("tool_%d", index)

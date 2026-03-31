@@ -148,6 +148,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	if err != nil {
 		return nil, err
 	}
+	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
@@ -165,7 +166,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -243,6 +244,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 	if err != nil {
 		return nil, err
 	}
+	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
@@ -260,7 +262,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		attrs[k] = v
 	}
 	logging.Event("upstream_request_built", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -326,7 +328,7 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 }
 
 func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization)
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, nil)
 	if err != nil {
 		return err
 	}
@@ -334,12 +336,12 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, originalToolIDs map[int]string) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, endpointType, body, authorization)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs)
 		if err == nil {
 			return stream, nil
 		}
@@ -449,7 +451,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	return normalizeResponsePayload(endpointType, payload, c.thinkingTagStyleTwo), nil
 }
 
-func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string) (*EventStream, error) {
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string) (*EventStream, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -467,7 +469,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo, originalToolIDs)}
 	if err := stream.prime(); err != nil {
 		_ = stream.Close()
 		return nil, err
