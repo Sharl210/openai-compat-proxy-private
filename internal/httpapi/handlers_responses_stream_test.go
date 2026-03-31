@@ -330,8 +330,9 @@ func renderResponsesWriterEvents(t *testing.T, endpointType string, events ...up
 	t.Helper()
 	rec := httptest.NewRecorder()
 	state := &responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: endpointType}
+	writer := &ResponsesEventWriter{w: rec, flusher: nil}
 	for _, evt := range events {
-		if err := writeResponsesEvent(rec, nil, state, evt, nil); err != nil {
+		if err := writeResponsesEvent(writer, state, evt, nil); err != nil {
 			t.Fatalf("writeResponsesEvent error: %v", err)
 		}
 	}

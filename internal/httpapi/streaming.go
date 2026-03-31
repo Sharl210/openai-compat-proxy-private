@@ -75,6 +75,118 @@ type responsesToolItemState struct {
 	doneSent  bool
 }
 
+// EventWriter 接口：统一 Responses 事件输出
+type EventWriter interface {
+	WriteEvent(event string, data map[string]any) error
+	WriteComment(comment string) error
+	DownstreamType() string
+}
+
+// ResponsesEventWriter - 直接写 Responses SSE
+type ResponsesEventWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+}
+
+func (w *ResponsesEventWriter) WriteEvent(event string, data map[string]any) error {
+	if _, err := fmt.Fprintf(w.w, "event: %s\n", event); err != nil {
+		return err
+	}
+	payload, err := responseStreamPayload(event, data)
+	if err != nil {
+		return err
+	}
+	if len(payload) > 0 {
+		if _, err := fmt.Fprintf(w.w, "data: %s\n\n", payload); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprint(w.w, "data: {}\n\n"); err != nil {
+			return err
+		}
+	}
+	if w.flusher != nil {
+		w.flusher.Flush()
+	}
+	return nil
+}
+
+func (w *ResponsesEventWriter) WriteComment(comment string) error {
+	return writeSSEComment(w.w, w.flusher, comment)
+}
+
+func (w *ResponsesEventWriter) DownstreamType() string {
+	return "responses"
+}
+
+func (w *ResponsesEventWriter) WriteSSERaw(event string, payload []byte) error {
+	if _, err := fmt.Fprintf(w.w, "event: %s\n", event); err != nil {
+		return err
+	}
+	if len(payload) > 0 {
+		if _, err := fmt.Fprintf(w.w, "data: %s\n\n", payload); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprint(w.w, "data: {}\n\n"); err != nil {
+			return err
+		}
+	}
+	if w.flusher != nil {
+		w.flusher.Flush()
+	}
+	return nil
+}
+
+// ChatEventWriter - 将 Responses 事件转换为 Chat SSE
+type ChatEventWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+	state   *chatStreamState
+}
+
+func NewChatEventWriter(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState) *ChatEventWriter {
+	return &ChatEventWriter{w: w, flusher: flusher, state: state}
+}
+
+func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
+	// 构建伪 upstream.Event 以复用 writeChatEvent
+	evt := upstream.Event{Event: event, Data: data}
+	return writeChatEvent(w.w, w.flusher, w.state, evt, true, nil)
+}
+
+func (w *ChatEventWriter) WriteComment(comment string) error {
+	return writeSSEComment(w.w, w.flusher, comment)
+}
+
+func (w *ChatEventWriter) DownstreamType() string {
+	return "chat"
+}
+
+// AnthropicEventWriter - 将 Responses 事件转换为 Anthropic SSE
+type AnthropicEventWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+	state   *anthropicStreamState
+}
+
+func NewAnthropicEventWriter(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState) *AnthropicEventWriter {
+	return &AnthropicEventWriter{w: w, flusher: flusher, state: state}
+}
+
+func (w *AnthropicEventWriter) WriteEvent(event string, data map[string]any) error {
+	evt := upstream.Event{Event: event, Data: data}
+	return writeAnthropicEvent(w.w, w.flusher, w.state, evt, nil)
+}
+
+func (w *AnthropicEventWriter) WriteComment(comment string) error {
+	return writeSSEComment(w.w, w.flusher, comment)
+}
+
+func (w *AnthropicEventWriter) DownstreamType() string {
+	return "anthropic"
+}
+
 func startSSE(w http.ResponseWriter) http.Flusher {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -135,6 +247,7 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
 	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: upstreamEndpointType, requestID: req.RequestID}
 	collector := aggregate.NewCollector()
+	writer := &ResponsesEventWriter{w: w, flusher: flusher}
 	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 		return aggregate.Result{}, err
 	}
@@ -147,7 +260,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
 			collector.Accept(evt)
-			return writeResponsesEvent(w, flusher, &state, evt, usageRecorder)
+			return writeResponsesEvent(writer, &state, evt, usageRecorder)
 		},
 	)
 	if err != nil {
@@ -166,7 +279,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	return result, nil
 }
 
-func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
+func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	compatCompleteToolArgs := state != nil && state.upstreamEndpointType != config.UpstreamEndpointTypeResponses
 	if state != nil && state.toolIDAliases == nil {
 		state.toolIDAliases = map[string]string{}
@@ -196,26 +309,7 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		return itemID
 	}
 	writeStreamEvent := func(event string, data map[string]any) error {
-		if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
-			return err
-		}
-		payload, err := responseStreamPayload(event, data)
-		if err != nil {
-			return err
-		}
-		if len(payload) > 0 {
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
-				return err
-			}
-		} else {
-			if _, err := fmt.Fprint(w, "data: {}\n\n"); err != nil {
-				return err
-			}
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return nil
+		return writer.WriteEvent(event, data)
 	}
 	writeToolItemEvent := func(event string, item map[string]any) error {
 		return writeStreamEvent(event, map[string]any{"item": item})
@@ -273,28 +367,29 @@ func writeResponsesEvent(w http.ResponseWriter, flusher http.Flusher, state *res
 		if !state.reasoningStarted || state.reasoningClosed {
 			return nil
 		}
+		if writer.DownstreamType() != "responses" {
+			state.reasoningClosed = true
+			return nil
+		}
 		summary := []any{}
 		if text := state.syntheticSummary.String(); text != "" {
 			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
 		}
-		payload, err := responseStreamPayload("response.output_item.done", map[string]any{
-			"item": map[string]any{
-				"id":      "rs_proxy",
-				"type":    "reasoning",
-				"summary": summary,
-			},
-		})
+		payload, err := json.Marshal(map[string]any{"type": "response.output_item.done", "item": map[string]any{
+			"id":      "rs_proxy",
+			"type":    "reasoning",
+			"summary": summary,
+		}})
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprint(w, "event: response.output_item.done\n"); err != nil {
-			return err
+		responsesWriter, ok := writer.(*ResponsesEventWriter)
+		if !ok {
+			state.reasoningClosed = true
+			return nil
 		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+		if err := responsesWriter.WriteSSERaw("response.output_item.done", payload); err != nil {
 			return err
-		}
-		if flusher != nil {
-			flusher.Flush()
 		}
 		state.reasoningClosed = true
 		return nil
@@ -1009,18 +1104,19 @@ func usageNumberAsFloatForStreaming(v any) (float64, bool) {
 }
 
 type chatStreamState struct {
-	roleSent          bool
-	textStarted       bool
-	realReasoningSeen bool
-	planningSent      bool
-	toolStatusSent    bool
-	toolMeta          map[string]map[string]string
-	toolIndex         map[string]int
-	toolSent          map[string]bool
-	pendingToolArgs   map[string]string
-	nextToolIx        int
-	terminalSeen      bool
-	terminalFailure   *aggregate.TerminalFailureError
+	roleSent            bool
+	textStarted         bool
+	realReasoningSeen   bool
+	planningSent        bool
+	toolStatusSent      bool
+	toolMeta            map[string]map[string]string
+	toolIndex           map[string]int
+	toolSent            map[string]bool
+	pendingToolArgs     map[string]string
+	nextToolIx          int
+	terminalSeen        bool
+	terminalFailure     *aggregate.TerminalFailureError
+	pendingReasoningTag string
 }
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder usageRecorderFunc) error {
@@ -1227,8 +1323,36 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if err := ensureRoleSent(); err != nil {
 			return err
 		}
-		if delta := stringValue(evt.Data["delta"]); delta != "" {
-			if err := writeChatChunk(w, flusher, map[string]any{"content": delta}, "", nil); err != nil {
+		delta := stringValue(evt.Data["delta"])
+		if delta == "" && state.pendingReasoningTag == "" {
+			break
+		}
+		// Prepend any pending incomplete reasoning tag
+		if state.pendingReasoningTag != "" {
+			delta = state.pendingReasoningTag + delta
+			state.pendingReasoningTag = ""
+		}
+		// Extract reasoning tags from content
+		cleanContent, reasoningContent := extractReasoningTags(delta)
+		// Check if we have an incomplete trailing tag
+		const tagOpen = "<think>"
+		const tagClose = "</think>"
+		if strings.HasSuffix(cleanContent, tagOpen) {
+			// Find where the incomplete tag starts
+			openIdx := strings.LastIndex(cleanContent, tagOpen)
+			if openIdx >= 0 {
+				state.pendingReasoningTag = cleanContent[openIdx:]
+				cleanContent = cleanContent[:openIdx]
+			}
+		}
+		if reasoningContent != "" {
+			state.realReasoningSeen = true
+			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
+				return err
+			}
+		}
+		if cleanContent != "" {
+			if err := writeChatChunk(w, flusher, map[string]any{"content": cleanContent}, "", nil); err != nil {
 				return err
 			}
 		}
@@ -1478,6 +1602,37 @@ func chatUsage(usage map[string]any) any {
 		return nil
 	}
 	return result
+}
+
+func extractReasoningTags(text string) (cleanText string, reasoningContent string) {
+	cleanText = text
+	reasoningContent = ""
+
+	// Pattern to match <think>...</think> pairs
+	// We need to handle multiple occurrences and extract all reasoning content
+	const tagOpen = "<think>"
+	const tagClose = "</think>"
+
+	for {
+		openIdx := strings.Index(cleanText, tagOpen)
+		if openIdx == -1 {
+			break
+		}
+		closeIdx := strings.Index(cleanText[openIdx:], tagClose)
+		if closeIdx == -1 {
+			// Incomplete tag - leave as-is, stop processing
+			break
+		}
+		closeIdx += openIdx // Make it absolute index
+
+		// Extract reasoning content between the tags
+		reasoningContent += cleanText[openIdx+len(tagOpen) : closeIdx]
+
+		// Remove the tag pair from cleanText
+		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(tagClose):]
+	}
+
+	return cleanText, reasoningContent
 }
 
 func cloneMap(input map[string]any) map[string]any {
