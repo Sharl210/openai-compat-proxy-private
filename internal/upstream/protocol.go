@@ -302,7 +302,13 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		delta, _ := choice["delta"].(map[string]any)
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
-				events = append(events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": text}})
+				cleanText, reasoningContent := extractContentAndReasoningTags(text)
+				if reasoningContent != "" {
+					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
+				}
+				if cleanText != "" {
+					events = append(events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": cleanText}})
+				}
 			}
 			if reasoning, _ := delta["reasoning_content"].(string); reasoning != "" {
 				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoning}})
@@ -521,8 +527,21 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 		}
 		output = append(output, map[string]any{"id": callID, "type": "function_call", "status": "completed", "call_id": callID, "name": stringValue(function["name"]), "arguments": stringValue(function["arguments"])})
 	}
-	if reasoning := stringValue(message["reasoning_content"]); reasoning != "" {
-		result["reasoning"] = map[string]any{"summary": reasoning}
+	var reasoningContent string
+	for _, rawItem := range content {
+		if item, ok := rawItem.(map[string]any); ok && stringValue(item["type"]) == "output_text" {
+			text := stringValue(item["text"])
+			cleanText, extracted := extractContentAndReasoningTags(text)
+			reasoningContent += extracted
+			item["text"] = cleanText
+		}
+	}
+	existingReasoning := stringValue(message["reasoning_content"])
+	if existingReasoning != "" {
+		reasoningContent = existingReasoning
+	}
+	if reasoningContent != "" {
+		result["reasoning"] = map[string]any{"summary": reasoningContent}
 	}
 	if finishReason := stringValue(choice["finish_reason"]); finishReason != "" {
 		result["finish_reason"] = finishReason
@@ -1047,4 +1066,49 @@ func numberValue(value any) float64 {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+// extractContentAndReasoningTags extracts <think>...</think> and <thinking>...</thinking> tags from text,
+// returning the cleaned text and the extracted reasoning content.
+func extractContentAndReasoningTags(text string) (cleanText string, reasoningContent string) {
+	cleanText = text
+
+	// Extract <think>...</think> tags
+	const thinkTagOpen = "<think>"
+	const thinkTagClose = `
+</think>
+
+`
+	for {
+		openIdx := strings.Index(cleanText, thinkTagOpen)
+		if openIdx == -1 {
+			break
+		}
+		closeIdx := strings.Index(cleanText[openIdx:], thinkTagClose)
+		if closeIdx == -1 {
+			break
+		}
+		closeIdx += openIdx
+		reasoningContent += cleanText[openIdx+len(thinkTagOpen) : closeIdx]
+		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(thinkTagClose):]
+	}
+
+	// Extract <thinking>...</thinking> tags
+	const thinTagOpen = "<thinking>"
+	const thinTagClose = "</thinking>"
+	for {
+		openIdx := strings.Index(cleanText, thinTagOpen)
+		if openIdx == -1 {
+			break
+		}
+		closeIdx := strings.Index(cleanText[openIdx:], thinTagClose)
+		if closeIdx == -1 {
+			break
+		}
+		closeIdx += openIdx
+		reasoningContent += cleanText[openIdx+len(thinTagOpen) : closeIdx]
+		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(thinTagClose):]
+	}
+
+	return cleanText, reasoningContent
 }

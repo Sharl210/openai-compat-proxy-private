@@ -1127,3 +1127,64 @@ func TestResponsesRouteMapsChatRefusal(t *testing.T) {
 		t.Fatalf("expected chat refusal to map into responses payload, got %s", rec.Body.String())
 	}
 }
+
+func TestChatUpstreamToResponsesDownstreamUsage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+
+		_, _ = w.Write([]byte("data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"))
+		flusher.Flush()
+
+		_, _ = w.Write([]byte("data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"))
+		flusher.Flush()
+
+		_, _ = w.Write([]byte("data: {\"id\":\"chat-123\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n"))
+		flusher.Flush()
+
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	t.Logf("Response body:\n%s", body)
+
+	if !strings.Contains(body, "input_tokens") {
+		t.Errorf("expected response to contain input_tokens, got:\n%s", body)
+	}
+	if !strings.Contains(body, "output_tokens") {
+		t.Errorf("expected response to contain output_tokens, got:\n%s", body)
+	}
+	if !strings.Contains(body, "total_tokens") {
+		t.Errorf("expected response to contain total_tokens, got:\n%s", body)
+	}
+	if !strings.Contains(body, "event: response.completed") {
+		t.Errorf("expected response to contain response.completed event, got:\n%s", body)
+	}
+}
