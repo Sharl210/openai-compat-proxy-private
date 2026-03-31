@@ -230,7 +230,7 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 }
 
 func newChatEventBatchReader() func(*bufio.Scanner) ([]Event, error) {
-	state := &chatNormalizationState{toolIDsByIndex: map[int]string{}, toolSent: map[string]bool{}}
+	state := &chatNormalizationState{toolIDsByIndex: map[int]string{}, toolSent: map[string]bool{}, pendingItems: map[string]map[string]any{}}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
 			frame, err := readNextSSEFrame(scanner)
@@ -262,6 +262,7 @@ type chatNormalizationState struct {
 	createdSent    bool
 	completed      bool
 	pendingFinish  string
+	pendingItems   map[string]map[string]any
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
@@ -324,11 +325,29 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				function, _ := tool["function"].(map[string]any)
 				name := stringValue(function["name"])
 				arguments := stringValue(function["arguments"])
-				if (name != "" || stringValue(tool["id"]) != "") && !state.toolSent[itemID] {
-					events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}}})
-					state.toolSent[itemID] = true
-				}
-				if arguments != "" {
+				if name != "" || stringValue(tool["id"]) != "" {
+					if !state.toolSent[itemID] {
+						if arguments != "" {
+							events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name, "arguments": arguments}}})
+							state.toolSent[itemID] = true
+						} else {
+							events = append(events, Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}}})
+							if state.pendingItems == nil {
+								state.pendingItems = map[string]map[string]any{}
+							}
+							state.pendingItems[itemID] = map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}
+						}
+					}
+					if arguments != "" {
+						events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": arguments}})
+					}
+				} else if arguments != "" {
+					if state.pendingItems != nil {
+						if pending, ok := state.pendingItems[itemID]; ok {
+							existingArgs, _ := pending["arguments"].(string)
+							pending["arguments"] = existingArgs + arguments
+						}
+					}
 					events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": arguments}})
 				}
 			}
@@ -336,6 +355,17 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		if finishReason := stringValue(choice["finish_reason"]); finishReason != "" && !state.completed {
 			if len(state.usage) > 0 {
 				state.completed = true
+				if state.pendingItems != nil {
+					for itemID, pending := range state.pendingItems {
+						item := map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": pending["name"]}
+						if args, ok := pending["arguments"].(string); ok && args != "" {
+							item["arguments"] = args
+						}
+						events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": item}})
+						state.toolSent[itemID] = true
+					}
+					state.pendingItems = nil
+				}
 				data := map[string]any{"finish_reason": finishReason, "usage": cloneMap(state.usage)}
 				events = append(events, Event{Event: "response.completed", Data: data})
 			} else {
