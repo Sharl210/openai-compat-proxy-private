@@ -69,7 +69,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			defer stream.Close()
 			flusher := startSSE(w)
 			streamState := &anthropicStreamState{}
-			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState, usageRecorder); err != nil {
+			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState, providerCfg.UpstreamEndpointType, usageRecorder); err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					_ = writeAnthropicTerminalFailure(w, flusher, streamState, canon.RequestID, terminalFailure.HealthFlag, terminalFailure.Message)

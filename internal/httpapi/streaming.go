@@ -396,65 +396,40 @@ func (w *ResponsesEventWriter) WriteSSERaw(event string, payload []byte) error {
 
 // ChatEventWriter - 将 Responses 事件转换为 Chat SSE
 type ChatEventWriter struct {
-	w           http.ResponseWriter
-	flusher     http.Flusher
-	chatState   *chatStreamState
-	respState   *responsesStreamState
-	eventHelper *responseEventWriterHelper
+	w             http.ResponseWriter
+	flusher       http.Flusher
+	chatState     *chatStreamState
+	helper        *responseEventWriterHelper
+	usageRecorder usageRecorderFunc
 }
 
-func NewChatEventWriter(w http.ResponseWriter, flusher http.Flusher, chatState *chatStreamState, respState *responsesStreamState) *ChatEventWriter {
-	if respState.toolItems == nil {
-		respState.toolItems = map[string]*responsesToolItemState{}
-	}
-	if respState.toolIDAliases == nil {
-		respState.toolIDAliases = map[string]string{}
-	}
-	h := &responseEventWriterHelper{
-		downstreamType:       "chat",
-		upstreamEndpointType: respState.upstreamEndpointType,
-		toolIDAliases:        respState.toolIDAliases,
-		toolItems:            respState.toolItems,
-		toolOrder:            respState.toolOrder,
-		reasoningStarted:     respState.reasoningStarted,
-		reasoningClosed:      respState.reasoningClosed,
-		realReasoningSeen:    respState.realReasoningSeen,
-		syntheticSummary:     &respState.syntheticSummary,
-		requestID:            respState.requestID,
-		terminalSeen:         respState.terminalSeen,
-		terminalFailure:      respState.terminalFailure,
-	}
-	return &ChatEventWriter{w: w, flusher: flusher, chatState: chatState, respState: respState, eventHelper: h}
+func NewChatEventWriter(w http.ResponseWriter, flusher http.Flusher, chatState *chatStreamState, h *responseEventWriterHelper, usageRecorder usageRecorderFunc) *ChatEventWriter {
+	return &ChatEventWriter{w: w, flusher: flusher, chatState: chatState, helper: h, usageRecorder: usageRecorder}
 }
 
 func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
 	evt := upstream.Event{Event: event, Data: data}
-	result, err := doProcessResponseEvent(w.eventHelper, evt)
-	if err != nil {
-		return err
-	}
-	w.respState.toolIDAliases = w.eventHelper.toolIDAliases
-	w.respState.toolItems = w.eventHelper.toolItems
-	w.respState.toolOrder = w.eventHelper.toolOrder
-	w.respState.reasoningStarted = w.eventHelper.reasoningStarted
-	w.respState.reasoningClosed = w.eventHelper.reasoningClosed
-	w.respState.realReasoningSeen = w.eventHelper.realReasoningSeen
-	w.respState.terminalSeen = w.eventHelper.terminalSeen
-	w.respState.terminalFailure = w.eventHelper.terminalFailure
-	for _, cmd := range w.eventHelper.events {
-		if err := w.writeChatEvent(cmd.Event, cmd.Data); err != nil {
+
+	if w.helper != nil {
+		_, err := doProcessResponseEvent(w.helper, evt)
+		if err != nil {
 			return err
 		}
+
+		for _, cmd := range w.helper.events {
+			if err := w.writeProcessedEvent(cmd.Event, cmd.Data); err != nil {
+				return err
+			}
+		}
+		w.helper.events = nil
 	}
-	if result.skipWrite {
-		return nil
-	}
-	return w.writeChatEvent(event, data)
+
+	return writeChatEvent(w.w, w.flusher, w.chatState, evt, true, w.usageRecorder)
 }
 
-func (w *ChatEventWriter) writeChatEvent(event string, data map[string]any) error {
-	chatEvt := upstream.Event{Event: event, Data: data}
-	return writeChatEvent(w.w, w.flusher, w.chatState, chatEvt, true, nil)
+func (w *ChatEventWriter) writeProcessedEvent(event string, data map[string]any) error {
+	evt := upstream.Event{Event: event, Data: data}
+	return writeChatEvent(w.w, w.flusher, w.chatState, evt, true, nil)
 }
 
 func (w *ChatEventWriter) WriteComment(comment string) error {
@@ -470,62 +445,40 @@ type AnthropicEventWriter struct {
 	w              http.ResponseWriter
 	flusher        http.Flusher
 	anthropicState *anthropicStreamState
-	respState      *responsesStreamState
-	eventHelper    *responseEventWriterHelper
+	helper         *responseEventWriterHelper
 }
 
-func NewAnthropicEventWriter(w http.ResponseWriter, flusher http.Flusher, anthropicState *anthropicStreamState, respState *responsesStreamState) *AnthropicEventWriter {
-	if respState.toolItems == nil {
-		respState.toolItems = map[string]*responsesToolItemState{}
-	}
-	if respState.toolIDAliases == nil {
-		respState.toolIDAliases = map[string]string{}
-	}
-	h := &responseEventWriterHelper{
-		downstreamType:       "anthropic",
-		upstreamEndpointType: respState.upstreamEndpointType,
-		toolIDAliases:        respState.toolIDAliases,
-		toolItems:            respState.toolItems,
-		toolOrder:            respState.toolOrder,
-		reasoningStarted:     respState.reasoningStarted,
-		reasoningClosed:      respState.reasoningClosed,
-		realReasoningSeen:    respState.realReasoningSeen,
-		syntheticSummary:     &respState.syntheticSummary,
-		requestID:            respState.requestID,
-		terminalSeen:         respState.terminalSeen,
-		terminalFailure:      respState.terminalFailure,
-	}
-	return &AnthropicEventWriter{w: w, flusher: flusher, anthropicState: anthropicState, respState: respState, eventHelper: h}
+func NewAnthropicEventWriter(w http.ResponseWriter, flusher http.Flusher, anthropicState *anthropicStreamState, h *responseEventWriterHelper) *AnthropicEventWriter {
+	return &AnthropicEventWriter{w: w, flusher: flusher, anthropicState: anthropicState, helper: h}
 }
 
 func (w *AnthropicEventWriter) WriteEvent(event string, data map[string]any) error {
 	evt := upstream.Event{Event: event, Data: data}
-	result, err := doProcessResponseEvent(w.eventHelper, evt)
-	if err != nil {
-		return err
-	}
-	w.respState.toolIDAliases = w.eventHelper.toolIDAliases
-	w.respState.toolItems = w.eventHelper.toolItems
-	w.respState.toolOrder = w.eventHelper.toolOrder
-	w.respState.reasoningStarted = w.eventHelper.reasoningStarted
-	w.respState.reasoningClosed = w.eventHelper.reasoningClosed
-	w.respState.realReasoningSeen = w.eventHelper.realReasoningSeen
-	w.respState.terminalSeen = w.eventHelper.terminalSeen
-	w.respState.terminalFailure = w.eventHelper.terminalFailure
-	for _, cmd := range w.eventHelper.events {
-		if err := w.writeAnthropicEvent(cmd.Event, cmd.Data); err != nil {
+
+	if w.helper != nil {
+		result, err := doProcessResponseEvent(w.helper, evt)
+		if err != nil {
 			return err
 		}
+
+		for _, cmd := range w.helper.events {
+			if err := w.writeProcessedEvent(cmd.Event, cmd.Data); err != nil {
+				return err
+			}
+		}
+		w.helper.events = nil
+
+		if result.skipWrite {
+			return nil
+		}
 	}
-	if result.skipWrite {
-		return nil
-	}
-	return w.writeAnthropicEvent(event, data)
+
+	return writeAnthropicEvent(w.w, w.flusher, w.anthropicState, evt, nil)
 }
 
-func (w *AnthropicEventWriter) writeAnthropicEvent(event string, data map[string]any) error {
-	anthropicEvt := upstream.Event{Event: event, Data: data}
-	return writeAnthropicEvent(w.w, w.flusher, w.anthropicState, anthropicEvt, nil)
+func (w *AnthropicEventWriter) writeProcessedEvent(event string, data map[string]any) error {
+	evt := upstream.Event{Event: event, Data: data}
+	return writeAnthropicEvent(w.w, w.flusher, w.anthropicState, evt, nil)
 }
 
 func (w *AnthropicEventWriter) WriteComment(comment string) error {
@@ -755,7 +708,7 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, usageRecorder usageRecorderFunc) error {
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
@@ -764,6 +717,12 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if state.pendingToolArgs == nil {
 		state.pendingToolArgs = map[string]string{}
 	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: upstreamEndpointType,
+		requestID:            req.RequestID,
+	}
+	writer := NewAnthropicEventWriter(w, flusher, state, helper)
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
@@ -790,7 +749,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
-			return writeAnthropicEvent(w, flusher, state, evt, usageRecorder)
+			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
 	if err != nil {
@@ -1271,13 +1230,19 @@ type chatStreamState struct {
 	pendingReasoningTag string
 }
 
-func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, usageRecorder usageRecorderFunc) error {
+func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
 	state := chatStreamState{
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
 		toolSent:        map[string]bool{},
 		pendingToolArgs: map[string]string{},
 	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: upstreamEndpointType,
+		requestID:            req.RequestID,
+	}
+	writer := NewChatEventWriter(w, flusher, &state, helper, usageRecorder)
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
@@ -1297,7 +1262,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
-			return writeChatEvent(w, flusher, &state, evt, req.IncludeUsage, usageRecorder)
+			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
 	if err != nil {
