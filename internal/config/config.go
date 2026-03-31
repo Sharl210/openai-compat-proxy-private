@@ -34,6 +34,7 @@ type Config struct {
 	UpstreamRetryCount             int
 	UpstreamRetryDelay             time.Duration
 	LogFilePath                    string
+	ThinkingTagStyleTwo            bool
 	LogIncludeBodies               bool
 	LogMaxSizeMB                   int
 	LogMaxBackups                  int

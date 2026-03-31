@@ -43,6 +43,7 @@ type ProviderConfig struct {
 	SystemPromptPosition                   string
 	SystemPromptText                       string
 	AnthropicVersion                       string
+	UpstreamThinkingTagStyle               string
 }
 
 type ModelMapEntry struct {
@@ -71,6 +72,10 @@ const (
 	MasqueradeTargetClaude   = "claude" // 模拟 Claude Code 客户端
 	MasqueradeTargetCodex    = "codex"  // 模拟 OpenAI Codex CLI 客户端
 	MasqueradeTargetNone     = "none"   // 不做任何伪装
+)
+
+const (
+	UpstreamThinkingTagStyleTwo = "two" // 上游将思维链以<think></thinking>或<thinking></thinking>标签对形式嵌入在正文传输
 )
 
 type invalidConfigError string
@@ -243,6 +248,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.InjectClaudeCodeMetadataUserID, _ = parseProviderStrictBool(value, key, path)
 		case "INJECT_CLAUDE_CODE_SYSTEM_PROMPT":
 			provider.InjectClaudeCodeSystemPrompt, _ = parseProviderStrictBool(value, key, path)
+		case "UPSTREAM_THINKING_TAG_STYLE":
+			provider.UpstreamThinkingTagStyle = strings.ToLower(value)
 		}
 	}
 	if err := scanner.Err(); err != nil {

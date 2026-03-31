@@ -31,6 +31,7 @@ type Client struct {
 	masqueradeTarget               string
 	injectClaudeCodeMetadataUserID bool
 	injectClaudeCodeSystemPrompt   bool
+	thinkingTagStyleTwo            bool
 }
 
 type EventStream struct {
@@ -74,6 +75,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		masqueradeTarget:               cfg.MasqueradeTarget,
 		injectClaudeCodeMetadataUserID: cfg.InjectClaudeCodeMetadataUserID,
 		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
+		thinkingTagStyleTwo:            cfg.ThinkingTagStyleTwo,
 	}
 }
 
@@ -444,7 +446,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		return nil, err
 	}
-	return normalizeResponsePayload(endpointType, payload), nil
+	return normalizeResponsePayload(endpointType, payload, c.thinkingTagStyleTwo), nil
 }
 
 func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string) (*EventStream, error) {
@@ -465,7 +467,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo)}
 	if err := stream.prime(); err != nil {
 		_ = stream.Close()
 		return nil, err

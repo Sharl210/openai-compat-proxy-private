@@ -141,10 +141,10 @@ func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, 
 	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
 }
 
-func normalizeResponsePayload(endpointType string, payload map[string]any) map[string]any {
+func normalizeResponsePayload(endpointType string, payload map[string]any, styleTwo bool) map[string]any {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return normalizeChatPayload(payload)
+		return normalizeChatPayload(payload, styleTwo)
 	case config.UpstreamEndpointTypeAnthropic:
 		return normalizeAnthropicPayload(payload)
 	default:
@@ -152,10 +152,10 @@ func normalizeResponsePayload(endpointType string, payload map[string]any) map[s
 	}
 }
 
-func eventBatchReaderForType(endpointType string) func(*bufio.Scanner) ([]Event, error) {
+func eventBatchReaderForType(endpointType string, styleTwo bool) func(*bufio.Scanner) ([]Event, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return newChatEventBatchReader()
+		return newChatEventBatchReader(styleTwo)
 	case config.UpstreamEndpointTypeAnthropic:
 		return newAnthropicEventBatchReader()
 	default:
@@ -229,8 +229,8 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 	return nil, nil
 }
 
-func newChatEventBatchReader() func(*bufio.Scanner) ([]Event, error) {
-	state := &chatNormalizationState{toolIDsByIndex: map[int]string{}, toolSent: map[string]bool{}, pendingItems: map[string]map[string]any{}}
+func newChatEventBatchReader(styleTwo bool) func(*bufio.Scanner) ([]Event, error) {
+	state := &chatNormalizationState{toolIDsByIndex: map[int]string{}, toolSent: map[string]bool{}, pendingItems: map[string]map[string]any{}, thinkingTagStyleTwo: styleTwo}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
 			frame, err := readNextSSEFrame(scanner)
@@ -256,15 +256,16 @@ func newChatEventBatchReader() func(*bufio.Scanner) ([]Event, error) {
 }
 
 type chatNormalizationState struct {
-	toolIDsByIndex     map[int]string
-	toolSent           map[string]bool
-	usage              map[string]any
-	createdSent        bool
-	completed          bool
-	pendingFinish      string
-	pendingItems       map[string]map[string]any
-	pendingThinkingTag string // incomplete thinking tag waiting for close tag (e.g., "<think>" or "<thinking>")
-	pendingThinking    string // accumulated thinking content for the current pending tag
+	toolIDsByIndex      map[int]string
+	toolSent            map[string]bool
+	usage               map[string]any
+	createdSent         bool
+	completed           bool
+	pendingFinish       string
+	pendingItems        map[string]map[string]any
+	pendingThinkingTag  string
+	pendingThinking     string
+	thinkingTagStyleTwo bool
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
@@ -334,7 +335,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		delta, _ := choice["delta"].(map[string]any)
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
-				cleanText, reasoningContent, pendingTag, pendingContent := extractContentAndReasoningTagsWithState(text, state.pendingThinkingTag, state.pendingThinking)
+				cleanText, reasoningContent, pendingTag, pendingContent := extractContentAndReasoningTagsWithState(text, state.pendingThinkingTag, state.pendingThinking, state.thinkingTagStyleTwo)
 				state.pendingThinkingTag = pendingTag
 				state.pendingThinking = pendingContent
 				if reasoningContent != "" {
@@ -520,7 +521,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	return events, false, nil
 }
 
-func normalizeChatPayload(payload map[string]any) map[string]any {
+func normalizeChatPayload(payload map[string]any, styleTwo bool) map[string]any {
 	responseID := stringValue(payload["id"])
 	if responseID == "" {
 		responseID = "resp_proxy"
@@ -566,7 +567,7 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 	for _, rawItem := range content {
 		if item, ok := rawItem.(map[string]any); ok && stringValue(item["type"]) == "output_text" {
 			text := stringValue(item["text"])
-			cleanText, extracted, newPendingTag, newPendingContent := extractContentAndReasoningTagsWithState(text, pendingTag, pendingContent)
+			cleanText, extracted, newPendingTag, newPendingContent := extractContentAndReasoningTagsWithState(text, pendingTag, pendingContent, styleTwo)
 			pendingTag = newPendingTag
 			pendingContent = newPendingContent
 			reasoningContent += extracted
@@ -579,7 +580,7 @@ func normalizeChatPayload(payload map[string]any) map[string]any {
 	existingReasoning := stringValue(message["reasoning_content"])
 	if existingReasoning != "" {
 		// Process through extraction to strip any raw thinking tags that might be in reasoning_content
-		_, cleanReasoning, _, _ := extractContentAndReasoningTagsWithState(existingReasoning, "", "")
+		_, cleanReasoning, _, _ := extractContentAndReasoningTagsWithState(existingReasoning, "", "", styleTwo)
 		if cleanReasoning != "" {
 			reasoningContent = cleanReasoning
 		} else {
@@ -1161,10 +1162,9 @@ func extractContentAndReasoningTags(text string) (cleanText string, reasoningCon
 
 // extractContentAndReasoningTagsWithState extracts <think>...</think> and <thinking>...</thinking>
 // tags from text, handling tags that span across multiple deltas.
+// styleTwo: if true, treat text from the start as thinking until close tag is found.
 // Returns: cleanText, reasoningContent, pendingTag, pendingThinking
-// pendingTag is "" if no tag is open, otherwise "<think>" or "<thinking>"
-// pendingThinking is the accumulated content waiting for a close tag
-func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking string) (cleanText, reasoningContent, newPendingTag, newPendingThinking string) {
+func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking string, styleTwo bool) (cleanText, reasoningContent, newPendingTag, newPendingThinking string) {
 	cleanText = text
 	newPendingTag = pendingTag
 	newPendingThinking = pendingThinking
@@ -1189,6 +1189,30 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking s
 		cleanText = cleanText[closeIdx+len(closeTag):]
 		newPendingTag = ""
 		newPendingThinking = ""
+	}
+
+	if styleTwo {
+		thinTagClose := "</thinking>"
+		thinkTagClose := `
+</think>
+
+`
+		closeIdx := strings.Index(cleanText, thinTagClose)
+		whichClose := thinTagClose
+		if closeIdx == -1 {
+			closeIdx = strings.Index(cleanText, thinkTagClose)
+			whichClose = thinkTagClose
+		}
+		if closeIdx == -1 {
+			newPendingTag = "<think>"
+			newPendingThinking = cleanText
+			reasoningContent += cleanText
+			cleanText = ""
+			return
+		}
+		reasoningContent += cleanText[:closeIdx]
+		cleanText = cleanText[closeIdx+len(whichClose):]
+		return
 	}
 
 	const thinkTagOpen = "<think>"
@@ -1221,8 +1245,6 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking s
 			}
 		}
 
-		// Only extract thinking tag if it appears at the beginning of the text
-		// (preceded only by whitespace). Otherwise keep as plain text.
 		if openIdx > 0 && strings.TrimSpace(cleanText[:openIdx]) != "" {
 			break
 		}
