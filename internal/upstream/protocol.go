@@ -1202,6 +1202,12 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking s
 			}
 		}
 
+		// Only extract thinking tag if it appears at the beginning of the text
+		// (preceded only by whitespace). Otherwise keep as plain text.
+		if openIdx > 0 && strings.TrimSpace(cleanText[:openIdx]) != "" {
+			break
+		}
+
 		closeIdx := strings.Index(cleanText[openIdx+len(openTag):], closeTag)
 		if closeIdx == -1 {
 			newPendingTag = openTag
