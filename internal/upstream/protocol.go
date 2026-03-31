@@ -272,6 +272,19 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		return nil, true, nil
 	}
 	if strings.TrimSpace(frame.Data) == "[DONE]" {
+		// If we have a pending finish reason or usage that hasn't been emitted yet,
+		// emit response.completed before signaling end of stream
+		if !state.completed && (state.pendingFinish != "" || len(state.usage) > 0) {
+			state.completed = true
+			data := map[string]any{}
+			if state.pendingFinish != "" {
+				data["finish_reason"] = state.pendingFinish
+			}
+			if len(state.usage) > 0 {
+				data["usage"] = cloneMap(state.usage)
+			}
+			return []Event{{Event: "response.completed", Data: data}}, true, nil
+		}
 		return nil, true, nil
 	}
 	var payload map[string]any
