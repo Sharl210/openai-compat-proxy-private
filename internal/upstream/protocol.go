@@ -1193,14 +1193,23 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking s
 
 	if styleTwo {
 		thinTagClose := "</thinking>"
+		reasoningTagClose := "</reasoning>"
 		thinkTagClose := `
 </think>
 
 `
-		closeIdx := strings.Index(cleanText, thinTagClose)
-		whichClose := thinTagClose
-		if closeIdx == -1 {
-			closeIdx = strings.Index(cleanText, thinkTagClose)
+		closeIdx := -1
+		whichClose := ""
+		if idx := strings.Index(cleanText, thinTagClose); idx != -1 && (closeIdx == -1 || idx < closeIdx) {
+			closeIdx = idx
+			whichClose = thinTagClose
+		}
+		if idx := strings.Index(cleanText, reasoningTagClose); idx != -1 && (closeIdx == -1 || idx < closeIdx) {
+			closeIdx = idx
+			whichClose = reasoningTagClose
+		}
+		if idx := strings.Index(cleanText, thinkTagClose); idx != -1 && (closeIdx == -1 || idx < closeIdx) {
+			closeIdx = idx
 			whichClose = thinkTagClose
 		}
 		if closeIdx == -1 {
