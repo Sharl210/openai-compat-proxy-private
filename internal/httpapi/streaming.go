@@ -269,6 +269,13 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		h.flushPendingFunctionCalls()
 		h.markRealReasoningSeen()
+		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
+		if evt.Event == "response.reasoning.delta" {
+			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
+				h.addEvent("response.reasoning_summary_text.delta", map[string]any{"delta": summary})
+			}
+			result.skipWrite = true
+		}
 	case "response.function_call_arguments.delta":
 		itemID, _ := evt.Data["item_id"].(string)
 		itemID = h.canonicalToolItemID(itemID)

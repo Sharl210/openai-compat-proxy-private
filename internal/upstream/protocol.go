@@ -296,6 +296,23 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		}
 	}
 	choices, _ := payload["choices"].([]any)
+	// Check if finish_reason is in choices (needs to be processed in the loop below)
+	var finishReasonInChoices string
+	for _, rawChoice := range choices {
+		if choice, ok := rawChoice.(map[string]any); ok {
+			if fr := stringValue(choice["finish_reason"]); fr != "" {
+				finishReasonInChoices = fr
+				break
+			}
+		}
+	}
+	// If we have usage but no pendingFinish, and there's a finish_reason in choices coming,
+	// emit response.completed now (usage already arrived before finish_reason)
+	if len(state.usage) > 0 && state.pendingFinish == "" && !state.completed && finishReasonInChoices != "" {
+		state.completed = true
+		data := map[string]any{"finish_reason": finishReasonInChoices, "usage": cloneMap(state.usage)}
+		events = append(events, Event{Event: "response.completed", Data: data})
+	}
 	for _, rawChoice := range choices {
 		choice, _ := rawChoice.(map[string]any)
 		if choice == nil {
