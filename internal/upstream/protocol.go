@@ -173,7 +173,7 @@ func eventBatchReaderForType(endpointType string, styleTwo bool, originalToolIDs
 	case config.UpstreamEndpointTypeChat:
 		return newChatEventBatchReader(styleTwo, originalToolIDs)
 	case config.UpstreamEndpointTypeAnthropic:
-		return newAnthropicEventBatchReader()
+		return newAnthropicEventBatchReader(originalToolIDs)
 	default:
 		return readNextResponsesEventBatch
 	}
@@ -289,6 +289,7 @@ type chatNormalizationState struct {
 	pendingThinking     string
 	thinkingTagStyleTwo bool
 	originalToolIDs     map[int]string
+	responseID          string
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
@@ -296,17 +297,16 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		return nil, true, nil
 	}
 	if strings.TrimSpace(frame.Data) == "[DONE]" {
-		// Always emit response.completed to prevent "stream did not complete" error.
 		if !state.completed {
 			state.completed = true
-			data := map[string]any{}
+			responseData := map[string]any{"id": state.responseID, "object": "response"}
 			if state.pendingFinish != "" {
-				data["finish_reason"] = state.pendingFinish
+				responseData["finish_reason"] = state.pendingFinish
 			}
 			if len(state.usage) > 0 {
-				data["usage"] = cloneMap(state.usage)
+				responseData["usage"] = cloneMap(state.usage)
 			}
-			return []Event{{Event: "response.completed", Data: data}}, true, nil
+			return []Event{{Event: "response.completed", Data: map[string]any{"response": responseData}}}, true, nil
 		}
 		return nil, true, nil
 	}
@@ -319,15 +319,15 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		state.usage = usage
 		if state.pendingFinish != "" && !state.completed {
 			state.completed = true
-			data := map[string]any{"finish_reason": state.pendingFinish}
-			data["usage"] = cloneMap(state.usage)
-			events = append(events, Event{Event: "response.completed", Data: data})
+			responseData := map[string]any{"id": state.responseID, "object": "response", "finish_reason": state.pendingFinish, "usage": cloneMap(state.usage)}
+			events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
 			state.pendingFinish = ""
 		}
 	}
 	if !state.createdSent {
 		if responseID := stringValue(payload["id"]); responseID != "" {
-			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID}}})
+			state.responseID = responseID
+			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID, "object": "response"}}})
 			state.createdSent = true
 		}
 	}
@@ -342,12 +342,10 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 			}
 		}
 	}
-	// If we have usage but no pendingFinish, and there's a finish_reason in choices coming,
-	// emit response.completed now (usage already arrived before finish_reason)
 	if len(state.usage) > 0 && state.pendingFinish == "" && !state.completed && finishReasonInChoices != "" {
 		state.completed = true
-		data := map[string]any{"finish_reason": finishReasonInChoices, "usage": cloneMap(state.usage)}
-		events = append(events, Event{Event: "response.completed", Data: data})
+		responseData := map[string]any{"id": state.responseID, "object": "response", "finish_reason": finishReasonInChoices, "usage": cloneMap(state.usage)}
+		events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
 	}
 	for _, rawChoice := range choices {
 		choice, _ := rawChoice.(map[string]any)
@@ -432,8 +430,8 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 					}
 					state.pendingItems = nil
 				}
-				data := map[string]any{"finish_reason": finishReason, "usage": cloneMap(state.usage)}
-				events = append(events, Event{Event: "response.completed", Data: data})
+				responseData := map[string]any{"id": state.responseID, "object": "response", "finish_reason": finishReason, "usage": cloneMap(state.usage)}
+				events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
 			} else {
 				state.pendingFinish = finishReason
 			}
@@ -442,8 +440,8 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 	return events, false, nil
 }
 
-func newAnthropicEventBatchReader() func(*bufio.Scanner) ([]Event, error) {
-	state := &anthropicNormalizationState{toolIDsByIndex: map[int]string{}, usage: map[string]any{}}
+func newAnthropicEventBatchReader(originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
+	state := &anthropicNormalizationState{toolIDsByIndex: map[int]string{}, usage: map[string]any{}, originalToolIDs: originalToolIDs}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
 			frame, err := readNextSSEFrame(scanner)
@@ -469,9 +467,11 @@ func newAnthropicEventBatchReader() func(*bufio.Scanner) ([]Event, error) {
 }
 
 type anthropicNormalizationState struct {
-	toolIDsByIndex map[int]string
-	usage          map[string]any
-	completed      bool
+	toolIDsByIndex  map[int]string
+	usage           map[string]any
+	completed       bool
+	responseID      string
+	originalToolIDs map[int]string
 }
 
 func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState) ([]Event, bool, error) {
@@ -487,13 +487,20 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	case "message_start":
 		message, _ := payload["message"].(map[string]any)
 		if responseID := stringValue(message["id"]); responseID != "" {
-			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID}}})
+			state.responseID = responseID
+			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID, "object": "response"}}})
 		}
 	case "content_block_start":
 		index := int(numberValue(payload["index"]))
 		block, _ := payload["content_block"].(map[string]any)
 		if blockType := stringValue(block["type"]); blockType == "tool_use" {
 			itemID := stringValue(block["id"])
+			if itemID == "" {
+				itemID = state.toolIDsByIndex[index]
+			}
+			if itemID == "" {
+				itemID = state.originalToolIDs[index]
+			}
 			if itemID == "" {
 				itemID = fmt.Sprintf("tool_%d", index)
 			}
@@ -520,6 +527,9 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 			if partial := stringValue(delta["partial_json"]); partial != "" {
 				itemID := state.toolIDsByIndex[index]
 				if itemID == "" {
+					itemID = state.originalToolIDs[index]
+				}
+				if itemID == "" {
 					itemID = fmt.Sprintf("tool_%d", index)
 					state.toolIDsByIndex[index] = itemID
 				}
@@ -531,12 +541,20 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 		delta, _ := payload["delta"].(map[string]any)
 		if stopReason := stringValue(delta["stop_reason"]); stopReason != "" && !state.completed {
 			state.completed = true
-			events = append(events, Event{Event: "response.completed", Data: map[string]any{"usage": cloneMap(state.usage), "stop_reason": stopReason}})
+			responseData := map[string]any{"id": state.responseID, "object": "response", "finish_reason": stopReason}
+			if len(state.usage) > 0 {
+				responseData["usage"] = cloneMap(state.usage)
+			}
+			events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
 		}
 	case "message_stop":
 		if !state.completed {
 			state.completed = true
-			events = append(events, Event{Event: "response.completed", Data: map[string]any{"usage": cloneMap(state.usage)}})
+			responseData := map[string]any{"id": state.responseID, "object": "response"}
+			if len(state.usage) > 0 {
+				responseData["usage"] = cloneMap(state.usage)
+			}
+			events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
 		}
 	case "error":
 		errMap, _ := payload["error"].(map[string]any)

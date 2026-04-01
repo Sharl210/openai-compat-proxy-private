@@ -1196,8 +1196,18 @@ func anthropicUsageFromEvent(data map[string]any) map[string]any {
 }
 
 func anthropicStreamStopReason(current string, data map[string]any) string {
+	// Try stop_reason directly (backward compat), then response.stop_reason, then response.finish_reason (unified format)
 	if stopReason, _ := data["stop_reason"].(string); stopReason != "" {
 		return stopReason
+	}
+	if response, _ := data["response"].(map[string]any); response != nil {
+		if stopReason, _ := response["stop_reason"].(string); stopReason != "" {
+			return stopReason
+		}
+		// Unified format uses finish_reason instead of stop_reason
+		if finishReason, _ := response["finish_reason"].(string); finishReason != "" {
+			return finishReason
+		}
 	}
 	if current != "" {
 		return current
@@ -1382,8 +1392,14 @@ func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream
 }
 
 func chatStreamFinishReason(state *chatStreamState, data map[string]any) string {
+	// Try direct finish_reason first, then look inside response wrapper (unified format)
 	if finishReason, _ := data["finish_reason"].(string); finishReason != "" {
 		return finishReason
+	}
+	if response, _ := data["response"].(map[string]any); response != nil {
+		if finishReason, _ := response["finish_reason"].(string); finishReason != "" {
+			return finishReason
+		}
 	}
 	if state.textStarted {
 		return "stop"

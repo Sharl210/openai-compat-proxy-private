@@ -449,7 +449,9 @@ func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
 	if got := events[0].Data["delta"]; got != "hello" {
 		t.Fatalf("expected delta hello, got %#v", got)
 	}
-	usage, _ := events[1].Data["usage"].(map[string]any)
+	// Usage is now wrapped inside response object (unified format)
+	response, _ := events[1].Data["response"].(map[string]any)
+	usage, _ := response["usage"].(map[string]any)
 	if got := usage["input_tokens"]; got != float64(3) {
 		t.Fatalf("expected input_tokens 3, got %#v", got)
 	}
@@ -477,7 +479,9 @@ func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrame
 	if completed.Event != "response.completed" {
 		t.Fatalf("expected final event response.completed, got %#v", completed)
 	}
-	usage, _ := completed.Data["usage"].(map[string]any)
+	// Usage and finish_reason are now wrapped inside response object (unified format)
+	response, _ := completed.Data["response"].(map[string]any)
+	usage, _ := response["usage"].(map[string]any)
 	if got := usage["input_tokens"]; got != float64(3) {
 		t.Fatalf("expected completed usage.input_tokens 3, got %#v events=%#v", got, events)
 	}
@@ -485,7 +489,7 @@ func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrame
 	if got := details["cached_tokens"]; got != float64(1) {
 		t.Fatalf("expected completed usage.input_tokens_details.cached_tokens 1, got %#v events=%#v", got, events)
 	}
-	if got := completed.Data["finish_reason"]; got != "stop" {
+	if got := response["finish_reason"]; got != "stop" {
 		t.Fatalf("expected finish_reason stop on completed event, got %#v events=%#v", got, events)
 	}
 	if len(events) != 2 {
@@ -743,7 +747,9 @@ func TestStreamUsesAnthropicEndpointPrefersFinalUsageOverMessageStartZeroes(t *t
 	if completed.Event != "response.completed" {
 		t.Fatalf("expected final event response.completed, got %#v", completed)
 	}
-	usage, _ := completed.Data["usage"].(map[string]any)
+	// Usage is now wrapped inside response object (unified format)
+	response, _ := completed.Data["response"].(map[string]any)
+	usage, _ := response["usage"].(map[string]any)
 	if got := usage["input_tokens"]; got != float64(12) {
 		t.Fatalf("expected final anthropic usage.input_tokens 12, got %#v events=%#v", got, events)
 	}

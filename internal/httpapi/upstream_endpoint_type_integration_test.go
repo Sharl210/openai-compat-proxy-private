@@ -12,7 +12,7 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
-var responseCreatedIDPattern = regexp.MustCompile(`event: response\.created\s+data: \{"response":\{"id":"([^"]+)"\}`)
+var responseCreatedIDPattern = regexp.MustCompile(`event: response\.created\s+data: \{"response":\{"id":"([^"]+)"[^}]*\}`)
 
 func firstResponseIDFromStreamBody(t *testing.T, body string) string {
 	t.Helper()

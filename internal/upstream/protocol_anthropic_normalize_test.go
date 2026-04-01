@@ -224,7 +224,7 @@ data: {}
 `
 
 	reader := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newAnthropicEventBatchReader()
+	readNext := newAnthropicEventBatchReader(nil)
 
 	var allEvents []Event
 	for {
