@@ -6,17 +6,18 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
 )
 
-func TestLoggerWritesJSONFileByRequestID(t *testing.T) {
+func TestLoggerWritesTxtFileByRequestID(t *testing.T) {
 	tmpDir := t.TempDir()
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogIncludeBodies: false}, stdout)
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestLoggerWritesJSONFileByRequestID(t *testing.T) {
 		"cached_tokens": 0,
 	})
 
-	filePath := filepath.Join(tmpDir, "req-test-123.jsonl")
+	filePath := filepath.Join(tmpDir, "req-test-123.txt")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
@@ -44,43 +45,40 @@ func TestLoggerWritesJSONFileByRequestID(t *testing.T) {
 	if record["event"] != "downstream_request_received" {
 		t.Fatalf("unexpected event: %#v", record)
 	}
-	if record["body"] != "[REDACTED]" {
-		t.Fatalf("expected body redaction, got %#v", record["body"])
-	}
 	if record["authorization"] != "[REDACTED]" {
 		t.Fatalf("expected auth redaction, got %#v", record["authorization"])
 	}
 	if record["api_key"] != "[REDACTED]" {
 		t.Fatalf("expected api_key redaction, got %#v", record["api_key"])
 	}
-	if record["x_api_key"] != "[REDACTED]" {
-		t.Fatalf("expected x_api_key redaction, got %#v", record["x_api_key"])
-	}
-	if record["body_hash"] != "abc123" {
-		t.Fatalf("expected body hash to remain, got %#v", record["body_hash"])
+	if record["body"] != "top secret body" {
+		t.Fatalf("expected body to be preserved, got %#v", record["body"])
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("downstream_request_received")) {
 		t.Fatalf("expected stdout summary to mention event, got %s", stdout.String())
 	}
 }
 
-func TestLoggerCanIncludeBodiesWhenEnabled(t *testing.T) {
+func TestLoggerTruncatesBody(t *testing.T) {
 	tmpDir := t.TempDir()
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogIncludeBodies: true}, stdout)
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      tmpDir,
+		LogMaxRequests:   50,
+		LogMaxBodySizeMB: 0.00001,
+	}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeFn()
 
-	logger.Event("upstream_request_built", map[string]any{
-		"request_id": "req-test-456",
-		"body":       "visible body",
-		"body_hash":  "def456",
+	logger.Event("test", map[string]any{
+		"request_id": "req-truncate-test",
+		"body":       "this is a very long body that should be truncated",
 	})
 
-	filePath := filepath.Join(tmpDir, "req-test-456.jsonl")
+	filePath := filepath.Join(tmpDir, "req-truncate-test.txt")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
@@ -89,22 +87,20 @@ func TestLoggerCanIncludeBodiesWhenEnabled(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(content), &record); err != nil {
 		t.Fatal(err)
 	}
-	if record["body"] != "visible body" {
-		t.Fatalf("expected body to be preserved, got %#v", record["body"])
-	}
-	if record["body_hash"] != "def456" {
-		t.Fatalf("expected body hash to remain, got %#v", record["body_hash"])
+	body := record["body"].(string)
+	if !strings.HasSuffix(body, "...[TRUNCATED]") {
+		t.Fatalf("expected body to be truncated, got %#v", body)
 	}
 }
 
-func TestLoggerRespectsMaxHistory(t *testing.T) {
+func TestLoggerRespectsMaxRequests(t *testing.T) {
 	tmpDir := t.TempDir()
 	stdout := &bytes.Buffer{}
 
 	logger, closeFn, err := logging.New(config.Config{
 		LogFilePath:      tmpDir,
-		LogMaxHistory:    3,
-		LogIncludeBodies: false,
+		LogMaxRequests:   3,
+		LogMaxBodySizeMB: 1,
 	}, stdout)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +126,11 @@ func TestLoggerRequiresRequestID(t *testing.T) {
 	tmpDir := t.TempDir()
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir}, stdout)
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      tmpDir,
+		LogMaxRequests:   50,
+		LogMaxBodySizeMB: 1,
+	}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,11 @@ func TestLoggerSerializesErrorAttrsAsReadableStrings(t *testing.T) {
 	tmpDir := t.TempDir()
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir}, stdout)
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      tmpDir,
+		LogMaxRequests:   50,
+		LogMaxBodySizeMB: 1,
+	}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +184,7 @@ func TestLoggerSerializesErrorAttrsAsReadableStrings(t *testing.T) {
 		"nested_error": map[string]any{"cause": errors.New("connection reset by peer")},
 	})
 
-	filePath := filepath.Join(tmpDir, "req-error-test.jsonl")
+	filePath := filepath.Join(tmpDir, "req-error-test.txt")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
@@ -190,10 +194,10 @@ func TestLoggerSerializesErrorAttrsAsReadableStrings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := record["error"]; got != "first byte timeout" {
-		t.Fatalf("expected top-level error string, got %#v", got)
+		t.Fatalf("expected top-level error String, got %#v", got)
 	}
 	nested, _ := record["nested_error"].(map[string]any)
 	if got := nested["cause"]; got != "connection reset by peer" {
-		t.Fatalf("expected nested error string, got %#v", record["nested_error"])
+		t.Fatalf("expected nested error String, got %#v", record["nested_error"])
 	}
 }

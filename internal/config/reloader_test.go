@@ -150,8 +150,8 @@ func TestRuntimeStoreRefreshAppliesHotReloadableRootChangesDespiteInvalidStartup
 	if got := active.Config.ProxyAPIKey; got != "after" {
 		t.Fatalf("expected proxy api key to update, got %q", got)
 	}
-	if got := active.Config.LogMaxHistory; got != 100 {
-		t.Fatalf("expected startup-only log max history to stay previous value, got %d", got)
+	if got := active.Config.LogMaxRequests; got != 50 {
+		t.Fatalf("expected startup-only log max requests to stay previous value, got %d", got)
 	}
 }
 

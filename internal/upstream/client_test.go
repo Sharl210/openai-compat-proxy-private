@@ -985,7 +985,7 @@ func TestStreamEventsLogsBrokenStreamAfterFirstEvent(t *testing.T) {
 func initUpstreamTestLogger(t *testing.T) (string, func()) {
 	t.Helper()
 	logDir := t.TempDir()
-	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logDir}, &bytes.Buffer{})
+	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logDir, LogMaxRequests: 50, LogMaxBodySizeMB: 5}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("init logger: %v", err)
 	}
@@ -1004,7 +1004,7 @@ func readUpstreamTestLogRecords(t *testing.T, logDir string) []map[string]any {
 	}
 	var allRecords []map[string]any
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
 			continue
 		}
 		filePath := filepath.Join(logDir, entry.Name())

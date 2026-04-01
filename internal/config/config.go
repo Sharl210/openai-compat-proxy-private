@@ -33,10 +33,10 @@ type Config struct {
 	TotalTimeout                   time.Duration
 	UpstreamRetryCount             int
 	UpstreamRetryDelay             time.Duration
-	LogFilePath                    string
 	ThinkingTagStyleTwo            bool
-	LogIncludeBodies               bool
-	LogMaxHistory                  int
+	LogFilePath                    string
+	LogMaxRequests                 int
+	LogMaxBodySizeMB               float64
 }
 
 const (
@@ -48,15 +48,16 @@ func Default() Config {
 	return Config{
 		ListenAddr:                  ":21021",
 		CacheInfoTimezone:           "Asia/Shanghai",
-		LogEnable:                   false,
+		LogEnable:                   true,
 		ConnectTimeout:              10 * time.Second,
 		FirstByteTimeout:            20 * time.Minute,
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
-		LogFilePath:                 ".proxy_requests",
-		LogMaxHistory:               100,
+		LogFilePath:                 "logs",
+		LogMaxRequests:              50,
+		LogMaxBodySizeMB:            5.0,
 	}
 }
 
@@ -101,12 +102,14 @@ func loadFromLookup(lookup func(string) string) Config {
 	if value := lookup("LOG_FILE_PATH"); value != "" {
 		cfg.LogFilePath = value
 	}
-	if value := lookup("LOG_INCLUDE_BODIES"); value != "" {
-		cfg.LogIncludeBodies = parseRootBool(value)
-	}
-	if value := lookup("LOG_MAX_HISTORY"); value != "" {
+	if value := lookup("LOG_MAX_REQUESTS"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
-			cfg.LogMaxHistory = parsed
+			cfg.LogMaxRequests = parsed
+		}
+	}
+	if value := lookup("LOG_MAX_BODY_SIZE_MB"); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed >= 0 {
+			cfg.LogMaxBodySizeMB = parsed
 		}
 	}
 	if value := lookup("CONNECT_TIMEOUT"); value != "" {
@@ -165,15 +168,13 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateStrictBool(values, "LOG_ENABLE"); err != nil {
 		return err
 	}
-	if err := validateStrictBool(values, "LOG_INCLUDE_BODIES"); err != nil {
-		return err
-	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
 		return err
 	}
-	if err := validateMinInt(values, "LOG_MAX_HISTORY", 1); err != nil {
+	if err := validateMinInt(values, "LOG_MAX_REQUESTS", 1); err != nil {
 		return err
 	}
+
 	if err := validateProvidersDir(values, "PROVIDERS_DIR"); err != nil {
 		return err
 	}
@@ -342,8 +343,8 @@ func (c *Config) applyStartupOnlyFrom(previous Config) {
 	c.CacheInfoTimezone = previous.CacheInfoTimezone
 	c.LogEnable = previous.LogEnable
 	c.LogFilePath = previous.LogFilePath
-	c.LogIncludeBodies = previous.LogIncludeBodies
-	c.LogMaxHistory = previous.LogMaxHistory
+	c.LogMaxRequests = previous.LogMaxRequests
+	c.LogMaxBodySizeMB = previous.LogMaxBodySizeMB
 }
 
 func (c Config) hotReloadableRootEquals(other Config) bool {

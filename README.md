@@ -119,10 +119,9 @@ FIRST_BYTE_TIMEOUT=20m
 IDLE_TIMEOUT=3m
 TOTAL_TIMEOUT=1h
 
-LOG_ENABLE=false
-LOG_FILE_PATH=.proxy_requests
-LOG_INCLUDE_BODIES=false
-LOG_MAX_HISTORY=100
+LOG_ENABLE=true
+LOG_MAX_BODY_SIZE_MB=5
+LOG_MAX_REQUESTS=50
 ```
 
 ### 3. 准备 provider
@@ -249,7 +248,7 @@ anthropic-version: 2023-06-01
 | `ENABLE_LEGACY_V1_ROUTES` | 是否开启裸 `/v1/*`（必须写成合法布尔值） | 是 |
 | `DOWNSTREAM_NON_STREAM_STRATEGY` | 非流时走本地聚合还是直接请求上游非流 | 是 |
 | `CONNECT_TIMEOUT` / `FIRST_BYTE_TIMEOUT` / `IDLE_TIMEOUT` / `TOTAL_TIMEOUT` | 上游超时控制 | 是 |
-| `LOG_*` | 结构化日志配置 | 否，修改后需重启 |
+| `LOG_ENABLE` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS` | 结构化日志配置 | 否，修改后需重启 |
 | `UPSTREAM_USER_AGENT` | 上游请求时发送的自定义 User-Agent 头；优先级高于伪装目标对 User-Agent 的修改；与伪装目标不沾边 | 是 |
 | `UPSTREAM_MASQUERADE_TARGET` | 伪装目标客户端：`opencode`/`claude`/`codex`/`none`；留空继承上级，none 显式禁用（详见 `.env.example` 详解） | 是 |
 | `UPSTREAM_INJECT_METADATA_USER_ID` | 仅在有效伪装目标为 claude 时生效：注入 `metadata.user_id` 以绕过 sub2api 校验 | 是 |
@@ -333,7 +332,9 @@ anthropic-version: 2023-06-01
 
 - `LISTEN_ADDR`
 - `CACHE_INFO_TIMEZONE`
-- 所有 `LOG_*`
+- `LOG_ENABLE`
+- `LOG_MAX_BODY_SIZE_MB`
+- `LOG_MAX_REQUESTS`
 
 说明：启动时根 `.env` 和 provider `.env` 中要求严格布尔值的字段都必须写成合法布尔值；写成非法值时，配置校验会失败，不会再静默按 `false` 处理。运行时热加载阶段，只有实际参与热更新校验的根字段会重新按这个规则检查。
 

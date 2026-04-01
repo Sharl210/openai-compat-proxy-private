@@ -16,11 +16,13 @@ import (
 )
 
 type Logger struct {
-	stdout        io.Writer
-	dir           string
-	includeBodies bool
-	maxHistory    int
-	mu            sync.Mutex
+	stdout       io.Writer
+	dir          string
+	maxRequests  int
+	maxBodySize  int
+	mu           sync.Mutex
+	pendingFiles map[string]*os.File
+	pendingMu    sync.Mutex
 }
 
 var (
@@ -32,15 +34,30 @@ func New(cfg config.Config, stdout io.Writer) (*Logger, func() error, error) {
 	if stdout == nil {
 		stdout = io.Discard
 	}
-	dir := strings.TrimSpace(cfg.LogFilePath)
+	dir := cfg.LogFilePath
 	if dir == "" {
-		dir = ".proxy_requests"
+		dir = "logs"
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, nil, err
 	}
-	logger := &Logger{stdout: stdout, dir: dir, includeBodies: cfg.LogIncludeBodies, maxHistory: cfg.LogMaxHistory}
-	return logger, func() error { return nil }, nil
+	logger := &Logger{
+		stdout:       stdout,
+		dir:          dir,
+		maxRequests:  cfg.LogMaxRequests,
+		maxBodySize:  int(cfg.LogMaxBodySizeMB * 1024 * 1024),
+		pendingFiles: make(map[string]*os.File),
+	}
+	return logger, func() error { return logger.closeAll() }, nil
+}
+
+func (l *Logger) closeAll() error {
+	l.pendingMu.Lock()
+	defer l.pendingMu.Unlock()
+	for _, f := range l.pendingFiles {
+		f.Close()
+	}
+	return nil
 }
 
 func Init(cfg config.Config, stdout io.Writer) (func() error, error) {
@@ -79,27 +96,25 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	record := make(map[string]any, len(attrs)+2)
 	record["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
 	record["event"] = name
-	for k, v := range redactAttrs(attrs, l.includeBodies) {
+	for k, v := range redactAttrs(attrs, l.maxBodySize) {
 		record[k] = v
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	requestID, ok := attrs["request_id"].(string)
 	if !ok || requestID == "" {
 		return
 	}
 
-	filePath := filepath.Join(l.dir, requestID+".jsonl")
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	line, err := json.Marshal(record)
 	if err != nil {
 		return
 	}
-	defer file.Close()
 
-	line, err := json.Marshal(record)
-	if err != nil {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	file := l.getFile(requestID)
+	if file == nil {
 		return
 	}
 	_, _ = file.Write(append(line, '\n'))
@@ -108,8 +123,26 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	l.cleanupOldFiles()
 }
 
+func (l *Logger) getFile(requestID string) *os.File {
+	l.pendingMu.Lock()
+	defer l.pendingMu.Unlock()
+
+	if f, ok := l.pendingFiles[requestID]; ok {
+		return f
+	}
+
+	filePath := filepath.Join(l.dir, requestID+".txt")
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil
+	}
+
+	l.pendingFiles[requestID] = file
+	return file
+}
+
 func (l *Logger) cleanupOldFiles() error {
-	if l.maxHistory <= 0 {
+	if l.maxRequests <= 0 {
 		return nil
 	}
 	entries, err := os.ReadDir(l.dir)
@@ -128,15 +161,15 @@ func (l *Logger) cleanupOldFiles() error {
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ModTime().Before(files[j].ModTime())
 	})
-	if len(files) > l.maxHistory {
-		for _, info := range files[:len(files)-l.maxHistory] {
+	if len(files) > l.maxRequests {
+		for _, info := range files[:len(files)-l.maxRequests] {
 			os.Remove(filepath.Join(l.dir, info.Name()))
 		}
 	}
 	return nil
 }
 
-func redactAttrs(attrs map[string]any, includeBodies bool) map[string]any {
+func redactAttrs(attrs map[string]any, maxBodySize int) map[string]any {
 	clean := make(map[string]any, len(attrs))
 	for k, v := range attrs {
 		lower := strings.ToLower(k)
@@ -145,13 +178,28 @@ func redactAttrs(attrs map[string]any, includeBodies bool) map[string]any {
 			clean[k] = "[REDACTED]"
 		case strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey"):
 			clean[k] = "[REDACTED]"
-		case lower == "body" && !includeBodies:
-			clean[k] = "[REDACTED]"
+		case lower == "body":
+			clean[k] = truncateBody(v, maxBodySize)
 		default:
 			clean[k] = normalizeAttrValue(v)
 		}
 	}
 	return clean
+}
+
+func truncateBody(v any, maxSize int) any {
+	if maxSize <= 0 {
+		return v
+	}
+	str, ok := v.(string)
+	if !ok {
+		return v
+	}
+	runes := []rune(str)
+	if len(runes) > maxSize {
+		return string(runes[:maxSize]) + "...[TRUNCATED]"
+	}
+	return str
 }
 
 func normalizeAttrValue(v any) any {
