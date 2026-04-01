@@ -654,6 +654,19 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	if len(req.ResponseInclude) > 0 {
 		payload["include"] = append([]string(nil), req.ResponseInclude...)
 	}
+	if req.IncludeUsage {
+		includeList, _ := payload["include"].([]string)
+		hasUsage := false
+		for _, v := range includeList {
+			if v == "usage" {
+				hasUsage = true
+				break
+			}
+		}
+		if !hasUsage {
+			payload["include"] = append(includeList, "usage")
+		}
+	}
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
