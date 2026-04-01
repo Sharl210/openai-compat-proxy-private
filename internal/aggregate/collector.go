@@ -143,11 +143,16 @@ func (c *Collector) Accept(evt upstream.Event) {
 			call.Arguments = arguments
 		}
 	case "response.completed", "response.done":
-		if finishReason, _ := evt.Data["finish_reason"].(string); finishReason != "" {
-			c.finishReason = finishReason
+		if response, _ := evt.Data["response"].(map[string]any); response != nil {
+			if fr, _ := response["finish_reason"].(string); fr != "" {
+				c.finishReason = fr
+			}
 		}
-		if stopReason, _ := evt.Data["stop_reason"].(string); stopReason != "" {
-			c.finishReason = stopReason
+		if fr, _ := evt.Data["finish_reason"].(string); fr != "" && c.finishReason == "" {
+			c.finishReason = fr
+		}
+		if sr, _ := evt.Data["stop_reason"].(string); sr != "" && c.finishReason == "" {
+			c.finishReason = sr
 		}
 		if usage := usageFromEventData(evt.Data); len(usage) > 0 {
 			c.reasoning["usage"] = usage
