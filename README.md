@@ -120,10 +120,9 @@ IDLE_TIMEOUT=3m
 TOTAL_TIMEOUT=1h
 
 LOG_ENABLE=false
-LOG_FILE_PATH=.proxy.requests.jsonl
+LOG_FILE_PATH=.proxy_requests
 LOG_INCLUDE_BODIES=false
-LOG_MAX_SIZE_MB=100
-LOG_MAX_BACKUPS=10
+LOG_MAX_HISTORY=100
 ```
 
 ### 3. 准备 provider
