@@ -271,7 +271,7 @@ data: [DONE]
 `
 
 	reader := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(false, nil)
+	readNext := newChatEventBatchReader(false, nil, "")
 
 	var allEvents []Event
 	for {

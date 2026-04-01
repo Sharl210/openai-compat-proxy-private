@@ -334,7 +334,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs, requestID)
 		if err == nil {
 			return stream, nil
 		}
@@ -444,7 +444,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	return normalizeResponsePayload(endpointType, payload, c.thinkingTagStyleTwo), nil
 }
 
-func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string) (*EventStream, error) {
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string) (*EventStream, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -462,7 +462,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo, originalToolIDs)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo, originalToolIDs, requestID)}
 	if err := stream.prime(); err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -1021,6 +1021,12 @@ func upstreamBodyLogAttrs(body []byte) map[string]any {
 		toolNames := make([]string, 0, len(tools))
 		for _, raw := range tools {
 			if tool, _ := raw.(map[string]any); tool != nil {
+				if fn, _ := tool["function"].(map[string]any); fn != nil {
+					if name, _ := fn["name"].(string); name != "" {
+						toolNames = append(toolNames, name)
+						continue
+					}
+				}
 				if name, _ := tool["name"].(string); name != "" {
 					toolNames = append(toolNames, name)
 				}

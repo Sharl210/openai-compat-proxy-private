@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -168,10 +169,10 @@ func normalizeResponsePayload(endpointType string, payload map[string]any, style
 	}
 }
 
-func eventBatchReaderForType(endpointType string, styleTwo bool, originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
+func eventBatchReaderForType(endpointType string, styleTwo bool, originalToolIDs map[int]string, requestID string) func(*bufio.Scanner) ([]Event, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return newChatEventBatchReader(styleTwo, originalToolIDs)
+		return newChatEventBatchReader(styleTwo, originalToolIDs, requestID)
 	case config.UpstreamEndpointTypeAnthropic:
 		return newAnthropicEventBatchReader(originalToolIDs)
 	default:
@@ -245,13 +246,14 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 	return nil, nil
 }
 
-func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
+func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string, requestID string) func(*bufio.Scanner) ([]Event, error) {
 	state := &chatNormalizationState{
 		toolIDsByIndex:      map[int]string{},
 		toolSent:            map[string]bool{},
 		pendingItems:        map[string]map[string]any{},
 		thinkingTagStyleTwo: styleTwo,
 		originalToolIDs:     originalToolIDs,
+		requestID:           requestID,
 	}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
@@ -261,6 +263,17 @@ func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string) func
 			}
 			if frame == nil {
 				return nil, nil
+			}
+			if frame.Event != "" || frame.Data != "" {
+				dataPreview := frame.Data
+				if len(dataPreview) > 512 {
+					dataPreview = dataPreview[:512]
+				}
+				logging.Event("upstreamRawFrame", map[string]any{
+					"request_id": state.requestID,
+					"event":      frame.Event,
+					"data":       dataPreview,
+				})
 			}
 			events, done, err := normalizeChatFrame(frame, state)
 			if err != nil {
@@ -290,6 +303,7 @@ type chatNormalizationState struct {
 	thinkingTagStyleTwo bool
 	originalToolIDs     map[int]string
 	responseID          string
+	requestID           string
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
