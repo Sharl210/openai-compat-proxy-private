@@ -17,11 +17,9 @@ import (
 
 type Logger struct {
 	stdout        io.Writer
-	file          *os.File
-	path          string
+	dir           string
 	includeBodies bool
-	maxSizeBytes  int64
-	maxBackups    int
+	maxHistory    int
 	mu            sync.Mutex
 }
 
@@ -34,16 +32,15 @@ func New(cfg config.Config, stdout io.Writer) (*Logger, func() error, error) {
 	if stdout == nil {
 		stdout = io.Discard
 	}
-	path := strings.TrimSpace(cfg.LogFilePath)
-	if path == "" {
-		path = ".proxy.requests.jsonl"
+	dir := strings.TrimSpace(cfg.LogFilePath)
+	if dir == "" {
+		dir = ".proxy_requests"
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, nil, err
 	}
-	logger := &Logger{stdout: stdout, file: file, path: path, includeBodies: cfg.LogIncludeBodies, maxSizeBytes: int64(cfg.LogMaxSizeMB) * 1024 * 1024, maxBackups: cfg.LogMaxBackups}
-	return logger, file.Close, nil
+	logger := &Logger{stdout: stdout, dir: dir, includeBodies: cfg.LogIncludeBodies, maxHistory: cfg.LogMaxHistory}
+	return logger, func() error { return nil }, nil
 }
 
 func Init(cfg config.Config, stdout io.Writer) (func() error, error) {
@@ -60,14 +57,7 @@ func Init(cfg config.Config, stdout io.Writer) (func() error, error) {
 	globalMu.Lock()
 	global = logger
 	globalMu.Unlock()
-	return func() error {
-		globalMu.Lock()
-		if global == logger {
-			global = nil
-		}
-		globalMu.Unlock()
-		return closeFn()
-	}, nil
+	return closeFn, nil
 }
 
 func Default() *Logger {
@@ -92,77 +82,56 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	for k, v := range redactAttrs(attrs, l.includeBodies) {
 		record[k] = v
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	requestID, ok := attrs["request_id"].(string)
+	if !ok || requestID == "" {
+		return
+	}
+
+	filePath := filepath.Join(l.dir, requestID+".jsonl")
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
 	line, err := json.Marshal(record)
 	if err != nil {
 		return
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	_ = l.rotateIfNeeded(int64(len(line) + 1))
-	_, _ = l.file.Write(append(line, '\n'))
+	_, _ = file.Write(append(line, '\n'))
 	_, _ = fmt.Fprintf(l.stdout, "%s %s\n", name, summarize(record))
+
+	l.cleanupOldFiles()
 }
 
-func (l *Logger) rotateIfNeeded(nextWrite int64) error {
-	if l == nil || l.file == nil || l.maxSizeBytes <= 0 {
+func (l *Logger) cleanupOldFiles() error {
+	if l.maxHistory <= 0 {
 		return nil
 	}
-	info, err := l.file.Stat()
+	entries, err := os.ReadDir(l.dir)
 	if err != nil {
 		return err
 	}
-	if info.Size()+nextWrite <= l.maxSizeBytes {
-		return nil
-	}
-	current := l.file
-	rotatedPath := rotatedName(l.path)
-	if err := os.Rename(l.path, rotatedPath); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		l.file = current
-		return err
-	}
-	l.file = file
-	if err := current.Close(); err != nil {
-		return err
-	}
-	return l.cleanupOldBackups()
-}
-
-func rotatedName(path string) string {
-	ext := filepath.Ext(path)
-	base := strings.TrimSuffix(path, ext)
-	return fmt.Sprintf("%s-%s%s", base, time.Now().UTC().Format("20060102-150405.000000000"), ext)
-}
-
-func (l *Logger) cleanupOldBackups() error {
-	if l.maxBackups < 0 {
-		return nil
-	}
-	dir := filepath.Dir(l.path)
-	base := filepath.Base(l.path)
-	ext := filepath.Ext(base)
-	prefix := strings.TrimSuffix(base, ext) + "-"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	var backups []string
+	var files []os.FileInfo
 	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ext) {
-			backups = append(backups, filepath.Join(dir, name))
+		if entry.IsDir() {
+			continue
+		}
+		if info, err := entry.Info(); err == nil {
+			files = append(files, info)
 		}
 	}
-	sort.Strings(backups)
-	for len(backups) > l.maxBackups {
-		if err := os.Remove(backups[0]); err != nil && !os.IsNotExist(err) {
-			return err
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].ModTime().Before(files[j].ModTime())
+	})
+	if len(files) > l.maxHistory {
+		for _, info := range files[:len(files)-l.maxHistory] {
+			os.Remove(filepath.Join(l.dir, info.Name()))
 		}
-		backups = backups[1:]
 	}
 	return nil
 }

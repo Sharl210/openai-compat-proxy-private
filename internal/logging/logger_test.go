@@ -6,25 +6,24 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
 )
 
-func TestLoggerWritesJSONFileAndRedactsBodiesByDefault(t *testing.T) {
+func TestLoggerWritesJSONFileByRequestID(t *testing.T) {
 	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "proxy.jsonl")
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: logPath, LogIncludeBodies: false}, stdout)
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogIncludeBodies: false}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeFn()
 
 	logger.Event("downstream_request_received", map[string]any{
+		"request_id":    "req-test-123",
 		"authorization": "Bearer secret",
 		"api_key":       "proxy-secret",
 		"x_api_key":     "proxy-secret-2",
@@ -33,7 +32,8 @@ func TestLoggerWritesJSONFileAndRedactsBodiesByDefault(t *testing.T) {
 		"cached_tokens": 0,
 	})
 
-	content, err := os.ReadFile(logPath)
+	filePath := filepath.Join(tmpDir, "req-test-123.jsonl")
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,21 +66,22 @@ func TestLoggerWritesJSONFileAndRedactsBodiesByDefault(t *testing.T) {
 
 func TestLoggerCanIncludeBodiesWhenEnabled(t *testing.T) {
 	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "proxy.jsonl")
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: logPath, LogIncludeBodies: true}, stdout)
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogIncludeBodies: true}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeFn()
 
 	logger.Event("upstream_request_built", map[string]any{
-		"body":      "visible body",
-		"body_hash": "def456",
+		"request_id": "req-test-456",
+		"body":       "visible body",
+		"body_hash":  "def456",
 	})
 
-	content, err := os.ReadFile(logPath)
+	filePath := filepath.Join(tmpDir, "req-test-456.jsonl")
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,15 +97,13 @@ func TestLoggerCanIncludeBodiesWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestLoggerRotatesAndKeepsRecentBackups(t *testing.T) {
+func TestLoggerRespectsMaxHistory(t *testing.T) {
 	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "proxy.jsonl")
 	stdout := &bytes.Buffer{}
 
 	logger, closeFn, err := logging.New(config.Config{
-		LogFilePath:      logPath,
-		LogMaxSizeMB:     1,
-		LogMaxBackups:    2,
+		LogFilePath:      tmpDir,
+		LogMaxHistory:    3,
 		LogIncludeBodies: false,
 	}, stdout)
 	if err != nil {
@@ -112,11 +111,9 @@ func TestLoggerRotatesAndKeepsRecentBackups(t *testing.T) {
 	}
 	defer closeFn()
 
-	largeBody := strings.Repeat("x", 600*1024)
-	for i := 0; i < 4; i++ {
-		logger.Event("rotation_test", map[string]any{
-			"body":      largeBody,
-			"body_hash": i,
+	for i := 0; i < 5; i++ {
+		logger.Event("history_test", map[string]any{
+			"request_id": "req-history-" + string(rune('a'+i)),
 		})
 	}
 
@@ -124,75 +121,44 @@ func TestLoggerRotatesAndKeepsRecentBackups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rotated int
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, "proxy-") && strings.HasSuffix(name, ".jsonl") {
-			rotated++
-		}
-	}
-	if rotated > 2 {
-		t.Fatalf("expected at most 2 rotated backups, got %d", rotated)
-	}
-	if _, err := os.Stat(logPath); err != nil {
-		t.Fatalf("expected active log file to exist: %v", err)
+	if len(entries) > 3 {
+		t.Fatalf("expected at most 3 log files, got %d", len(entries))
 	}
 }
 
-func TestLoggerKeepsWritingWhenRotationRenameFails(t *testing.T) {
+func TestLoggerRequiresRequestID(t *testing.T) {
 	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "proxy.jsonl")
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{
-		LogFilePath:      logPath,
-		LogMaxSizeMB:     1,
-		LogMaxBackups:    2,
-		LogIncludeBodies: true,
-	}, stdout)
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeFn()
 
-	if err := os.WriteFile(logPath, []byte(strings.Repeat("x", 1024*1024)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(tmpDir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(tmpDir, 0o755)
+	logger.Event("no_request_id", map[string]any{"body": "should not be logged"})
 
-	logger.Event("rotation_failure", map[string]any{"body": "still written"})
-
-	content, err := os.ReadFile(logPath)
+	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(content, []byte("rotation_failure")) {
-		t.Fatalf("expected log file to retain event after rotate failure, got %d bytes", len(content))
-	}
-	if !bytes.Contains(stdout.Bytes(), []byte("rotation_failure")) {
-		t.Fatalf("expected stdout summary to mention event, got %s", stdout.String())
+	if len(entries) != 0 {
+		t.Fatalf("expected no files when request_id missing, got %d", len(entries))
 	}
 }
 
 func TestInitDisablesLoggingWhenLogEnableIsFalse(t *testing.T) {
 	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "proxy.jsonl")
 	stdout := &bytes.Buffer{}
 
-	closeFn, err := logging.Init(config.Config{LogEnable: false, LogFilePath: logPath}, stdout)
+	closeFn, err := logging.Init(config.Config{LogEnable: false, LogFilePath: tmpDir}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeFn()
 
-	logging.Event("disabled_test", map[string]any{"body": "hidden"})
+	logging.Event("disabled_test", map[string]any{"request_id": "req-disabled", "body": "hidden"})
 
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("expected no log file when logging disabled, got err=%v", err)
-	}
 	if stdout.Len() != 0 {
 		t.Fatalf("expected no stdout output when logging disabled, got %q", stdout.String())
 	}
@@ -200,21 +166,22 @@ func TestInitDisablesLoggingWhenLogEnableIsFalse(t *testing.T) {
 
 func TestLoggerSerializesErrorAttrsAsReadableStrings(t *testing.T) {
 	tmpDir := t.TempDir()
-	logPath := filepath.Join(tmpDir, "proxy.jsonl")
 	stdout := &bytes.Buffer{}
 
-	logger, closeFn, err := logging.New(config.Config{LogFilePath: logPath}, stdout)
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir}, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeFn()
 
 	logger.Event("upstream_request_failed", map[string]any{
+		"request_id":   "req-error-test",
 		"error":        errors.New("first byte timeout"),
 		"nested_error": map[string]any{"cause": errors.New("connection reset by peer")},
 	})
 
-	content, err := os.ReadFile(logPath)
+	filePath := filepath.Join(tmpDir, "req-error-test.jsonl")
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatal(err)
 	}

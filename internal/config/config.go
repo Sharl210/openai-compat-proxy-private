@@ -36,8 +36,7 @@ type Config struct {
 	LogFilePath                    string
 	ThinkingTagStyleTwo            bool
 	LogIncludeBodies               bool
-	LogMaxSizeMB                   int
-	LogMaxBackups                  int
+	LogMaxHistory                  int
 }
 
 const (
@@ -56,9 +55,8 @@ func Default() Config {
 		TotalTimeout:                time.Hour,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
-		LogFilePath:                 ".proxy.requests.jsonl",
-		LogMaxSizeMB:                100,
-		LogMaxBackups:               10,
+		LogFilePath:                 ".proxy_requests",
+		LogMaxHistory:               100,
 	}
 }
 
@@ -106,14 +104,9 @@ func loadFromLookup(lookup func(string) string) Config {
 	if value := lookup("LOG_INCLUDE_BODIES"); value != "" {
 		cfg.LogIncludeBodies = parseRootBool(value)
 	}
-	if value := lookup("LOG_MAX_SIZE_MB"); value != "" {
+	if value := lookup("LOG_MAX_HISTORY"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
-			cfg.LogMaxSizeMB = parsed
-		}
-	}
-	if value := lookup("LOG_MAX_BACKUPS"); value != "" {
-		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
-			cfg.LogMaxBackups = parsed
+			cfg.LogMaxHistory = parsed
 		}
 	}
 	if value := lookup("CONNECT_TIMEOUT"); value != "" {
@@ -178,10 +171,7 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
 		return err
 	}
-	if err := validateMinInt(values, "LOG_MAX_SIZE_MB", 1); err != nil {
-		return err
-	}
-	if err := validateMinInt(values, "LOG_MAX_BACKUPS", 0); err != nil {
+	if err := validateMinInt(values, "LOG_MAX_HISTORY", 1); err != nil {
 		return err
 	}
 	if err := validateProvidersDir(values, "PROVIDERS_DIR"); err != nil {
@@ -353,8 +343,7 @@ func (c *Config) applyStartupOnlyFrom(previous Config) {
 	c.LogEnable = previous.LogEnable
 	c.LogFilePath = previous.LogFilePath
 	c.LogIncludeBodies = previous.LogIncludeBodies
-	c.LogMaxSizeMB = previous.LogMaxSizeMB
-	c.LogMaxBackups = previous.LogMaxBackups
+	c.LogMaxHistory = previous.LogMaxHistory
 }
 
 func (c Config) hotReloadableRootEquals(other Config) bool {

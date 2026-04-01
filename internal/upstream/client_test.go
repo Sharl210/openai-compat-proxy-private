@@ -984,37 +984,47 @@ func TestStreamEventsLogsBrokenStreamAfterFirstEvent(t *testing.T) {
 
 func initUpstreamTestLogger(t *testing.T) (string, func()) {
 	t.Helper()
-	logPath := filepath.Join(t.TempDir(), "proxy.jsonl")
-	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logPath}, &bytes.Buffer{})
+	logDir := t.TempDir()
+	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logDir}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("init logger: %v", err)
 	}
-	return logPath, func() {
+	return logDir, func() {
 		if err := closeFn(); err != nil {
 			t.Fatalf("close logger: %v", err)
 		}
 	}
 }
 
-func readUpstreamTestLogRecords(t *testing.T, logPath string) []map[string]any {
+func readUpstreamTestLogRecords(t *testing.T, logDir string) []map[string]any {
 	t.Helper()
-	content, err := os.ReadFile(logPath)
+	entries, err := os.ReadDir(logDir)
 	if err != nil {
-		t.Fatalf("read log file: %v", err)
+		t.Fatalf("read log dir: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	records := make([]map[string]any, 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+	var allRecords []map[string]any
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			continue
 		}
-		var record map[string]any
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			t.Fatalf("decode log line %q: %v", line, err)
+		filePath := filepath.Join(logDir, entry.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Fatalf("read log file %s: %v", filePath, err)
 		}
-		records = append(records, record)
+		lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				t.Fatalf("decode log line %q: %v", line, err)
+			}
+			allRecords = append(allRecords, record)
+		}
 	}
-	return records
+	return allRecords
 }
 
 func assertHasLogRecord(t *testing.T, records []map[string]any, event string, match func(map[string]any) bool) {
