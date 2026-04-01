@@ -349,7 +349,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		healthFlag, _ := evt.Data["health_flag"].(string)
 		message, _ := evt.Data["message"].(string)
 		if healthFlag == "" {
-			healthFlag = "upstream_stream_broken"
+			healthFlag = "upstreamStreamBroken"
 		}
 		if message == "" {
 			message = "upstream response incomplete"
@@ -1566,7 +1566,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		finishReason := chatStreamFinishReason(state, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		cachedTokens := nestedCachedTokens(rawUsage)
-		logging.Event("upstream_stream_usage_observed", map[string]any{
+		logging.Event("upstreamStreamUsageObserved", map[string]any{
 			"upstream_event":       evt.Event,
 			"cached_tokens":        cachedTokens,
 			"stream_include_usage": includeUsage,
@@ -1605,7 +1605,7 @@ func terminalFailureFromEventData(data map[string]any) *aggregate.TerminalFailur
 	healthFlag, _ := data["health_flag"].(string)
 	message, _ := data["message"].(string)
 	if healthFlag == "" {
-		healthFlag = "upstream_stream_broken"
+		healthFlag = "upstreamStreamBroken"
 	}
 	if message == "" {
 		message = "upstream response incomplete"

@@ -151,21 +151,17 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
-		"auth_mode":     req.AuthMode,
 		"model":         req.Model,
+		"endpoint_type": endpointType,
 		"stream":        true,
-		"body":          string(body),
-		"body_probe":    "enabled",
-		"body_preview":  previewBodyForLog(body),
-		"body_hash":     hashBytes(body),
 		"body_size":     len(body),
-		"message_count": len(req.Messages),
+		"body_preview":  previewBodyForLog(body),
 		"tool_count":    len(req.Tools),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
 		attrs[k] = v
 	}
-	logging.Event("upstream_request_built", attrs)
+	logging.Event("proxyToUpstreamRequest", attrs)
 	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
@@ -176,26 +172,25 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		events = append(events, evt)
 		return nil
 	}); err != nil {
-		logging.Event("upstream_stream_broken", mergeLogAttrs(map[string]any{
+		logging.Event("upstreamStreamBroken", mergeLogAttrs(map[string]any{
 			"request_id":  req.RequestID,
 			"streaming":   true,
 			"event_count": len(events),
-		}, failureLogAttrs(err, "upstream_stream_broken")))
+		}, failureLogAttrs(err, "upstreamStreamBroken")))
 		return nil, err
 	}
 	cachedTokens := cachedTokensFromEvents(events)
-	logging.Event("upstream_stream_usage_observed", map[string]any{
+	logging.Event("upstreamStreamUsageObserved", map[string]any{
 		"request_id":     req.RequestID,
 		"upstream_event": "response.completed",
 		"cached_tokens":  cachedTokens,
 		"streaming":      false,
 	})
-	logging.Event("upstream_response_completed", map[string]any{
+	logging.Event("upstreamToProxyResponse", map[string]any{
 		"request_id":    req.RequestID,
 		"attempt":       1,
 		"event_count":   len(events),
 		"cached_tokens": cachedTokens,
-		"events":        events,
 	})
 	return events, nil
 }
@@ -212,7 +207,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 		eventCount++
 		if tokens := cachedTokensFromEvent(evt); tokens != nil {
 			cachedTokens = tokens
-			logging.Event("upstream_stream_usage_observed", map[string]any{
+			logging.Event("upstreamStreamUsageObserved", map[string]any{
 				"request_id":     req.RequestID,
 				"upstream_event": evt.Event,
 				"cached_tokens":  tokens,
@@ -221,14 +216,14 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 		return onEvent(evt)
 	})
 	if err != nil {
-		logging.Event("upstream_stream_broken", mergeLogAttrs(map[string]any{
+		logging.Event("upstreamStreamBroken", mergeLogAttrs(map[string]any{
 			"request_id":  req.RequestID,
 			"streaming":   true,
 			"event_count": eventCount,
-		}, failureLogAttrs(err, "upstream_stream_broken")))
+		}, failureLogAttrs(err, "upstreamStreamBroken")))
 	}
 	if err == nil {
-		logging.Event("upstream_response_completed", map[string]any{
+		logging.Event("upstreamToProxyResponse", map[string]any{
 			"request_id":    req.RequestID,
 			"attempt":       1,
 			"event_count":   eventCount,
@@ -262,7 +257,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 	for k, v := range upstreamBodyLogAttrs(body) {
 		attrs[k] = v
 	}
-	logging.Event("upstream_request_built", attrs)
+	logging.Event("proxyToUpstreamRequest", attrs)
 	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
@@ -278,26 +273,22 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 	}
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
-		"auth_mode":     req.AuthMode,
 		"model":         req.Model,
-		"stream":        false,
-		"body":          string(body),
-		"body_probe":    "enabled",
-		"body_preview":  previewBodyForLog(body),
-		"body_hash":     hashBytes(body),
+		"endpoint_type": endpointType,
+		"stream":        true,
 		"body_size":     len(body),
-		"message_count": len(req.Messages),
+		"body_preview":  previewBodyForLog(body),
 		"tool_count":    len(req.Tools),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
 		attrs[k] = v
 	}
-	logging.Event("upstream_request_built", attrs)
+	logging.Event("proxyToUpstreamRequest", attrs)
 	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
-	logging.Event("upstream_response_completed", map[string]any{
+	logging.Event("upstreamToProxyResponse", map[string]any{
 		"request_id": req.RequestID,
 		"attempt":    1,
 		"streaming":  false,
@@ -349,7 +340,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 		}
 		lastErr = err
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
-			logging.Event("upstream_request_failed", mergeLogAttrs(map[string]any{
+			logging.Event("upstreamRequestFailed", mergeLogAttrs(map[string]any{
 				"request_id":         requestID,
 				"attempt":            attempt,
 				"retries_performed":  attempt - 1,
@@ -358,7 +349,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 			}, failureLogAttrs(lastErr, classifyRequestFailure(lastErr))))
 			break
 		}
-		logging.Event("upstream_request_retry", mergeLogAttrs(map[string]any{
+		logging.Event("upstreamRequestRetry", mergeLogAttrs(map[string]any{
 			"request_id":         requestID,
 			"attempt":            attempt,
 			"next_attempt":       attempt + 1,
@@ -393,7 +384,7 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 		}
 		lastErr = err
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
-			logging.Event("upstream_request_failed", mergeLogAttrs(map[string]any{
+			logging.Event("upstreamRequestFailed", mergeLogAttrs(map[string]any{
 				"request_id":         requestID,
 				"attempt":            attempt,
 				"retries_performed":  attempt - 1,
@@ -402,7 +393,7 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 			}, failureLogAttrs(lastErr, classifyRequestFailure(lastErr))))
 			break
 		}
-		logging.Event("upstream_request_retry", mergeLogAttrs(map[string]any{
+		logging.Event("upstreamRequestRetry", mergeLogAttrs(map[string]any{
 			"request_id":         requestID,
 			"attempt":            attempt,
 			"next_attempt":       attempt + 1,

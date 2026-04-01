@@ -162,7 +162,7 @@ func (c *Collector) Accept(evt upstream.Event) {
 		healthFlag, _ := evt.Data["health_flag"].(string)
 		message, _ := evt.Data["message"].(string)
 		if healthFlag == "" {
-			healthFlag = "upstream_stream_broken"
+			healthFlag = "upstreamStreamBroken"
 		}
 		if message == "" {
 			message = "upstream response incomplete"

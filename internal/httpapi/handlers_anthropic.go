@@ -79,7 +79,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 					_ = writeAnthropicTerminalFailure(w, flusher, streamState, canon.RequestID, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				_ = writeAnthropicTerminalFailure(w, flusher, streamState, canon.RequestID, "upstream_stream_broken", err.Error())
+				_ = writeAnthropicTerminalFailure(w, flusher, streamState, canon.RequestID, "upstreamStreamBroken", err.Error())
 				return
 			}
 			return

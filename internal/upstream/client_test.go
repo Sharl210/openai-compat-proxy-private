@@ -919,10 +919,10 @@ func TestResponseLogsRetryAndFinalFailureEvidence(t *testing.T) {
 	}
 
 	records := readUpstreamTestLogRecords(t, logPath)
-	assertHasLogRecord(t, records, "upstream_request_retry", func(record map[string]any) bool {
+	assertHasLogRecord(t, records, "upstreamRequestRetry", func(record map[string]any) bool {
 		return record["request_id"] == "req-retry-fail" && record["attempt"] == float64(1) && record["status_code"] == float64(http.StatusBadGateway)
 	})
-	assertHasLogRecord(t, records, "upstream_request_failed", func(record map[string]any) bool {
+	assertHasLogRecord(t, records, "upstreamRequestFailed", func(record map[string]any) bool {
 		return record["request_id"] == "req-retry-fail" && record["status_code"] == float64(http.StatusBadGateway) && record["health_flag"] == "upstream_error"
 	})
 	if attempts.Load() != 2 {
@@ -949,7 +949,7 @@ func TestStreamLogsTimeoutFailureBeforeFirstEvent(t *testing.T) {
 	}
 
 	records := readUpstreamTestLogRecords(t, logPath)
-	assertHasLogRecord(t, records, "upstream_request_failed", func(record map[string]any) bool {
+	assertHasLogRecord(t, records, "upstreamRequestFailed", func(record map[string]any) bool {
 		return record["request_id"] == "req-timeout" && record["health_flag"] == "upstream_timeout" && record["streaming"] == true
 	})
 }
@@ -977,7 +977,7 @@ func TestStreamEventsLogsBrokenStreamAfterFirstEvent(t *testing.T) {
 	}
 
 	records := readUpstreamTestLogRecords(t, logPath)
-	assertHasLogRecord(t, records, "upstream_stream_broken", func(record map[string]any) bool {
+	assertHasLogRecord(t, records, "upstreamStreamBroken", func(record map[string]any) bool {
 		return record["request_id"] == "req-broken-stream" && record["event_count"] == float64(1)
 	})
 }

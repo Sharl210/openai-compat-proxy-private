@@ -50,21 +50,20 @@ func handleChat() http.HandlerFunc {
 		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
 		attrs := map[string]any{
-			"request_id":            canon.RequestID,
-			"route":                 "/v1/chat/completions",
-			"auth_mode":             canon.AuthMode,
-			"model":                 canon.Model,
-			"stream":                canon.Stream,
-			"include_usage":         canon.IncludeUsage,
-			"message_count":         len(canon.Messages),
-			"tool_count":            len(canon.Tools),
-			"has_reasoning":         canon.Reasoning != nil,
-			"normalization_version": normalizationVersion,
+			"request_id":    canon.RequestID,
+			"route":         "/v1/chat/completions",
+			"auth_mode":     canon.AuthMode,
+			"model":         canon.Model,
+			"stream":        canon.Stream,
+			"include_usage": canon.IncludeUsage,
+			"message_count": len(canon.Messages),
+			"tool_count":    len(canon.Tools),
+			"has_reasoning": canon.Reasoning != nil,
 		}
 		for k, v := range canonicalLogAttrs(canon) {
 			attrs[k] = v
 		}
-		logging.Event("canonical_request_built", attrs)
+		logging.Event("proxyBuiltCanonicalRequest", attrs)
 
 		ctx := r.Context()
 		var cancel context.CancelFunc
@@ -97,7 +96,7 @@ func handleChat() http.HandlerFunc {
 					_ = writeChatTerminalFailure(w, flusher, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				_ = writeChatTerminalFailure(w, flusher, "upstream_stream_broken", err.Error())
+				_ = writeChatTerminalFailure(w, flusher, "upstreamStreamBroken", err.Error())
 				return
 			}
 			return

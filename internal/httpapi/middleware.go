@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -30,26 +29,19 @@ func withRequestID(next http.Handler) http.Handler {
 			r.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		}
 
-		logging.Event("downstream_request_received", map[string]any{
-			"request_id":                       id,
-			"method":                           r.Method,
-			"path":                             r.URL.Path,
-			"normalization_version":            normalizationVersion,
-			"content_length":                   r.ContentLength,
-			"content_type":                     r.Header.Get("Content-Type"),
-			"client_user_agent":                r.Header.Get("User-Agent"),
-			"x_upstream_authorization_present": strings.TrimSpace(r.Header.Get("X-Upstream-Authorization")) != "",
-			"request_body":                     string(requestBody),
+		logging.Event("clientToProxyRequest", map[string]any{
+			"request_id":   id,
+			"method":       r.Method,
+			"path":         r.URL.Path,
+			"content_type": r.Header.Get("Content-Type"),
+			"request_body": truncateBody(requestBody, 512),
 		})
 		cw := &responseCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
-		logging.Event("downstream_response_sent", map[string]any{
-			"request_id":            id,
-			"path":                  r.URL.Path,
-			"status":                cw.status,
-			"elapsed_ms":            time.Since(started).Milliseconds(),
-			"normalization_version": normalizationVersion,
-			"response_body":         cw.body.String(),
+		logging.Event("proxyToClientResponse", map[string]any{
+			"request_id": id,
+			"status":     cw.status,
+			"elapsed_ms": time.Since(started).Milliseconds(),
 		})
 	})
 }
@@ -95,4 +87,11 @@ func (w *responseCaptureWriter) WriteHeader(status int) {
 func (w *responseCaptureWriter) Write(b []byte) (int, error) {
 	w.body.Write(b)
 	return w.ResponseWriter.Write(b)
+}
+
+func truncateBody(body []byte, maxLen int) string {
+	if len(body) <= maxLen {
+		return string(body)
+	}
+	return string(body[:maxLen]) + "...[TRUNCATED]"
 }
