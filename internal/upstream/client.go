@@ -195,6 +195,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		"attempt":       1,
 		"event_count":   len(events),
 		"cached_tokens": cachedTokens,
+		"events":        events,
 	})
 	return events, nil
 }
@@ -300,6 +301,7 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		"request_id": req.RequestID,
 		"attempt":    1,
 		"streaming":  false,
+		"response":   payload,
 	})
 	return payload, nil
 }

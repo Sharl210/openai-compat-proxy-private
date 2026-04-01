@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -20,6 +22,14 @@ func withRequestID(next http.Handler) http.Handler {
 		id := fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestCounter, 1))
 		w.Header().Set("X-Request-Id", id)
 		started := time.Now()
+
+		var requestBody []byte
+		if r.Body != nil {
+			requestBody, _ = io.ReadAll(r.Body)
+			r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+		}
+
 		logging.Event("downstream_request_received", map[string]any{
 			"request_id":                       id,
 			"method":                           r.Method,
@@ -29,8 +39,9 @@ func withRequestID(next http.Handler) http.Handler {
 			"content_type":                     r.Header.Get("Content-Type"),
 			"client_user_agent":                r.Header.Get("User-Agent"),
 			"x_upstream_authorization_present": strings.TrimSpace(r.Header.Get("X-Upstream-Authorization")) != "",
+			"request_body":                     string(requestBody),
 		})
-		cw := &captureWriter{ResponseWriter: w, status: http.StatusOK}
+		cw := &responseCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
 		logging.Event("downstream_response_sent", map[string]any{
 			"request_id":            id,
@@ -38,6 +49,7 @@ func withRequestID(next http.Handler) http.Handler {
 			"status":                cw.status,
 			"elapsed_ms":            time.Since(started).Milliseconds(),
 			"normalization_version": normalizationVersion,
+			"response_body":         cw.body.String(),
 		})
 	})
 }
@@ -69,12 +81,18 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 	}
 }
 
-type captureWriter struct {
+type responseCaptureWriter struct {
 	http.ResponseWriter
 	status int
+	body   bytes.Buffer
 }
 
-func (w *captureWriter) WriteHeader(status int) {
+func (w *responseCaptureWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *responseCaptureWriter) Write(b []byte) (int, error) {
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
 }
