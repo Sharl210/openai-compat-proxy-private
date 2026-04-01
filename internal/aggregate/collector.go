@@ -187,8 +187,7 @@ func (c *Collector) Result() (Result, error) {
 	if !c.completed {
 		return Result{}, errors.New("stream did not complete")
 	}
-
-	result := Result{Text: c.text.String()}
+	result := Result{}
 	result.ResponseID = c.responseID
 	result.Refusal = c.refusal
 	result.FinishReason = c.finishReason

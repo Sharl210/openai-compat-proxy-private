@@ -293,12 +293,36 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			result.skipWrite = true
 			return result, nil
 		}
-	case "response.completed", "response.done":
+	case "response.completed":
 		h.terminalSeen = true
 		h.reasoningStarted = true
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
+		response, _ := evt.Data["response"].(map[string]any)
+		if response == nil {
+			response = map[string]any{}
+			evt.Data["response"] = response
+		}
+		if _, ok := response["id"]; !ok {
+			response["id"] = h.currentResponseID()
+		}
+		if _, ok := response["object"]; !ok {
+			response["object"] = "response"
+		}
+		if usage, _ := evt.Data["usage"].(map[string]any); len(usage) > 0 {
+			if _, ok := response["usage"]; !ok {
+				response["usage"] = cloneMap(usage)
+			}
+		}
+		h.closeSyntheticReasoning()
+	case "response.done":
+		if h.terminalFailure != nil {
+			result.skipWrite = true
+			return result, nil
+		}
+		h.terminalSeen = true
+		// Mirror top-level usage into response object for compatibility
 		response, _ := evt.Data["response"].(map[string]any)
 		if response == nil {
 			response = map[string]any{}
@@ -572,14 +596,18 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			return writeResponsesEvent(writer, &state, evt, usageRecorder)
 		},
 	)
-	if err != nil {
+	if err != nil && !state.terminalSeen {
 		return aggregate.Result{}, err
 	}
 	if !state.terminalSeen {
 		return aggregate.Result{}, io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return aggregate.Result{}, state.terminalFailure
+		result, resultErr := collector.Result()
+		if resultErr != nil {
+			return aggregate.Result{}, state.terminalFailure
+		}
+		return result, state.terminalFailure
 	}
 	result, err := collector.Result()
 	if err != nil {

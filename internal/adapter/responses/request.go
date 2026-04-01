@@ -88,6 +88,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		MaxOutputTokens: decodeOptionalInt(req.MaxOutputTokensRaw),
 		Stop:            req.Stop,
 	}
+	for _, inc := range req.Include {
+		if inc == "usage" {
+			canon.IncludeUsage = true
+			break
+		}
+	}
 
 	if preservedTopLevelFields := collectPreservedTopLevelFields(req); len(preservedTopLevelFields) > 0 {
 		canon.ResponseInputItems = append(canon.ResponseInputItems, map[string]any{
@@ -159,12 +165,33 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
 		return nil, model.CanonicalMessage{}, false, err
 	}
-	if itemType, _ := rawMap["type"].(string); itemType == "function_call_output" {
+	itemType, _ := rawMap["type"].(string)
+	if itemType == "function_call_output" {
 		msg, ok, err := decodeFunctionCallOutput(rawMap)
 		if err != nil {
 			return nil, model.CanonicalMessage{}, false, err
 		}
 		return cloneMapAny(rawMap), msg, ok, nil
+	}
+	// Handle type: "function_call" - extract tool call from top-level fields
+	if itemType == "function_call" {
+		callID, _ := rawMap["call_id"].(string)
+		name, _ := rawMap["name"].(string)
+		arguments, _ := rawMap["arguments"].(string)
+		role, _ := rawMap["role"].(string)
+		if role == "" {
+			role = "assistant"
+		}
+		var parts []model.CanonicalContentPart
+		if content, ok := rawMap["content"].(string); ok && content != "" {
+			parts = []model.CanonicalContentPart{{Type: "text", Text: content}}
+		}
+		var toolCalls []model.CanonicalToolCall
+		if callID != "" {
+			toolCalls = []model.CanonicalToolCall{{ID: callID, Type: "function", Name: name, Arguments: arguments}}
+		}
+		preserved := cloneMapAny(rawMap)
+		return preserved, model.CanonicalMessage{Role: role, Parts: parts, ToolCalls: toolCalls}, true, nil
 	}
 	if role, _ := rawMap["role"].(string); role != "" {
 		var msg message
