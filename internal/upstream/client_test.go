@@ -721,6 +721,37 @@ func TestBuildChatRequestBodySanitizesRepeatedConcatenatedToolArguments(t *testi
 	}
 }
 
+func TestBuildChatRequestBodySanitizesCorruptedPrefixBeforeRepeatedToolArguments(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []model.CanonicalToolCall{{
+				ID:        "call_1",
+				Type:      "function",
+				Name:      "scrape_web",
+				Arguments: `{"url":"https://github.com/k3ss-official/g0dm0d3` + `{"url":"https://github.com/k3ss-official/g0dm0d3"}{"url":"https://github.com/k3ss-official/g0dm0d3"}`,
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	toolCalls, _ := message["tool_calls"].([]any)
+	call, _ := toolCalls[0].(map[string]any)
+	function, _ := call["function"].(map[string]any)
+	if got, _ := function["arguments"].(string); got != `{"url":"https://github.com/k3ss-official/g0dm0d3"}` {
+		t.Fatalf("expected corrupted prefix to be discarded in favor of repeated valid JSON, got %#v", function)
+	}
+}
+
 func TestBuildResponsesRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",

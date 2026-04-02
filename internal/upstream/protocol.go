@@ -946,35 +946,55 @@ func sanitizeToolArguments(arguments string) string {
 	if trimmed == "" || json.Valid([]byte(trimmed)) {
 		return arguments
 	}
-	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	if normalized, ok := sanitizeRepeatedJSONObject(trimmed); ok {
+		return normalized
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '{' && trimmed[i] != '[' {
+			continue
+		}
+		if normalized, ok := sanitizeRepeatedJSONObject(trimmed[i:]); ok {
+			return normalized
+		}
+	}
+	return arguments
+}
+
+func sanitizeRepeatedJSONObject(input string) (string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(input))
 	decoder.UseNumber()
 	var first any
 	if err := decoder.Decode(&first); err != nil {
-		return arguments
+		return "", false
 	}
 	canonical, err := json.Marshal(first)
 	if err != nil {
-		return arguments
+		return "", false
 	}
 	canonicalTrimmed := strings.TrimSpace(string(canonical))
 	if canonicalTrimmed == "" {
-		return arguments
+		return "", false
 	}
 	offset := int(decoder.InputOffset())
-	if offset < 0 || offset > len(trimmed) {
-		return arguments
+	if offset < 0 || offset > len(input) {
+		return "", false
 	}
-	combined := strings.TrimSpace(trimmed[offset:])
-	if combined == "" {
-		return canonicalTrimmed
+	remainder := strings.TrimSpace(input[offset:])
+	if remainder == "" {
+		return canonicalTrimmed, true
 	}
-	for combined != "" {
-		if !strings.HasPrefix(combined, canonicalTrimmed) {
-			return arguments
+	count := 1
+	for remainder != "" {
+		if !strings.HasPrefix(remainder, canonicalTrimmed) {
+			return "", false
 		}
-		combined = strings.TrimSpace(strings.TrimPrefix(combined, canonicalTrimmed))
+		remainder = strings.TrimSpace(strings.TrimPrefix(remainder, canonicalTrimmed))
+		count++
 	}
-	return canonicalTrimmed
+	if count < 2 {
+		return "", false
+	}
+	return canonicalTrimmed, true
 }
 
 func buildChatContentParts(parts []model.CanonicalContentPart) []any {
