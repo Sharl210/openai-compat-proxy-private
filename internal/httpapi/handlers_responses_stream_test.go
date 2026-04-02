@@ -376,6 +376,59 @@ func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T)
 	}
 }
 
+func TestProviderResponsesRouteStreamsCompleteToolArgumentsForChatUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"scrape_web\",\"arguments\":\"\"}}]},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}]},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"open repo"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected compatibility stream to avoid tool item without arguments, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected compatibility stream to emit added event with full arguments, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected compatibility stream to emit arguments.done with full arguments, got %s", body)
+	}
+}
+
 func testResponsesConfig(upstreamURL string) config.Config {
 	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
 }
