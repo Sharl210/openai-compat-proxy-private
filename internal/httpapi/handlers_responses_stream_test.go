@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -319,6 +320,59 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 	}
 	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
 		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	}
+}
+
+func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		if strings.Contains(string(body), `"stream_options":{"include_usage":true}`) {
+			_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"prompt_tokens_details\":{\"cached_tokens\":1}},\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}]}\n\n"))
+		} else {
+			_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}]}\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, `"response":{"finish_reason":"stop","id":"chatcmpl_123","object":"response","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens":2,"total_tokens":5}}`) {
+		t.Fatalf("expected provider /chat/v1/responses stream to include usage by default, got %s", body)
+	}
+	if !strings.Contains(body, `"cached_tokens":1`) {
+		t.Fatalf("expected cached_tokens to be surfaced in usage payload, got %s", body)
 	}
 }
 
