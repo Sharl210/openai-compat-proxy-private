@@ -162,3 +162,61 @@ func testResponsesConfigWithStrategy(upstreamURL string, strategy string) config
 	cfg.DownstreamNonStreamStrategy = strategy
 	return cfg
 }
+
+func TestResponsesProxyBufferWithChatUpstreamFinalizesOnEOFWithoutCompletedEvent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			_, _ = w.Write([]byte("event: chat\n" +
+				"data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n" +
+				"event: chat\n" +
+				"data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"final answer\"}}]}\n\n"))
+			flusher.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "chat",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyProxyBuffer,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	if got, _ := payload["id"].(string); got != "chat-123" {
+		t.Fatalf("expected response id chat-123, got %#v", payload)
+	}
+	if reasoning, _ := payload["reasoning"].(map[string]any); reasoning == nil || reasoning["summary"] != "thinking" {
+		t.Fatalf("expected reasoning summary thinking, got %#v body=%s", payload["reasoning"], rec.Body.String())
+	}
+	output, _ := payload["output"].([]any)
+	if len(output) == 0 {
+		t.Fatalf("expected output items, got %s", rec.Body.String())
+	}
+}

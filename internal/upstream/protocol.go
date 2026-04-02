@@ -281,6 +281,9 @@ func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string, requ
 				return nil, err
 			}
 			if frame == nil {
+				if events := finalizeChatEventsOnEOF(state); len(events) > 0 {
+					return events, nil
+				}
 				return nil, nil
 			}
 			events, done, err := normalizeChatFrame(frame, state)
@@ -296,6 +299,35 @@ func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string, requ
 			return events, nil
 		}
 	}
+}
+
+func finalizeChatEventsOnEOF(state *chatNormalizationState) []Event {
+	if state == nil || state.completed || !state.createdSent {
+		return nil
+	}
+	var events []Event
+	if state.pendingItems != nil {
+		for itemID, pending := range state.pendingItems {
+			item := map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": pending["name"]}
+			if args, ok := pending["arguments"].(string); ok && args != "" {
+				item["arguments"] = args
+			}
+			events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": item}})
+			state.toolSent[itemID] = true
+		}
+		state.pendingItems = nil
+	}
+	responseData := map[string]any{"id": state.responseID, "object": "response"}
+	if state.pendingFinish != "" {
+		responseData["finish_reason"] = state.pendingFinish
+	}
+	if len(state.usage) > 0 {
+		responseData["usage"] = cloneMap(state.usage)
+	}
+	events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
+	state.completed = true
+	state.pendingFinish = ""
+	return events
 }
 
 type chatNormalizationState struct {
@@ -889,13 +921,18 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 		if len(msg.ToolCalls) > 0 {
 			toolCalls := make([]any, 0, len(msg.ToolCalls))
 			for _, call := range msg.ToolCalls {
+				if strings.TrimSpace(call.Name) == "" {
+					continue
+				}
 				callID := call.ID
 				if callID == "" {
 					callID = call.Name
 				}
 				toolCalls = append(toolCalls, map[string]any{"id": callID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": call.Arguments}})
 			}
-			entry["tool_calls"] = toolCalls
+			if len(toolCalls) > 0 {
+				entry["tool_calls"] = toolCalls
+			}
 		}
 		messages = append(messages, entry)
 	}
@@ -1012,6 +1049,9 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		pendingToolResults = appendPendingToolResults(pendingToolResults)
 		content := buildAnthropicContentParts(msg.Parts)
 		for _, call := range msg.ToolCalls {
+			if strings.TrimSpace(call.Name) == "" {
+				continue
+			}
 			callID := call.ID
 			if callID == "" {
 				callID = call.Name

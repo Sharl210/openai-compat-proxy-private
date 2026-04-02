@@ -186,6 +186,43 @@ func TestNormalizeChatFrame_UsageAndCompletion(t *testing.T) {
 	}
 }
 
+func TestChatEventBatchReader_FinalizesOnEOFWithoutCompletedEvent(t *testing.T) {
+	rawSSE := strings.Join([]string{
+		"event: chat",
+		`data: {"id":"chat-123","choices":[{"delta":{"reasoning_content":"thinking"}}]}`,
+		"",
+		"event: chat",
+		`data: {"id":"chat-123","choices":[{"delta":{"content":"final answer"}}]}`,
+		"",
+	}, "\n")
+
+	scanner := bufio.NewScanner(strings.NewReader(rawSSE))
+	readNext := newChatEventBatchReader(false, nil, "req-test")
+
+	var allEvents []Event
+	for {
+		events, err := readNext(scanner)
+		if err != nil {
+			t.Fatalf("readNext error: %v", err)
+		}
+		if len(events) == 0 {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	if len(allEvents) < 4 {
+		t.Fatalf("expected created + reasoning + text + completed events, got %d %#v", len(allEvents), allEvents)
+	}
+	if allEvents[len(allEvents)-1].Event != "response.completed" {
+		t.Fatalf("expected final event response.completed, got %#v", allEvents[len(allEvents)-1])
+	}
+	response, _ := allEvents[len(allEvents)-1].Data["response"].(map[string]any)
+	if id, _ := response["id"].(string); id != "chat-123" {
+		t.Fatalf("expected completed response id chat-123, got %#v", response)
+	}
+}
+
 func TestNormalizeChatFrame_ReasoningContent(t *testing.T) {
 	// 测试 reasoning_content
 	frames := []string{

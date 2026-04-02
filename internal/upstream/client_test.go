@@ -661,6 +661,35 @@ func TestBuildChatRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 	}
 }
 
+func TestBuildChatRequestBodyDropsAssistantToolCallsWithEmptyFunctionName(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:      "assistant",
+			ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "", Arguments: `{"url":"https://example.com"}`}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("expected one message, got %#v", payload)
+	}
+	message, _ := messages[0].(map[string]any)
+	if _, exists := message["tool_calls"]; exists {
+		t.Fatalf("expected empty-name tool_call to be dropped from chat upstream payload, got %#v", message)
+	}
+	if got, _ := message["role"].(string); got != "assistant" {
+		t.Fatalf("expected assistant role preserved, got %#v", message)
+	}
+}
+
 func TestBuildResponsesRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
