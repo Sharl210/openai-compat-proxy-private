@@ -41,12 +41,12 @@ func TestPrepareCanonicalMessagesDropsErroredToolOutputs(t *testing.T) {
 	}
 
 	prepared := prepareCanonicalMessages(messages)
-	if len(prepared) != 3 {
-		t.Fatalf("expected errored tool output removed, got %#v", prepared)
+	if len(prepared) != 2 {
+		t.Fatalf("expected errored tool pair removed, got %#v", prepared)
 	}
 	for _, msg := range prepared {
-		if msg.Role == "tool" {
-			t.Fatalf("expected errored tool output to be removed, got %#v", prepared)
+		if msg.Role == "tool" || len(msg.ToolCalls) > 0 {
+			t.Fatalf("expected errored tool output and paired assistant tool_call to be removed, got %#v", prepared)
 		}
 	}
 }
@@ -60,5 +60,21 @@ func TestPrepareCanonicalMessagesKeepsSuccessfulToolOutputs(t *testing.T) {
 	prepared := prepareCanonicalMessages(messages)
 	if len(prepared) != 2 {
 		t.Fatalf("expected successful tool output kept, got %#v", prepared)
+	}
+}
+
+func TestPrepareCanonicalMessagesKeepsAssistantTextWhileDroppingErroredToolCallPair(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "让我先访问这个 GitHub 仓库页面。"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "scrape_web", Arguments: `{"url":"https://example.com"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"error":"boom"}`}}},
+	}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 1 {
+		t.Fatalf("expected only plain assistant text to remain, got %#v", prepared)
+	}
+	if prepared[0].Role != "assistant" || len(prepared[0].ToolCalls) != 0 || prepared[0].Parts[0].Text == "" {
+		t.Fatalf("expected plain assistant text preserved without tool_call, got %#v", prepared)
 	}
 }
