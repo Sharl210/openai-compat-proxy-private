@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 
 	"openai-compat-proxy/internal/aggregate"
@@ -142,6 +144,9 @@ func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []mo
 	for _, msg := range base {
 		switch msg.Role {
 		case "user", "tool":
+			if msg.Role == "tool" && shouldDropToolMessageFromHistory(msg) {
+				continue
+			}
 			snapshot = append(snapshot, cloneCanonicalMessages([]model.CanonicalMessage{msg})...)
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
@@ -158,4 +163,30 @@ func mergeConversationHistory(base []model.CanonicalMessage, assistant []model.C
 	merged = append(merged, cloneCanonicalMessages(base)...)
 	merged = append(merged, cloneCanonicalMessages(assistant)...)
 	return merged
+}
+
+func shouldDropToolMessageFromHistory(msg model.CanonicalMessage) bool {
+	if msg.Role != "tool" {
+		return false
+	}
+	text := strings.TrimSpace(toolMessageText(msg))
+	if text == "" {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		return false
+	}
+	_, hasError := payload["error"]
+	return hasError
+}
+
+func toolMessageText(msg model.CanonicalMessage) string {
+	var builder strings.Builder
+	for _, part := range msg.Parts {
+		if part.Type == "text" {
+			builder.WriteString(part.Text)
+		}
+	}
+	return builder.String()
 }

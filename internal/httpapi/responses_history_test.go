@@ -90,3 +90,39 @@ func TestBuildResponsesHistorySnapshotKeepsOnlyFollowUpRelevantMessages(t *testi
 		}
 	}
 }
+
+func TestBuildResponsesHistorySnapshotDropsErroredToolOutputs(t *testing.T) {
+	base := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "open repo"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "scrape_web", Arguments: `{"url":"https://example.com"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"error":"invalid params, invalid function arguments json string"}`}}},
+	}
+	assistant := []model.CanonicalMessage{{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "I will retry."}}}}
+
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+	if len(snapshot) != 3 {
+		t.Fatalf("expected user + assistant tool_call + new assistant output, got %#v", snapshot)
+	}
+	for _, msg := range snapshot {
+		if msg.Role == "tool" {
+			t.Fatalf("expected errored tool output to be excluded from history snapshot, got %#v", snapshot)
+		}
+	}
+}
+
+func TestBuildResponsesHistorySnapshotKeepsSuccessfulToolOutputs(t *testing.T) {
+	base := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "open repo"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "scrape_web", Arguments: `{"url":"https://example.com"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"markdown":"ok"}`}}},
+	}
+	assistant := []model.CanonicalMessage{{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "done"}}}}
+
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+	if len(snapshot) != 4 {
+		t.Fatalf("expected successful tool output to remain in snapshot, got %#v", snapshot)
+	}
+	if snapshot[2].Role != "tool" || snapshot[2].ToolCallID != "call_1" {
+		t.Fatalf("expected successful tool message to remain, got %#v", snapshot)
+	}
+}
