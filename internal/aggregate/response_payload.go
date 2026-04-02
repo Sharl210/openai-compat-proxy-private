@@ -10,10 +10,10 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 	if responseID, _ := payload["id"].(string); responseID != "" {
 		result.ResponseID = responseID
 	}
+	// finish_reason takes priority; stop_reason is a fallback
 	if finishReason, _ := payload["finish_reason"].(string); finishReason != "" {
 		result.FinishReason = finishReason
-	}
-	if stopReason, _ := payload["stop_reason"].(string); stopReason != "" {
+	} else if stopReason, _ := payload["stop_reason"].(string); stopReason != "" {
 		result.FinishReason = stopReason
 	}
 	if usage, _ := payload["usage"].(map[string]any); len(usage) > 0 {

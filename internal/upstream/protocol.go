@@ -229,12 +229,12 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 			dataLines = nil
 			continue
 		}
-		if strings.HasPrefix(line, "event:") {
-			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		if rest, ok := strings.CutPrefix(line, "event:"); ok {
+			currentEvent = strings.TrimSpace(rest)
 			continue
 		}
-		if strings.HasPrefix(line, "data:") {
-			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		if rest, ok := strings.CutPrefix(line, "data:"); ok {
+			dataLines = append(dataLines, strings.TrimSpace(rest))
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -310,18 +310,10 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 	if frame == nil {
 		return nil, true, nil
 	}
-	if strings.TrimSpace(frame.Data) == "[DONE]" {
-		if !state.completed {
-			state.completed = true
-			responseData := map[string]any{"id": state.responseID, "object": "response"}
-			if state.pendingFinish != "" {
-				responseData["finish_reason"] = state.pendingFinish
-			}
-			if len(state.usage) > 0 {
-				responseData["usage"] = cloneMap(state.usage)
-			}
-			return []Event{{Event: "response.completed", Data: map[string]any{"response": responseData}}}, true, nil
-		}
+	// [DONE] is always the terminal sentinel for chat SSE, regardless of completion state.
+	// Must check BEFORE checking state.completed to avoid parse error when finish_reason
+	// caused state.completed=true before [DONE] arrives.
+	if strings.Trim(strings.TrimSpace(frame.Data), "\r") == "[DONE]" {
 		return nil, true, nil
 	}
 	var payload map[string]any
