@@ -135,6 +135,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			normalized := responsesadapter.BuildResponse(result)
+			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
 				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
 			}
@@ -185,6 +186,7 @@ func handleResponses() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		normalized := responsesadapter.BuildResponse(result)
+		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
 			globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
 		}
@@ -200,6 +202,33 @@ func handleResponses() http.HandlerFunc {
 			"request_id":    canon.RequestID,
 			"cached_tokens": nestedCachedTokens(result.Usage),
 			"usage_present": len(result.Usage) > 0,
+		})
+	}
+}
+
+func logNonStreamResponsesOutput(requestID string, normalized map[string]any) {
+	if requestID == "" || len(normalized) == 0 {
+		return
+	}
+	output, _ := normalized["output"].([]any)
+	for _, raw := range output {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		if itemType, _ := item["type"].(string); itemType != "function_call" {
+			continue
+		}
+		arguments, _ := item["arguments"].(string)
+		parameters, _ := item["parameters"].(map[string]any)
+		logging.Event("downstreamNonStreamToolOutput", map[string]any{
+			"request_id":        requestID,
+			"item_id":           stringValue(item["id"]),
+			"call_id":           stringValue(item["call_id"]),
+			"name":              stringValue(item["name"]),
+			"arguments_len":     len(arguments),
+			"arguments_preview": truncateForLog(arguments, 120),
+			"has_parameters":    len(parameters) > 0,
 		})
 	}
 }
