@@ -222,7 +222,7 @@ func (h *responseEventWriterHelper) markRealReasoningSeen() {
 
 func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (processResponseEventResult, error) {
 	result := processResponseEventResult{}
-	compatCompleteToolArgs := h.upstreamEndpointType != config.UpstreamEndpointTypeResponses
+	compatCompleteToolArgs := normalizeHTTPAPIUpstreamEndpointType(h.upstreamEndpointType) != config.UpstreamEndpointTypeResponses
 	if h.toolIDAliases == nil {
 		h.toolIDAliases = map[string]string{}
 	}
@@ -477,10 +477,11 @@ type AnthropicEventWriter struct {
 	flusher        http.Flusher
 	anthropicState *anthropicStreamState
 	helper         *responseEventWriterHelper
+	usageRecorder  usageRecorderFunc
 }
 
-func NewAnthropicEventWriter(w http.ResponseWriter, flusher http.Flusher, anthropicState *anthropicStreamState, h *responseEventWriterHelper) *AnthropicEventWriter {
-	return &AnthropicEventWriter{w: w, flusher: flusher, anthropicState: anthropicState, helper: h}
+func NewAnthropicEventWriter(w http.ResponseWriter, flusher http.Flusher, anthropicState *anthropicStreamState, h *responseEventWriterHelper, usageRecorder usageRecorderFunc) *AnthropicEventWriter {
+	return &AnthropicEventWriter{w: w, flusher: flusher, anthropicState: anthropicState, helper: h, usageRecorder: usageRecorder}
 }
 
 func (w *AnthropicEventWriter) WriteEvent(event string, data map[string]any) error {
@@ -504,7 +505,7 @@ func (w *AnthropicEventWriter) WriteEvent(event string, data map[string]any) err
 		}
 	}
 
-	return writeAnthropicEvent(w.w, w.flusher, w.anthropicState, evt, nil)
+	return writeAnthropicEvent(w.w, w.flusher, w.anthropicState, evt, w.usageRecorder)
 }
 
 func (w *AnthropicEventWriter) writeProcessedEvent(event string, data map[string]any) error {
@@ -757,7 +758,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		upstreamEndpointType: upstreamEndpointType,
 		requestID:            req.RequestID,
 	}
-	writer := NewAnthropicEventWriter(w, flusher, state, helper)
+	writer := NewAnthropicEventWriter(w, flusher, state, helper, usageRecorder)
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
@@ -918,7 +919,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		return nil
 	}
 	startToolBlock := func(item map[string]any) error {
-		itemID := stringValue(item["id"])
+		rawItemID := stringValue(item["id"])
+		itemID := anthropicToolStateKey(item)
 		if state.toolStarted && !state.toolStopped {
 			if state.toolItemID == itemID && itemID != "" {
 				if state.toolDeltaSent {
@@ -968,10 +970,16 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return err
 		}
 		arguments := state.pendingToolArgs[itemID]
+		if rawItemID != "" && rawItemID != itemID {
+			arguments += state.pendingToolArgs[rawItemID]
+		}
 		if directArguments := stringValue(item["arguments"]); directArguments != "" {
 			arguments += directArguments
 		}
 		delete(state.pendingToolArgs, itemID)
+		if rawItemID != "" && rawItemID != itemID {
+			delete(state.pendingToolArgs, rawItemID)
+		}
 		if arguments != "" {
 			state.toolDeltaSent = true
 			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
@@ -1094,6 +1102,24 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		return writeAnthropicTerminalFailure(w, flusher, state, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message)
 	}
 	return nil
+}
+
+func anthropicToolStateKey(item map[string]any) string {
+	if callID := stringValue(item["call_id"]); callID != "" {
+		return callID
+	}
+	return stringValue(item["id"])
+}
+
+func normalizeHTTPAPIUpstreamEndpointType(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case config.UpstreamEndpointTypeChat:
+		return config.UpstreamEndpointTypeChat
+	case config.UpstreamEndpointTypeAnthropic:
+		return config.UpstreamEndpointTypeAnthropic
+	default:
+		return config.UpstreamEndpointTypeResponses
+	}
 }
 
 func closeTextBlock(state *anthropicStreamState, w http.ResponseWriter, flusher http.Flusher) error {

@@ -108,7 +108,13 @@ func (c *Collector) Accept(evt upstream.Event) {
 						}
 						continue
 					}
-					if partType != "" && partType != "output_text" {
+					if partType == "output_text" {
+						if text, _ := part["text"].(string); text != "" {
+							c.text.WriteString(text)
+						}
+						continue
+					}
+					if partType != "" {
 						c.unsupportedContentTypes = append(c.unsupportedContentTypes, partType)
 					}
 				}
@@ -189,6 +195,7 @@ func (c *Collector) Result() (Result, error) {
 	}
 	result := Result{}
 	result.ResponseID = c.responseID
+	result.Text = c.text.String()
 	result.Refusal = c.refusal
 	result.FinishReason = c.finishReason
 	for _, id := range c.order {
