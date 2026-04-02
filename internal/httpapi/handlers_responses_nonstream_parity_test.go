@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -218,5 +219,73 @@ func TestResponsesProxyBufferWithChatUpstreamFinalizesOnEOFWithoutCompletedEvent
 	output, _ := payload["output"].([]any)
 	if len(output) == 0 {
 		t.Fatalf("expected output items, got %s", rec.Body.String())
+	}
+}
+
+func TestProviderResponsesRouteDefaultsUsageForChatUpstreamNonStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"stream_options":{"include_usage":true}`) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"id":"chatcmpl_123",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],
+				"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5,"prompt_tokens_details":{"cached_tokens":1}}
+			}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl_123",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "chat",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":false,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v body=%s", err, rec.Body.String())
+	}
+	usage, _ := payload["usage"].(map[string]any)
+	if usage == nil {
+		t.Fatalf("expected non-stream compat route to include usage by default, got %s", rec.Body.String())
+	}
+	if usage["input_tokens"] != float64(3) || usage["output_tokens"] != float64(2) || usage["total_tokens"] != float64(5) {
+		t.Fatalf("expected mapped usage fields, got %#v body=%s", usage, rec.Body.String())
+	}
+	inputDetails, _ := usage["input_tokens_details"].(map[string]any)
+	if inputDetails == nil || inputDetails["cached_tokens"] != float64(1) {
+		t.Fatalf("expected cached_tokens in usage payload, got %#v body=%s", usage, rec.Body.String())
 	}
 }
