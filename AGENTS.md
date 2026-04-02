@@ -1,5 +1,53 @@
 # openai-compat-proxy Project Instructions
 
+## 仓库概览
+
+- 这是一个 Go 单二进制代理，入口在 `cmd/proxy/main.go`，主流程是 `httpapi -> adapter -> upstream -> aggregate`。
+- 运行时配置来自根 `.env` 与 `providers/*.env`；provider 模板与用户说明统一放在 `providers/`。
+- 核心复杂度集中在 `internal/httpapi`、`internal/upstream`、`internal/config`、`internal/adapter`。
+- 部署与启停统一走 `scripts/*.sh`，实际逻辑大多收敛在 `scripts/lib/runtime.sh`。
+
+## 目录速览
+
+| 路径 | 作用 | 何时优先看 |
+|---|---|---|
+| `cmd/proxy` | 进程入口、装配 runtime store 与 HTTP server | 想知道程序如何启动 |
+| `internal/httpapi` | 路由、鉴权、三套下游接口、流式处理 | 改接口、状态流、headers |
+| `internal/adapter` | OpenAI / Anthropic 协议互转 | 改字段映射、tool/reasoning 兼容 |
+| `internal/upstream` | 上游请求、SSE 解析、伪装 header、重试 | 改上游交互、超时、伪装 |
+| `internal/config` | 根配置与 provider 配置、热加载 | 改 `.env` 语义、加载规则 |
+| `providers` | provider 模板、真实配置、prompt 文件 | 增加配置项、改模板注释 |
+| `scripts` | 部署、重启、停服、卸载 | 改运维流程 |
+
+## 常用命令
+
+```bash
+go test ./...
+go test -v -count=1 ./internal/httpapi/...
+go test -v -count=1 ./internal/config/...
+go test -v -count=1 ./internal/upstream/...
+go test -v -count=1 ./scripts/...
+go build -o bin/openai-compat-proxy ./cmd/proxy
+go vet ./...
+bash scripts/deploy-linux.sh
+curl http://127.0.0.1:21021/healthz
+```
+
+## 子目录 AGENTS 边界
+
+- `internal/httpapi/AGENTS.md`：只讲 HTTP 层、路由、流式与 handler 约束。
+- `internal/config/AGENTS.md`：只讲配置校验、热加载、模板联动。
+- `internal/upstream/AGENTS.md`：只讲上游请求、SSE、重试、伪装。
+- `internal/adapter/AGENTS.md`：只讲 canonical request/response 与三协议映射。
+- `providers/AGENTS.md`：只讲配置模板、真实 `*.env`、prompt 文件。
+- `scripts/AGENTS.md`：只讲部署脚本与 `scripts/lib/runtime.sh` 的约束。
+
+## 额外工作约定
+
+- `internal/httpapi` 测试最密，改入口行为优先补或跑该目录测试，不要一上来只跑全量。
+- `internal/upstream/protocol.go`、`internal/upstream/client.go`、`internal/httpapi/streaming.go` 都是超大文件；修改时要先定位精确函数，再小范围改。
+- `providers/prompt.md` 属于 provider 级人工维护文件；除非任务明确要求，不要顺手改内容。
+
 ## 配置文件语言规则
 
 - 项目内面向用户的配置模板文件注释默认使用**简体中文**。
