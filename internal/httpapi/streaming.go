@@ -666,6 +666,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.terminalFailure = h.terminalFailure
 
 	for _, cmd := range h.events {
+		logDownstreamToolEvent(state.requestID, writer.DownstreamType(), cmd.Event, cmd.Data)
 		if err := writer.WriteEvent(cmd.Event, cmd.Data); err != nil {
 			return err
 		}
@@ -681,7 +682,51 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		}
 	}
 
+	logDownstreamToolEvent(state.requestID, writer.DownstreamType(), evt.Event, evt.Data)
 	return writer.WriteEvent(evt.Event, evt.Data)
+}
+
+func logDownstreamToolEvent(requestID, downstreamType, event string, data map[string]any) {
+	if requestID == "" || len(data) == 0 {
+		return
+	}
+	if item, _ := data["item"].(map[string]any); item != nil {
+		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			arguments, _ := item["arguments"].(string)
+			logging.Event("downstreamToolEvent", map[string]any{
+				"request_id":        requestID,
+				"downstream_type":   downstreamType,
+				"event":             event,
+				"item_id":           stringValue(item["id"]),
+				"call_id":           stringValue(item["call_id"]),
+				"name":              stringValue(item["name"]),
+				"arguments_len":     len(arguments),
+				"arguments_preview": truncateForLog(arguments, 120),
+			})
+		}
+		return
+	}
+	if event == "response.function_call_arguments.done" || event == "response.function_call_arguments.delta" {
+		arguments := stringValue(data["arguments"])
+		if arguments == "" {
+			arguments = stringValue(data["delta"])
+		}
+		logging.Event("downstreamToolEvent", map[string]any{
+			"request_id":        requestID,
+			"downstream_type":   downstreamType,
+			"event":             event,
+			"item_id":           stringValue(data["item_id"]),
+			"arguments_len":     len(arguments),
+			"arguments_preview": truncateForLog(arguments, 120),
+		})
+	}
+}
+
+func truncateForLog(text string, max int) string {
+	if max <= 0 || len(text) <= max {
+		return text
+	}
+	return text[:max]
 }
 
 func newResponseEventWriterHelper(downstreamType string, state responseProjectionState) *responseEventWriterHelper {
