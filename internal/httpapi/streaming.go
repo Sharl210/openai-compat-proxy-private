@@ -153,10 +153,12 @@ func (h *responseEventWriterHelper) addEvent(event string, data map[string]any) 
 }
 
 func (h *responseEventWriterHelper) addToolItemAddedEvent(item map[string]any) {
+	item = withParsedToolParameters(item)
 	h.addEvent("response.output_item.added", map[string]any{"item": item})
 }
 
 func (h *responseEventWriterHelper) addToolItemDoneEvent(item map[string]any) {
+	item = withParsedToolParameters(item)
 	h.addEvent("response.output_item.done", map[string]any{"item": item})
 }
 
@@ -720,6 +722,29 @@ func logDownstreamToolEvent(requestID, downstreamType, event string, data map[st
 			"arguments_preview": truncateForLog(arguments, 120),
 		})
 	}
+}
+
+func withParsedToolParameters(item map[string]any) map[string]any {
+	if item == nil {
+		return item
+	}
+	if itemType, _ := item["type"].(string); itemType != "function_call" {
+		return item
+	}
+	arguments, _ := item["arguments"].(string)
+	if strings.TrimSpace(arguments) == "" {
+		return item
+	}
+	if _, exists := item["parameters"]; exists {
+		return item
+	}
+	var parsedMap map[string]any
+	if err := json.Unmarshal([]byte(arguments), &parsedMap); err == nil && len(parsedMap) > 0 {
+		itemCopy := cloneMap(item)
+		itemCopy["parameters"] = parsedMap
+		return itemCopy
+	}
+	return item
 }
 
 func truncateForLog(text string, max int) string {

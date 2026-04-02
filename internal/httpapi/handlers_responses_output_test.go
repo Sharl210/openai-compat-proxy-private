@@ -55,6 +55,10 @@ func TestResponsesNonStreamReturnsFunctionCallOutputItems(t *testing.T) {
 	if got, _ := item["call_id"].(string); got != "call_123" {
 		t.Fatalf("expected function_call call_id call_123, got %#v", item)
 	}
+	parameters, _ := item["parameters"].(map[string]any)
+	if parameters == nil || parameters["city"] != "Shanghai" {
+		t.Fatalf("expected parsed parameters object, got %#v", item)
+	}
 	if _, exists := item["tool_calls"]; exists {
 		t.Fatalf("expected responses output item shape, got nested tool_calls %#v", item)
 	}

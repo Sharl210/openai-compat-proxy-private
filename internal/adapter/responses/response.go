@@ -1,6 +1,10 @@
 package responses
 
-import "openai-compat-proxy/internal/aggregate"
+import (
+	"encoding/json"
+
+	"openai-compat-proxy/internal/aggregate"
+)
 
 func BuildResponse(result aggregate.Result) map[string]any {
 	var output []map[string]any
@@ -25,14 +29,18 @@ func BuildResponse(result aggregate.Result) map[string]any {
 			})
 		}
 		for _, call := range result.ToolCalls {
-			output = append(output, map[string]any{
+			item := map[string]any{
 				"id":        call.ID,
 				"type":      "function_call",
 				"status":    "completed",
 				"call_id":   call.CallID,
 				"name":      call.Name,
 				"arguments": call.Arguments,
-			})
+			}
+			if parsed := parseToolParameters(call.Arguments); len(parsed) > 0 {
+				item["parameters"] = parsed
+			}
+			output = append(output, item)
 		}
 	}
 
@@ -71,6 +79,13 @@ func cloneOutputItems(input []map[string]any) []map[string]any {
 		for k, v := range item {
 			copy[k] = v
 		}
+		if itemType, _ := copy["type"].(string); itemType == "function_call" {
+			if _, exists := copy["parameters"]; !exists {
+				if parsed := parseToolParameters(stringValue(copy["arguments"])); len(parsed) > 0 {
+					copy["parameters"] = parsed
+				}
+			}
+		}
 		cloned = append(cloned, copy)
 	}
 	return cloned
@@ -102,4 +117,22 @@ func cloneMap(input map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func parseToolParameters(arguments string) map[string]any {
+	if arguments == "" {
+		return nil
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(arguments), &parsed); err != nil || len(parsed) == 0 {
+		return nil
+	}
+	return parsed
+}
+
+func stringValue(v any) string {
+	if s, _ := v.(string); s != "" {
+		return s
+	}
+	return ""
 }
