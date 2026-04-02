@@ -455,11 +455,13 @@ func NewChatEventWriter(w http.ResponseWriter, flusher http.Flusher, chatState *
 func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
 	evt := upstream.Event{Event: event, Data: data}
 
+	skipOriginalWrite := false
 	if w.helper != nil {
-		_, err := doProcessResponseEvent(w.helper, evt)
+		result, err := doProcessResponseEvent(w.helper, evt)
 		if err != nil {
 			return err
 		}
+		skipOriginalWrite = result.skipWrite
 
 		for _, cmd := range w.helper.events {
 			if err := w.writeProcessedEvent(cmd.Event, cmd.Data); err != nil {
@@ -467,6 +469,9 @@ func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
 			}
 		}
 		w.helper.events = nil
+	}
+	if skipOriginalWrite {
+		return nil
 	}
 
 	return writeChatEvent(w.w, w.flusher, w.chatState, evt, true, w.usageRecorder)
@@ -1321,6 +1326,7 @@ type chatStreamState struct {
 	realReasoningSeen   bool
 	planningSent        bool
 	toolStatusSent      bool
+	toolIDAliases       map[string]string
 	toolMeta            map[string]map[string]string
 	toolIndex           map[string]int
 	toolSent            map[string]bool
@@ -1333,6 +1339,7 @@ type chatStreamState struct {
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
 	state := chatStreamState{
+		toolIDAliases:   map[string]string{},
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
 		toolSent:        map[string]bool{},
@@ -1462,6 +1469,7 @@ func streamLiveWithSyntheticTicks(
 
 func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event, includeUsage bool) error {
 	state := chatStreamState{
+		toolIDAliases:   map[string]string{},
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
 		toolSent:        map[string]bool{},
@@ -1495,6 +1503,9 @@ func chatStreamFinishReason(state *chatStreamState, data map[string]any) string 
 }
 
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder usageRecorderFunc) error {
+	if state.toolIDAliases == nil {
+		state.toolIDAliases = map[string]string{}
+	}
 	ensureRoleSent := func() error {
 		if state.roleSent {
 			return nil
@@ -1503,6 +1514,40 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 		state.roleSent = true
+		return nil
+	}
+	flushPendingToolCall := func(itemID string) error {
+		if mapped, ok := state.toolIDAliases[itemID]; ok && mapped != "" {
+			itemID = mapped
+		}
+		if itemID == "" || state.toolSent[itemID] {
+			return nil
+		}
+		meta, ok := state.toolMeta[itemID]
+		if !ok {
+			return nil
+		}
+		if _, ok := state.toolIndex[itemID]; !ok {
+			state.toolIndex[itemID] = state.nextToolIx
+			state.nextToolIx++
+		}
+		if err := ensureRoleSent(); err != nil {
+			return err
+		}
+		toolDelta := chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], state.pendingToolArgs[itemID], true)
+		if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
+			return err
+		}
+		state.toolSent[itemID] = true
+		delete(state.pendingToolArgs, itemID)
+		return nil
+	}
+	flushAllPendingToolCalls := func() error {
+		for itemID := range state.toolMeta {
+			if err := flushPendingToolCall(itemID); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	switch evt.Event {
@@ -1519,7 +1564,18 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 		}
 		if itemType, _ := item["type"].(string); itemType == "function_call" {
-			itemID, _ := item["id"].(string)
+			rawItemID, _ := item["id"].(string)
+			itemID := rawItemID
+			if callID, _ := item["call_id"].(string); callID != "" {
+				if rawItemID != "" && rawItemID != callID {
+					state.toolIDAliases[rawItemID] = callID
+					if pending := state.pendingToolArgs[rawItemID]; pending != "" && state.pendingToolArgs[callID] == "" {
+						state.pendingToolArgs[callID] = pending
+						delete(state.pendingToolArgs, rawItemID)
+					}
+				}
+				itemID = callID
+			}
 			if itemID != "" {
 				if _, ok := state.toolIndex[itemID]; !ok {
 					state.toolIndex[itemID] = state.nextToolIx
@@ -1529,16 +1585,13 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 					"name":    stringValue(item["name"]),
 					"call_id": stringValue(item["call_id"]),
 				}
-				if !state.toolSent[itemID] {
-					if err := ensureRoleSent(); err != nil {
+				if directArgs := stringValue(item["arguments"]); directArgs != "" {
+					state.pendingToolArgs[itemID] = directArgs
+				}
+				if state.pendingToolArgs[itemID] != "" {
+					if err := flushPendingToolCall(itemID); err != nil {
 						return err
 					}
-					toolDelta := chatToolDelta(state.toolIndex[itemID], stringValue(item["call_id"]), stringValue(item["name"]), state.pendingToolArgs[itemID], true)
-					if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
-						return err
-					}
-					state.toolSent[itemID] = true
-					delete(state.pendingToolArgs, itemID)
 				}
 			}
 		}
@@ -1592,6 +1645,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.function_call_arguments.delta":
 		itemID := stringValue(evt.Data["item_id"])
+		if mapped, ok := state.toolIDAliases[itemID]; ok && mapped != "" {
+			itemID = mapped
+		}
 		delta := stringValue(evt.Data["delta"])
 		if itemID == "" || delta == "" {
 			return nil
@@ -1619,6 +1675,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		if err := flushAllPendingToolCalls(); err != nil {
+			return err
+		}
 		finishReason := chatStreamFinishReason(state, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		cachedTokens := nestedCachedTokens(rawUsage)

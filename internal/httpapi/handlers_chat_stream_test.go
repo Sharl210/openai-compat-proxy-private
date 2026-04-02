@@ -9,6 +9,7 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
+	"openai-compat-proxy/internal/upstream"
 )
 
 func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
@@ -116,6 +117,9 @@ func TestChatStreamSendsAssistantRoleBeforeToolCalls(t *testing.T) {
 	body := rec.Body.String()
 	roleIdx := strings.Index(body, `"delta":{"role":"assistant"}`)
 	toolIdx := strings.Index(body, `"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`)
+	if toolIdx == -1 {
+		toolIdx = strings.Index(body, `"tool_calls":[{"function":{"arguments":"{\"city\":\"Shanghai\"}","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`)
+	}
 	if roleIdx == -1 || toolIdx == -1 || roleIdx > toolIdx {
 		t.Fatalf("expected assistant role chunk before tool_calls chunk, got %s", body)
 	}
@@ -201,6 +205,90 @@ func TestChatStreamDoesNotKeepToolCallsFinishReasonAfterLaterText(t *testing.T) 
 	}
 	if !strings.Contains(body, `"finish_reason":"stop"`) {
 		t.Fatalf("expected final finish_reason stop after later text, got %s", body)
+	}
+}
+
+func TestChatStreamDoesNotEmitEmptyToolArgumentsBeforeDeltaArrives(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, `"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected no provisional empty arguments tool chunk, got %s", body)
+	}
+	if !strings.Contains(body, `"tool_calls":[{"function":{"arguments":"{\"city\":\"Shanghai\"}","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected first emitted tool chunk to contain full arguments, got %s", body)
+	}
+}
+
+func TestWriteChatSSEDoesNotEmitEmptyToolArgumentsBeforeDeltaArrives(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := writeChatSSE(rec, nil, []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "get_weather"}}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"city":"Shanghai"}`}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	}, true)
+	if err != nil {
+		t.Fatalf("writeChatSSE error: %v", err)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected direct writeChatSSE path to avoid empty arguments chunk, got %s", body)
+	}
+	if !strings.Contains(body, `"tool_calls":[{"function":{"arguments":"{\"city\":\"Shanghai\"}","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected direct writeChatSSE path to emit full arguments chunk, got %s", body)
+	}
+}
+
+func TestChatEventWriterDoesNotEmitEmptyToolArgumentsBeforeDeltaArrives(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, evt := range []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "get_weather"}}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"city":"Shanghai"}`}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	} {
+		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
+			t.Fatalf("writer.WriteEvent error: %v", err)
+		}
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected ChatEventWriter path to avoid empty arguments chunk, got %s", body)
+	}
+	if !strings.Contains(body, `"tool_calls":[{"function":{"arguments":"{\"city\":\"Shanghai\"}","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected ChatEventWriter path to emit full arguments chunk, got %s", body)
 	}
 }
 
