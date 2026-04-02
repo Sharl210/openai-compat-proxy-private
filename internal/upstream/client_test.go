@@ -690,6 +690,37 @@ func TestBuildChatRequestBodyDropsAssistantToolCallsWithEmptyFunctionName(t *tes
 	}
 }
 
+func TestBuildChatRequestBodySanitizesRepeatedConcatenatedToolArguments(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []model.CanonicalToolCall{{
+				ID:        "call_1",
+				Type:      "function",
+				Name:      "scrape_web",
+				Arguments: `{"url":"https://example.com"}{"url":"https://example.com"}{"url":"https://example.com"}`,
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	toolCalls, _ := message["tool_calls"].([]any)
+	call, _ := toolCalls[0].(map[string]any)
+	function, _ := call["function"].(map[string]any)
+	if got, _ := function["arguments"].(string); got != `{"url":"https://example.com"}` {
+		t.Fatalf("expected repeated concatenated tool arguments to be sanitized, got %#v", function)
+	}
+}
+
 func TestBuildResponsesRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",

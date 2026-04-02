@@ -930,7 +930,7 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 				if callID == "" {
 					callID = call.Name
 				}
-				toolCalls = append(toolCalls, map[string]any{"id": callID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": call.Arguments}})
+				toolCalls = append(toolCalls, map[string]any{"id": callID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": sanitizeToolArguments(call.Arguments)}})
 			}
 			if len(toolCalls) > 0 {
 				entry["tool_calls"] = toolCalls
@@ -939,6 +939,42 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 		messages = append(messages, entry)
 	}
 	return messages
+}
+
+func sanitizeToolArguments(arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" || json.Valid([]byte(trimmed)) {
+		return arguments
+	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	var first any
+	if err := decoder.Decode(&first); err != nil {
+		return arguments
+	}
+	canonical, err := json.Marshal(first)
+	if err != nil {
+		return arguments
+	}
+	canonicalTrimmed := strings.TrimSpace(string(canonical))
+	if canonicalTrimmed == "" {
+		return arguments
+	}
+	offset := int(decoder.InputOffset())
+	if offset < 0 || offset > len(trimmed) {
+		return arguments
+	}
+	combined := strings.TrimSpace(trimmed[offset:])
+	if combined == "" {
+		return canonicalTrimmed
+	}
+	for combined != "" {
+		if !strings.HasPrefix(combined, canonicalTrimmed) {
+			return arguments
+		}
+		combined = strings.TrimSpace(strings.TrimPrefix(combined, canonicalTrimmed))
+	}
+	return canonicalTrimmed
 }
 
 func buildChatContentParts(parts []model.CanonicalContentPart) []any {
