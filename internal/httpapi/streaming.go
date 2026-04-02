@@ -93,6 +93,20 @@ type processedResponseEvents struct {
 	terminalFailure *aggregate.TerminalFailureError
 }
 
+type responseProjectionState struct {
+	toolIDAliases        map[string]string
+	toolItems            map[string]*responsesToolItemState
+	toolOrder            []string
+	reasoningStarted     bool
+	reasoningClosed      bool
+	realReasoningSeen    bool
+	syntheticSummary     *strings.Builder
+	requestID            string
+	upstreamEndpointType string
+	terminalSeen         bool
+	terminalFailure      *aggregate.TerminalFailureError
+}
+
 type responseEventWriterHelper struct {
 	downstreamType       string
 	upstreamEndpointType string
@@ -618,9 +632,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 }
 
 func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
-	h := &responseEventWriterHelper{
-		downstreamType:       writer.DownstreamType(),
-		upstreamEndpointType: state.upstreamEndpointType,
+	h := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{
 		toolIDAliases:        state.toolIDAliases,
 		toolItems:            state.toolItems,
 		toolOrder:            state.toolOrder,
@@ -629,9 +641,10 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		realReasoningSeen:    state.realReasoningSeen,
 		syntheticSummary:     &state.syntheticSummary,
 		requestID:            state.requestID,
+		upstreamEndpointType: state.upstreamEndpointType,
 		terminalSeen:         state.terminalSeen,
 		terminalFailure:      state.terminalFailure,
-	}
+	})
 
 	result, err := doProcessResponseEvent(h, evt)
 	if err != nil {
@@ -664,6 +677,23 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	}
 
 	return writer.WriteEvent(evt.Event, evt.Data)
+}
+
+func newResponseEventWriterHelper(downstreamType string, state responseProjectionState) *responseEventWriterHelper {
+	return &responseEventWriterHelper{
+		downstreamType:       downstreamType,
+		upstreamEndpointType: state.upstreamEndpointType,
+		toolIDAliases:        state.toolIDAliases,
+		toolItems:            state.toolItems,
+		toolOrder:            state.toolOrder,
+		reasoningStarted:     state.reasoningStarted,
+		reasoningClosed:      state.reasoningClosed,
+		realReasoningSeen:    state.realReasoningSeen,
+		syntheticSummary:     state.syntheticSummary,
+		requestID:            state.requestID,
+		terminalSeen:         state.terminalSeen,
+		terminalFailure:      state.terminalFailure,
+	}
 }
 
 func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flusher, text string) error {

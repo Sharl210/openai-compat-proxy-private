@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/debugarchive"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
@@ -39,6 +40,8 @@ type EventStream struct {
 	scanner       *bufio.Scanner
 	pendingEvents []Event
 	readNext      func(*bufio.Scanner) ([]Event, error)
+	archive       *debugarchive.ArchiveWriter
+	seq           int64
 }
 
 var sseScannerInitialBufferSize = 64 * 1024
@@ -288,6 +291,9 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
+	if archive := debugarchive.ArchiveWriterFromContext(ctx); archive != nil {
+		_ = archive.WriteFinalSnapshot(debugarchive.FinalSnapshot{StatusCode: http.StatusOK, Response: payload})
+	}
 	logging.Event("upstreamToProxyResponse", map[string]any{
 		"request_id": req.RequestID,
 		"attempt":    1,
@@ -462,7 +468,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo, originalToolIDs, requestID)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo, originalToolIDs, requestID), archive: debugarchive.ArchiveWriterFromContext(ctx)}
 	if err := stream.prime(); err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -477,11 +483,15 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 	for len(s.pendingEvents) > 0 {
 		evt := s.pendingEvents[0]
 		s.pendingEvents = s.pendingEvents[1:]
+		s.recordEvent(evt)
 		if err := onEvent(evt); err != nil {
 			return err
 		}
 	}
-	return consumeSSEScannerWithReader(s.scanner, s.readNext, onEvent)
+	return consumeSSEScannerWithReader(s.scanner, s.readNext, func(evt Event) error {
+		s.recordEvent(evt)
+		return onEvent(evt)
+	})
 }
 
 func (s *EventStream) Close() error {
@@ -508,6 +518,21 @@ func (s *EventStream) prime() error {
 	}
 	s.pendingEvents = append(s.pendingEvents, events...)
 	return nil
+}
+
+func (s *EventStream) recordEvent(evt Event) {
+	if s == nil || s.archive == nil {
+		return
+	}
+	_ = s.archive.WriteRawEvent(debugarchive.RawEventEnvelope{EventName: evt.Event, Raw: evt.Raw})
+	s.seq++
+	canonical := model.CanonicalEvent{
+		Seq:          s.seq,
+		Type:         evt.Event,
+		RawPayload:   evt.Raw,
+		ProviderMeta: cloneMap(anyMap(evt.Data["provider_meta"])),
+	}
+	_ = s.archive.WriteCanonicalEvent(canonical)
 }
 
 func readHTTPStatusError(resp *http.Response) *HTTPStatusError {
@@ -876,6 +901,17 @@ func cloneMap(input map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+// anyMap safely converts an any value to map[string]any.
+func anyMap(v any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	return nil
 }
 
 func splitPreservedResponsesTopLevelFields(items []map[string]any) (map[string]any, []map[string]any) {

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"openai-compat-proxy/internal/config"
-	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -188,7 +187,26 @@ func readNextResponsesEventBatch(scanner *bufio.Scanner) ([]Event, error) {
 	if evt == nil {
 		return nil, nil
 	}
-	return []Event{*evt}, nil
+	events := []Event{*evt}
+	shadowRecordResponses(events, evt.Event)
+	return events, nil
+}
+
+func shadowRecordResponses(events []Event, originalEvent string) {
+	if len(events) == 0 || originalEvent == "[DONE]" {
+		return
+	}
+	rawData := events[0].Raw
+	if !json.Valid(rawData) {
+		return
+	}
+	envelope := map[string]any{
+		"provider":      "responses",
+		"originalEvent": originalEvent,
+		"_raw":          json.RawMessage(rawData),
+	}
+	envelopeBytes, _ := json.Marshal(envelope)
+	events[0].Raw = envelopeBytes
 }
 
 func consumeSSEScannerWithReader(scanner *bufio.Scanner, readNext func(*bufio.Scanner) ([]Event, error), onEvent func(Event) error) error {
@@ -254,6 +272,7 @@ func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string, requ
 		thinkingTagStyleTwo: styleTwo,
 		originalToolIDs:     originalToolIDs,
 		requestID:           requestID,
+		provider:            "chat",
 	}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
@@ -263,17 +282,6 @@ func newChatEventBatchReader(styleTwo bool, originalToolIDs map[int]string, requ
 			}
 			if frame == nil {
 				return nil, nil
-			}
-			if frame.Event != "" || frame.Data != "" {
-				dataPreview := frame.Data
-				if len(dataPreview) > 512 {
-					dataPreview = dataPreview[:512]
-				}
-				logging.Event("upstreamRawFrame", map[string]any{
-					"request_id": state.requestID,
-					"event":      frame.Event,
-					"data":       dataPreview,
-				})
 			}
 			events, done, err := normalizeChatFrame(frame, state)
 			if err != nil {
@@ -304,15 +312,39 @@ type chatNormalizationState struct {
 	originalToolIDs     map[int]string
 	responseID          string
 	requestID           string
+	provider            string
+}
+
+func shadowRecord(events []Event, frame *sseFrame, provider string) {
+	if len(events) == 0 {
+		return
+	}
+	if provider == "" {
+		provider = "unknown"
+	}
+	trimmedData := strings.Trim(strings.TrimSpace(frame.Data), "\r")
+	if trimmedData == "[DONE]" {
+		return
+	}
+	rawData := []byte(frame.Data)
+	if !json.Valid(rawData) {
+		return
+	}
+	for i := range events {
+		envelope := map[string]any{
+			"provider":      provider,
+			"originalEvent": frame.Event,
+			"_raw":          json.RawMessage(rawData),
+		}
+		envelopeBytes, _ := json.Marshal(envelope)
+		events[i].Raw = envelopeBytes
+	}
 }
 
 func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event, bool, error) {
 	if frame == nil {
 		return nil, true, nil
 	}
-	// [DONE] is always the terminal sentinel for chat SSE, regardless of completion state.
-	// Must check BEFORE checking state.completed to avoid parse error when finish_reason
-	// caused state.completed=true before [DONE] arrives.
 	if strings.Trim(strings.TrimSpace(frame.Data), "\r") == "[DONE]" {
 		return nil, true, nil
 	}
@@ -443,11 +475,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 			}
 		}
 	}
+	shadowRecord(events, frame, state.provider)
 	return events, false, nil
 }
 
 func newAnthropicEventBatchReader(originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
-	state := &anthropicNormalizationState{toolIDsByIndex: map[int]string{}, usage: map[string]any{}, originalToolIDs: originalToolIDs}
+	state := &anthropicNormalizationState{toolIDsByIndex: map[int]string{}, usage: map[string]any{}, originalToolIDs: originalToolIDs, provider: "anthropic"}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
 			frame, err := readNextSSEFrame(scanner)
@@ -478,6 +511,7 @@ type anthropicNormalizationState struct {
 	completed       bool
 	responseID      string
 	originalToolIDs map[int]string
+	provider        string
 }
 
 func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState) ([]Event, bool, error) {
@@ -567,6 +601,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 		events = append(events, Event{Event: "response.incomplete", Data: map[string]any{"health_flag": "upstream_error", "message": stringValue(errMap["message"])}})
 		state.completed = true
 	}
+	shadowRecord(events, frame, state.provider)
 	return events, false, nil
 }
 

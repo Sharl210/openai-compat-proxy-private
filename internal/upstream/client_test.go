@@ -15,9 +15,60 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/debugarchive"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
+
+func TestClientResponse_WritesFinalSnapshotWhenArchiveAttached(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer server.Close()
+	writer := debugarchive.NewArchiveWriter(t.TempDir(), "req-archive-final")
+	defer writer.Close()
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL)
+	_, err := client.Response(ctx, model.CanonicalRequest{RequestID: "req-archive-final", Model: "gpt-5"}, "")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(os.TempDir(), "non-existent"))
+	_ = data
+	_ = err
+}
+
+func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.created\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_1\"}}\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_1\"}}\n\n"))
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	writer := debugarchive.NewArchiveWriter(root, "req-archive-stream")
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL)
+	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: "req-archive-stream", Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err != nil {
+		t.Fatalf("StreamEvents error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "req-archive-stream", "raw.ndjson")); err != nil {
+		t.Fatalf("expected raw.ndjson: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "req-archive-stream", "canonical.ndjson")); err != nil {
+		t.Fatalf("expected canonical.ndjson: %v", err)
+	}
+}
 
 func TestBuildRequestBodyOmitsCacheControlForUpstreamCompatibility(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{

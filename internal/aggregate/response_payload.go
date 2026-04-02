@@ -1,6 +1,10 @@
 package aggregate
 
-import "fmt"
+import (
+	"fmt"
+
+	"openai-compat-proxy/internal/upstream"
+)
 
 func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 	if len(payload) == 0 {
@@ -94,4 +98,90 @@ func cloneMap(input map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+// PayloadToSyntheticCanonicalEvents converts a non-stream upstream payload into
+// synthetic upstream events so that the Collector can aggregate them the same way
+// it aggregates real streaming events. Each emitted event carries
+// ProviderMeta["synthetic"]=true to mark its synthetic origin.
+func PayloadToSyntheticCanonicalEvents(payload map[string]any) []upstream.Event {
+	if len(payload) == 0 {
+		return nil
+	}
+
+	var events []upstream.Event
+	syntheticMeta := map[string]any{"synthetic": true}
+
+	responseID, _ := payload["id"].(string)
+	if responseID != "" {
+		events = append(events, upstream.Event{
+			Event: "response.created",
+			Data: map[string]any{
+				"response":      map[string]any{"id": responseID},
+				"provider_meta": syntheticMeta,
+			},
+		})
+	}
+
+	output, _ := payload["output"].([]any)
+	for _, rawItem := range output {
+		item, ok := rawItem.(map[string]any)
+		if !ok || item == nil {
+			continue
+		}
+		itemCopy := cloneMap(item)
+		events = append(events, upstream.Event{
+			Event: "response.output_item.done",
+			Data: map[string]any{
+				"item":          itemCopy,
+				"provider_meta": syntheticMeta,
+			},
+		})
+	}
+
+	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
+		events = append(events, upstream.Event{
+			Event: "response.reasoning.delta",
+			Data: map[string]any{
+				"summary":       reasoning["summary"],
+				"provider_meta": syntheticMeta,
+			},
+		})
+	}
+
+	finishReason := ""
+	if fr, _ := payload["finish_reason"].(string); fr != "" {
+		finishReason = fr
+	} else if sr, _ := payload["stop_reason"].(string); sr != "" {
+		finishReason = sr
+	}
+	usage, _ := payload["usage"].(map[string]any)
+
+	respData := map[string]any{}
+	if finishReason != "" {
+		respData["finish_reason"] = finishReason
+	}
+	if usage != nil {
+		respData["usage"] = cloneMap(usage)
+	}
+
+	completedData := map[string]any{
+		"provider_meta": syntheticMeta,
+	}
+	if len(respData) > 0 {
+		completedData["response"] = respData
+	}
+	if finishReason != "" {
+		completedData["finish_reason"] = finishReason
+	}
+	if usage != nil {
+		completedData["usage"] = cloneMap(usage)
+	}
+
+	events = append(events, upstream.Event{
+		Event: "response.completed",
+		Data:  completedData,
+	})
+
+	return events
 }
