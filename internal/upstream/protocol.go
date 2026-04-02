@@ -460,10 +460,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				name := stringValue(function["name"])
 				arguments := stringValue(function["arguments"])
 				if name != "" || stringValue(tool["id"]) != "" {
+					emittedDoneWithArguments := false
 					if !state.toolSent[itemID] {
 						if arguments != "" {
 							events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name, "arguments": arguments}}})
 							state.toolSent[itemID] = true
+							emittedDoneWithArguments = true
 						} else {
 							events = append(events, Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}}})
 							if state.pendingItems == nil {
@@ -472,7 +474,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 							state.pendingItems[itemID] = map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}
 						}
 					}
-					if arguments != "" {
+					if arguments != "" && !emittedDoneWithArguments {
 						events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": arguments}})
 					}
 				} else if arguments != "" {

@@ -149,9 +149,21 @@ func TestNormalizeChatFrame_ToolCallWithArgumentsInSameFrame(t *testing.T) {
 		t.Logf("  [%d] %s: %s", i, evt.Event, dataStr)
 	}
 
-	// 当 name 和 arguments 都在同一个 frame 中时
-	// normalizeChatFrame 应该发送 output_item.done（带 name 和 arguments？）
-	// 还是 output_item.done（带 name）+ function_call_arguments.delta？
+	var doneCount, deltaCount int
+	for _, evt := range events {
+		switch evt.Event {
+		case "response.output_item.done":
+			doneCount++
+		case "response.function_call_arguments.delta":
+			deltaCount++
+		}
+	}
+	if doneCount != 1 {
+		t.Fatalf("expected exactly one output_item.done, got %d events=%#v", doneCount, events)
+	}
+	if deltaCount != 0 {
+		t.Fatalf("expected same-frame complete tool call to avoid duplicate function_call_arguments.delta, got %d events=%#v", deltaCount, events)
+	}
 }
 
 func TestNormalizeChatFrame_UsageAndCompletion(t *testing.T) {
