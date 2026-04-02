@@ -2,12 +2,22 @@ package httpapi
 
 import "openai-compat-proxy/internal/model"
 
-func dedupeCanonicalToolMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
-	if len(messages) < 2 {
+func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
+	if len(messages) == 0 {
 		return messages
 	}
-	result := make([]model.CanonicalMessage, 0, len(messages))
+	filtered := make([]model.CanonicalMessage, 0, len(messages))
 	for _, msg := range messages {
+		if shouldDropToolMessageFromHistory(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	if len(filtered) < 2 {
+		return filtered
+	}
+	result := make([]model.CanonicalMessage, 0, len(filtered))
+	for _, msg := range filtered {
 		if len(result) > 0 && isDuplicateToolMessage(result[len(result)-1], msg) {
 			continue
 		}
