@@ -1365,7 +1365,9 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 		}
 		closeIdx := strings.Index(cleanText, closeTag)
 		if closeIdx == -1 {
-			newPendingThinking += cleanText
+			emitted, holdback := splitStreamingReasoningChunk(newPendingThinking+cleanText, closeTag)
+			reasoningContent += emitted
+			newPendingThinking = holdback
 			cleanText = ""
 			return
 		}
@@ -1409,7 +1411,9 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 		closeIdx := strings.Index(cleanText[openIdx+len(openTag):], closeTag)
 		if closeIdx == -1 {
 			newPendingTag = openTag
-			newPendingThinking = cleanText[openIdx+len(openTag):]
+			emitted, holdback := splitStreamingReasoningChunk(cleanText[openIdx+len(openTag):], closeTag)
+			reasoningContent += emitted
+			newPendingThinking = holdback
 			cleanText = cleanText[:openIdx]
 			break
 		}
@@ -1419,6 +1423,30 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 	}
 
 	return cleanText, reasoningContent, newPendingTag, newPendingThinking
+}
+
+func splitStreamingReasoningChunk(text, closeTag string) (emitted string, holdback string) {
+	if text == "" || closeTag == "" {
+		return text, ""
+	}
+	maxHold := len(closeTag) - 1
+	if maxHold <= 0 {
+		return text, ""
+	}
+	if len(text) < maxHold {
+		maxHold = len(text)
+	}
+	holdLen := 0
+	for n := 1; n <= maxHold; n++ {
+		suffix := text[len(text)-n:]
+		if strings.HasPrefix(closeTag, suffix) {
+			holdLen = n
+		}
+	}
+	if holdLen == 0 {
+		return text, ""
+	}
+	return text[:len(text)-holdLen], text[len(text)-holdLen:]
 }
 
 func suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText string, suppressBlankTextAfterThink bool) string {
