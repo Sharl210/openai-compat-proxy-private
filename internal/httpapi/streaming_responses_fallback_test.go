@@ -199,3 +199,39 @@ func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *
 		t.Fatalf("expected merged reasoning path to avoid synthetic ellipsis ticks, got %s", body)
 	}
 }
+
+func TestResponsesStreamSkipsWhitespaceOnlyOutputAfterThinkExtraction(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank\",\"choices\":[{\"delta\":{\"content\":\"<think>internal reasoning</think>\\n\\n\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"fetch_webpage\",\"arguments\":\"{\\\"url\\\":\\\"https://github.com/k3ss-official/g0dm0d3\\\"}\"}}]}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if strings.Contains(body, `event: response.output_text.delta`) {
+		t.Fatalf("expected whitespace-only text left after think extraction to be suppressed, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"fetch_webpage","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected tool event to remain after suppressing blank text block, got %s", body)
+	}
+}

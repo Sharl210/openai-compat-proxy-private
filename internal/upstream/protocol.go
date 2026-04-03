@@ -431,6 +431,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				if reasoningContent != "" {
 					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
 				}
+				cleanText = suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, reasoningContent)
 				if cleanText != "" {
 					events = append(events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": cleanText}})
 				}
@@ -1415,4 +1416,14 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 	}
 
 	return cleanText, reasoningContent, newPendingTag, newPendingThinking
+}
+
+func suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, reasoningContent string) string {
+	if reasoningContent == "" {
+		return cleanText
+	}
+	if strings.TrimSpace(cleanText) == "" {
+		return ""
+	}
+	return cleanText
 }
