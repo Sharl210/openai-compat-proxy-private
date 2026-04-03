@@ -83,6 +83,19 @@ func (c *Collector) Accept(evt upstream.Event) {
 			c.order = append(c.order, itemID)
 		}
 		call.Arguments += delta
+		for index := range c.outputItems {
+			item := c.outputItems[index]
+			if item == nil {
+				continue
+			}
+			if itemType, _ := item["type"].(string); itemType != "function_call" {
+				continue
+			}
+			if stringValue(item["id"]) != itemID && stringValue(item["call_id"]) != itemID {
+				continue
+			}
+			item["arguments"] = stringValue(item["arguments"]) + delta
+		}
 	case "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
 		if item == nil {
