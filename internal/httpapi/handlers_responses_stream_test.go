@@ -585,6 +585,72 @@ func TestProviderResponsesRouteStreamsMetadataAddedAndSingleArgumentsDoneForRikk
 	}
 }
 
+func TestProviderResponsesRouteDoesNotEmitMalformedFunctionArgumentsDoneForChatUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"scrape_web\",\"arguments\":\"{\\\"url\\\": \\\"https://github.com/k3ss-official/g0dm\"}}]},\"index\":0}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
+		t.Fatalf("expected malformed tool arguments to avoid synthetic arguments.done emission, got %s", body)
+	}
+	if strings.Contains(body, `"type":"response.output_item.done"`) && strings.Contains(body, `"name":"scrape_web"`) {
+		t.Fatalf("expected malformed tool arguments to avoid completed function_call emission, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"response.output_item.added"`) {
+		t.Fatalf("expected metadata-only added event to remain for malformed tool call visibility, got %s", body)
+	}
+}
+
+func TestResponsesStreamCompatibilitySuppressesMalformedFunctionArgumentsDone(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "call_1", "type": "function_call", "call_id": "call_1", "name": "scrape_web", "arguments": `{"url": "https://github.com/k3ss-official/g0dm`}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	if strings.Contains(body, `{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected malformed arguments to avoid function_call_arguments.done emission, got %s", body)
+	}
+	if strings.Contains(body, `{"item":{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm","call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected malformed arguments to avoid completed function_call emission, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected metadata-only added event to remain for malformed tool call visibility, got %s", body)
+	}
+}
+
 func testResponsesConfig(upstreamURL string) config.Config {
 	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
 }
