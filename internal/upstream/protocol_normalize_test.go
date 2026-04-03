@@ -301,6 +301,42 @@ func TestNormalizeChatFrame_DoesNotExtractThinkTagsWhenStyleDisabled(t *testing.
 	}
 }
 
+func TestNormalizeChatFrame_SuppressesWhitespaceOnlyFrameAfterThinkExtraction(t *testing.T) {
+	frames := []string{
+		`{"id":"chat-123","choices":[{"delta":{"content":"<think>internal reasoning</think>"}}]}`,
+		`{"id":"chat-123","choices":[{"delta":{"content":"\n\n"}}]}`,
+		`{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"id":"tool_0","function":{"name":"fetch_webpage"}}]}}]}`,
+	}
+
+	state := &chatNormalizationState{
+		toolIDsByIndex:   map[int]string{},
+		toolSent:         map[string]bool{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+	}
+
+	var allEvents []Event
+	for _, frameData := range frames {
+		frame := &sseFrame{Event: "chat", Data: frameData}
+		events, done, err := normalizeChatFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	for _, evt := range allEvents {
+		if evt.Event == "response.output_text.delta" {
+			t.Fatalf("expected split whitespace-only frame after think extraction to be suppressed, got %#v", allEvents)
+		}
+	}
+	if len(allEvents) < 3 {
+		t.Fatalf("expected created, reasoning, and tool events, got %#v", allEvents)
+	}
+}
+
 func TestNormalizeChatFrame_Done(t *testing.T) {
 	frame := &sseFrame{Event: "", Data: "[DONE]"}
 	state := &chatNormalizationState{}
