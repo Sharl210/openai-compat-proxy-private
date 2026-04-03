@@ -32,7 +32,7 @@ type Client struct {
 	masqueradeTarget               string
 	injectClaudeCodeMetadataUserID bool
 	injectClaudeCodeSystemPrompt   bool
-	thinkingTagStyleTwo            bool
+	upstreamThinkingTagStyle       string
 }
 
 type EventStream struct {
@@ -42,6 +42,25 @@ type EventStream struct {
 	readNext      func(*bufio.Scanner) ([]Event, error)
 	archive       *debugarchive.ArchiveWriter
 	seq           int64
+}
+
+func (s *EventStream) FirstPendingResponseID() string {
+	if s == nil {
+		return ""
+	}
+	for _, evt := range s.pendingEvents {
+		if evt.Event != "response.created" {
+			continue
+		}
+		response, _ := evt.Data["response"].(map[string]any)
+		if response == nil {
+			continue
+		}
+		if id, _ := response["id"].(string); id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 var sseScannerInitialBufferSize = 64 * 1024
@@ -78,7 +97,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		masqueradeTarget:               cfg.MasqueradeTarget,
 		injectClaudeCodeMetadataUserID: cfg.InjectClaudeCodeMetadataUserID,
 		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
-		thinkingTagStyleTwo:            cfg.ThinkingTagStyleTwo,
+		upstreamThinkingTagStyle:       cfg.UpstreamThinkingTagStyle,
 	}
 }
 
@@ -447,7 +466,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		return nil, err
 	}
-	return normalizeResponsePayload(endpointType, payload, c.thinkingTagStyleTwo), nil
+	return normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle), nil
 }
 
 func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string) (*EventStream, error) {
@@ -468,7 +487,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.thinkingTagStyleTwo, originalToolIDs, requestID), archive: debugarchive.ArchiveWriterFromContext(ctx)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, originalToolIDs, requestID), archive: debugarchive.ArchiveWriterFromContext(ctx)}
 	if err := stream.prime(); err != nil {
 		_ = stream.Close()
 		return nil, err

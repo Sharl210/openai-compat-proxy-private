@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"openai-compat-proxy/internal/config"
 )
 
 // normalizeChatFrame 的隔离测试
@@ -209,7 +211,7 @@ func TestChatEventBatchReader_FinalizesOnEOFWithoutCompletedEvent(t *testing.T) 
 	}, "\n")
 
 	scanner := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(false, nil, "req-test")
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "req-test")
 
 	var allEvents []Event
 	for {
@@ -267,6 +269,38 @@ func TestNormalizeChatFrame_ReasoningContent(t *testing.T) {
 	}
 }
 
+func TestNormalizeChatFrame_DoesNotExtractThinkTagsWhenStyleDisabled(t *testing.T) {
+	frame := &sseFrame{Event: "chat", Data: `{"id":"chat-123","choices":[{"delta":{"content":"<think>internal reasoning</think>final answer"}}]}`}
+	state := &chatNormalizationState{
+		toolIDsByIndex:   map[int]string{},
+		toolSent:         map[string]bool{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleOff,
+	}
+
+	events, done, err := normalizeChatFrame(frame, state)
+	if err != nil {
+		t.Fatalf("normalizeChatFrame error: %v", err)
+	}
+	if done {
+		t.Fatal("unexpected done")
+	}
+	if len(events) < 2 {
+		t.Fatalf("expected created + output_text events, got %#v", events)
+	}
+	for _, evt := range events {
+		if evt.Event == "response.reasoning.delta" {
+			t.Fatalf("expected disabled style to avoid extracting think tags, got %#v", events)
+		}
+	}
+	last := events[len(events)-1]
+	if last.Event != "response.output_text.delta" {
+		t.Fatalf("expected final event output_text.delta, got %#v", events)
+	}
+	if delta := stringValue(last.Data["delta"]); delta != "<think>internal reasoning</think>final answer" {
+		t.Fatalf("expected original text preserved, got %#v", events)
+	}
+}
+
 func TestNormalizeChatFrame_Done(t *testing.T) {
 	frame := &sseFrame{Event: "", Data: "[DONE]"}
 	state := &chatNormalizationState{}
@@ -317,7 +351,7 @@ data: [DONE]
 `
 
 	reader := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(false, nil, "")
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "")
 
 	var allEvents []Event
 	for {
