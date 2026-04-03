@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
 )
 
@@ -50,5 +53,149 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	}
 	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n"`) {
 		t.Fatalf("expected synthetic reasoning done item to include non-empty summary text, got %s", body)
+	}
+}
+
+func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, ": upstream-ready\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(700 * time.Millisecond)
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	originalTick := syntheticReasoningTickInterval
+	syntheticReasoningTickInterval = 10 * time.Millisecond
+	defer func() {
+		syntheticReasoningTickInterval = originalTick
+	}()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	textIdx := strings.Index(body, `event: response.output_text.delta`)
+	if textIdx == -1 {
+		t.Fatalf("expected output text event, got %s", body)
+	}
+	beforeText := body[:textIdx]
+	createdIdx := strings.Index(beforeText, `event: response.created`)
+	addedIdx := strings.Index(beforeText, `event: response.output_item.added`)
+	if createdIdx == -1 || addedIdx == -1 || createdIdx > addedIdx {
+		t.Fatalf("expected response.created before synthetic reasoning block, got %s", body)
+	}
+	if count := strings.Count(body, `event: response.created`); count != 1 {
+		t.Fatalf("expected exactly one response.created event, got count=%d body=%s", count, body)
+	}
+	if !strings.Contains(beforeText, `event: response.output_item.added`) || !strings.Contains(beforeText, `event: response.reasoning_summary_text.delta`) {
+		t.Fatalf("expected visible synthetic reasoning block before first text, got %s", body)
+	}
+	if strings.Contains(beforeText, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {
+		t.Fatalf("expected no ellipsis tick before first text, got %s", body)
+	}
+}
+
+func TestResponsesStreamSkipsSyntheticReasoningWhenChatThinkTagsArePassedThrough(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"<think>internal reasoning</think>final answer\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleOff))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected no synthetic reasoning block when think tags are passed through, got %s", body)
+	}
+	if !strings.Contains(body, `event: response.output_text.delta`) {
+		t.Fatalf("expected passthrough output text, got %s", body)
+	}
+}
+
+func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"<think>internal reasoning</think>final answer\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
+	mergedReasoningIdx := strings.Index(body, `{"delta":"internal reasoning","type":"response.reasoning_summary_text.delta"}`)
+	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
+	textIdx := strings.Index(body, `{"delta":"final answer","type":"response.output_text.delta"}`)
+	if proxyAddedIdx == -1 || mergedReasoningIdx == -1 || proxyDoneIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected merged synthetic reasoning lifecycle and final text, got %s", body)
+	}
+	if !(proxyAddedIdx < mergedReasoningIdx && mergedReasoningIdx < proxyDoneIdx && proxyDoneIdx < textIdx) {
+		t.Fatalf("expected merged reasoning to stay in rs_proxy until text starts, got %s", body)
+	}
+	if strings.Contains(body, `<think>`) || strings.Contains(body, `</think>`) {
+		t.Fatalf("expected think tags to be removed from final output text, got %s", body)
+	}
+	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\ninternal reasoning\n","type":"summary_text"}]`) {
+		t.Fatalf("expected rs_proxy summary to include merged real reasoning text, got %s", body)
+	}
+	if strings.Contains(body, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {
+		t.Fatalf("expected merged reasoning path to avoid synthetic ellipsis ticks, got %s", body)
 	}
 }

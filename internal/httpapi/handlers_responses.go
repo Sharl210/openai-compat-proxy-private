@@ -97,7 +97,7 @@ func handleResponses() http.HandlerFunc {
 			}
 			defer stream.Close()
 			flusher := startSSE(w)
-			result, err := writeResponsesSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, usageRecorder)
+			result, err := writeResponsesSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder)
 			if err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
