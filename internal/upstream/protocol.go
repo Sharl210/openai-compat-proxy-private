@@ -331,20 +331,21 @@ func finalizeChatEventsOnEOF(state *chatNormalizationState) []Event {
 }
 
 type chatNormalizationState struct {
-	toolIDsByIndex     map[int]string
-	toolSent           map[string]bool
-	usage              map[string]any
-	createdSent        bool
-	completed          bool
-	pendingFinish      string
-	pendingItems       map[string]map[string]any
-	pendingThinkingTag string
-	pendingThinking    string
-	thinkingTagStyle   string
-	originalToolIDs    map[int]string
-	responseID         string
-	requestID          string
-	provider           string
+	toolIDsByIndex              map[int]string
+	toolSent                    map[string]bool
+	usage                       map[string]any
+	createdSent                 bool
+	completed                   bool
+	pendingFinish               string
+	pendingItems                map[string]map[string]any
+	pendingThinkingTag          string
+	pendingThinking             string
+	thinkingTagStyle            string
+	suppressBlankTextAfterThink bool
+	originalToolIDs             map[int]string
+	responseID                  string
+	requestID                   string
+	provider                    string
 }
 
 func shadowRecord(events []Event, frame *sseFrame, provider string) {
@@ -428,11 +429,13 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				cleanText, reasoningContent, pendingTag, pendingContent := extractContentAndReasoningTagsWithState(text, state.pendingThinkingTag, state.pendingThinking, state.thinkingTagStyle)
 				state.pendingThinkingTag = pendingTag
 				state.pendingThinking = pendingContent
+				state.suppressBlankTextAfterThink = state.suppressBlankTextAfterThink || reasoningContent != ""
 				if reasoningContent != "" {
 					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
 				}
-				cleanText = suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, reasoningContent)
+				cleanText = suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, state.suppressBlankTextAfterThink)
 				if cleanText != "" {
+					state.suppressBlankTextAfterThink = false
 					events = append(events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": cleanText}})
 				}
 			}
@@ -1418,8 +1421,8 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 	return cleanText, reasoningContent, newPendingTag, newPendingThinking
 }
 
-func suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, reasoningContent string) string {
-	if reasoningContent == "" {
+func suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText string, suppressBlankTextAfterThink bool) string {
+	if !suppressBlankTextAfterThink {
 		return cleanText
 	}
 	if strings.TrimSpace(cleanText) == "" {
