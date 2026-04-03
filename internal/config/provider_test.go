@@ -221,6 +221,55 @@ func TestLoadProviderFileRejectsInvalidReasoningSuffixBooleanValues(t *testing.T
 	}
 }
 
+func TestLoadProviderFileParsesThinkingTagStyleAsStrictBoolean(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"UPSTREAM_THINKING_TAG_STYLE=true",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamThinkingTagStyle != UpstreamThinkingTagStyleLegacy {
+		t.Fatalf("expected true to enable think tag parsing, got %q", provider.UpstreamThinkingTagStyle)
+	}
+
+	providerBody = strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"UPSTREAM_THINKING_TAG_STYLE=false",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	provider, err = loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamThinkingTagStyle != UpstreamThinkingTagStyleOff {
+		t.Fatalf("expected false to disable think tag parsing, got %q", provider.UpstreamThinkingTagStyle)
+	}
+
+	providerBody = strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"UPSTREAM_THINKING_TAG_STYLE=legacy",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	if _, err := loadProviderFile(providerEnvPath); err == nil {
+		t.Fatalf("expected non-boolean UPSTREAM_THINKING_TAG_STYLE to fail validation")
+	}
+}
+
 func TestLoadProviderFileRejectsInvalidThinkingMappingBooleanValue(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

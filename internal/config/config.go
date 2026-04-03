@@ -33,7 +33,7 @@ type Config struct {
 	TotalTimeout                   time.Duration
 	UpstreamRetryCount             int
 	UpstreamRetryDelay             time.Duration
-	ThinkingTagStyleTwo            bool
+	UpstreamThinkingTagStyle       string
 	LogFilePath                    string
 	LogMaxRequests                 int
 	LogMaxBodySizeMB               float64
@@ -54,6 +54,7 @@ func Default() Config {
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
+		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 "logs",
 		LogMaxRequests:              50,
@@ -166,6 +167,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateStrictBool(values, "LOG_ENABLE"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "LOG_INCLUDE_BODIES"); err != nil {
 		return err
 	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {

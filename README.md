@@ -267,6 +267,7 @@ anthropic-version: 2023-06-01
 | `UPSTREAM_BASE_URL` | 上游站点根地址 |
 | `UPSTREAM_API_KEY` | 默认上游 key |
 | `UPSTREAM_ENDPOINT_TYPE` | 当前 provider 内部统一使用的上游协议：`responses/chat/anthropic` |
+| `UPSTREAM_THINKING_TAG_STYLE` | 仅当 `UPSTREAM_ENDPOINT_TYPE=chat` 时生效：必须写成布尔值；`true`=拆分 think 标签为思考内容，`false`=正文原样透传 |
 | `SUPPORTS_CHAT` | 是否开放 chat/completions 公开端口 |
 | `SUPPORTS_RESPONSES` | 是否开放 responses 公开端口 |
 | `SUPPORTS_MODELS` | 是否开放 models |
