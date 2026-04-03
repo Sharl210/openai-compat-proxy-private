@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,8 +24,9 @@ func TestResponsesNonStreamPassesThroughPlainTextUpstreamError(t *testing.T) {
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider:      "openai",
-		EnableLegacyV1Routes: true,
+		DefaultProvider:          "openai",
+		EnableLegacyV1Routes:     true,
+		UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
 		Providers: []config.ProviderConfig{{
 			ID:                 "openai",
 			Enabled:            true,
@@ -95,27 +95,27 @@ func TestResponsesStreamReturnsUpstreamErrorBeforeStartingSSE(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected upstream status 401 to be preserved, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected stream to stay in SSE protocol after placeholder prelude, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("expected JSON body, got decode error %v body=%s", err, rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, "代理层占位") {
+		t.Fatalf("expected early synthetic placeholder before upstream auth error, got %s", body)
 	}
-	if got, _ := payload["detail"].(string); got != "bad key" {
-		t.Fatalf("expected upstream detail to be preserved, got %#v", payload)
+	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_error"`) {
+		t.Fatalf("expected SSE terminal upstream_error event, got %s", body)
 	}
-	if got, _ := payload["message"].(string); got != "upstream auth failed" {
-		t.Fatalf("expected JSON message with retry notice, got %#v", payload)
+	if !strings.Contains(body, `upstream auth failed`) || !strings.Contains(body, `bad key`) {
+		t.Fatalf("expected upstream error detail to remain in terminal SSE payload, got %s", body)
 	}
 	if attempts.Load() != 1 {
 		t.Fatalf("expected unauthorized upstream error to skip retries, got %d attempts", attempts.Load())
 	}
-	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
-		t.Fatalf("expected json content type to be preserved, got %q", got)
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		t.Fatalf("expected SSE content type after prelude starts, got %q", got)
 	}
-	if got := rec.Header().Get("X-Accel-Buffering"); got != "" {
-		t.Fatalf("expected SSE headers to be absent when upstream rejected before stream start, got X-Accel-Buffering=%q", got)
+	if got := rec.Header().Get("X-Accel-Buffering"); got != "no" {
+		t.Fatalf("expected SSE headers to remain present after prelude starts, got X-Accel-Buffering=%q", got)
 	}
 }
 

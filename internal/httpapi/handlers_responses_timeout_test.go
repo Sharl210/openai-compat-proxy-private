@@ -21,9 +21,10 @@ func TestResponsesStreamFirstByteTimeoutReturnsGatewayTimeoutJSON(t *testing.T) 
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider:      "openai",
-		EnableLegacyV1Routes: true,
-		FirstByteTimeout:     50 * time.Millisecond,
+		DefaultProvider:          "openai",
+		EnableLegacyV1Routes:     true,
+		FirstByteTimeout:         50 * time.Millisecond,
+		UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
 		Providers: []config.ProviderConfig{{
 			ID:                "openai",
 			Enabled:           true,
@@ -38,16 +39,15 @@ func TestResponsesStreamFirstByteTimeoutReturnsGatewayTimeoutJSON(t *testing.T) 
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusGatewayTimeout {
-		t.Fatalf("expected status 504, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 after SSE prelude starts, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("expected json timeout body, got decode error %v body=%s", err, rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, "代理层占位") {
+		t.Fatalf("expected timeout path to keep early synthetic placeholder, got %s", body)
 	}
-	errMap, _ := payload["error"].(map[string]any)
-	if got, _ := errMap["code"].(string); got != "upstream_timeout" {
-		t.Fatalf("expected upstream_timeout code, got %#v", payload)
+	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_timeout"`) {
+		t.Fatalf("expected SSE timeout terminal event after prelude, got %s", body)
 	}
 }
 
@@ -61,9 +61,10 @@ func TestResponsesStreamUsesProviderScopedFirstByteTimeoutOverride(t *testing.T)
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider:      "openai",
-		EnableLegacyV1Routes: true,
-		FirstByteTimeout:     5 * time.Second,
+		DefaultProvider:          "openai",
+		EnableLegacyV1Routes:     true,
+		FirstByteTimeout:         5 * time.Second,
+		UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
 		Providers: []config.ProviderConfig{{
 			ID:                       "openai",
 			Enabled:                  true,
@@ -79,8 +80,12 @@ func TestResponsesStreamUsesProviderScopedFirstByteTimeoutOverride(t *testing.T)
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusGatewayTimeout {
-		t.Fatalf("expected provider-scoped timeout to return 504, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected provider-scoped timeout to stay in SSE after prelude, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_timeout"`) {
+		t.Fatalf("expected provider-scoped first-byte timeout to emit SSE terminal timeout, got %s", body)
 	}
 }
 

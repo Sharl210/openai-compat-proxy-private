@@ -184,7 +184,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, true)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -257,6 +257,14 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 }
 
 func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest, authorization string) (*EventStream, error) {
+	return c.openPreparedEventStream(ctx, req, authorization, true)
+}
+
+func (c *Client) OpenEventStreamLazy(ctx context.Context, req model.CanonicalRequest, authorization string) (*EventStream, error) {
+	return c.openPreparedEventStream(ctx, req, authorization, false)
+}
+
+func (c *Client) openPreparedEventStream(ctx context.Context, req model.CanonicalRequest, authorization string, primeFirstEvent bool) (*EventStream, error) {
 	endpointType := c.endpointType()
 	body, err := buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
 	if err != nil {
@@ -280,7 +288,7 @@ func (c *Client) OpenEventStream(ctx context.Context, req model.CanonicalRequest
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, primeFirstEvent)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -346,7 +354,7 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 }
 
 func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, nil)
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, nil, true)
 	if err != nil {
 		return err
 	}
@@ -354,12 +362,12 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, originalToolIDs map[int]string) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, primeFirstEvent bool) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs, requestID)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs, requestID, primeFirstEvent)
 		if err == nil {
 			return stream, nil
 		}
@@ -469,7 +477,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	return normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle), nil
 }
 
-func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string) (*EventStream, error) {
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool) (*EventStream, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -488,9 +496,11 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 	}
 
 	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, originalToolIDs, requestID), archive: debugarchive.ArchiveWriterFromContext(ctx)}
-	if err := stream.prime(); err != nil {
-		_ = stream.Close()
-		return nil, err
+	if primeFirstEvent {
+		if err := stream.prime(); err != nil {
+			_ = stream.Close()
+			return nil, err
+		}
 	}
 	return stream, nil
 }

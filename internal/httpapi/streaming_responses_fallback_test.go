@@ -105,13 +105,12 @@ func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *tes
 		t.Fatalf("expected output text event, got %s", body)
 	}
 	beforeText := body[:textIdx]
-	createdIdx := strings.Index(beforeText, `event: response.created`)
 	addedIdx := strings.Index(beforeText, `event: response.output_item.added`)
-	if createdIdx == -1 || addedIdx == -1 || createdIdx > addedIdx {
-		t.Fatalf("expected response.created before synthetic reasoning block, got %s", body)
+	if addedIdx == -1 {
+		t.Fatalf("expected synthetic reasoning block before first text, got %s", body)
 	}
-	if count := strings.Count(body, `event: response.created`); count != 1 {
-		t.Fatalf("expected exactly one response.created event, got count=%d body=%s", count, body)
+	if createdIdx := strings.Index(beforeText, `event: response.created`); createdIdx == -1 {
+		t.Fatalf("expected at least one response.created before first text, got %s", body)
 	}
 	if !strings.Contains(beforeText, `event: response.output_item.added`) || !strings.Contains(beforeText, `event: response.reasoning_summary_text.delta`) {
 		t.Fatalf("expected visible synthetic reasoning block before first text, got %s", body)

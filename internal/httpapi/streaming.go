@@ -214,6 +214,9 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 		if toolState.arguments.Len() > 0 {
 			itemCopy["arguments"] = toolState.arguments.String()
 		}
+		if compatCompleteToolArgs && toolState.arguments.Len() > 0 && !isValidToolArgumentsJSON(toolState.arguments.String()) {
+			continue
+		}
 		if compatCompleteToolArgs && !toolState.addedSent {
 			addedItem := cloneJSONValueForResponse(toolState.item).(map[string]any)
 			delete(addedItem, "arguments")
@@ -221,15 +224,76 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 			h.addToolItemAddedEvent(addedItem)
 			toolState.addedSent = true
 		}
-		if compatCompleteToolArgs && toolState.arguments.Len() > 0 && !isValidToolArgumentsJSON(toolState.arguments.String()) {
-			continue
-		}
 		h.addToolItemDoneEvent(itemCopy)
 		if compatCompleteToolArgs && toolState.arguments.Len() > 0 {
 			h.addFunctionCallArgumentsDoneEvent(itemID, toolState.arguments.String())
 		}
 		toolState.doneSent = true
 	}
+}
+
+func newResponsesStreamState(requestID, upstreamEndpointType string) *responsesStreamState {
+	return &responsesStreamState{
+		toolItems:            map[string]*responsesToolItemState{},
+		toolIDAliases:        map[string]string{},
+		upstreamEndpointType: upstreamEndpointType,
+		requestID:            requestID,
+	}
+}
+
+func cloneResponsesStreamState(initialState *responsesStreamState, requestID, upstreamEndpointType string) *responsesStreamState {
+	state := &responsesStreamState{
+		toolItems:            map[string]*responsesToolItemState{},
+		toolIDAliases:        map[string]string{},
+		upstreamEndpointType: upstreamEndpointType,
+		requestID:            requestID,
+	}
+	if initialState == nil {
+		return state
+	}
+	state.createdSent = initialState.createdSent
+	state.createdResponseID = initialState.createdResponseID
+	state.textStarted = initialState.textStarted
+	state.realReasoningSeen = initialState.realReasoningSeen
+	state.planningSent = initialState.planningSent
+	state.toolStatusSent = initialState.toolStatusSent
+	state.reasoningStarted = initialState.reasoningStarted
+	state.reasoningClosed = initialState.reasoningClosed
+	state.syntheticInjected = initialState.syntheticInjected
+	state.toolItems = initialState.toolItems
+	state.toolIDAliases = initialState.toolIDAliases
+	state.toolOrder = initialState.toolOrder
+	state.terminalSeen = initialState.terminalSeen
+	state.terminalFailure = initialState.terminalFailure
+	if summary := initialState.syntheticSummary.String(); summary != "" {
+		state.syntheticSummary.WriteString(summary)
+	}
+	if state.toolItems == nil {
+		state.toolItems = map[string]*responsesToolItemState{}
+	}
+	if state.toolIDAliases == nil {
+		state.toolIDAliases = map[string]string{}
+	}
+	if state.requestID == "" {
+		state.requestID = requestID
+	}
+	if state.upstreamEndpointType == "" {
+		state.upstreamEndpointType = upstreamEndpointType
+	}
+	return state
+}
+
+func startResponsesSyntheticPrelude(w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType, thinkingTagStyle string) (*responsesStreamState, error) {
+	state := newResponsesStreamState(req.RequestID, upstreamEndpointType)
+	if err := writeSSEPadding(w, flusher); err != nil {
+		return nil, err
+	}
+	if shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle) {
+		if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPlaceholder); err != nil {
+			return nil, err
+		}
+	}
+	return state, nil
 }
 
 func (h *responseEventWriterHelper) closeSyntheticReasoning() {
@@ -664,8 +728,8 @@ func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
 	return normalizeHTTPAPIUpstreamEndpointType(upstreamEndpointType) == config.UpstreamEndpointTypeChat
 }
 
-func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
-	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: upstreamEndpointType, requestID: req.RequestID}
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc, initialState *responsesStreamState) (aggregate.Result, error) {
+	state := cloneResponsesStreamState(initialState, req.RequestID, upstreamEndpointType)
 	collector := aggregate.NewCollector()
 	writer := &ResponsesEventWriter{w: w, flusher: flusher}
 	if shouldEmitSyntheticResponsesCreated(upstreamEndpointType) {
@@ -680,8 +744,8 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		}
 	}
 	injectSyntheticReasoning := shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle)
-	if injectSyntheticReasoning {
-		if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
+	if injectSyntheticReasoning && !state.syntheticInjected {
+		if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPlaceholder); err != nil {
 			return aggregate.Result{}, err
 		}
 	}
@@ -694,7 +758,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			if evt.Event == "response.output_text.delta" {
 				state.textStarted = true
 			}
-			return writeResponsesEvent(writer, &state, evt, usageRecorder)
+			return writeResponsesEvent(writer, state, evt, usageRecorder)
 		},
 	)
 	if err != nil && !state.terminalSeen {

@@ -111,7 +111,9 @@ func providerConfigForRequest(r *http.Request) config.Config {
 			if provider.MasqueradeTarget != "" {
 				providerCfg.MasqueradeTarget = provider.MasqueradeTarget
 			}
-			providerCfg.UpstreamThinkingTagStyle = provider.UpstreamThinkingTagStyle
+			if provider.UpstreamThinkingTagStyle != "" {
+				providerCfg.UpstreamThinkingTagStyle = provider.UpstreamThinkingTagStyle
+			}
 		}
 	}
 	return providerCfg

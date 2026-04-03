@@ -73,7 +73,7 @@ func handleChat() http.HandlerFunc {
 		}
 
 		if canon.Stream {
-			stream, err := client.OpenEventStream(ctx, canon, authorization)
+			stream, err := client.OpenEventStreamLazy(ctx, canon, authorization)
 			if err != nil {
 				if isUpstreamTimeout(err, ctx) {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
