@@ -1,102 +1,53 @@
 # openai-compat-proxy
 
-一个 Go 单二进制代理：**每个 provider 只选一种上游正规协议**，代理层继续统一对外提供三类兼容接口。
+一个 Go 单二进制代理：**每个 provider 只选一种上游正规协议**，但对外继续统一提供 OpenAI Responses、Chat Completions 和 Anthropic Messages 三套兼容入口。
 
-支持的上游协议类型：
-
-- `responses` → OpenAI `/responses`
-- `chat` → OpenAI `/chat/completions`
-- `anthropic` → Anthropic `/messages`
-
-对外统一提供：
-
-- `POST /v1/responses`
-- `POST /v1/chat/completions`
-- `POST /v1/messages`
-- `GET /v1/models`
+> 适合把不同上游站点收敛到一套稳定入口，同时保留多 provider 路由、热加载、流式转发、工具调用、reasoning 兼容和部署脚本。
 
 ---
 
-## 你现在能得到什么
+## ✨ 现在能做什么
 
-### 1. 多 provider 路由
-
-- 支持 `providers/*.env` 管理多个 provider
-- 支持显式路由：`/{providerId}/v1/*`
-- 支持默认 provider，兼容裸 `/v1/*`
-
-### 2. provider 级统一上游协议
-
-每个 provider 通过一个字段决定自己内部统一走哪条上游链：
-
-```env
-UPSTREAM_ENDPOINT_TYPE=responses
-```
-
-可选值：
-
-- `responses`
-- `chat`
-- `anthropic`
-
-这个字段**只影响代理内部如何请求上游**，不影响对外公开的三个兼容端口。
-
-### 3. 三出口兼容分发
-
-无论 provider 选的是哪种上游协议，代理层都尽量统一分发成：
-
-- Responses 输出
-- Chat Completions 输出
-- Anthropic Messages 输出
-
-### 4. 代理增强能力
-
-- 流式与非流式双模式
-- tool / function calling 映射
-- `/v1/responses` 下游的 `function_call_output` 在上游为 `responses/chat/anthropic` 时都能继续参与多轮工具调用回传
-- thinking / reasoning 映射
-- refusal 映射
-- usage 归一化映射与透传
-- provider prompt 注入
-- model map + reasoning suffix
-- 流式失败终态补发
-
-### 5. 多模态支持（当前已接通的主路径）
-
-- 文本
-- image URL / input image
-- file
-- OpenAI 侧 input audio
-
-说明：`/v1/messages` 兼容入口当前对 `input_audio` 走**显式拒绝**，不会再静默吞掉；这一限制与当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 无关。
+| 能力 | 当前状态 | 说明 |
+|---|---|---|
+| 多 provider 路由 | ✅ | 支持 `providers/*.env`、显式 `/{providerId}/v1/*` 和默认 provider 裸 `/v1/*` |
+| 三套兼容入口 | ✅ | `POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`GET /v1/models` |
+| provider 内部统一走一种上游协议 | ✅ | `UPSTREAM_ENDPOINT_TYPE=responses/chat/anthropic` |
+| 流式 / 非流式 | ✅ | 支持 SSE 转发，也支持 `proxy_buffer` / `upstream_non_stream` |
+| 工具调用与多轮 tool result 回传 | ✅ | `/v1/responses` 主路径最完整 |
+| reasoning / thinking 兼容 | ✅ | 支持 reasoning 映射、suffix → effort、Anthropic thinking 映射 |
+| 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0/$1/$2` 占位符、`MANUAL_MODELS` |
+| provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
+| 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
+| 调试归档 | ✅ | `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 写出 `request/raw/canonical/final.ndjson` |
+| 健康检查与 Linux 部署脚本 | ✅ | 自带 `healthz`、deploy / restart / stop / uninstall |
 
 ---
 
-## 1Panel / Nginx 反代建议
+## 🧭 工作方式
 
-如果你前面还有 1Panel / OpenResty 反代，建议先加：
-
-```nginx
-proxy_connect_timeout 1200s;
-proxy_send_timeout 1200s;
-proxy_read_timeout 1200s;
-send_timeout 1200s;
+```mermaid
+flowchart LR
+    A[客户端] --> B[/responses\n/chat/completions\n/messages\n/models]
+    B --> C{按路由选 provider}
+    C --> D[provider A\nresponses/chat/anthropic]
+    C --> E[provider B\nresponses/chat/anthropic]
+    D --> F[上游站点]
+    E --> F
+    B --> G[协议兼容 / streaming / tool 调用 / reasoning / usage]
 ```
 
-否则长思考、长流式场景容易被网关提前掐掉。
+核心思路很简单：
+
+1. **路由先选 provider**
+2. **provider 决定内部走哪条上游正规协议**
+3. **代理层继续统一对外暴露三套兼容接口**
 
 ---
 
-## 快速启动
+## 🚀 快速启动
 
-### 1. 拉代码
-
-```bash
-git clone https://github.com/Sharl210/openai-compat-proxy-private.git
-cd openai-compat-proxy-private
-```
-
-### 2. 准备根配置
+### 1）准备根配置
 
 ```bash
 cp .env.example .env
@@ -106,12 +57,12 @@ cp .env.example .env
 
 ```env
 LISTEN_ADDR=:21021
-CACHE_INFO_TIMEZONE=Asia/Shanghai
 PROXY_API_KEY=
 
 PROVIDERS_DIR=./providers
 DEFAULT_PROVIDER=openai
 ENABLE_LEGACY_V1_ROUTES=true
+
 DOWNSTREAM_NON_STREAM_STRATEGY=proxy_buffer
 
 CONNECT_TIMEOUT=10s
@@ -120,29 +71,20 @@ IDLE_TIMEOUT=3m
 TOTAL_TIMEOUT=1h
 
 LOG_ENABLE=true
+LOG_FILE_PATH=logs
 LOG_MAX_BODY_SIZE_MB=5
 LOG_MAX_REQUESTS=50
+
 OPENAI_COMPAT_DEBUG_ARCHIVE_DIR=
 ```
 
-### 3. 准备 provider
+### 2）准备 provider
 
 ```bash
 cp providers/openai.env.example providers/openai.env
 ```
 
-如果你要多个 provider，就复制多份：
-
-```bash
-cp providers/openai.env.example providers/openai.env
-cp providers/openai.env.example providers/anthropic.env
-```
-
-程序只读取 `providers/*.env`，忽略 `providers/*.env.example`。
-
-### 4. 配置 provider
-
-最关键的是这几个字段：
+最小示例：
 
 ```env
 PROVIDER_ID=openai
@@ -158,14 +100,14 @@ SUPPORTS_MODELS=true
 SUPPORTS_ANTHROPIC_MESSAGES=true
 ```
 
-### 5. 启动
+### 3）启动
 
 ```bash
 chmod +x scripts/*.sh
-./scripts/deploy-linux.sh
+bash scripts/deploy-linux.sh
 ```
 
-健康检查：
+### 4）健康检查
 
 ```bash
 curl http://127.0.0.1:21021/healthz
@@ -173,7 +115,7 @@ curl http://127.0.0.1:21021/healthz
 
 ---
 
-## 路由规则
+## 🌐 路由规则
 
 ### 推荐：显式 provider 路由
 
@@ -197,237 +139,208 @@ curl http://127.0.0.1:21021/healthz
 - `/v1/messages`
 - `/v1/models`
 
-### Anthropic Messages 头要求
-
-请求 `/v1/messages` 或 `/{providerId}/v1/messages` 时，必须带：
-
-```text
-anthropic-version: 2023-06-01
-```
-
-缺少这个头会直接返回 `400 invalid_request`。
-当前代码只校验这个头**存在且非空**；如果你想和 Anthropic 官方默认契约保持一致，建议仍然传 `2023-06-01`。
-
-说明：这是 `/v1/messages` 这个下游兼容端口本身的契约要求。
-无论当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 是 `anthropic`、`responses` 还是 `chat`，这个头都必须带。
-
 ---
 
-## 鉴权约定
+## 🔐 鉴权约定
 
-代理层支持：
+代理层支持以下 header：
 
 - `Authorization: Bearer <proxy-key>`
 - `X-API-Key: <proxy-key>`
 - `Api-Key: <proxy-key>`
 
-上游鉴权透传支持：
+上游 key 透传支持：
 
 - `X-Upstream-Authorization: Bearer <real-upstream-key>`
 
-如果请求里没有传 `X-Upstream-Authorization`：
+如果请求里没有 `X-Upstream-Authorization`：
 
-- 当当前路由实际不要求代理鉴权时，`Authorization: Bearer ...` 会直接作为上游鉴权透传
-- 对 Anthropic / Claude 风格客户端，如果当前路由实际不要求代理鉴权，`X-API-Key` / `x-api-key` 也会被当成上游 key 使用
-- 否则回退到当前 provider 的 `UPSTREAM_API_KEY`
+- 当当前路由**不要求代理鉴权**时，`Authorization` 可能直接作为上游鉴权透传
+- 对 Anthropic / Claude 风格客户端，当当前路由**不要求代理鉴权**时，`X-API-Key` / `x-api-key` 也可以直接作为上游 key
+- 否则回退到 provider 自己的 `UPSTREAM_API_KEY`
 
 ---
 
-## 配置说明
+## 🧩 关键能力说明
+
+### 1. provider 内部统一上游协议
+
+每个 provider 通过：
+
+```env
+UPSTREAM_ENDPOINT_TYPE=responses
+```
+
+可选值：
+
+- `responses`
+- `chat`
+- `anthropic`
+
+它只决定**代理内部如何请求上游**，不影响对外公开的三套兼容入口。
+
+### 2. 流式与非流式策略
+
+`DOWNSTREAM_NON_STREAM_STRATEGY` / `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` 支持：
+
+- `proxy_buffer`：下游非流时，代理继续向上游请求 SSE，再本地聚合
+- `upstream_non_stream`：下游非流时，代理直接向上游请求非流 JSON
+- `UPSTREAM_THINKING_TAG_STYLE=true/false`：当 `UPSTREAM_ENDPOINT_TYPE=chat` 时，决定是否把 `<think>` / `<thinking>` 标签拆成 reasoning 内容
+
+### 3. 模型映射与 reasoning suffix
+
+支持：
+
+- `MODEL_MAP` 通配符映射
+- `$0/$1/$2` 占位符替换
+- `MANUAL_MODELS` 手动补模型
+- `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-low/-medium/-high/-xhigh`
+- `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
+- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix effort 自动映射到 Anthropic thinking
+
+### 4. provider 级系统提示词
+
+支持：
+
+- `SYSTEM_PROMPT_FILES=prompt.md,...`
+- `SYSTEM_PROMPT_POSITION=prepend|append`
+
+对应文件内容支持热加载。
+
+### 5. 调试归档与日志
+
+- `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS`：结构化日志
+- `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`：按 `request_id` 写出：
+  - `request.ndjson`
+  - `raw.ndjson`
+  - `canonical.ndjson`
+  - `final.ndjson`
+
+---
+
+## 🧪 伪装客户端（实验性）
+
+通过根 `.env` 的 `UPSTREAM_MASQUERADE_TARGET`，或 provider `.env` 的 `MASQUERADE_TARGET` 控制：
+
+| 值 | 作用 |
+|---|---|
+| `opencode` | 注入 OpenCode 风格 `User-Agent` + `originator` |
+| `claude` | 注入 Claude Code 风格 `User-Agent`、`X-App`、`anthropic-beta`、`X-Stainless-*` |
+| `codex` | 注入 Codex CLI 风格 `User-Agent`、`originator`、residency header |
+| `none` | 显式禁用伪装 |
+| 留空 | provider 级留空表示继承根配置 |
+
+Claude 相关还有两个配套开关：
+
+- 根级：
+  - `UPSTREAM_INJECT_METADATA_USER_ID`
+  - `UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT`
+- provider 级：
+  - `INJECT_CLAUDE_CODE_METADATA_USER_ID`
+  - `INJECT_CLAUDE_CODE_SYSTEM_PROMPT`
+
+其中 provider 级这两个字段现在支持：
+
+- **留空 = 继承根配置**
+- **显式 true / false = 覆盖根配置**
+
+> 根级和 provider 级的 `UPSTREAM_USER_AGENT` 都会优先于伪装目标对 User-Agent 的修改，但不会改变其他伪装专属头。
+
+---
+
+## ⚙️ 配置与热加载摘要
+
+完整字段以 `.env.example` 和 `providers/openai.env.example` 为准。这里只列最关键的运行时语义。
 
 ### 根 `.env`
 
-最常用字段：
-
-| 字段 | 说明 | 热加载 |
+| 字段组 | 例子 | 热加载 |
 |---|---|---|
-| `LISTEN_ADDR` | 监听地址 | 否，修改后需重启 |
-| `CACHE_INFO_TIMEZONE` | 统计展示时区 | 否，修改后需重启 |
-| `PROXY_API_KEY` | 根级代理鉴权 key | 是 |
-| `PROVIDERS_DIR` | provider 配置目录；修改后 provider 配置监听会切换，但 Cache_Info 落盘目录要重启后才会切换 | 部分，Cache_Info 路径切换需重启 |
-| `DEFAULT_PROVIDER` | 裸 `/v1/*` 默认 provider | 是 |
-| `ENABLE_LEGACY_V1_ROUTES` | 是否开启裸 `/v1/*`（必须写成合法布尔值） | 是 |
-| `DOWNSTREAM_NON_STREAM_STRATEGY` | 非流时走本地聚合还是直接请求上游非流 | 是 |
-| `CONNECT_TIMEOUT` / `FIRST_BYTE_TIMEOUT` / `IDLE_TIMEOUT` / `TOTAL_TIMEOUT` | 上游超时控制 | 是 |
-| `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS` | 结构化日志配置 | 否，修改后需重启 |
-| `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` | 开发调试归档目录；留空关闭，设置后按 request_id 写入 request/raw/canonical/final ndjson | 否，修改后需重启 |
-| `UPSTREAM_USER_AGENT` | 上游请求时发送的自定义 User-Agent 头；优先级高于伪装目标对 User-Agent 的修改；与伪装目标不沾边 | 是 |
-| `UPSTREAM_MASQUERADE_TARGET` | 伪装目标客户端：`opencode`/`claude`/`codex`/`none`；留空继承上级，none 显式禁用（详见 `.env.example` 详解） | 是 |
-| `UPSTREAM_INJECT_METADATA_USER_ID` | 仅在有效伪装目标为 claude 时生效：注入 `metadata.user_id` 以绕过 sub2api 校验 | 是 |
-| `UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | 仅在有效伪装目标为 claude 时生效：注入 Claude Code 真实 system prompt 以绕过 Dice 系数校验 | 是 |
+| 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
+| 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
+| 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
+| provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
+| 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` | ❌ 修改后需重启 |
 
 ### provider `.env`
 
-最常用字段：
+| 字段组 | 例子 | 说明 |
+|---|---|---|
+| 上游连接 | `UPSTREAM_BASE_URL`、`UPSTREAM_API_KEY`、`UPSTREAM_ENDPOINT_TYPE` | 当前 provider 如何连上游 |
+| Anthropic / thinking | `ANTHROPIC_VERSION`、`UPSTREAM_THINKING_TAG_STYLE` | Anthropic 上游版本与 chat 上游 thinking 标签策略 |
+| 能力开关 | `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES` | 控制公开端口是否开放 |
+| 非流 / timeout / retry | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`、`UPSTREAM_FIRST_BYTE_TIMEOUT`、`UPSTREAM_RETRY_COUNT`、`UPSTREAM_RETRY_DELAY` | provider 级运行时策略 |
+| 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS` | 注入与模型能力 |
+| 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
+| 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
 
-| 字段 | 说明 |
-|---|---|
-| `PROVIDER_ID` | provider 唯一 id |
-| `PROVIDER_ENABLED` | 是否启用（必须写成合法布尔值） |
-| `UPSTREAM_BASE_URL` | 上游站点根地址 |
-| `UPSTREAM_API_KEY` | 默认上游 key |
-| `UPSTREAM_ENDPOINT_TYPE` | 当前 provider 内部统一使用的上游协议：`responses/chat/anthropic` |
-| `UPSTREAM_THINKING_TAG_STYLE` | 仅当 `UPSTREAM_ENDPOINT_TYPE=chat` 时生效：必须写成布尔值；`true`=拆分 think 标签为思考内容，`false`=正文原样透传 |
-| `SUPPORTS_CHAT` | 是否开放 chat/completions 公开端口 |
-| `SUPPORTS_RESPONSES` | 是否开放 responses 公开端口 |
-| `SUPPORTS_MODELS` | 是否开放 models |
-| `SUPPORTS_ANTHROPIC_MESSAGES` | 是否开放 messages 公开端口 |
-| `UPSTREAM_RETRY_COUNT` / `UPSTREAM_RETRY_DELAY` | 上游刚请求就失败时的安全门重试 |
-| `UPSTREAM_FIRST_BYTE_TIMEOUT` | provider 级首字节超时 |
-| `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` | provider 级非流模式覆写 |
-| `SYSTEM_PROMPT_FILES` / `SYSTEM_PROMPT_POSITION` | provider 级系统提示词注入 |
-| `MODEL_MAP` | 模型映射（逗号分隔格式，支持 $0/$1/$2 占位符和通配符） |
-| `MANUAL_MODELS` | 手动补充的模型名列表（逗号分隔），用于上游未提供模型列表时 |
-| `ENABLE_REASONING_EFFORT_SUFFIX` | 是否启用 `-low/-medium/-high/-xhigh` suffix 解析（必须写成合法布尔值） |
-| `EXPOSE_REASONING_SUFFIX_MODELS` | `/models` 是否暴露 suffix 模型名（必须写成合法布尔值） |
-| `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | 是否把 suffix 自动映射为 Anthropic thinking（必须写成合法布尔值） |
-| `UPSTREAM_USER_AGENT` | 上游请求时发送的自定义 User-Agent 头；与伪装目标不沾边，优先级高于伪装目标对 User-Agent 的修改 | |
-| `MASQUERADE_TARGET` | 伪装目标客户端：`opencode`/`claude`/`codex`/`none`；留空继承根配置，none 显式禁用（详见 `providers/*.env.example` 详解） | |
-| `INJECT_CLAUDE_CODE_METADATA_USER_ID` | 仅在有效伪装目标为 claude 时生效：注入 `metadata.user_id` 以绕过 sub2api 校验；留空继承根配置 | |
-| `INJECT_CLAUDE_CODE_SYSTEM_PROMPT` | 仅在有效伪装目标为 claude 时生效：注入 Claude Code 真实 system prompt 以绕过 Dice 系数校验；留空继承根配置 | |
-
-说明：provider 文件里的字段当前都支持热加载；但 Cache_Info 统计文件会写到进程启动时初始化的 `<PROVIDERS_DIR>/Cache_Info/` 下，其中 JSON 快照实际落在 `SYSTEM_JSON_FILES/` 子目录里。修改根 `.env` 里的 `PROVIDERS_DIR` 后如果还要切换 Cache_Info 落盘目录，需要重启。
+补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；而 provider 级 Claude 注入开关留空则表示继承根配置。
 
 ---
 
-## 非流模式说明
+## 📌 当前行为边界
 
-`DOWNSTREAM_NON_STREAM_STRATEGY` / `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` 支持两个值：
+这些都是当前代码里的真实边界，建议在接入前明确：
 
-- `proxy_buffer`：下游是非流式时，代理继续向上游请求流，再本地聚合成非流输出
-- `upstream_non_stream`：下游是非流式时，代理直接向上游请求非流 JSON
+1. **`/v1/responses` 是能力最完整的主路径**  
+   `previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation`、`store`、`include` 这类高层字段，优先在这条链完整保留。
 
-默认值是 `proxy_buffer`。
+2. **当 provider 内部上游不是 `responses` 时，不承诺所有 `responses` 顶层字段一比一透传**  
+   尤其像 `store`、`include` 这种字段，在转到 `chat` / `anthropic` 上游时不应理解成“继续原样透传”。
 
----
+3. **`/v1/messages` 必须带 `anthropic-version`，且当前只校验存在且非空**  
+   建议仍然传 `2023-06-01`。
 
-## 热加载与重启
+4. **`/v1/messages` 当前对 `input_audio` 走显式拒绝**  
+   不会静默吞掉。
 
-### 当前可热加载
-
-- 根 `.env` 中的：
-  - `PROXY_API_KEY`
-  - `DEFAULT_PROVIDER`
-  - `ENABLE_LEGACY_V1_ROUTES`
-  - `DOWNSTREAM_NON_STREAM_STRATEGY`
-  - `CONNECT_TIMEOUT`
-  - `FIRST_BYTE_TIMEOUT`
-  - `IDLE_TIMEOUT`
-  - `TOTAL_TIMEOUT`
-  - `UPSTREAM_USER_AGENT`
-  - `UPSTREAM_MASQUERADE_TARGET`
-  - `UPSTREAM_INJECT_METADATA_USER_ID`
-  - `UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT`
-- 根 `.env` 中带条件生效的：
-  - `PROVIDERS_DIR`（provider 配置监听会切换；Cache_Info 落盘目录仍需重启后才会切换）
-- provider `.env` 中的大部分运行时字段，包括：
-  - `UPSTREAM_BASE_URL`
-  - `UPSTREAM_API_KEY`
-  - `UPSTREAM_ENDPOINT_TYPE`
-  - `MASQUERADE_TARGET`
-  - `INJECT_CLAUDE_CODE_METADATA_USER_ID`
-  - `INJECT_CLAUDE_CODE_SYSTEM_PROMPT`
-  - 能力开关
-  - 重试 / timeout / model map / suffix / system prompt 相关字段
-- `SYSTEM_PROMPT_FILES` 引用到的文本文件内容
-
-### 当前不能热加载（修改后需要重启）
-
-- `LISTEN_ADDR`
-- `CACHE_INFO_TIMEZONE`
-- `LOG_ENABLE`
-- `LOG_MAX_BODY_SIZE_MB`
-- `LOG_MAX_REQUESTS`
-- `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`
-
-说明：启动时根 `.env` 和 provider `.env` 中要求严格布尔值的字段都必须写成合法布尔值；写成非法值时，配置校验会失败，不会再静默按 `false` 处理。运行时热加载阶段，只有实际参与热更新校验的根字段会重新按这个规则检查。
+5. **`cache_control` 当前是兼容输入，不等于真实上游 prompt caching 支持**  
+   代理会接受，但不会把它继续透传为真正的 Anthropic prompt caching 语义。
 
 ---
 
-## Debug Archive（开发调试归档）
-
-当根 `.env` 里的 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 设为非空目录后，代理会按 `request_id` 在该目录下写入结构化调试归档：
-
-- `request.ndjson`：入口请求事实
-- `raw.ndjson`：上游原始事件封装
-- `canonical.ndjson`：内部 canonical event 事实
-- `final.ndjson`：最终快照（响应或错误）
-
-这个归档通道面向开发调试、问题复盘与事件重放，不追求人类可读摘要格式。
-该配置**不能热加载**；修改后需要重启进程。
-
----
-
-## 模型映射与 suffix
-
-`MODEL_MAP` 格式为逗号分隔的 `src:target` 对，支持：
-
-- 精确 key 匹配
-- 通配符 key：`prefix*`、`*suffix`、`prefix*suffix`、`*`（兜底）
-- 多个 `*` 捕获：`key*with*multiple` 会产生多次捕获
-- 目标占位符：`$0`（完整原始模型）、`$1`（第 1 个 `*` 捕获）、`$2`（第 2 个 `*`）等
-- 转义：`\*` 表示真实星号，`\$` 表示真实美元符号
-- 示例：`gpt-4*:gpt-o1-$1` 把 `gpt-4o` 映射为 `gpt-o1-o`
-
-`ENABLE_REASONING_EFFORT_SUFFIX=true` 时，支持把模型名后缀：
-
-- `-low`
-- `-medium`
-- `-high`
-- `-xhigh`
-
-解析成 reasoning effort。
-
-如果某个 provider 还打开了 `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true`，并且该 provider 的 `UPSTREAM_ENDPOINT_TYPE=anthropic`，那么代理会在请求本身没有显式 `thinking` 时，把解析出的 suffix effort 自动映射成 Anthropic 上游 `thinking` 配置。
-当前映射规则：
-
-- 如果目标模型命中当前内置的自适应识别规则（目前主要按模型名包含 `opus-4-6` 或 `opus-4.6` 判断），则发送：
-  - `thinking: {"type":"adaptive"}`
-  - `output_config.effort` 分别映射为 `low / medium / high / max`
-- 其余模型走手动 `budget_tokens`：
-  - `low` → 约 `max_tokens * 25%`
-  - `medium` → 约 `max_tokens * 40%`
-  - `high` → 约 `max_tokens * 60%`
-  - `xhigh` → 约 `max_tokens * 80%`
-- 手动 budget 还会再做上下限保护，避免预算过小或过大。
-
-这个映射默认关闭，避免改变旧请求语义。
-
----
-
-## Claude / Messages 兼容说明
-
-- `chat/completions` 对外除了保留 `usage.prompt_tokens_details.cached_tokens` / `usage.prompt_tokens_details.cache_creation_tokens` 之外，也会额外显式返回顶层 `usage.cached_tokens` / `usage.cache_creation_tokens`，方便不继续解析 details 的客户端直接读取缓存统计
-- `cache_control` 当前是**兼容输入**，代理会接受这个字段，但不会把它继续透传给上游；它不是对 Anthropic prompt caching 的真实上游支持
-- Anthropic usage 对外会保留上游原始 `input_tokens`，并额外附带 `cache_read_input_tokens` / `cache_creation_input_tokens`；不会再把 `input_tokens` 改写成扣除缓存后的净值
-- Cache_Info 会分别记录缓存命中 token（`cached_tokens` / `cache_read_input_tokens`）和缓存创建 token（`cache_creation_input_tokens` / `cache_creation_tokens`）
-- Anthropic 上游当前支持 text / image / document / tool_use / tool_result 等主路径
-- 当下游入口使用 `/v1/responses` 时，`function_call_output` 会继续被归一成内部 tool result 语义；即使 provider 内部上游选的是 `chat` 或 `anthropic`，也能继续把工具结果回传给上游完成多轮工具调用
-- `/v1/messages` 兼容入口当前对 `input_audio` 走**显式拒绝**，不会再静默吞掉；这一限制与当前 provider 的 `UPSTREAM_ENDPOINT_TYPE` 无关
-
-## Responses / Chat / Anthropic 对齐边界
-
-- `/v1/responses` 仍然是代理内部能力最完整的基线入口；`previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation`、`store`、`include` 这类高层字段优先在这条链完整保留
-- 当 provider 内部上游是 `responses` 时，上述字段会继续向上游透传；相关回归测试见 `internal/adapter/responses/request_test.go` 与 `internal/httpapi/upstream_endpoint_type_integration_test.go`
-- 当 provider 内部上游是 `chat` 或 `anthropic` 时，代理会尽量保留高价值语义，但这不等于三套协议已经做到完全保真互转；`chat` / `messages` 更偏兼容出口，不承诺一比一承接所有 `responses` 顶层控制字段。像 `store`、`include` 这类字段在跨到非 responses 上游时尤其不应按“继续透传”理解。
-
----
-
-## 常用脚本
+## 🛠️ 部署与运维
 
 | 脚本 | 作用 |
 |---|---|
-| `scripts/deploy-linux.sh` | 首次部署 / 重新部署 |
-| `scripts/stop-linux.sh` | 停服务，不删产物 |
-| `scripts/restart-linux.sh` | 重启服务 |
-| `scripts/uninstall-linux.sh` | 停服务并清理部署产物 |
+| `bash scripts/deploy-linux.sh` | 预检、编译、停旧、启新、健康检查、失败回滚 |
+| `bash scripts/restart-linux.sh` | 重启服务 |
+| `bash scripts/stop-linux.sh` | 停止服务 |
+| `bash scripts/uninstall-linux.sh` | 卸载部署产物 |
 
-所有脚本都带基础预检、端口检查、健康检查和失败回滚保护。
+如果前面还有 1Panel / Nginx / OpenResty，建议先把长连接超时放宽：
+
+```nginx
+proxy_connect_timeout 1200s;
+proxy_send_timeout 1200s;
+proxy_read_timeout 1200s;
+send_timeout 1200s;
+```
 
 ---
 
-## 一个务实建议
+## ✅ 常用验证命令
 
-如果你的客户端本身对 Responses / Anthropic 的细节实现不稳定，优先先用 `chat/completions` 兼容接口测通；复杂推理强度可以优先通过模型后缀来控，不一定要依赖客户端自己的“思维链开关”。
+```bash
+go test -count=1 ./...
+go build -o bin/openai-compat-proxy ./cmd/proxy
+curl http://127.0.0.1:21021/healthz
+```
 
-另外，当前 `/v1/responses` 在跨到 `chat` 或 `anthropic` 上游时，会尽量保留 `previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation` 这些高价值顶层字段到下游响应里；但这仍不等于三套协议已经做到完全保真互转。
+如果你准备改配置语义、协议兼容或流式行为，建议优先跑：
+
+```bash
+go test -count=1 ./internal/config ./internal/httpapi ./internal/upstream ./internal/adapter/...
+```
+
+---
+
+## 📂 参考文件
+
+- 根配置模板：`.env.example`
+- provider 模板：`providers/openai.env.example`
+- 入口：`cmd/proxy/main.go`
+- HTTP 入口层：`internal/httpapi`
+- 配置层：`internal/config`
+- 上游协议与 header：`internal/upstream`
+- Linux 部署脚本：`scripts/`
