@@ -43,7 +43,7 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n"`) {
+	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
 		t.Fatalf("expected chat placeholder reasoning to use titled format, got %s", body)
 	}
 }

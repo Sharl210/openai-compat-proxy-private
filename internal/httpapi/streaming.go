@@ -23,6 +23,10 @@ var sseHeartbeatInterval = 15 * time.Second
 
 const syntheticReasoningPlaceholder = "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"
 
+func syntheticReasoningPrelude() string {
+	return syntheticReasoningPlaceholder + "\n\n"
+}
+
 type usageRecorderFunc func(map[string]any)
 
 type anthropicStreamState struct {
@@ -289,7 +293,7 @@ func startResponsesSyntheticPrelude(w http.ResponseWriter, flusher http.Flusher,
 		return nil, err
 	}
 	if shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle) {
-		if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPlaceholder); err != nil {
+		if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPrelude()); err != nil {
 			return nil, err
 		}
 	}
@@ -745,7 +749,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	}
 	injectSyntheticReasoning := shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle)
 	if injectSyntheticReasoning && !state.syntheticInjected {
-		if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPlaceholder); err != nil {
+		if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPrelude()); err != nil {
 			return aggregate.Result{}, err
 		}
 	}
@@ -959,8 +963,12 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 		state.reasoningStarted = true
 		state.syntheticInjected = true
 	}
-	if !strings.HasSuffix(text, "\n") {
-		text += "\n"
+	if !strings.HasSuffix(text, "\n\n") {
+		if strings.HasSuffix(text, "\n") {
+			text += "\n"
+		} else {
+			text += "\n\n"
+		}
 	}
 	if state != nil {
 		state.syntheticSummary.WriteString(text)
@@ -1108,7 +1116,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 		"type":  "content_block_delta",
 		"index": state.thinkingIndex,
-		"delta": map[string]any{"type": "thinking_delta", "thinking": syntheticReasoningPlaceholder + "\n"},
+		"delta": map[string]any{"type": "thinking_delta", "thinking": syntheticReasoningPrelude()},
 	})
 }
 
@@ -1616,7 +1624,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": syntheticReasoningPlaceholder + "\n"}, "", nil); err != nil {
+	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": syntheticReasoningPrelude()}, "", nil); err != nil {
 		return err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
