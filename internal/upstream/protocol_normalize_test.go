@@ -385,6 +385,96 @@ func TestNormalizeChatFrame_StreamsThinkReasoningBeforeClosingTag(t *testing.T) 
 	}
 }
 
+func TestNormalizeChatFrame_DefaultsToReasoningUntilClosingTagWhenStyleEnabled(t *testing.T) {
+	frames := []string{
+		`{"id":"chat-implicit-think","choices":[{"delta":{"content":"abc"}}]}`,
+		`{"id":"chat-implicit-think","choices":[{"delta":{"content":"def"}}]}`,
+		`{"id":"chat-implicit-think","choices":[{"delta":{"content":"</think>final"}}]}`,
+	}
+
+	state := &chatNormalizationState{
+		toolIDsByIndex:   map[int]string{},
+		toolSent:         map[string]bool{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+	}
+
+	var allEvents []Event
+	for _, frameData := range frames {
+		frame := &sseFrame{Event: "chat", Data: frameData}
+		events, done, err := normalizeChatFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	var reasoning []string
+	var text []string
+	for _, evt := range allEvents {
+		switch evt.Event {
+		case "response.reasoning.delta":
+			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+		case "response.output_text.delta":
+			text = append(text, stringValue(evt.Data["delta"]))
+		}
+	}
+
+	if strings.Join(reasoning, "") != "abcdef" {
+		t.Fatalf("expected content before closing tag to be emitted as reasoning, got %#v from %#v", reasoning, allEvents)
+	}
+	if strings.Join(text, "") != "final" {
+		t.Fatalf("expected content after closing tag to remain output text, got %#v from %#v", text, allEvents)
+	}
+}
+
+func TestNormalizeChatFrame_DoesNotReenterImplicitReasoningAfterFirstClose(t *testing.T) {
+	frames := []string{
+		`{"id":"chat-implicit-think-once","choices":[{"delta":{"content":"alpha"}}]}`,
+		`{"id":"chat-implicit-think-once","choices":[{"delta":{"content":"</think>final"}}]}`,
+		`{"id":"chat-implicit-think-once","choices":[{"delta":{"content":" trailing text"}}]}`,
+	}
+
+	state := &chatNormalizationState{
+		toolIDsByIndex:   map[int]string{},
+		toolSent:         map[string]bool{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+	}
+
+	var allEvents []Event
+	for _, frameData := range frames {
+		frame := &sseFrame{Event: "chat", Data: frameData}
+		events, done, err := normalizeChatFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	var reasoning []string
+	var text []string
+	for _, evt := range allEvents {
+		switch evt.Event {
+		case "response.reasoning.delta":
+			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+		case "response.output_text.delta":
+			text = append(text, stringValue(evt.Data["delta"]))
+		}
+	}
+
+	if strings.Join(reasoning, "") != "alpha" {
+		t.Fatalf("expected only pre-close content to stay in reasoning, got %#v from %#v", reasoning, allEvents)
+	}
+	if strings.Join(text, "") != "final trailing text" {
+		t.Fatalf("expected post-close deltas to remain output text without re-entering reasoning, got %#v from %#v", text, allEvents)
+	}
+}
+
 func TestNormalizeChatFrame_Done(t *testing.T) {
 	frame := &sseFrame{Event: "", Data: "[DONE]"}
 	state := &chatNormalizationState{}
