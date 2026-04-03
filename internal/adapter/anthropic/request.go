@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,15 +52,24 @@ type tool struct {
 }
 
 func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return model.CanonicalRequest{}, err
+	}
 	var req request
-	if err := json.NewDecoder(r).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		return model.CanonicalRequest{}, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return model.CanonicalRequest{}, err
 	}
 	canon := model.CanonicalRequest{
-		Model:           req.Model,
-		Stream:          decodeAnthropicOptionalBool(req.StreamRaw),
-		Instructions:    decodeAnthropicSystem(req.System),
-		MaxOutputTokens: req.MaxTokens,
+		Model:                   req.Model,
+		Stream:                  decodeAnthropicOptionalBool(req.StreamRaw),
+		PreservedTopLevelFields: collectUnhandledTopLevelFields(raw),
+		Instructions:            decodeAnthropicSystem(req.System),
+		MaxOutputTokens:         req.MaxTokens,
 	}
 	if reasoning := decodeAnthropicThinking(req.ThinkingRaw); reasoning != nil {
 		canon.Reasoning = reasoning
@@ -95,6 +105,26 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 	canon.ToolChoice = decodeAnthropicToolChoice(req.ToolChoiceRaw)
 	return canon, nil
+}
+
+func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	known := map[string]struct{}{
+		"model": {}, "messages": {}, "system": {}, "max_tokens": {}, "stream": {}, "thinking": {}, "tools": {}, "tool_choice": {},
+	}
+	fields := map[string]any{}
+	for key, value := range raw {
+		if _, ok := known[key]; ok {
+			continue
+		}
+		fields[key] = value
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
 }
 
 func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
