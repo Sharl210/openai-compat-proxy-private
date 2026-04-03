@@ -1174,6 +1174,12 @@ func TestChatUpstreamToResponsesDownstreamUsage(t *testing.T) {
 
 	body := rec.Body.String()
 	t.Logf("Response body:\n%s", body)
+	if count := strings.Count(body, `event: response.created`); count != 1 {
+		t.Fatalf("expected exactly one response.created event, got count=%d body=\n%s", count, body)
+	}
+	if responseID := firstResponseIDFromStreamBody(t, body); responseID != "chat-123" {
+		t.Fatalf("expected response.created to use upstream chat id chat-123, got %q body=\n%s", responseID, body)
+	}
 
 	if !strings.Contains(body, "input_tokens") {
 		t.Errorf("expected response to contain input_tokens, got:\n%s", body)

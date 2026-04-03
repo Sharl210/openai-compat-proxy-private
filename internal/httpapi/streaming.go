@@ -732,9 +732,9 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	state := cloneResponsesStreamState(initialState, req.RequestID, upstreamEndpointType)
 	collector := aggregate.NewCollector()
 	writer := &ResponsesEventWriter{w: w, flusher: flusher}
-	if shouldEmitSyntheticResponsesCreated(upstreamEndpointType) {
+	if syntheticResponseID := stream.FirstPendingResponseID(); shouldEmitSyntheticResponsesCreated(upstreamEndpointType) && syntheticResponseID != "" {
 		createdHelper := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{requestID: state.requestID, upstreamEndpointType: state.upstreamEndpointType, createdSent: state.createdSent})
-		createdHelper.addCreatedEvent(stream.FirstPendingResponseID())
+		createdHelper.addCreatedEvent(syntheticResponseID)
 		state.createdSent = createdHelper.createdSent
 		state.createdResponseID = createdHelper.createdResponseID
 		for _, cmd := range createdHelper.events {

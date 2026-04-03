@@ -55,8 +55,21 @@ func TestWithRequestIDFlushesStreamingPreludeImmediately(t *testing.T) {
 	buf := make([]byte, 8192)
 	readDone := make(chan string, 1)
 	go func() {
-		n, _ := resp.Body.Read(buf)
-		readDone <- string(buf[:n])
+		var out strings.Builder
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				out.Write(buf[:n])
+				if strings.Contains(out.String(), "代理层占位") {
+					readDone <- out.String()
+					return
+				}
+			}
+			if err != nil {
+				readDone <- out.String()
+				return
+			}
+		}
 	}()
 
 	select {
