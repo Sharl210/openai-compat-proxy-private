@@ -491,6 +491,41 @@ func TestNormalizeChatFrame_Done(t *testing.T) {
 	}
 }
 
+func TestNormalizeChatFrame_DoneFlushesPendingToolItems(t *testing.T) {
+	frame := &sseFrame{Event: "", Data: "[DONE]"}
+	state := &chatNormalizationState{
+		createdSent: true,
+		responseID:  "chat-123",
+		pendingItems: map[string]map[string]any{
+			"call_3": {
+				"type":      "function_call",
+				"id":        "call_3",
+				"call_id":   "call_3",
+				"name":      "search_web",
+				"arguments": `{"query":"q"}`,
+			},
+		},
+		toolSent: map[string]bool{},
+	}
+
+	events, done, err := normalizeChatFrame(frame, state)
+	if err != nil {
+		t.Fatalf("normalizeChatFrame error: %v", err)
+	}
+	if !done {
+		t.Fatal("expected done=true for [DONE]")
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected pending tool item and terminal response on [DONE], got %#v", events)
+	}
+	if events[0].Event != "response.output_item.done" {
+		t.Fatalf("expected first event response.output_item.done, got %#v", events[0])
+	}
+	if events[1].Event != "response.completed" {
+		t.Fatalf("expected second event response.completed, got %#v", events[1])
+	}
+}
+
 // 测试 normalizeChatFrame 的完整流程（模拟 SSE scanner）
 func TestNormalizeChatFrame_FullStream(t *testing.T) {
 	rawSSE := `event: chat

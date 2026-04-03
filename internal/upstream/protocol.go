@@ -381,7 +381,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		return nil, true, nil
 	}
 	if strings.Trim(strings.TrimSpace(frame.Data), "\r") == "[DONE]" {
-		return nil, true, nil
+		return finalizeChatEventsOnEOF(state), true, nil
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(frame.Data), &payload); err != nil {
