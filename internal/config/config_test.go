@@ -101,6 +101,17 @@ func TestValidateRootEnvValuesRejectsInvalidDownstreamNonStreamStrategy(t *testi
 	}
 }
 
+func TestValidateRootEnvValuesRejectsInvalidLogMaxBodySizeMB(t *testing.T) {
+	for _, value := range []string{"-1", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{"LOG_MAX_BODY_SIZE_MB": value})
+			if err == nil {
+				t.Fatalf("expected invalid LOG_MAX_BODY_SIZE_MB=%q to fail validation", value)
+			}
+		})
+	}
+}
+
 func TestValidateRootEnvValuesRejectsInvalidEnableLegacyV1RoutesBoolean(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"ENABLE_LEGACY_V1_ROUTES": "enabled"})
 	if err == nil {
@@ -109,13 +120,20 @@ func TestValidateRootEnvValuesRejectsInvalidEnableLegacyV1RoutesBoolean(t *testi
 }
 
 func TestValidateRootEnvValuesRejectsInvalidStartupBoolValues(t *testing.T) {
-	for _, key := range []string{"LOG_ENABLE", "LOG_INCLUDE_BODIES"} {
+	for _, key := range []string{"LOG_ENABLE"} {
 		t.Run(key, func(t *testing.T) {
 			err := ValidateRootEnvValues(map[string]string{key: "enabled"})
 			if err == nil {
 				t.Fatalf("expected invalid %s to fail validation", key)
 			}
 		})
+	}
+}
+
+func TestValidateRootEnvValuesIgnoresUnknownLegacyVariables(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"LOG_INCLUDE_BODIES": "enabled"})
+	if err != nil {
+		t.Fatalf("expected unknown legacy variable to be ignored, got %v", err)
 	}
 }
 
