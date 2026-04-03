@@ -1,23 +1,24 @@
 package model
 
 type CanonicalRequest struct {
-	Model              string
-	Stream             bool
-	IncludeUsage       bool
-	ResponseStore      *bool
-	ResponseInclude    []string
-	Instructions       string
-	ResponseInputItems []map[string]any
-	Messages           []CanonicalMessage
-	Temperature        *float64
-	TopP               *float64
-	MaxOutputTokens    *int
-	Stop               []string
-	Tools              []CanonicalTool
-	ToolChoice         CanonicalToolChoice
-	Reasoning          *CanonicalReasoning
-	RequestID          string
-	AuthMode           string
+	Model                   string
+	Stream                  bool
+	PreservedTopLevelFields map[string]any
+	IncludeUsage            bool
+	ResponseStore           *bool
+	ResponseInclude         []string
+	Instructions            string
+	ResponseInputItems      []map[string]any
+	Messages                []CanonicalMessage
+	Temperature             *float64
+	TopP                    *float64
+	MaxOutputTokens         *int
+	Stop                    []string
+	Tools                   []CanonicalTool
+	ToolChoice              CanonicalToolChoice
+	Reasoning               *CanonicalReasoning
+	RequestID               string
+	AuthMode                string
 }
 
 type CanonicalMessage struct {
