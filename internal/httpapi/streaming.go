@@ -221,6 +221,9 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 			h.addToolItemAddedEvent(addedItem)
 			toolState.addedSent = true
 		}
+		if compatCompleteToolArgs && toolState.arguments.Len() > 0 && !isValidToolArgumentsJSON(toolState.arguments.String()) {
+			continue
+		}
 		h.addToolItemDoneEvent(itemCopy)
 		if compatCompleteToolArgs && toolState.arguments.Len() > 0 {
 			h.addFunctionCallArgumentsDoneEvent(itemID, toolState.arguments.String())
@@ -830,6 +833,14 @@ func withParsedToolParameters(item map[string]any) map[string]any {
 		return itemCopy
 	}
 	return item
+}
+
+func isValidToolArgumentsJSON(arguments string) bool {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		return true
+	}
+	return json.Valid([]byte(trimmed))
 }
 
 func truncateForLog(text string, max int) string {
