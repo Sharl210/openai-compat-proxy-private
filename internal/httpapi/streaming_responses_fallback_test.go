@@ -71,7 +71,7 @@ func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *tes
 		}
 		time.Sleep(700 * time.Millisecond)
 		_, _ = fmt.Fprint(w, "event: chat\n")
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"content\":\"<think>internal reasoning</think>hello\"}}]}\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -118,6 +118,50 @@ func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *tes
 	}
 	if strings.Contains(beforeText, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {
 		t.Fatalf("expected no ellipsis tick before first text, got %s", body)
+	}
+}
+
+func TestResponsesStreamDoesNotHoldRealReasoningBehindSyntheticLeadTime(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-fast-think\",\"choices\":[{\"delta\":{\"content\":\"alpha\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-fast-think\",\"choices\":[{\"delta\":{\"content\":\"</think>final\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-fast-think\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	server.ServeHTTP(rec, req)
+	duration := time.Since(start)
+	if duration >= 250*time.Millisecond {
+		t.Fatalf("expected real reasoning to flow without waiting for synthetic lead time, took %s body=%s", duration, rec.Body.String())
 	}
 }
 
@@ -238,6 +282,91 @@ func TestResponsesStreamProgressivelyEmitsThinkReasoningBeforeClosingTag(t *test
 	}
 	if !(abcIdx < defIdx && defIdx < textIdx) {
 		t.Fatalf("expected abc then def reasoning deltas before final output text, got %s", body)
+	}
+}
+
+func TestResponsesStreamDefaultsToReasoningUntilClosingTagWhenStyleEnabled(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-think\",\"choices\":[{\"delta\":{\"content\":\"abc\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-think\",\"choices\":[{\"delta\":{\"content\":\"def\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-think\",\"choices\":[{\"delta\":{\"content\":\"</think>final\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-think\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
+	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
+	textIdx := strings.Index(body, `{"delta":"final","type":"response.output_text.delta"}`)
+	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected implicit reasoning deltas before final text, got %s", body)
+	}
+	if !(abcIdx < defIdx && defIdx < textIdx) {
+		t.Fatalf("expected implicit reasoning to stream before output text, got %s", body)
+	}
+}
+
+func TestResponsesStreamDoesNotReenterImplicitReasoningAfterFirstClose(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-once\",\"choices\":[{\"delta\":{\"content\":\"alpha\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-once\",\"choices\":[{\"delta\":{\"content\":\"</think>final\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-once\",\"choices\":[{\"delta\":{\"content\":\" trailing text\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-implicit-once\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	alphaIdx := strings.Index(body, `{"delta":"alpha","type":"response.reasoning_summary_text.delta"}`)
+	finalIdx := strings.Index(body, `{"delta":"final","type":"response.output_text.delta"}`)
+	trailingIdx := strings.Index(body, `{"delta":" trailing text","type":"response.output_text.delta"}`)
+	if alphaIdx == -1 || finalIdx == -1 || trailingIdx == -1 {
+		t.Fatalf("expected one implicit reasoning phase followed by stable output text, got %s", body)
+	}
+	if !(alphaIdx < finalIdx && finalIdx < trailingIdx) {
+		t.Fatalf("expected post-close text deltas to stay as output text, got %s", body)
+	}
+	if strings.Contains(body[finalIdx:], `{"delta":" trailing text","type":"response.reasoning_summary_text.delta"}`) {
+		t.Fatalf("expected no re-entry into implicit reasoning after first close, got %s", body)
 	}
 }
 
