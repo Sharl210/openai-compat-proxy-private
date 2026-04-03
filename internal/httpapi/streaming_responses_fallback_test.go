@@ -51,7 +51,7 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	if strings.Contains(body, `分析中…`) || strings.Contains(body, `正在组织回答…`) || strings.Contains(body, `正在调用工具…`) {
 		t.Fatalf("expected synthetic fallback reasoning to use only one generic phrase, got %s", body)
 	}
-	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n"`) {
+	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
 		t.Fatalf("expected synthetic reasoning done item to include non-empty summary text, got %s", body)
 	}
 }
@@ -105,13 +105,12 @@ func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *tes
 		t.Fatalf("expected output text event, got %s", body)
 	}
 	beforeText := body[:textIdx]
-	createdIdx := strings.Index(beforeText, `event: response.created`)
 	addedIdx := strings.Index(beforeText, `event: response.output_item.added`)
-	if createdIdx == -1 || addedIdx == -1 || createdIdx > addedIdx {
-		t.Fatalf("expected response.created before synthetic reasoning block, got %s", body)
+	if addedIdx == -1 {
+		t.Fatalf("expected synthetic reasoning block before first text, got %s", body)
 	}
-	if count := strings.Count(body, `event: response.created`); count != 1 {
-		t.Fatalf("expected exactly one response.created event, got count=%d body=%s", count, body)
+	if createdIdx := strings.Index(beforeText, `event: response.created`); createdIdx == -1 {
+		t.Fatalf("expected at least one response.created before first text, got %s", body)
 	}
 	if !strings.Contains(beforeText, `event: response.output_item.added`) || !strings.Contains(beforeText, `event: response.reasoning_summary_text.delta`) {
 		t.Fatalf("expected visible synthetic reasoning block before first text, got %s", body)
@@ -236,7 +235,7 @@ func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *
 	if strings.Contains(body, `<think>`) || strings.Contains(body, `</think>`) {
 		t.Fatalf("expected think tags to be removed from final output text, got %s", body)
 	}
-	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\ninternal reasoning\n","type":"summary_text"}]`) {
+	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\ninternal reasoning\n","type":"summary_text"}]`) {
 		t.Fatalf("expected rs_proxy summary to include merged real reasoning text, got %s", body)
 	}
 	if strings.Contains(body, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {

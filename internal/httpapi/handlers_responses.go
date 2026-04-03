@@ -83,8 +83,26 @@ func handleResponses() http.HandlerFunc {
 		}
 
 		if canon.Stream {
-			stream, err := client.OpenEventStream(ctx, canon, authorization)
+			var flusher http.Flusher
+			var initialState *responsesStreamState
+			if shouldInjectSyntheticResponsesReasoning(providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle) {
+				flusher = startSSE(w)
+				initialState, err = startResponsesSyntheticPrelude(w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle)
+				if err != nil {
+					_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "stream_setup_error", err.Error())
+					return
+				}
+			}
+			stream, err := client.OpenEventStreamLazy(ctx, canon, authorization)
 			if err != nil {
+				if flusher != nil {
+					if isUpstreamTimeout(err, ctx) {
+						_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_timeout", "upstream request timed out")
+						return
+					}
+					_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "upstream_error", err.Error())
+					return
+				}
 				if isUpstreamTimeout(err, ctx) {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
@@ -96,8 +114,10 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			defer stream.Close()
-			flusher := startSSE(w)
-			result, err := writeResponsesSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder)
+			if flusher == nil {
+				flusher = startSSE(w)
+			}
+			result, err := writeResponsesSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder, initialState)
 			if err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {

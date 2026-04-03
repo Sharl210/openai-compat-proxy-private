@@ -48,6 +48,26 @@ curl http://127.0.0.1:21021/healthz
 - `internal/upstream/protocol.go`、`internal/upstream/client.go`、`internal/httpapi/streaming.go` 都是超大文件；修改时要先定位精确函数，再小范围改。
 - `providers/prompt.md` 属于 provider 级人工维护文件；除非任务明确要求，不要顺手改内容。
 
+## 指令继承说明
+
+- 当前仓库除本文件外，还会继承 `/home/harl/.config/opencode/AGENTS.md` 的根级工作区规则。
+- 当根级规则与本仓库规则冲突时，以本文件为准。
+
+## 项目构建与验证命令
+
+- 编译主程序：`go build -o bin/openai-compat-proxy ./cmd/proxy`
+- 全量测试：`go test -count=1 ./...`
+- 配置相关改动优先补跑：`go test -count=1 ./internal/config ./scripts`
+- HTTP / 协议改动优先补跑：`go test -count=1 ./internal/httpapi ./internal/upstream ./internal/adapter/...`
+- 提交前至少应运行与本次改动直接相关的测试；如果改动跨配置、协议或脚本边界，默认补跑 `go test -count=1 ./...`
+
+## 任务完成定义
+
+- 声称完成前，必须提供本轮新鲜验证证据，不能复用旧结果。
+- 涉及 Go 代码改动时，至少确保相关测试通过且 `go build -o bin/openai-compat-proxy ./cmd/proxy` 成功。
+- 涉及配置语义或模板注释改动时，必须同步检查 `README.md`、`.env.example`、`providers/*.env.example` 是否仍一致。
+- 不要修改真实 `.env`、`providers/*.env` 中的用户运行配置，除非当前任务明确要求迁移或上线配置。
+
 ## 配置文件语言规则
 
 - 项目内面向用户的配置模板文件注释默认使用**简体中文**。

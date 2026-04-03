@@ -917,6 +917,56 @@ func TestAnthropicStreamingUpstreamThinkingPreservedInAnthropicMessagesStream(t 
 	if !strings.Contains(body, "reasoning here") {
 		t.Fatalf("expected thinking content in anthropic messages stream, got %s", body)
 	}
+	if !strings.Contains(body, `"stop_reason":"end_turn"`) {
+		t.Fatalf("expected anthropic messages stream to end with end_turn stop_reason, got %s", body)
+	}
+}
+
+func TestChatStreamingUpstreamToolUseMapsToAnthropicStopReason(t *testing.T) {
+	upstream := newChatStreamingUpstream(t, []string{
+		"data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n",
+		"data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search_web\",\"arguments\":\"{\\\"query\\\":\\\"weather\\\",\\\"topic\\\":\\\"general\\\"}\"}}]},\"index\":0}]}\n\n",
+		"data: {\"id\":\"chatcmpl_123\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15},\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0}]}\n\n",
+		"data: [DONE]\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "chat",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeChat,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"max_tokens":128,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, `"stop_reason":"tool_use"`) {
+		t.Fatalf("expected anthropic tool_use stop_reason, got %s", body)
+	}
+	if strings.Contains(body, `"stop_reason":"tool_calls"`) {
+		t.Fatalf("expected anthropic stream to avoid OpenAI tool_calls stop_reason, got %s", body)
+	}
 }
 
 // ---------------------------------------------------------------------------

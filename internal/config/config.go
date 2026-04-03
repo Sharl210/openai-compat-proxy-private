@@ -169,13 +169,13 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateStrictBool(values, "LOG_ENABLE"); err != nil {
 		return err
 	}
-	if err := validateStrictBool(values, "LOG_INCLUDE_BODIES"); err != nil {
-		return err
-	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
 		return err
 	}
 	if err := validateMinInt(values, "LOG_MAX_REQUESTS", 1); err != nil {
+		return err
+	}
+	if err := validateMinFloat(values, "LOG_MAX_BODY_SIZE_MB", 0); err != nil {
 		return err
 	}
 
@@ -236,6 +236,18 @@ func validateMinInt(values map[string]string, key string, min int) error {
 		return nil
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < min {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func validateMinFloat(values map[string]string, key string, min float64) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil || parsed < min {
 		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
 	}
@@ -360,5 +372,9 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.ConnectTimeout == other.ConnectTimeout &&
 		c.FirstByteTimeout == other.FirstByteTimeout &&
 		c.IdleTimeout == other.IdleTimeout &&
-		c.TotalTimeout == other.TotalTimeout
+		c.TotalTimeout == other.TotalTimeout &&
+		c.UpstreamUserAgent == other.UpstreamUserAgent &&
+		c.MasqueradeTarget == other.MasqueradeTarget &&
+		c.InjectClaudeCodeMetadataUserID == other.InjectClaudeCodeMetadataUserID &&
+		c.InjectClaudeCodeSystemPrompt == other.InjectClaudeCodeSystemPrompt
 }

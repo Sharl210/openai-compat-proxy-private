@@ -189,6 +189,85 @@ func TestRuntimeStoreRefreshAppliesHotReloadableDownstreamNonStreamStrategy(t *t
 	}
 }
 
+func TestRuntimeStoreRefreshAppliesHotReloadableUpstreamIdentityFields(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 7, 0, 111000000, time.UTC)
+	updatedRootMTime := time.Date(2026, 3, 26, 10, 8, 0, 222000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_USER_AGENT=before-agent\nUPSTREAM_MASQUERADE_TARGET=opencode\nUPSTREAM_INJECT_METADATA_USER_ID=false\nUPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT=false\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 7, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_USER_AGENT=after-agent\nUPSTREAM_MASQUERADE_TARGET=claude\nUPSTREAM_INJECT_METADATA_USER_ID=true\nUPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT=true\n", updatedRootMTime)
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("expected upstream identity field refresh to succeed, got %v", err)
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(updatedRootMTime) {
+		t.Fatalf("expected root version to update to %q, got %q", formatVersionTime(updatedRootMTime), got)
+	}
+	if got := active.Config.UpstreamUserAgent; got != "after-agent" {
+		t.Fatalf("expected upstream user agent to update, got %q", got)
+	}
+	if got := active.Config.MasqueradeTarget; got != "claude" {
+		t.Fatalf("expected masquerade target to update, got %q", got)
+	}
+	if !active.Config.InjectClaudeCodeMetadataUserID {
+		t.Fatalf("expected metadata user id injection to update to true")
+	}
+	if !active.Config.InjectClaudeCodeSystemPrompt {
+		t.Fatalf("expected claude system prompt injection to update to true")
+	}
+}
+
+func TestRuntimeStoreRefreshRejectsInvalidHotReloadableUpstreamIdentityFields(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 9, 0, 111000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MASQUERADE_TARGET=opencode\nUPSTREAM_INJECT_METADATA_USER_ID=false\nUPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT=false\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 9, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MASQUERADE_TARGET=bad-target\nUPSTREAM_INJECT_METADATA_USER_ID=enabled\nUPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT=false\n", time.Date(2026, 3, 26, 10, 10, 0, 222000000, time.UTC))
+	if err := store.Refresh(); err == nil {
+		t.Fatalf("expected invalid hot-reloadable upstream identity fields to fail refresh")
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(initialRootMTime) {
+		t.Fatalf("expected root version to remain %q, got %q", formatVersionTime(initialRootMTime), got)
+	}
+	if got := active.Config.MasqueradeTarget; got != "opencode" {
+		t.Fatalf("expected last good masquerade target to remain, got %q", got)
+	}
+	if active.Config.InjectClaudeCodeMetadataUserID {
+		t.Fatalf("expected last good metadata injection value to remain false")
+	}
+}
+
 func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidEnableLegacyV1RoutesValue(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

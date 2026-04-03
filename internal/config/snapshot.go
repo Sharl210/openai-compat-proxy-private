@@ -99,6 +99,15 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
 		return err
 	}
+	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "UPSTREAM_INJECT_METADATA_USER_ID"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT"); err != nil {
+		return err
+	}
 	if err := validatePositiveDuration(values, "CONNECT_TIMEOUT"); err != nil {
 		return err
 	}

@@ -76,6 +76,54 @@ func TestDeployUsesListenHostForHealthCheck(t *testing.T) {
 	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
+func TestDeployPassesCurrentLogEnvNamesToProcess(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\nLOG_FILE_PATH=.proxy.requests.jsonl\nLOG_MAX_BODY_SIZE_MB=7\nLOG_MAX_REQUESTS=99\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	result := runScript(t, repoDir, "deploy-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected deploy to succeed, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+
+	seenEnv := mustReadFile(t, filepath.Join(repoDir, ".seen.env"))
+	for _, want := range []string{
+		"LOG_FILE_PATH=.proxy.requests.jsonl",
+		"LOG_MAX_BODY_SIZE_MB=7",
+		"LOG_MAX_REQUESTS=99",
+	} {
+		if !strings.Contains(seenEnv, want) {
+			t.Fatalf("expected deployed process env to contain %q, got %s", want, seenEnv)
+		}
+	}
+	for _, legacy := range []string{"LOG_INCLUDE_BODIES=", "LOG_MAX_SIZE_MB=", "LOG_MAX_BACKUPS="} {
+		if strings.Contains(seenEnv, legacy) {
+			t.Fatalf("expected deployed process env to omit legacy log variable %q, got %s", legacy, seenEnv)
+		}
+	}
+
+	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	newPID, err := strconv.Atoi(newPIDText)
+	if err != nil {
+		t.Fatalf("parse new pid: %v text=%q", err, newPIDText)
+	}
+	stopPID(t, newPID)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
+func TestRuntimeScriptDoesNotReferenceLegacyLogVariables(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	runtimeScript := mustReadFile(t, filepath.Join(repoDir, "scripts", "lib", "runtime.sh"))
+	for _, legacy := range []string{"LOG_INCLUDE_BODIES", "LOG_MAX_SIZE_MB", "LOG_MAX_BACKUPS"} {
+		if strings.Contains(runtimeScript, legacy) {
+			t.Fatalf("expected runtime.sh to stop referencing legacy log variable %q", legacy)
+		}
+	}
+}
+
 func TestDeployFailsWhenThirdPartyOccupiesPort(t *testing.T) {
 	repoDir := newScriptTestRepo(t)
 	port := mustReservePort(t)
@@ -655,6 +703,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 )
 
@@ -677,6 +727,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, "missing provider env files")
 		os.Exit(13)
 	}
+	tracked := []string{
+		"LOG_ENABLE",
+		"LOG_FILE_PATH",
+		"LOG_INCLUDE_BODIES",
+		"LOG_MAX_BODY_SIZE_MB",
+		"LOG_MAX_REQUESTS",
+		"LOG_MAX_SIZE_MB",
+		"LOG_MAX_BACKUPS",
+	}
+	lines := make([]string, 0, len(tracked))
+	for _, key := range tracked {
+		if value := os.Getenv(key); value != "" {
+			lines = append(lines, key+"="+value)
+		}
+	}
+	sort.Strings(lines)
+	_ = os.WriteFile(filepath.Join(".seen.env"), []byte(strings.Join(lines, "\n")), 0o644)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -865,6 +865,9 @@ func normalizeChatMessageContent(raw any) []any {
 
 func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	payload := map[string]any{"model": req.Model, "stream": req.Stream}
+	for key, value := range req.PreservedTopLevelFields {
+		payload[key] = cloneJSONValue(value)
+	}
 	if req.IncludeUsage {
 		payload["stream_options"] = map[string]any{"include_usage": true}
 	}
@@ -1045,6 +1048,9 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		return nil, err
 	}
 	payload := map[string]any{"model": req.Model, "stream": req.Stream}
+	for key, value := range req.PreservedTopLevelFields {
+		payload[key] = cloneJSONValue(value)
+	}
 	if req.MaxOutputTokens != nil {
 		payload["max_tokens"] = *req.MaxOutputTokens
 	} else {

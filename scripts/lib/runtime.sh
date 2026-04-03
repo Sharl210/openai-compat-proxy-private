@@ -464,9 +464,6 @@ start_service() {
     TOTAL_TIMEOUT="${TOTAL_TIMEOUT:-}" \
     LOG_ENABLE="${LOG_ENABLE:-}" \
     LOG_FILE_PATH="${LOG_FILE_PATH:-}" \
-    LOG_INCLUDE_BODIES="${LOG_INCLUDE_BODIES:-}" \
-    LOG_MAX_SIZE_MB="${LOG_MAX_SIZE_MB:-}" \
-    LOG_MAX_BACKUPS="${LOG_MAX_BACKUPS:-}" \
     "$BIN_PATH" >>"$LOG_FILE" 2>&1 &
   local new_pid=$!
   echo "$new_pid" > "$PID_FILE"

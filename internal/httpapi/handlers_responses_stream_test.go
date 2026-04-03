@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
@@ -345,13 +347,14 @@ func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T)
 		DefaultProvider:      "chat",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:                   "chat",
-			Enabled:              true,
-			UpstreamBaseURL:      upstream.URL,
-			UpstreamAPIKey:       "test-key",
-			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
-			SupportsResponses:    true,
-			SupportsChat:         true,
+			ID:                       "chat",
+			Enabled:                  true,
+			UpstreamBaseURL:          upstream.URL,
+			UpstreamAPIKey:           "test-key",
+			UpstreamEndpointType:     config.UpstreamEndpointTypeChat,
+			UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+			SupportsResponses:        true,
+			SupportsChat:             true,
 		}},
 	})
 
@@ -631,8 +634,8 @@ func TestProviderResponsesRouteDoesNotEmitMalformedFunctionArgumentsDoneForChatU
 	if strings.Contains(body, `"type":"response.output_item.done"`) && strings.Contains(body, `"name":"scrape_web"`) {
 		t.Fatalf("expected malformed tool arguments to avoid completed function_call emission, got %s", body)
 	}
-	if !strings.Contains(body, `"type":"response.output_item.added"`) {
-		t.Fatalf("expected metadata-only added event to remain for malformed tool call visibility, got %s", body)
+	if strings.Contains(body, `"type":"response.output_item.added"`) && strings.Contains(body, `"name":"scrape_web"`) {
+		t.Fatalf("expected malformed tool call to be suppressed instead of leaving a dangling added item, got %s", body)
 	}
 }
 
@@ -648,8 +651,101 @@ func TestResponsesStreamCompatibilitySuppressesMalformedFunctionArgumentsDone(t 
 	if strings.Contains(body, `{"item":{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm","call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected malformed arguments to avoid completed function_call emission, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
-		t.Fatalf("expected metadata-only added event to remain for malformed tool call visibility, got %s", body)
+	if strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected malformed tool call to be fully suppressed, got %s", body)
+	}
+}
+
+func TestProviderResponsesRouteEmitsPlaceholderBeforeFirstUpstreamEvent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(400 * time.Millisecond)
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"index\":0}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	handler := NewServer(config.Config{
+		DefaultProvider:          "chat",
+		EnableLegacyV1Routes:     true,
+		UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+	proxy := httptest.NewServer(handler)
+	defer proxy.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxy.URL+"/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if elapsed := time.Since(start); elapsed >= 250*time.Millisecond {
+		t.Fatalf("expected response headers before first upstream event, got %s", elapsed)
+	}
+
+	readDone := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 8192)
+		var out strings.Builder
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				out.Write(buf[:n])
+				if strings.Contains(out.String(), "代理层占位") {
+					readDone <- out.String()
+					return
+				}
+			}
+			if err != nil {
+				readDone <- out.String()
+				return
+			}
+		}
+	}()
+
+	select {
+	case body := <-readDone:
+		if !strings.Contains(body, "代理层占位") {
+			t.Fatalf("expected placeholder body before first upstream event, got %q", body)
+		}
+	case <-time.After(200 * time.Millisecond):
+		select {
+		case body := <-readDone:
+			_ = resp.Body.Close()
+			t.Fatalf("expected placeholder bytes before upstream event, but only received later body %q", body)
+		case <-time.After(350 * time.Millisecond):
+			_ = resp.Body.Close()
+			t.Fatal("expected placeholder bytes to reach client before upstream event")
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,21 +73,30 @@ type reasoning struct {
 const preservedResponsesTopLevelFieldsKey = "__openai_compat_responses_top_level"
 
 func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return model.CanonicalRequest{}, err
+	}
 	var req request
-	if err := json.NewDecoder(r).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+		return model.CanonicalRequest{}, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return model.CanonicalRequest{}, err
 	}
 
 	canon := model.CanonicalRequest{
-		Model:           req.Model,
-		Stream:          req.Stream,
-		ResponseStore:   req.Store,
-		ResponseInclude: append([]string(nil), req.Include...),
-		Instructions:    decodeOptionalString(req.Instructions),
-		Temperature:     decodeOptionalFloat(req.Temperature),
-		TopP:            decodeOptionalFloat(req.TopP),
-		MaxOutputTokens: decodeOptionalInt(req.MaxOutputTokensRaw),
-		Stop:            req.Stop,
+		Model:                   req.Model,
+		Stream:                  req.Stream,
+		PreservedTopLevelFields: collectPassthroughTopLevelFields(raw, req),
+		ResponseStore:           req.Store,
+		ResponseInclude:         append([]string(nil), req.Include...),
+		Instructions:            decodeOptionalString(req.Instructions),
+		Temperature:             decodeOptionalFloat(req.Temperature),
+		TopP:                    decodeOptionalFloat(req.TopP),
+		MaxOutputTokens:         decodeOptionalInt(req.MaxOutputTokensRaw),
+		Stop:                    req.Stop,
 	}
 	for _, inc := range req.Include {
 		if inc == "usage" {
@@ -95,7 +105,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		}
 	}
 
-	if preservedTopLevelFields := collectPreservedTopLevelFields(req); len(preservedTopLevelFields) > 0 {
+	if preservedTopLevelFields := collectResponseEchoTopLevelFields(req); len(preservedTopLevelFields) > 0 {
 		canon.ResponseInputItems = append(canon.ResponseInputItems, map[string]any{
 			preservedResponsesTopLevelFieldsKey: preservedTopLevelFields,
 		})
@@ -452,7 +462,31 @@ func isUndefinedString(value string) bool {
 	return value == "[undefined]" || value == "undefined" || value == ""
 }
 
-func collectPreservedTopLevelFields(req request) map[string]any {
+func collectPassthroughTopLevelFields(raw map[string]any, req request) map[string]any {
+	fields := map[string]any{}
+	known := map[string]struct{}{
+		"model": {}, "stream": {}, "store": {}, "include": {}, "previous_response_id": {}, "metadata": {},
+		"parallel_tool_calls": {}, "truncation": {}, "text": {}, "instructions": {}, "input": {}, "tools": {},
+		"tool_choice": {}, "reasoning": {}, "temperature": {}, "top_p": {}, "max_output_tokens": {}, "stop": {},
+	}
+	for key, value := range raw {
+		if _, ok := known[key]; ok {
+			continue
+		}
+		fields[key] = value
+	}
+	if preserved := collectResponseEchoTopLevelFields(req); len(preserved) > 0 {
+		for key, value := range preserved {
+			fields[key] = value
+		}
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func collectResponseEchoTopLevelFields(req request) map[string]any {
 	fields := map[string]any{}
 	if req.PreviousResponseID != "" {
 		fields["previous_response_id"] = req.PreviousResponseID

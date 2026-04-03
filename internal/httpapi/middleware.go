@@ -103,6 +103,12 @@ func (w *responseCaptureWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+func (w *responseCaptureWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func truncateBody(body []byte, maxLen int) string {
 	if len(body) <= maxLen {
 		return string(body)
