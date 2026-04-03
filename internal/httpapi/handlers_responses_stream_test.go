@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -172,8 +173,8 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	addedIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
-	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`)
+	addedIdx := strings.Index(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
+	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","parameters":{"city":"Shanghai"},"type":"function_call"},"type":"response.output_item.done"}`)
 	completedIdx := strings.LastIndex(body, `event: response.completed`)
 
 	if addedIdx == -1 || doneIdx == -1 || completedIdx == -1 {
@@ -197,7 +198,7 @@ func TestResponsesStreamAccumulatesMultipleFunctionCallArgumentDeltasBeforeDone(
 		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"topic":"finance"}`}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel","topic":"finance"},"type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function call item to contain merged arguments, got %s", body)
 	}
 	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
@@ -215,10 +216,10 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress partial function_call_arguments.delta events, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
-		t.Fatalf("expected compatibility mode to delay added until full arguments are available, got %s", body)
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected compatibility mode to emit metadata-only added event, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel","topic":"finance"},"type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function_call item to retain full merged arguments, got %s", body)
 	}
 	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
@@ -233,7 +234,7 @@ func TestResponsesStreamCompatibilityKeepsOriginalItemIDWhilePreservingCallID(t 
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel"},"type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected compatibility mode to preserve original function_call item id while retaining call_id, got %s", body)
 	}
 	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
@@ -322,6 +323,268 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 	}
 }
 
+func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		if strings.Contains(string(body), `"stream_options":{"include_usage":true}`) {
+			_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"prompt_tokens_details\":{\"cached_tokens\":1}},\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}]}\n\n"))
+		} else {
+			_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0}]}\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, `"response":{"finish_reason":"stop","id":"chatcmpl_123","object":"response","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens":2,"total_tokens":5}}`) {
+		t.Fatalf("expected provider /chat/v1/responses stream to include usage by default, got %s", body)
+	}
+	if !strings.Contains(body, `"cached_tokens":1`) {
+		t.Fatalf("expected cached_tokens to be surfaced in usage payload, got %s", body)
+	}
+}
+
+func TestProviderResponsesRouteStreamsCompleteToolArgumentsForChatUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"scrape_web\",\"arguments\":\"\"}}]},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}]},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"open repo"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected compatibility stream to emit metadata-only added event, got %s", body)
+	}
+	if !strings.Contains(body, `"parameters":{"url":"https://example.com"}`) {
+		t.Fatalf("expected compatibility stream to also expose parsed parameters object, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://example.com"},"type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected compatibility stream to emit done event with parsed parameters object, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected compatibility stream to emit arguments.done with full arguments, got %s", body)
+	}
+	addedIndex := strings.Index(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`)
+	doneIndex := strings.Index(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://example.com"},"type":"function_call"},"type":"response.output_item.done"}`)
+	argumentsDoneIndex := strings.Index(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`)
+	if addedIndex == -1 || doneIndex == -1 || argumentsDoneIndex == -1 {
+		t.Fatalf("expected added, done and arguments.done events, got %s", body)
+	}
+	if !(addedIndex < doneIndex && doneIndex < argumentsDoneIndex) {
+		t.Fatalf("expected added then done then arguments.done, got %s", body)
+	}
+	if count := strings.Count(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`); count != 1 {
+		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
+	}
+}
+
+func TestProviderResponsesRouteStreamsSingleArgumentsDoneAfterToolEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search_web\",\"arguments\":\"{\\\"query\\\": \\\"openai compat proxy github\\\", \\\"topic\\\": \\\"general\\\"}\"}}]},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"search github"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	addedEvent := `{"item":{"call_id":"call_1","id":"call_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`
+	doneEvent := `{"item":{"arguments":"{\"query\": \"openai compat proxy github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"openai compat proxy github","topic":"general"},"type":"function_call"},"type":"response.output_item.done"}`
+	addedIndex := strings.Index(body, addedEvent)
+	doneIndex := strings.Index(body, doneEvent)
+	if addedIndex == -1 || doneIndex == -1 {
+		t.Fatalf("expected added and done events, got %s", body)
+	}
+	if !(addedIndex < doneIndex) {
+		t.Fatalf("expected output_item.added then output_item.done, got %s", body)
+	}
+	argumentsDoneEvent := `{"arguments":"{\"query\": \"openai compat proxy github\", \"topic\": \"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`
+	if !strings.Contains(body, argumentsDoneEvent) {
+		t.Fatalf("expected arguments.done event, got %s", body)
+	}
+	argumentsDoneIndex := strings.Index(body, argumentsDoneEvent)
+	if !(addedIndex < doneIndex && doneIndex < argumentsDoneIndex) {
+		t.Fatalf("expected output_item.added then output_item.done then arguments.done, got %s", body)
+	}
+	if count := strings.Count(body, argumentsDoneEvent); count != 1 {
+		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
+	}
+}
+
+func TestProviderResponsesRouteStreamsAvoidsDuplicateCompleteArgumentsAcrossEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search_web\",\"arguments\":\"{\\\"query\\\": \\\"k3ss-official g0dm0d3 github\\\", \\\"topic\\\": \\\"general\\\"}\"}}]},\"index\":0}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "chat",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"search github"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	addedWithArguments := `{"item":{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"type":"function_call"},"type":"response.output_item.added"}`
+	if strings.Contains(body, addedWithArguments) {
+		t.Fatalf("expected added event to avoid carrying complete arguments payload, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected compat stream to emit one final arguments.done payload for RikkaHub, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected done event to carry the complete final arguments once, got %s", body)
+	}
+	if count := strings.Count(body, `{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`); count != 1 {
+		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
+	}
+}
+
+func TestProviderResponsesRouteStreamsMetadataAddedAndSingleArgumentsDoneForRikkahub(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":"k3ss-official g0dm0d3 github","topic":"general"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected metadata-only added event for client placeholder, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected final arguments.done event for client parser, got %s", body)
+	}
+	if strings.Contains(body, `{"item":{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected added event to avoid duplicate complete arguments payload, got %s", body)
+	}
+	if count := strings.Count(body, `{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`); count != 1 {
+		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
+	}
+}
+
 func testResponsesConfig(upstreamURL string) config.Config {
 	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
 }
@@ -341,8 +604,9 @@ func renderResponsesWriterEvents(t *testing.T, endpointType string, events ...up
 
 func testResponsesConfigWithEndpoint(upstreamURL string, endpointType string) config.Config {
 	return config.Config{
-		DefaultProvider:      "openai",
-		EnableLegacyV1Routes: true,
+		DefaultProvider:          "openai",
+		EnableLegacyV1Routes:     true,
+		UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
 		Providers: []config.ProviderConfig{{
 			ID:                   "openai",
 			Enabled:              true,
@@ -353,4 +617,13 @@ func testResponsesConfigWithEndpoint(upstreamURL string, endpointType string) co
 			SupportsResponses:    true,
 		}},
 	}
+}
+
+func testResponsesConfigWithEndpointAndThinkingStyle(upstreamURL string, endpointType string, thinkingTagStyle string) config.Config {
+	cfg := testResponsesConfigWithEndpoint(upstreamURL, endpointType)
+	cfg.UpstreamThinkingTagStyle = thinkingTagStyle
+	if len(cfg.Providers) > 0 {
+		cfg.Providers[0].UpstreamThinkingTagStyle = thinkingTagStyle
+	}
+	return cfg
 }

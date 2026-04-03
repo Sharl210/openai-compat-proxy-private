@@ -36,7 +36,7 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		canon.Messages = dedupeCanonicalToolMessages(canon.Messages)
+		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
 			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)

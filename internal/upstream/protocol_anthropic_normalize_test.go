@@ -200,6 +200,195 @@ func TestNormalizeAnthropicFrame_Error(t *testing.T) {
 	}
 }
 
+func TestNormalizeAnthropicFrame_ShadowRecording_RawPreserved(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`message_start`, `{"message":{"id":"msg_123","type":"message","role":"assistant"}}`},
+		{`content_block_start`, `{"index":0,"content_block":{"type":"text","text":""}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"text_delta","text":"Hello"}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"text_delta","text":" world"}}`},
+		{`message_delta`, `{"usage":{"input_tokens":10,"output_tokens":2},"delta":{"stop_reason":"end_turn"}}`},
+		{`message_stop`, `{}`},
+	}
+
+	state := &anthropicNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		usage:          map[string]any{},
+		provider:       "anthropic",
+	}
+
+	var allEvents []Event
+	for _, f := range frames {
+		frame := &sseFrame{Event: f.event, Data: f.data}
+		events, done, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	foundRawEvent := false
+	noLeakage := true
+	for _, evt := range allEvents {
+		if _, ok := evt.Data["_providerMeta"]; ok {
+			noLeakage = false
+		}
+		if len(evt.Raw) > 0 {
+			foundRawEvent = true
+			var envelope map[string]any
+			if err := json.Unmarshal(evt.Raw, &envelope); err != nil {
+				t.Errorf("Event.Raw cannot be unmarshaled: %v", err)
+			} else {
+				if _, ok := envelope["_raw"]; !ok {
+					t.Error("envelope missing _raw field")
+				}
+				if provider, _ := envelope["provider"].(string); provider != "anthropic" {
+					t.Errorf("envelope provider = %q, want %q", provider, "anthropic")
+				}
+			}
+		}
+	}
+
+	if !noLeakage {
+		t.Error("shadow recording FAILED: _providerMeta leaked into Event.Data")
+	}
+	if !foundRawEvent {
+		t.Error("shadow recording FAILED: no Event.Raw preserved after anthropic normalization; expected raw frame data to be retained in Event.Raw")
+	}
+}
+
+func TestNormalizeAnthropicFrame_ShadowRecording_ProviderMeta(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`message_start`, `{"message":{"id":"msg_123","type":"message","role":"assistant"}}`},
+		{`content_block_start`, `{"index":0,"content_block":{"type":"text","text":""}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{`message_delta`, `{"usage":{"input_tokens":10,"output_tokens":2},"delta":{"stop_reason":"end_turn"}}`},
+		{`message_stop`, `{}`},
+	}
+
+	state := &anthropicNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		usage:          map[string]any{},
+		provider:       "anthropic",
+	}
+
+	var allEvents []Event
+	for _, f := range frames {
+		frame := &sseFrame{Event: f.event, Data: f.data}
+		events, done, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	providerMetaFound := false
+	noLeakage := true
+	for _, evt := range allEvents {
+		if _, ok := evt.Data["_providerMeta"]; ok {
+			noLeakage = false
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal(evt.Raw, &envelope); err == nil {
+			if provider, _ := envelope["provider"].(string); provider == "anthropic" {
+				if originalEvent, _ := envelope["originalEvent"].(string); originalEvent != "" {
+					providerMetaFound = true
+				}
+			}
+		}
+	}
+
+	if !noLeakage {
+		t.Error("shadow recording FAILED: _providerMeta leaked into Event.Data; metadata should only be in Raw envelope")
+	}
+	if !providerMetaFound {
+		t.Error("shadow recording FAILED: provider metadata not found in Event.Raw envelope")
+	}
+}
+
+func TestNormalizeAnthropicFrame_ShadowRecording_AllEventTypes(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`message_start`, `{"message":{"id":"msg_123","type":"message","role":"assistant"}}`},
+		{`content_block_start`, `{"index":0,"content_block":{"type":"thinking","thinking":""}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"thinking_delta","thinking":"thinking..."}}`},
+		{`content_block_start`, `{"index":1,"content_block":{"type":"text","text":""}}`},
+		{`content_block_delta`, `{"index":1,"delta":{"type":"text_delta","text":"answer"}}`},
+		{`content_block_start`, `{"index":2,"content_block":{"type":"tool_use","id":"tool_0","name":"get_weather","input":{}}}`},
+		{`content_block_delta`, `{"index":2,"delta":{"type":"input_json_delta","partial_json":"{}"}}`},
+		{`message_delta`, `{"usage":{"input_tokens":10,"output_tokens":5},"delta":{"stop_reason":"tool_use"}}`},
+		{`message_stop`, `{}`},
+	}
+
+	state := &anthropicNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		usage:          map[string]any{},
+		provider:       "anthropic",
+	}
+
+	var allEvents []Event
+	for _, f := range frames {
+		frame := &sseFrame{Event: f.event, Data: f.data}
+		events, done, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	noLeakage := true
+	for i, evt := range allEvents {
+		t.Logf("  [%d] canonical=%s raw=%s", i, evt.Event, string(evt.Raw))
+		if _, ok := evt.Data["_providerMeta"]; ok {
+			noLeakage = false
+		}
+		if len(evt.Raw) == 0 {
+			t.Errorf("  [%d] %s: no shadow recording (Raw is empty)", i, evt.Event)
+		} else {
+			var envelope map[string]any
+			if err := json.Unmarshal(evt.Raw, &envelope); err != nil {
+				t.Errorf("  [%d] %s: Raw is not valid envelope JSON: %v", i, evt.Event, err)
+			} else {
+				if _, ok := envelope["_raw"]; !ok {
+					t.Errorf("  [%d] %s: envelope missing _raw field", i, evt.Event)
+				}
+				if provider, _ := envelope["provider"].(string); provider != "anthropic" {
+					t.Errorf("  [%d] %s: envelope provider = %q, want %q", i, evt.Event, provider, "anthropic")
+				}
+			}
+		}
+	}
+
+	eventsWithShadow := 0
+	for _, evt := range allEvents {
+		if len(evt.Raw) > 0 {
+			eventsWithShadow++
+		}
+	}
+	if eventsWithShadow == 0 {
+		t.Error("shadow recording FAILED: no events have raw frame data captured for anthropic normalization")
+	}
+	if !noLeakage {
+		t.Error("shadow recording FAILED: _providerMeta leaked into Event.Data")
+	}
+}
+
 func TestNormalizeAnthropicFrame_FullStream(t *testing.T) {
 	rawSSE := `event: message_start
 data: {"message":{"id":"msg_123","type":"message","role":"assistant"}}

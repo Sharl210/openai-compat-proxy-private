@@ -68,14 +68,13 @@ const (
 )
 
 const (
+	UpstreamThinkingTagStyleOff    = "off"
+	UpstreamThinkingTagStyleLegacy = "legacy"
+
 	MasqueradeTargetOpenCode = "opencode"
 	MasqueradeTargetClaude   = "claude" // 模拟 Claude Code 客户端
 	MasqueradeTargetCodex    = "codex"  // 模拟 OpenAI Codex CLI 客户端
 	MasqueradeTargetNone     = "none"   // 不做任何伪装
-)
-
-const (
-	UpstreamThinkingTagStyleTwo = "two" // 上游将思维链以<think></thinking>或<thinking></thinking>标签对形式嵌入在正文传输
 )
 
 type invalidConfigError string
@@ -249,7 +248,15 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		case "INJECT_CLAUDE_CODE_SYSTEM_PROMPT":
 			provider.InjectClaudeCodeSystemPrompt, _ = parseProviderStrictBool(value, key, path)
 		case "UPSTREAM_THINKING_TAG_STYLE":
-			provider.UpstreamThinkingTagStyle = strings.ToLower(value)
+			enabled, parseErr := parseProviderStrictBool(value, key, path)
+			if parseErr != nil {
+				return ProviderConfig{}, parseErr
+			}
+			if enabled {
+				provider.UpstreamThinkingTagStyle = UpstreamThinkingTagStyleLegacy
+			} else {
+				provider.UpstreamThinkingTagStyle = UpstreamThinkingTagStyleOff
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

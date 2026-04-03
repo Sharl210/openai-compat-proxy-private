@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/debugarchive"
 	"openai-compat-proxy/internal/logging"
 )
 
@@ -27,6 +28,19 @@ func withRequestID(next http.Handler) http.Handler {
 			requestBody, _ = io.ReadAll(r.Body)
 			r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+		}
+
+		archiveWriter := debugarchive.NewWriterFromEnv(id)
+		if archiveWriter != nil {
+			_ = archiveWriter.WriteRequest(map[string]any{
+				"request_id":   id,
+				"method":       r.Method,
+				"path":         r.URL.Path,
+				"content_type": r.Header.Get("Content-Type"),
+				"request_body": string(requestBody),
+			})
+			defer archiveWriter.Close()
+			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
 		}
 
 		logging.Event("clientToProxyRequest", map[string]any{

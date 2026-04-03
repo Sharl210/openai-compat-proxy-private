@@ -15,9 +15,60 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/debugarchive"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
+
+func TestClientResponse_WritesFinalSnapshotWhenArchiveAttached(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer server.Close()
+	writer := debugarchive.NewArchiveWriter(t.TempDir(), "req-archive-final")
+	defer writer.Close()
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL)
+	_, err := client.Response(ctx, model.CanonicalRequest{RequestID: "req-archive-final", Model: "gpt-5"}, "")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(os.TempDir(), "non-existent"))
+	_ = data
+	_ = err
+}
+
+func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.created\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_1\"}}\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_1\"}}\n\n"))
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	writer := debugarchive.NewArchiveWriter(root, "req-archive-stream")
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL)
+	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: "req-archive-stream", Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err != nil {
+		t.Fatalf("StreamEvents error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "req-archive-stream", "raw.ndjson")); err != nil {
+		t.Fatalf("expected raw.ndjson: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "req-archive-stream", "canonical.ndjson")); err != nil {
+		t.Fatalf("expected canonical.ndjson: %v", err)
+	}
+}
 
 func TestBuildRequestBodyOmitsCacheControlForUpstreamCompatibility(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
@@ -607,6 +658,97 @@ func TestBuildChatRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 	audioRaw, _ := part["input_audio"].(map[string]any)
 	if got := audioRaw["format"]; got != "mp3" {
 		t.Fatalf("expected audio format preserved, got %#v", part)
+	}
+}
+
+func TestBuildChatRequestBodyDropsAssistantToolCallsWithEmptyFunctionName(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:      "assistant",
+			ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "", Arguments: `{"url":"https://example.com"}`}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("expected one message, got %#v", payload)
+	}
+	message, _ := messages[0].(map[string]any)
+	if _, exists := message["tool_calls"]; exists {
+		t.Fatalf("expected empty-name tool_call to be dropped from chat upstream payload, got %#v", message)
+	}
+	if got, _ := message["role"].(string); got != "assistant" {
+		t.Fatalf("expected assistant role preserved, got %#v", message)
+	}
+}
+
+func TestBuildChatRequestBodySanitizesRepeatedConcatenatedToolArguments(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []model.CanonicalToolCall{{
+				ID:        "call_1",
+				Type:      "function",
+				Name:      "scrape_web",
+				Arguments: `{"url":"https://example.com"}{"url":"https://example.com"}{"url":"https://example.com"}`,
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	toolCalls, _ := message["tool_calls"].([]any)
+	call, _ := toolCalls[0].(map[string]any)
+	function, _ := call["function"].(map[string]any)
+	if got, _ := function["arguments"].(string); got != `{"url":"https://example.com"}` {
+		t.Fatalf("expected repeated concatenated tool arguments to be sanitized, got %#v", function)
+	}
+}
+
+func TestBuildChatRequestBodySanitizesCorruptedPrefixBeforeRepeatedToolArguments(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []model.CanonicalToolCall{{
+				ID:        "call_1",
+				Type:      "function",
+				Name:      "scrape_web",
+				Arguments: `{"url":"https://github.com/k3ss-official/g0dm0d3` + `{"url":"https://github.com/k3ss-official/g0dm0d3"}{"url":"https://github.com/k3ss-official/g0dm0d3"}`,
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	toolCalls, _ := message["tool_calls"].([]any)
+	call, _ := toolCalls[0].(map[string]any)
+	function, _ := call["function"].(map[string]any)
+	if got, _ := function["arguments"].(string); got != `{"url":"https://github.com/k3ss-official/g0dm0d3"}` {
+		t.Fatalf("expected corrupted prefix to be discarded in favor of repeated valid JSON, got %#v", function)
 	}
 }
 

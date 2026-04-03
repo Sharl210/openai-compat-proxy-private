@@ -52,12 +52,15 @@ type anthropicStreamState struct {
 }
 
 type responsesStreamState struct {
+	createdSent          bool
+	createdResponseID    string
 	textStarted          bool
 	realReasoningSeen    bool
 	planningSent         bool
 	toolStatusSent       bool
 	reasoningStarted     bool
 	reasoningClosed      bool
+	syntheticInjected    bool
 	syntheticSummary     strings.Builder
 	toolItems            map[string]*responsesToolItemState
 	toolIDAliases        map[string]string
@@ -93,14 +96,34 @@ type processedResponseEvents struct {
 	terminalFailure *aggregate.TerminalFailureError
 }
 
-type responseEventWriterHelper struct {
-	downstreamType       string
-	upstreamEndpointType string
+type responseProjectionState struct {
+	createdSent          bool
+	createdResponseID    string
 	toolIDAliases        map[string]string
 	toolItems            map[string]*responsesToolItemState
 	toolOrder            []string
 	reasoningStarted     bool
 	reasoningClosed      bool
+	syntheticInjected    bool
+	realReasoningSeen    bool
+	syntheticSummary     *strings.Builder
+	requestID            string
+	upstreamEndpointType string
+	terminalSeen         bool
+	terminalFailure      *aggregate.TerminalFailureError
+}
+
+type responseEventWriterHelper struct {
+	downstreamType       string
+	upstreamEndpointType string
+	createdSent          bool
+	createdResponseID    string
+	toolIDAliases        map[string]string
+	toolItems            map[string]*responsesToolItemState
+	toolOrder            []string
+	reasoningStarted     bool
+	reasoningClosed      bool
+	syntheticInjected    bool
 	realReasoningSeen    bool
 	syntheticSummary     *strings.Builder
 	requestID            string
@@ -139,15 +162,26 @@ func (h *responseEventWriterHelper) addEvent(event string, data map[string]any) 
 }
 
 func (h *responseEventWriterHelper) addToolItemAddedEvent(item map[string]any) {
+	item = withParsedToolParameters(item)
 	h.addEvent("response.output_item.added", map[string]any{"item": item})
 }
 
 func (h *responseEventWriterHelper) addToolItemDoneEvent(item map[string]any) {
+	item = withParsedToolParameters(item)
 	h.addEvent("response.output_item.done", map[string]any{"item": item})
 }
 
 func (h *responseEventWriterHelper) addFunctionCallArgumentsDoneEvent(itemID, arguments string) {
 	h.addEvent("response.function_call_arguments.done", map[string]any{"item_id": itemID, "arguments": arguments})
+}
+
+func (h *responseEventWriterHelper) addCreatedEvent(id string) {
+	if id == "" {
+		id = h.currentResponseID()
+	}
+	h.addEvent("response.created", map[string]any{"response": map[string]any{"id": id, "object": "response"}})
+	h.createdSent = true
+	h.createdResponseID = id
 }
 
 func (h *responseEventWriterHelper) currentResponseID() string {
@@ -181,7 +215,10 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 			itemCopy["arguments"] = toolState.arguments.String()
 		}
 		if compatCompleteToolArgs && !toolState.addedSent {
-			h.addToolItemAddedEvent(itemCopy)
+			addedItem := cloneJSONValueForResponse(toolState.item).(map[string]any)
+			delete(addedItem, "arguments")
+			delete(addedItem, "parameters")
+			h.addToolItemAddedEvent(addedItem)
 			toolState.addedSent = true
 		}
 		h.addToolItemDoneEvent(itemCopy)
@@ -193,7 +230,7 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 }
 
 func (h *responseEventWriterHelper) closeSyntheticReasoning() {
-	if !h.reasoningStarted || h.reasoningClosed {
+	if !h.syntheticInjected || !h.reasoningStarted || h.reasoningClosed {
 		return
 	}
 	if h.downstreamType != "responses" {
@@ -220,6 +257,12 @@ func (h *responseEventWriterHelper) markRealReasoningSeen() {
 	h.closeSyntheticReasoning()
 }
 
+func (h *responseEventWriterHelper) shouldMergeChatReasoningIntoSynthetic() bool {
+	return h.downstreamType == "responses" &&
+		h.syntheticInjected &&
+		normalizeHTTPAPIUpstreamEndpointType(h.upstreamEndpointType) == config.UpstreamEndpointTypeChat
+}
+
 func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (processResponseEventResult, error) {
 	result := processResponseEventResult{}
 	compatCompleteToolArgs := normalizeHTTPAPIUpstreamEndpointType(h.upstreamEndpointType) != config.UpstreamEndpointTypeResponses
@@ -230,6 +273,20 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	item, _ := evt.Data["item"].(map[string]any)
 
 	switch evt.Event {
+	case "response.created":
+		if h.createdSent {
+			response, _ := evt.Data["response"].(map[string]any)
+			if response != nil && stringValue(response["id"]) == h.createdResponseID {
+				result.skipWrite = true
+				return result, nil
+			}
+		}
+		if response, _ := evt.Data["response"].(map[string]any); response != nil {
+			if id := stringValue(response["id"]); id != "" {
+				h.createdResponseID = id
+			}
+		}
+		h.createdSent = true
 	case "response.output_item.added", "response.output_item.done":
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
 			h.markRealReasoningSeen()
@@ -253,9 +310,6 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
 				}
-				if compatCompleteToolArgs && evt.Event == "response.output_item.done" && toolState.arguments.Len() > 0 {
-					h.addFunctionCallArgumentsDoneEvent(itemID, toolState.arguments.String())
-				}
 				if compatCompleteToolArgs {
 					result.skipWrite = true
 					return result, nil
@@ -268,6 +322,19 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		h.reasoningStarted = true
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		h.flushPendingFunctionCalls()
+		if h.shouldMergeChatReasoningIntoSynthetic() && evt.Event == "response.reasoning.delta" {
+			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
+				if h.syntheticSummary != nil {
+					h.syntheticSummary.WriteString(summary)
+					if !strings.HasSuffix(summary, "\n") {
+						h.syntheticSummary.WriteString("\n")
+					}
+				}
+				h.addEvent("response.reasoning_summary_text.delta", map[string]any{"delta": summary})
+			}
+			result.skipWrite = true
+			break
+		}
 		h.markRealReasoningSeen()
 		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
 		if evt.Event == "response.reasoning.delta" {
@@ -441,11 +508,13 @@ func NewChatEventWriter(w http.ResponseWriter, flusher http.Flusher, chatState *
 func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
 	evt := upstream.Event{Event: event, Data: data}
 
+	skipOriginalWrite := false
 	if w.helper != nil {
-		_, err := doProcessResponseEvent(w.helper, evt)
+		result, err := doProcessResponseEvent(w.helper, evt)
 		if err != nil {
 			return err
 		}
+		skipOriginalWrite = result.skipWrite
 
 		for _, cmd := range w.helper.events {
 			if err := w.writeProcessedEvent(cmd.Event, cmd.Data); err != nil {
@@ -453,6 +522,9 @@ func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
 			}
 		}
 		w.helper.events = nil
+	}
+	if skipOriginalWrite {
+		return nil
 	}
 
 	return writeChatEvent(w.w, w.flusher, w.chatState, evt, true, w.usageRecorder)
@@ -578,22 +650,50 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	return nil
 }
 
-func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
+func shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle string) bool {
+	if normalizeHTTPAPIUpstreamEndpointType(upstreamEndpointType) != config.UpstreamEndpointTypeChat {
+		return true
+	}
+	return thinkingTagStyle != config.UpstreamThinkingTagStyleOff
+}
+
+func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
+	return normalizeHTTPAPIUpstreamEndpointType(upstreamEndpointType) == config.UpstreamEndpointTypeChat
+}
+
+func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
 	state := responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: upstreamEndpointType, requestID: req.RequestID}
 	collector := aggregate.NewCollector()
 	writer := &ResponsesEventWriter{w: w, flusher: flusher}
-	if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
-		return aggregate.Result{}, err
+	if shouldEmitSyntheticResponsesCreated(upstreamEndpointType) {
+		createdHelper := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{requestID: state.requestID, upstreamEndpointType: state.upstreamEndpointType, createdSent: state.createdSent})
+		createdHelper.addCreatedEvent(stream.FirstPendingResponseID())
+		state.createdSent = createdHelper.createdSent
+		state.createdResponseID = createdHelper.createdResponseID
+		for _, cmd := range createdHelper.events {
+			if err := writer.WriteEvent(cmd.Event, cmd.Data); err != nil {
+				return aggregate.Result{}, err
+			}
+		}
+	}
+	injectSyntheticReasoning := shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle)
+	if injectSyntheticReasoning {
+		if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
+			return aggregate.Result{}, err
+		}
 	}
 	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return aggregate.Result{}, err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
-		func() bool { return true },
+		func() bool { return state.textStarted || state.realReasoningSeen },
 		nil,
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
 			collector.Accept(evt)
+			if evt.Event == "response.output_text.delta" {
+				state.textStarted = true
+			}
 			return writeResponsesEvent(writer, &state, evt, usageRecorder)
 		},
 	)
@@ -618,20 +718,22 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 }
 
 func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
-	h := &responseEventWriterHelper{
-		downstreamType:       writer.DownstreamType(),
-		upstreamEndpointType: state.upstreamEndpointType,
+	h := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{
+		createdSent:          state.createdSent,
+		createdResponseID:    state.createdResponseID,
 		toolIDAliases:        state.toolIDAliases,
 		toolItems:            state.toolItems,
 		toolOrder:            state.toolOrder,
 		reasoningStarted:     state.reasoningStarted,
 		reasoningClosed:      state.reasoningClosed,
+		syntheticInjected:    state.syntheticInjected,
 		realReasoningSeen:    state.realReasoningSeen,
 		syntheticSummary:     &state.syntheticSummary,
 		requestID:            state.requestID,
+		upstreamEndpointType: state.upstreamEndpointType,
 		terminalSeen:         state.terminalSeen,
 		terminalFailure:      state.terminalFailure,
-	}
+	})
 
 	result, err := doProcessResponseEvent(h, evt)
 	if err != nil {
@@ -639,15 +741,19 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	}
 
 	state.toolIDAliases = h.toolIDAliases
+	state.createdSent = h.createdSent
+	state.createdResponseID = h.createdResponseID
 	state.toolItems = h.toolItems
 	state.toolOrder = h.toolOrder
 	state.reasoningStarted = h.reasoningStarted
 	state.reasoningClosed = h.reasoningClosed
+	state.syntheticInjected = h.syntheticInjected
 	state.realReasoningSeen = h.realReasoningSeen
 	state.terminalSeen = h.terminalSeen
 	state.terminalFailure = h.terminalFailure
 
 	for _, cmd := range h.events {
+		logDownstreamToolEvent(state.requestID, writer.DownstreamType(), cmd.Event, cmd.Data)
 		if err := writer.WriteEvent(cmd.Event, cmd.Data); err != nil {
 			return err
 		}
@@ -663,7 +769,94 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		}
 	}
 
+	logDownstreamToolEvent(state.requestID, writer.DownstreamType(), evt.Event, evt.Data)
 	return writer.WriteEvent(evt.Event, evt.Data)
+}
+
+func logDownstreamToolEvent(requestID, downstreamType, event string, data map[string]any) {
+	if requestID == "" || len(data) == 0 {
+		return
+	}
+	if item, _ := data["item"].(map[string]any); item != nil {
+		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			arguments, _ := item["arguments"].(string)
+			logging.Event("downstreamToolEvent", map[string]any{
+				"request_id":        requestID,
+				"downstream_type":   downstreamType,
+				"event":             event,
+				"item_id":           stringValue(item["id"]),
+				"call_id":           stringValue(item["call_id"]),
+				"name":              stringValue(item["name"]),
+				"arguments_len":     len(arguments),
+				"arguments_preview": truncateForLog(arguments, 120),
+			})
+		}
+		return
+	}
+	if event == "response.function_call_arguments.done" || event == "response.function_call_arguments.delta" {
+		arguments := stringValue(data["arguments"])
+		if arguments == "" {
+			arguments = stringValue(data["delta"])
+		}
+		logging.Event("downstreamToolEvent", map[string]any{
+			"request_id":        requestID,
+			"downstream_type":   downstreamType,
+			"event":             event,
+			"item_id":           stringValue(data["item_id"]),
+			"arguments_len":     len(arguments),
+			"arguments_preview": truncateForLog(arguments, 120),
+		})
+	}
+}
+
+func withParsedToolParameters(item map[string]any) map[string]any {
+	if item == nil {
+		return item
+	}
+	if itemType, _ := item["type"].(string); itemType != "function_call" {
+		return item
+	}
+	arguments, _ := item["arguments"].(string)
+	if strings.TrimSpace(arguments) == "" {
+		return item
+	}
+	if _, exists := item["parameters"]; exists {
+		return item
+	}
+	var parsedMap map[string]any
+	if err := json.Unmarshal([]byte(arguments), &parsedMap); err == nil && len(parsedMap) > 0 {
+		itemCopy := cloneMap(item)
+		itemCopy["parameters"] = parsedMap
+		return itemCopy
+	}
+	return item
+}
+
+func truncateForLog(text string, max int) string {
+	if max <= 0 || len(text) <= max {
+		return text
+	}
+	return text[:max]
+}
+
+func newResponseEventWriterHelper(downstreamType string, state responseProjectionState) *responseEventWriterHelper {
+	return &responseEventWriterHelper{
+		downstreamType:       downstreamType,
+		upstreamEndpointType: state.upstreamEndpointType,
+		createdSent:          state.createdSent,
+		createdResponseID:    state.createdResponseID,
+		toolIDAliases:        state.toolIDAliases,
+		toolItems:            state.toolItems,
+		toolOrder:            state.toolOrder,
+		reasoningStarted:     state.reasoningStarted,
+		reasoningClosed:      state.reasoningClosed,
+		syntheticInjected:    state.syntheticInjected,
+		realReasoningSeen:    state.realReasoningSeen,
+		syntheticSummary:     state.syntheticSummary,
+		requestID:            state.requestID,
+		terminalSeen:         state.terminalSeen,
+		terminalFailure:      state.terminalFailure,
+	}
 }
 
 func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flusher, text string) error {
@@ -692,6 +885,7 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 			flusher.Flush()
 		}
 		state.reasoningStarted = true
+		state.syntheticInjected = true
 	}
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
@@ -722,6 +916,24 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", encodedSummary); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func writeSyntheticResponsesReasoningTick(w http.ResponseWriter, flusher http.Flusher) error {
+	payload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": "…"}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, "event: response.reasoning_summary_text.delta\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", encoded); err != nil {
 		return err
 	}
 	if flusher != nil {
@@ -1291,6 +1503,7 @@ type chatStreamState struct {
 	realReasoningSeen   bool
 	planningSent        bool
 	toolStatusSent      bool
+	toolIDAliases       map[string]string
 	toolMeta            map[string]map[string]string
 	toolIndex           map[string]int
 	toolSent            map[string]bool
@@ -1303,6 +1516,7 @@ type chatStreamState struct {
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
 	state := chatStreamState{
+		toolIDAliases:   map[string]string{},
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
 		toolSent:        map[string]bool{},
@@ -1432,6 +1646,7 @@ func streamLiveWithSyntheticTicks(
 
 func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event, includeUsage bool) error {
 	state := chatStreamState{
+		toolIDAliases:   map[string]string{},
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
 		toolSent:        map[string]bool{},
@@ -1465,6 +1680,9 @@ func chatStreamFinishReason(state *chatStreamState, data map[string]any) string 
 }
 
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder usageRecorderFunc) error {
+	if state.toolIDAliases == nil {
+		state.toolIDAliases = map[string]string{}
+	}
 	ensureRoleSent := func() error {
 		if state.roleSent {
 			return nil
@@ -1473,6 +1691,40 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 		state.roleSent = true
+		return nil
+	}
+	flushPendingToolCall := func(itemID string) error {
+		if mapped, ok := state.toolIDAliases[itemID]; ok && mapped != "" {
+			itemID = mapped
+		}
+		if itemID == "" || state.toolSent[itemID] {
+			return nil
+		}
+		meta, ok := state.toolMeta[itemID]
+		if !ok {
+			return nil
+		}
+		if _, ok := state.toolIndex[itemID]; !ok {
+			state.toolIndex[itemID] = state.nextToolIx
+			state.nextToolIx++
+		}
+		if err := ensureRoleSent(); err != nil {
+			return err
+		}
+		toolDelta := chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], state.pendingToolArgs[itemID], true)
+		if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
+			return err
+		}
+		state.toolSent[itemID] = true
+		delete(state.pendingToolArgs, itemID)
+		return nil
+	}
+	flushAllPendingToolCalls := func() error {
+		for itemID := range state.toolMeta {
+			if err := flushPendingToolCall(itemID); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	switch evt.Event {
@@ -1489,7 +1741,18 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 		}
 		if itemType, _ := item["type"].(string); itemType == "function_call" {
-			itemID, _ := item["id"].(string)
+			rawItemID, _ := item["id"].(string)
+			itemID := rawItemID
+			if callID, _ := item["call_id"].(string); callID != "" {
+				if rawItemID != "" && rawItemID != callID {
+					state.toolIDAliases[rawItemID] = callID
+					if pending := state.pendingToolArgs[rawItemID]; pending != "" && state.pendingToolArgs[callID] == "" {
+						state.pendingToolArgs[callID] = pending
+						delete(state.pendingToolArgs, rawItemID)
+					}
+				}
+				itemID = callID
+			}
 			if itemID != "" {
 				if _, ok := state.toolIndex[itemID]; !ok {
 					state.toolIndex[itemID] = state.nextToolIx
@@ -1499,16 +1762,13 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 					"name":    stringValue(item["name"]),
 					"call_id": stringValue(item["call_id"]),
 				}
-				if !state.toolSent[itemID] {
-					if err := ensureRoleSent(); err != nil {
+				if directArgs := stringValue(item["arguments"]); directArgs != "" {
+					state.pendingToolArgs[itemID] = directArgs
+				}
+				if state.pendingToolArgs[itemID] != "" {
+					if err := flushPendingToolCall(itemID); err != nil {
 						return err
 					}
-					toolDelta := chatToolDelta(state.toolIndex[itemID], stringValue(item["call_id"]), stringValue(item["name"]), state.pendingToolArgs[itemID], true)
-					if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
-						return err
-					}
-					state.toolSent[itemID] = true
-					delete(state.pendingToolArgs, itemID)
 				}
 			}
 		}
@@ -1562,6 +1822,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.function_call_arguments.delta":
 		itemID := stringValue(evt.Data["item_id"])
+		if mapped, ok := state.toolIDAliases[itemID]; ok && mapped != "" {
+			itemID = mapped
+		}
 		delta := stringValue(evt.Data["delta"])
 		if itemID == "" || delta == "" {
 			return nil
@@ -1589,6 +1852,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		if err := flushAllPendingToolCalls(); err != nil {
+			return err
+		}
 		finishReason := chatStreamFinishReason(state, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		cachedTokens := nestedCachedTokens(rawUsage)
