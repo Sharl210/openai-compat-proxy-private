@@ -152,3 +152,79 @@ func TestMessagesStreamStopsSyntheticTicksAfterRealReasoningStarts(t *testing.T)
 		t.Fatalf("expected no synthetic zero-width ticks after real reasoning started, got %s", body)
 	}
 }
+
+func TestChatStreamDoesNotHoldFirstDeltaBehindSyntheticLeadTime(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	server.ServeHTTP(rec, req)
+	duration := time.Since(start)
+	if duration >= 250*time.Millisecond {
+		t.Fatalf("expected chat stream to forward first delta without synthetic lead wait, took %s body=%s", duration, rec.Body.String())
+	}
+}
+
+func TestMessagesStreamDoesNotHoldFirstDeltaBehindSyntheticLeadTime(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	server.ServeHTTP(rec, req)
+	duration := time.Since(start)
+	if duration >= 250*time.Millisecond {
+		t.Fatalf("expected messages stream to forward first delta without synthetic lead wait, took %s body=%s", duration, rec.Body.String())
+	}
+}
