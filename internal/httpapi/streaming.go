@@ -985,9 +985,6 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if err := startAnthropicUnreasonedPlaceholder(w, flusher, state); err != nil {
 		return err
 	}
-	if err := waitSyntheticLeadTime(ctx); err != nil {
-		return err
-	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realThinkingSeen },
 		func() error {
@@ -1540,9 +1537,6 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 		return err
 	}
 	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": syntheticReasoningPlaceholder + "\n"}, "", nil); err != nil {
-		return err
-	}
-	if err := waitSyntheticLeadTime(ctx); err != nil {
 		return err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
