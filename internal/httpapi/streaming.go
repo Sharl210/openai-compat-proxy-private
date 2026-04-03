@@ -1354,6 +1354,9 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		stopReason := anthropicStreamStopReason(state.stopReason, evt.Data)
 		rawUsage := usageFromEventData(evt.Data)
 		usage := anthropicUsageFromEvent(evt.Data)
+		if usage == nil {
+			usage = map[string]any{}
+		}
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
 			"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil},
