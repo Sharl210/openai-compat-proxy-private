@@ -21,7 +21,9 @@ type ProviderConfig struct {
 	MasqueradeTarget                       string
 	UpstreamUserAgent                      string
 	InjectClaudeCodeMetadataUserID         bool
+	InjectClaudeCodeMetadataUserIDSet      bool
 	InjectClaudeCodeSystemPrompt           bool
+	InjectClaudeCodeSystemPromptSet        bool
 	SupportsChat                           bool
 	SupportsResponses                      bool
 	SupportsModels                         bool
@@ -244,9 +246,25 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		case "UPSTREAM_USER_AGENT":
 			provider.UpstreamUserAgent = value
 		case "INJECT_CLAUDE_CODE_METADATA_USER_ID":
-			provider.InjectClaudeCodeMetadataUserID, _ = parseProviderStrictBool(value, key, path)
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			parsed, parseErr := parseProviderStrictBool(value, key, path)
+			if parseErr != nil {
+				return ProviderConfig{}, parseErr
+			}
+			provider.InjectClaudeCodeMetadataUserIDSet = true
+			provider.InjectClaudeCodeMetadataUserID = parsed
 		case "INJECT_CLAUDE_CODE_SYSTEM_PROMPT":
-			provider.InjectClaudeCodeSystemPrompt, _ = parseProviderStrictBool(value, key, path)
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			parsed, parseErr := parseProviderStrictBool(value, key, path)
+			if parseErr != nil {
+				return ProviderConfig{}, parseErr
+			}
+			provider.InjectClaudeCodeSystemPromptSet = true
+			provider.InjectClaudeCodeSystemPrompt = parsed
 		case "UPSTREAM_THINKING_TAG_STYLE":
 			enabled, parseErr := parseProviderStrictBool(value, key, path)
 			if parseErr != nil {

@@ -111,6 +111,12 @@ func providerConfigForRequest(r *http.Request) config.Config {
 			if provider.MasqueradeTarget != "" {
 				providerCfg.MasqueradeTarget = provider.MasqueradeTarget
 			}
+			if provider.InjectClaudeCodeMetadataUserIDSet {
+				providerCfg.InjectClaudeCodeMetadataUserID = provider.InjectClaudeCodeMetadataUserID
+			}
+			if provider.InjectClaudeCodeSystemPromptSet {
+				providerCfg.InjectClaudeCodeSystemPrompt = provider.InjectClaudeCodeSystemPrompt
+			}
 			if provider.UpstreamThinkingTagStyle != "" {
 				providerCfg.UpstreamThinkingTagStyle = provider.UpstreamThinkingTagStyle
 			}

@@ -270,6 +270,98 @@ func TestLoadProviderFileParsesThinkingTagStyleAsStrictBoolean(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileTreatsBlankClaudeInjectionFlagsAsInheritance(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"INJECT_CLAUDE_CODE_METADATA_USER_ID=",
+		"INJECT_CLAUDE_CODE_SYSTEM_PROMPT=",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.InjectClaudeCodeMetadataUserIDSet {
+		t.Fatalf("expected blank metadata injection flag to inherit root config")
+	}
+	if provider.InjectClaudeCodeSystemPromptSet {
+		t.Fatalf("expected blank system prompt injection flag to inherit root config")
+	}
+}
+
+func TestLoadProviderFileParsesExplicitClaudeInjectionFlags(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"INJECT_CLAUDE_CODE_METADATA_USER_ID=true",
+		"INJECT_CLAUDE_CODE_SYSTEM_PROMPT=false",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if !provider.InjectClaudeCodeMetadataUserIDSet || !provider.InjectClaudeCodeMetadataUserID {
+		t.Fatalf("expected explicit true metadata injection override, got %#v", provider)
+	}
+	if !provider.InjectClaudeCodeSystemPromptSet || provider.InjectClaudeCodeSystemPrompt {
+		t.Fatalf("expected explicit false system prompt injection override, got %#v", provider)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidClaudeMetadataInjectionFlag(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"INJECT_CLAUDE_CODE_METADATA_USER_ID=enabled",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid INJECT_CLAUDE_CODE_METADATA_USER_ID to fail validation")
+	}
+	if err.Error() != "invalid INJECT_CLAUDE_CODE_METADATA_USER_ID in "+providerEnvPath+": \"enabled\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidClaudeSystemPromptInjectionFlag(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"INJECT_CLAUDE_CODE_SYSTEM_PROMPT=enabled",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid INJECT_CLAUDE_CODE_SYSTEM_PROMPT to fail validation")
+	}
+	if err.Error() != "invalid INJECT_CLAUDE_CODE_SYSTEM_PROMPT in "+providerEnvPath+": \"enabled\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestLoadProviderFileRejectsInvalidThinkingMappingBooleanValue(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

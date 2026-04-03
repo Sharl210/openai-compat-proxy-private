@@ -824,6 +824,52 @@ func TestBuildAnthropicRequestBodyRejectsInputAudio(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicRequestBodyInjectsClaudeMetadataUserID(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, true, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	metadata, _ := payload["metadata"].(map[string]any)
+	userID, _ := metadata["user_id"].(string)
+	if !strings.HasPrefix(userID, "user_") || !strings.Contains(userID, "_account__session_") {
+		t.Fatalf("expected claude metadata.user_id injection, got %#v", payload)
+	}
+}
+
+func TestBuildAnthropicRequestBodyInjectsClaudeSystemPrompt(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, false, true)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["system"].(string); got != claudeCodeSystemPrompt {
+		t.Fatalf("expected claude system prompt injection, got %#v", payload)
+	}
+}
+
 func TestStreamUsesAnthropicEndpointAndNormalizesEvents(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
