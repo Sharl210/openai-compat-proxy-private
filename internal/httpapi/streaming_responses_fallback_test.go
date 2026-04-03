@@ -200,6 +200,47 @@ func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *
 	}
 }
 
+func TestResponsesStreamProgressivelyEmitsThinkReasoningBeforeClosingTag(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-think-stream\",\"choices\":[{\"delta\":{\"content\":\"<think>abc\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-think-stream\",\"choices\":[{\"delta\":{\"content\":\"def\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-think-stream\",\"choices\":[{\"delta\":{\"content\":\"</think>final\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-think-stream\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
+	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
+	textIdx := strings.Index(body, `{"delta":"final","type":"response.output_text.delta"}`)
+	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected progressive reasoning deltas before final text, got %s", body)
+	}
+	if !(abcIdx < defIdx && defIdx < textIdx) {
+		t.Fatalf("expected abc then def reasoning deltas before final output text, got %s", body)
+	}
+}
+
 func TestResponsesStreamSkipsWhitespaceOnlyOutputAfterThinkExtraction(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
