@@ -677,6 +677,9 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		"model":  req.Model,
 		"stream": req.Stream,
 	}
+	for key, value := range req.PreservedTopLevelFields {
+		payload[key] = cloneJSONValue(value)
+	}
 	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
 	for key, value := range preservedTopLevelFields {
 		payload[key] = cloneJSONValue(value)
