@@ -341,6 +341,8 @@ type chatNormalizationState struct {
 	pendingThinkingTag          string
 	pendingThinking             string
 	thinkingTagStyle            string
+	implicitThinkingInitialized bool
+	implicitThinkingActive      bool
 	suppressBlankTextAfterThink bool
 	originalToolIDs             map[int]string
 	responseID                  string
@@ -426,9 +428,11 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		delta, _ := choice["delta"].(map[string]any)
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
-				cleanText, reasoningContent, pendingTag, pendingContent := extractContentAndReasoningTagsWithState(text, state.pendingThinkingTag, state.pendingThinking, state.thinkingTagStyle)
-				state.pendingThinkingTag = pendingTag
-				state.pendingThinking = pendingContent
+				if state.thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy && !state.implicitThinkingInitialized {
+					state.implicitThinkingInitialized = true
+					state.implicitThinkingActive = true
+				}
+				cleanText, reasoningContent := extractContentAndReasoningTagsWithState(text, state)
 				state.suppressBlankTextAfterThink = state.suppressBlankTextAfterThink || reasoningContent != ""
 				if reasoningContent != "" {
 					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
@@ -685,24 +689,31 @@ func normalizeChatPayload(payload map[string]any, thinkingTagStyle string) map[s
 		output = append(output, map[string]any{"id": callID, "type": "function_call", "status": "completed", "call_id": callID, "name": stringValue(function["name"]), "arguments": stringValue(function["arguments"])})
 	}
 	var reasoningContent string
-	var pendingTag, pendingContent string
+	extractState := &chatNormalizationState{thinkingTagStyle: thinkingTagStyle}
+	if thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy {
+		extractState.implicitThinkingInitialized = true
+		extractState.implicitThinkingActive = true
+	}
 	for _, rawItem := range content {
 		if item, ok := rawItem.(map[string]any); ok && stringValue(item["type"]) == "output_text" {
 			text := stringValue(item["text"])
-			cleanText, extracted, newPendingTag, newPendingContent := extractContentAndReasoningTagsWithState(text, pendingTag, pendingContent, thinkingTagStyle)
-			pendingTag = newPendingTag
-			pendingContent = newPendingContent
+			cleanText, extracted := extractContentAndReasoningTagsWithState(text, extractState)
 			reasoningContent += extracted
 			item["text"] = cleanText
 		}
 	}
-	if pendingTag != "" && pendingContent != "" {
-		reasoningContent += pendingContent
+	if extractState.pendingThinkingTag != "" && extractState.pendingThinking != "" {
+		reasoningContent += extractState.pendingThinking
 	}
 	existingReasoning := stringValue(message["reasoning_content"])
 	if existingReasoning != "" {
 		// Process through extraction to strip any raw thinking tags that might be in reasoning_content
-		_, cleanReasoning, _, _ := extractContentAndReasoningTagsWithState(existingReasoning, "", "", thinkingTagStyle)
+		reasoningState := &chatNormalizationState{thinkingTagStyle: thinkingTagStyle}
+		if thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy {
+			reasoningState.implicitThinkingInitialized = true
+			reasoningState.implicitThinkingActive = true
+		}
+		_, cleanReasoning := extractContentAndReasoningTagsWithState(existingReasoning, reasoningState)
 		if cleanReasoning != "" {
 			reasoningContent = cleanReasoning
 		} else {
@@ -1308,10 +1319,7 @@ func extractContentAndReasoningTags(text string) (cleanText string, reasoningCon
 
 	// Extract <think>...</think> tags
 	const thinkTagOpen = "<think>"
-	const thinkTagClose = `
-</think>
-
-`
+	const thinkTagClose = "</think>"
 	for {
 		openIdx := strings.Index(cleanText, thinkTagOpen)
 		if openIdx == -1 {
@@ -1348,13 +1356,95 @@ func extractContentAndReasoningTags(text string) (cleanText string, reasoningCon
 
 // extractContentAndReasoningTagsWithState extracts <think>...</think> and <thinking>...</thinking>
 // tags from text, handling tags that span across multiple deltas.
-func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, thinkingTagStyle string) (cleanText, reasoningContent, newPendingTag, newPendingThinking string) {
+func extractContentAndReasoningTagsWithState(text string, state *chatNormalizationState) (cleanText, reasoningContent string) {
+	cleanText = text
+	if state == nil || state.thinkingTagStyle == config.UpstreamThinkingTagStyleOff {
+		return cleanText, ""
+	}
+
+	if state.implicitThinkingActive {
+		cleanText, reasoningContent = extractImplicitReasoningUntilClose(cleanText, state)
+		if cleanText == "" || state.implicitThinkingActive {
+			return cleanText, reasoningContent
+		}
+	}
+
+	extraText, extraReasoning, pendingTag, pendingThinking := extractExplicitReasoningTagsWithState(cleanText, state.pendingThinkingTag, state.pendingThinking)
+	state.pendingThinkingTag = pendingTag
+	state.pendingThinking = pendingThinking
+	cleanText = extraText
+	reasoningContent += extraReasoning
+	return cleanText, reasoningContent
+}
+
+func extractImplicitReasoningUntilClose(text string, state *chatNormalizationState) (cleanText, reasoningContent string) {
+	cleanText = text
+	if state == nil {
+		return cleanText, ""
+	}
+
+	if state.pendingThinkingTag == "" {
+		switch {
+		case strings.HasPrefix(cleanText, "<think>"):
+			state.pendingThinkingTag = "<think>"
+			cleanText = cleanText[len("<think>"):]
+		case strings.HasPrefix(cleanText, "<thinking>"):
+			state.pendingThinkingTag = "<thinking>"
+			cleanText = cleanText[len("<thinking>"):]
+		}
+	}
+
+	closeTag := implicitThinkingCloseTag(state.pendingThinkingTag)
+	closeIdx := indexOfImplicitCloseTag(cleanText, closeTag)
+	if closeIdx == -1 {
+		emitted, holdback := splitStreamingReasoningChunkAnyClose(state.pendingThinking+cleanText, implicitHoldbackTags(closeTag)...)
+		state.pendingThinking = holdback
+		return "", emitted
+	}
+
+	reasoningContent = state.pendingThinking + cleanText[:closeIdx]
+	cleanText = cleanText[closeIdx+len(closeTag):]
+	state.pendingThinkingTag = ""
+	state.pendingThinking = ""
+	state.implicitThinkingActive = false
+	return cleanText, reasoningContent
+}
+
+func implicitThinkingCloseTag(openTag string) string {
+	switch openTag {
+	case "<thinking>":
+		return "</thinking>"
+	default:
+		return "</think>"
+	}
+}
+
+func implicitHoldbackTags(closeTag string) []string {
+	if closeTag == "</thinking>" {
+		return []string{"</thinking>"}
+	}
+	return []string{"</think>", "</thinking>"}
+}
+
+func indexOfImplicitCloseTag(text string, preferredCloseTag string) int {
+	if preferredCloseTag != "" {
+		return strings.Index(text, preferredCloseTag)
+	}
+	thinkIdx := strings.Index(text, "</think>")
+	thinkingIdx := strings.Index(text, "</thinking>")
+	if thinkIdx == -1 {
+		return thinkingIdx
+	}
+	if thinkingIdx == -1 || thinkIdx < thinkingIdx {
+		return thinkIdx
+	}
+	return thinkingIdx
+}
+
+func extractExplicitReasoningTagsWithState(text, pendingTag, pendingThinking string) (cleanText, reasoningContent, newPendingTag, newPendingThinking string) {
 	cleanText = text
 	newPendingTag = pendingTag
 	newPendingThinking = pendingThinking
-	if thinkingTagStyle == config.UpstreamThinkingTagStyleOff {
-		return cleanText, "", newPendingTag, newPendingThinking
-	}
 
 	if pendingTag != "" {
 		var closeTag string
@@ -1365,7 +1455,7 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 		}
 		closeIdx := strings.Index(cleanText, closeTag)
 		if closeIdx == -1 {
-			emitted, holdback := splitStreamingReasoningChunk(newPendingThinking+cleanText, closeTag)
+			emitted, holdback := splitStreamingReasoningChunkAnyClose(newPendingThinking+cleanText, closeTag)
 			reasoningContent += emitted
 			newPendingThinking = holdback
 			cleanText = ""
@@ -1411,7 +1501,7 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 		closeIdx := strings.Index(cleanText[openIdx+len(openTag):], closeTag)
 		if closeIdx == -1 {
 			newPendingTag = openTag
-			emitted, holdback := splitStreamingReasoningChunk(cleanText[openIdx+len(openTag):], closeTag)
+			emitted, holdback := splitStreamingReasoningChunkAnyClose(cleanText[openIdx+len(openTag):], closeTag)
 			reasoningContent += emitted
 			newPendingThinking = holdback
 			cleanText = cleanText[:openIdx]
@@ -1426,10 +1516,22 @@ func extractContentAndReasoningTagsWithState(text, pendingTag, pendingThinking, 
 }
 
 func splitStreamingReasoningChunk(text, closeTag string) (emitted string, holdback string) {
-	if text == "" || closeTag == "" {
+	return splitStreamingReasoningChunkAnyClose(text, closeTag)
+}
+
+func splitStreamingReasoningChunkAnyClose(text string, closeTags ...string) (emitted string, holdback string) {
+	if text == "" || len(closeTags) == 0 {
 		return text, ""
 	}
-	maxHold := len(closeTag) - 1
+	maxHold := 0
+	for _, closeTag := range closeTags {
+		if closeTag == "" {
+			continue
+		}
+		if n := len(closeTag) - 1; n > maxHold {
+			maxHold = n
+		}
+	}
 	if maxHold <= 0 {
 		return text, ""
 	}
@@ -1439,8 +1541,11 @@ func splitStreamingReasoningChunk(text, closeTag string) (emitted string, holdba
 	holdLen := 0
 	for n := 1; n <= maxHold; n++ {
 		suffix := text[len(text)-n:]
-		if strings.HasPrefix(closeTag, suffix) {
-			holdLen = n
+		for _, closeTag := range closeTags {
+			if closeTag != "" && strings.HasPrefix(closeTag, suffix) {
+				holdLen = n
+				break
+			}
 		}
 	}
 	if holdLen == 0 {
