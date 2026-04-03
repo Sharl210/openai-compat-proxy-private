@@ -37,6 +37,7 @@ type Config struct {
 	LogFilePath                    string
 	LogMaxRequests                 int
 	LogMaxBodySizeMB               float64
+	DebugArchiveRootDir            string
 }
 
 const (
@@ -112,6 +113,9 @@ func loadFromLookup(lookup func(string) string) Config {
 		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed >= 0 {
 			cfg.LogMaxBodySizeMB = parsed
 		}
+	}
+	if value := lookup("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR"); value != "" {
+		cfg.DebugArchiveRootDir = value
 	}
 	if value := lookup("CONNECT_TIMEOUT"); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
@@ -361,6 +365,7 @@ func (c *Config) applyStartupOnlyFrom(previous Config) {
 	c.LogFilePath = previous.LogFilePath
 	c.LogMaxRequests = previous.LogMaxRequests
 	c.LogMaxBodySizeMB = previous.LogMaxBodySizeMB
+	c.DebugArchiveRootDir = previous.DebugArchiveRootDir
 }
 
 func (c Config) hotReloadableRootEquals(other Config) bool {

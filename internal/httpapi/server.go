@@ -34,7 +34,7 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 	mux.HandleFunc("/v1/chat/completions", allowMethods(handleChat(), http.MethodPost))
 	mux.HandleFunc("/v1/messages", allowMethods(handleAnthropicMessages(), http.MethodPost))
 	srv.mux = mux
-	srv.handler = withRequestID(http.HandlerFunc(srv.serveHTTP))
+	srv.handler = withRequestID(store, http.HandlerFunc(srv.serveHTTP))
 	return srv
 }
 
@@ -67,7 +67,7 @@ func allowMethods(next http.HandlerFunc, methods ...string) http.HandlerFunc {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.handler == nil {
-		s.handler = withRequestID(http.HandlerFunc(s.serveHTTP))
+		s.handler = withRequestID(s.store, http.HandlerFunc(s.serveHTTP))
 	}
 	s.handler.ServeHTTP(w, r)
 }

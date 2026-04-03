@@ -23,7 +23,7 @@ func TestWriteSSEPaddingWritesCommentFrame(t *testing.T) {
 }
 
 func TestWithRequestIDFlushesStreamingPreludeImmediately(t *testing.T) {
-	handler := withRequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher := startSSE(w)
 		if err := writeSSEPadding(w, flusher); err != nil {
 			t.Fatalf("writeSSEPadding error: %v", err)

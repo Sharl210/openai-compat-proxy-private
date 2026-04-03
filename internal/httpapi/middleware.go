@@ -17,7 +17,7 @@ var requestCounter uint64
 
 const normalizationVersion = "v1"
 
-func withRequestID(next http.Handler) http.Handler {
+func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestCounter, 1))
 		w.Header().Set("X-Request-Id", id)
@@ -30,7 +30,7 @@ func withRequestID(next http.Handler) http.Handler {
 			r.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		}
 
-		archiveWriter := debugarchive.NewWriterFromEnv(id)
+		archiveWriter := archiveWriterForRequest(store, id)
 		if archiveWriter != nil {
 			_ = archiveWriter.WriteRequest(map[string]any{
 				"request_id":   id,
@@ -58,6 +58,20 @@ func withRequestID(next http.Handler) http.Handler {
 			"elapsed_ms": time.Since(started).Milliseconds(),
 		})
 	})
+}
+
+func archiveWriterForRequest(store *config.RuntimeStore, requestID string) *debugarchive.ArchiveWriter {
+	if requestID == "" {
+		return nil
+	}
+	if store != nil {
+		if snapshot := store.Active(); snapshot != nil {
+			if root := snapshot.Config.DebugArchiveRootDir; root != "" {
+				return debugarchive.NewArchiveWriter(root, requestID)
+			}
+		}
+	}
+	return nil
 }
 
 func setNormalizationVersionHeader(w http.ResponseWriter) {
