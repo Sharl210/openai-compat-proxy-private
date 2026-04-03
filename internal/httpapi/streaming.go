@@ -657,7 +657,7 @@ func shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagSt
 	if normalizeHTTPAPIUpstreamEndpointType(upstreamEndpointType) != config.UpstreamEndpointTypeChat {
 		return true
 	}
-	return thinkingTagStyle != config.UpstreamThinkingTagStyleOff
+	return thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy
 }
 
 func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
@@ -684,9 +684,6 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		if err := writeSyntheticResponsesReasoningWithState(w, flusher, &state, syntheticReasoningPlaceholder); err != nil {
 			return aggregate.Result{}, err
 		}
-	}
-	if err := waitSyntheticLeadTime(ctx); err != nil {
-		return aggregate.Result{}, err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realReasoningSeen },
