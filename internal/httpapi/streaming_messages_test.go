@@ -395,6 +395,61 @@ func TestMessagesStreamFailureClosesOpenBlocksBeforeTerminalStop(t *testing.T) {
 	}
 }
 
+func TestMessagesStreamUpstreamDisconnectClosesOpenBlocksBeforeTerminalStop(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.output_item.added\n"))
+		_, _ = w.Write([]byte("data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n"))
+		flusher.Flush()
+		_, _ = w.Write([]byte("event: response.function_call_arguments.delta\n"))
+		_, _ = w.Write([]byte("data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n"))
+		flusher.Flush()
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	toolStopIdx := strings.Index(body, `event: content_block_stop`+"\n"+`data: {"index":1,"type":"content_block_stop"}`)
+	errorIdx := strings.Index(body, `event: error`)
+	messageStopIdx := strings.Index(body, `event: message_stop`)
+	if toolStopIdx == -1 {
+		t.Fatalf("expected open tool block to be closed on upstream disconnect, got %s", body)
+	}
+	if errorIdx == -1 || messageStopIdx == -1 {
+		t.Fatalf("expected error and message_stop terminal events after upstream disconnect, got %s", body)
+	}
+	if !(toolStopIdx < errorIdx && errorIdx < messageStopIdx) {
+		t.Fatalf("expected block close before terminal failure events, got %s", body)
+	}
+	if !strings.Contains(body, `"health_flag":"upstreamStreamBroken"`) || !strings.Contains(body, `"message":"unexpected EOF"`) {
+		t.Fatalf("expected upstream disconnect to surface unexpected EOF health details, got %s", body)
+	}
+}
+
 func TestMessagesStreamSeparatesMultipleToolCallsIntoDistinctBlocks(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
