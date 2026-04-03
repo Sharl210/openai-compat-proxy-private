@@ -57,7 +57,7 @@ func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidProviderConfig(t *test
 	}
 
 	brokenProviderMTime := time.Date(2026, 3, 25, 10, 2, 0, 333000000, time.UTC)
-	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nMODEL_MAP_JSON={broken\n", brokenProviderMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nMODEL_MAP={broken\n", brokenProviderMTime)
 
 	if err := store.Refresh(); err == nil {
 		t.Fatalf("expected Refresh to fail for broken provider config")
@@ -130,7 +130,7 @@ func TestRuntimeStoreRefreshAppliesHotReloadableRootChangesDespiteInvalidStartup
 	initialRootMTime := time.Date(2026, 3, 26, 9, 0, 0, 111000000, time.UTC)
 	updatedRootMTime := time.Date(2026, 3, 26, 9, 1, 0, 222000000, time.UTC)
 
-	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_MAX_SIZE_MB=100\nPROXY_API_KEY=before\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", initialRootMTime)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_ENABLE=true\nPROXY_API_KEY=before\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", initialRootMTime)
 	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 9, 0, 30, 0, time.UTC))
 
 	store, err := NewRuntimeStore(rootEnvPath)
@@ -138,7 +138,7 @@ func TestRuntimeStoreRefreshAppliesHotReloadableRootChangesDespiteInvalidStartup
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
 
-	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_MAX_SIZE_MB=0\nPROXY_API_KEY=after\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", updatedRootMTime)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_ENABLE=enabled\nPROXY_API_KEY=after\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", updatedRootMTime)
 	if err := store.Refresh(); err != nil {
 		t.Fatalf("expected hot-reloadable root change refresh to succeed despite invalid startup-only value, got %v", err)
 	}
@@ -150,8 +150,8 @@ func TestRuntimeStoreRefreshAppliesHotReloadableRootChangesDespiteInvalidStartup
 	if got := active.Config.ProxyAPIKey; got != "after" {
 		t.Fatalf("expected proxy api key to update, got %q", got)
 	}
-	if got := active.Config.LogMaxRequests; got != 50 {
-		t.Fatalf("expected startup-only log max requests to stay previous value, got %d", got)
+	if !active.Config.LogEnable {
+		t.Fatalf("expected startup-only LOG_ENABLE to stay previous value true")
 	}
 }
 

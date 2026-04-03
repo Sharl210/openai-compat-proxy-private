@@ -52,7 +52,7 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	}
 
 	brokenProviderMTime := time.Date(2026, 3, 25, 11, 2, 0, 789000000, time.UTC)
-	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nMODEL_MAP_JSON={broken\n", brokenProviderMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nMODEL_MAP={broken\n", brokenProviderMTime)
 	if err := store.Refresh(); err == nil {
 		t.Fatalf("expected Refresh to fail for broken provider config")
 	}
