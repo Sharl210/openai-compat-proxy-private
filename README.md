@@ -191,6 +191,8 @@ curl http://127.0.0.1:21021/healthz
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
   - `responses/chat` 常见为 `{"reasoning":{...}}`
   - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
+- 如果 `/v1/messages` 是直接传 `thinking`，但**没有**显式 effort，也**没有**模型 suffix，那么 `X-Client-To-Proxy-Reasoning-Effort` 可能为空或直接不返回；这表示客户端这一侧没有直接给出可归一成 `low/medium/high/xhigh` 的强度值。
+- 当上游命中 Anthropic adaptive thinking（例如部分 `opus-4-6` 族模型）时，`X-Proxy-To-Upstream-Reasoning-Parameters` 里除了 `thinking` 之外，还可能同时看到 `output_config`，用来展示代理最终发给上游的 adaptive effort 配置。
 - `401 unauthorized`、`400 invalid_request` 这类在代理真正建立请求链路之前就失败的响应，不会暴露这组透明度 header。
 
 ---
