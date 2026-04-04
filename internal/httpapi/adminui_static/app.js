@@ -288,6 +288,10 @@ async function runAction(action) {
   if (!confirmAction(action)) {
     return;
   }
+  const isRecoverableAction = ['restart', 'deploy'].includes(action);
+  if (isRecoverableAction) {
+    startRecoveryWindow(action);
+  }
   try {
     const data = await api('/_admin/api/action', {
       method: 'POST',
@@ -297,12 +301,22 @@ async function runAction(action) {
     state.activeJobId = data.job ? data.job.id : '';
     render();
     setToast('info', `${labelForAction(action)}已开始`);
-    if (['restart', 'deploy'].includes(action)) {
-      startRecoveryWindow(action);
+    if (isRecoverableAction) {
       void refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: true });
     }
     pollActiveJob();
   } catch (error) {
+    if (isRecoverableAction && isRecoverableStatusDisconnect(error)) {
+      setToast('info', `${labelForAction(action)}已发出，等待服务恢复连接`);
+      const recovered = await refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: false });
+      if (recovered && state.activeJobId) {
+        pollActiveJob();
+        return;
+      }
+    }
+    if (isRecoverableAction) {
+      clearRecoveryWindow();
+    }
     setToast('error', error.message || '任务启动失败');
   }
 }
@@ -1402,6 +1416,7 @@ function setEditorZoom(value) {
     textarea.style.fontSize = `${state.editorZoom}px`;
     textarea.style.lineHeight = '1.5';
     autoSizeTextarea(textarea);
+    syncCodeEditor(textarea);
   });
 }
 
@@ -1432,13 +1447,14 @@ function bindCodeEditor(textarea) {
     if (event.touches.length !== 2 || pinchDistance <= 0) {
       return;
     }
+    event.preventDefault();
     const nextDistance = touchDistance(event.touches[0], event.touches[1]);
     const delta = nextDistance - pinchDistance;
     if (Math.abs(delta) >= 16) {
       setEditorZoom(state.editorZoom + (delta > 0 ? 1 : -1));
       pinchDistance = nextDistance;
     }
-  }, { passive: true });
+  }, { passive: false });
   textarea.addEventListener('touchend', () => {
     pinchDistance = 0;
   });
@@ -1453,11 +1469,10 @@ function syncCodeEditor(textarea) {
   }
   const highlight = document.getElementById(`${textarea.id}-highlight`);
   const totalLines = Math.max(1, String(textarea.value || '').split('\n').length);
+  const lineDigits = Math.max(String(totalLines).length, 2);
   gutter.style.fontSize = `${state.editorZoom}px`;
   gutter.style.lineHeight = '1.5';
-  const gutterWidth = textarea.dataset.highlightLanguage === 'env'
-    ? `${Math.max(String(totalLines).length, 2)}ch`
-    : `${Math.max(String(totalLines).length + 2, 4)}ch`;
+  const gutterWidth = `${Math.max(lineDigits + 2, 4)}ch`;
   if (shell) {
     shell.style.gridTemplateColumns = `${gutterWidth} minmax(0, 1fr)`;
   }

@@ -82,6 +82,40 @@ func TestAdminUILoginSetsSessionAndBootstrapAuthenticates(t *testing.T) {
 	}
 }
 
+func TestAdminUIBootstrapIncludesCurrentJob(t *testing.T) {
+	server := newAdminUITestServer(t)
+	stub := &stubAdminRunner{}
+	stub.job = &adminJob{
+		ID:       "job-bootstrap",
+		Action:   "restart",
+		Label:    "重启",
+		Status:   adminJobStatusRunning,
+		ExitCode: 0,
+	}
+	server.admin.runner = stub
+	cookie, _ := adminLogin(t, server)
+
+	bootstrapReq := httptest.NewRequest(http.MethodGet, "/_admin/api/bootstrap", nil)
+	bootstrapReq.AddCookie(cookie)
+	bootstrapRec := httptest.NewRecorder()
+	server.ServeHTTP(bootstrapRec, bootstrapReq)
+
+	if bootstrapRec.Code != http.StatusOK {
+		t.Fatalf("expected bootstrap 200, got %d body=%s", bootstrapRec.Code, bootstrapRec.Body.String())
+	}
+	data := decodeAdminJSON(t, bootstrapRec.Body.Bytes())
+	job, ok := data["job"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected bootstrap job payload, got %#v", data["job"])
+	}
+	if job["id"] != "job-bootstrap" {
+		t.Fatalf("expected bootstrap job id, got %#v", job)
+	}
+	if job["status"] != string(adminJobStatusRunning) {
+		t.Fatalf("expected running bootstrap job, got %#v", job)
+	}
+}
+
 func TestAdminUIFileEndpointBlocksPathTraversal(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)

@@ -194,6 +194,7 @@ func (a *adminUI) handleBootstrap() http.HandlerFunc {
 			"actions":       a.actionsPayload(),
 			"validation":    a.evaluateValidation(),
 			"status":        a.runtimeStatus(),
+			"job":           a.runner.Current(),
 		})
 	}
 }
