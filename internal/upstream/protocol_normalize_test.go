@@ -385,6 +385,60 @@ func TestNormalizeChatFrame_StreamsThinkReasoningBeforeClosingTag(t *testing.T) 
 	}
 }
 
+func TestNormalizeChatFrame_StreamsReasoningTagBeforeClosingTag(t *testing.T) {
+	frames := []string{
+		`{"id":"chat-reasoning","choices":[{"delta":{"content":"<reasoning>abc"}}]}`,
+		`{"id":"chat-reasoning","choices":[{"delta":{"content":"def"}}]}`,
+		`{"id":"chat-reasoning","choices":[{"delta":{"content":"</reasoning>final"}}]}`,
+	}
+
+	state := &chatNormalizationState{
+		toolIDsByIndex:   map[int]string{},
+		toolSent:         map[string]bool{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+	}
+
+	var allEvents []Event
+	for _, frameData := range frames {
+		frame := &sseFrame{Event: "chat", Data: frameData}
+		events, done, err := normalizeChatFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	var reasoning []string
+	var text []string
+	for _, evt := range allEvents {
+		switch evt.Event {
+		case "response.reasoning.delta":
+			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+		case "response.output_text.delta":
+			text = append(text, stringValue(evt.Data["delta"]))
+		}
+	}
+
+	if len(reasoning) < 2 {
+		t.Fatalf("expected progressive reasoning deltas for <reasoning> tag, got %#v", allEvents)
+	}
+	if reasoning[0] != "abc" || reasoning[1] != "def" {
+		t.Fatalf("expected reasoning deltas [abc def] from <reasoning> tag, got %#v from %#v", reasoning, allEvents)
+	}
+	if strings.Join(text, "") != "final" {
+		t.Fatalf("expected trailing answer text preserved after </reasoning>, got %#v from %#v", text, allEvents)
+	}
+	for _, evt := range allEvents {
+		data := mustMarshal(evt.Data)
+		if strings.Contains(data, "<reasoning>") || strings.Contains(data, "</reasoning>") {
+			t.Fatalf("expected <reasoning> tags to be stripped from normalized events, got %#v", allEvents)
+		}
+	}
+}
+
 func TestNormalizeChatFrame_DefaultsToReasoningUntilClosingTagWhenStyleEnabled(t *testing.T) {
 	frames := []string{
 		`{"id":"chat-implicit-think","choices":[{"delta":{"content":"abc"}}]}`,

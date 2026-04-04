@@ -1127,6 +1127,9 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		}
 		pendingToolResults = appendPendingToolResults(pendingToolResults)
 		content := buildAnthropicContentParts(msg.Parts)
+		if msg.Role == "assistant" && msg.ReasoningContent != "" {
+			content = append([]any{map[string]any{"type": "thinking", "thinking": msg.ReasoningContent}}, content...)
+		}
 		for _, call := range msg.ToolCalls {
 			if strings.TrimSpace(call.Name) == "" {
 				continue
@@ -1318,50 +1321,32 @@ func stringValue(value any) string {
 	return text
 }
 
-// extractContentAndReasoningTags extracts <think>...</think> and <thinking>...</thinking> tags from text,
-// returning the cleaned text and the extracted reasoning content.
 func extractContentAndReasoningTags(text string) (cleanText string, reasoningContent string) {
 	cleanText = text
 
-	// Extract <think>...</think> tags
-	const thinkTagOpen = "<think>"
-	const thinkTagClose = "</think>"
-	for {
-		openIdx := strings.Index(cleanText, thinkTagOpen)
-		if openIdx == -1 {
-			break
+	for _, tag := range []struct{ open, close string }{
+		{open: "<think>", close: "</think>"},
+		{open: "<thinking>", close: "</thinking>"},
+		{open: "<reasoning>", close: "</reasoning>"},
+	} {
+		for {
+			openIdx := strings.Index(cleanText, tag.open)
+			if openIdx == -1 {
+				break
+			}
+			closeIdx := strings.Index(cleanText[openIdx:], tag.close)
+			if closeIdx == -1 {
+				break
+			}
+			closeIdx += openIdx
+			reasoningContent += cleanText[openIdx+len(tag.open) : closeIdx]
+			cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(tag.close):]
 		}
-		closeIdx := strings.Index(cleanText[openIdx:], thinkTagClose)
-		if closeIdx == -1 {
-			break
-		}
-		closeIdx += openIdx
-		reasoningContent += cleanText[openIdx+len(thinkTagOpen) : closeIdx]
-		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(thinkTagClose):]
-	}
-
-	// Extract <thinking>...</thinking> tags
-	const thinTagOpen = "<thinking>"
-	const thinTagClose = "</thinking>"
-	for {
-		openIdx := strings.Index(cleanText, thinTagOpen)
-		if openIdx == -1 {
-			break
-		}
-		closeIdx := strings.Index(cleanText[openIdx:], thinTagClose)
-		if closeIdx == -1 {
-			break
-		}
-		closeIdx += openIdx
-		reasoningContent += cleanText[openIdx+len(thinTagOpen) : closeIdx]
-		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(thinTagClose):]
 	}
 
 	return cleanText, reasoningContent
 }
 
-// extractContentAndReasoningTagsWithState extracts <think>...</think> and <thinking>...</thinking>
-// tags from text, handling tags that span across multiple deltas.
 func extractContentAndReasoningTagsWithState(text string, state *chatNormalizationState) (cleanText, reasoningContent string) {
 	cleanText = text
 	if state == nil || state.thinkingTagStyle == config.UpstreamThinkingTagStyleOff {
@@ -1397,6 +1382,9 @@ func extractImplicitReasoningUntilClose(text string, state *chatNormalizationSta
 		case strings.HasPrefix(cleanText, "<thinking>"):
 			state.pendingThinkingTag = "<thinking>"
 			cleanText = cleanText[len("<thinking>"):]
+		case strings.HasPrefix(cleanText, "<reasoning>"):
+			state.pendingThinkingTag = "<reasoning>"
+			cleanText = cleanText[len("<reasoning>"):]
 		}
 	}
 
@@ -1420,6 +1408,8 @@ func implicitThinkingCloseTag(openTag string) string {
 	switch openTag {
 	case "<thinking>":
 		return "</thinking>"
+	case "<reasoning>":
+		return "</reasoning>"
 	default:
 		return "</think>"
 	}
@@ -1429,7 +1419,10 @@ func implicitHoldbackTags(closeTag string) []string {
 	if closeTag == "</thinking>" {
 		return []string{"</thinking>"}
 	}
-	return []string{"</think>", "</thinking>"}
+	if closeTag == "</reasoning>" {
+		return []string{"</reasoning>"}
+	}
+	return []string{"</think>", "</thinking>", "</reasoning>"}
 }
 
 func indexOfImplicitCloseTag(text string, preferredCloseTag string) int {
@@ -1456,6 +1449,8 @@ func extractExplicitReasoningTagsWithState(text, pendingTag, pendingThinking str
 		var closeTag string
 		if pendingTag == "<think>" {
 			closeTag = "</think>"
+		} else if pendingTag == "<reasoning>" {
+			closeTag = "</reasoning>"
 		} else {
 			closeTag = "</thinking>"
 		}
@@ -1477,27 +1472,29 @@ func extractExplicitReasoningTagsWithState(text, pendingTag, pendingThinking str
 	const thinkTagClose = "</think>"
 	const thinTagOpen = "<thinking>"
 	const thinTagClose = "</thinking>"
+	const reasoningTagOpen = "<reasoning>"
+	const reasoningTagClose = "</reasoning>"
 
 	for {
 		var openTag, closeTag string
-		openIdx := strings.Index(cleanText, thinkTagOpen)
+		openIdx := -1
+		for _, candidate := range []struct{ open, close string }{
+			{open: thinkTagOpen, close: thinkTagClose},
+			{open: thinTagOpen, close: thinTagClose},
+			{open: reasoningTagOpen, close: reasoningTagClose},
+		} {
+			idx := strings.Index(cleanText, candidate.open)
+			if idx == -1 {
+				continue
+			}
+			if openIdx == -1 || idx < openIdx {
+				openIdx = idx
+				openTag = candidate.open
+				closeTag = candidate.close
+			}
+		}
 		if openIdx == -1 {
-			openIdx = strings.Index(cleanText, thinTagOpen)
-			if openIdx == -1 {
-				break
-			}
-			openTag = thinTagOpen
-			closeTag = thinTagClose
-		} else {
-			thinIdx := strings.Index(cleanText, thinTagOpen)
-			if thinIdx != -1 && thinIdx < openIdx {
-				openIdx = thinIdx
-				openTag = thinTagOpen
-				closeTag = thinTagClose
-			} else {
-				openTag = thinkTagOpen
-				closeTag = thinkTagClose
-			}
+			break
 		}
 
 		if openIdx > 0 && strings.TrimSpace(cleanText[:openIdx]) != "" {

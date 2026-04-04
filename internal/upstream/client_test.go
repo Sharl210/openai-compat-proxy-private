@@ -342,6 +342,40 @@ func TestBuildAnthropicMessagesMergesAdjacentToolResultsIntoSingleUserMessage(t 
 	}
 }
 
+func TestBuildAnthropicMessagesPreservesAssistantReasoningContentAsThinkingBlock(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: "先想一下",
+		Parts:            []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one anthropic assistant message, got %#v", messages)
+	}
+	assistantMsg, _ := messages[0].(map[string]any)
+	if got, _ := assistantMsg["role"].(string); got != "assistant" {
+		t.Fatalf("expected assistant role, got %#v", assistantMsg)
+	}
+	content, _ := assistantMsg["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected thinking block plus text block, got %#v", assistantMsg)
+	}
+	thinking, _ := content[0].(map[string]any)
+	text, _ := content[1].(map[string]any)
+	if got, _ := thinking["type"].(string); got != "thinking" {
+		t.Fatalf("expected first content block type thinking, got %#v", thinking)
+	}
+	if got, _ := thinking["thinking"].(string); got != "先想一下" {
+		t.Fatalf("expected reasoning content preserved in thinking block, got %#v", thinking)
+	}
+	if got, _ := text["type"].(string); got != "text" {
+		t.Fatalf("expected second content block type text, got %#v", text)
+	}
+	if got, _ := text["text"].(string); got != "final answer" {
+		t.Fatalf("expected assistant text preserved after thinking block, got %#v", text)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{
