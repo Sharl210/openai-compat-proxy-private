@@ -1270,7 +1270,7 @@ func isSecureRequest(r *http.Request) bool {
 func (r *adminCommandRunner) Start(action string, label string) (*adminJob, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if current := r.Current(); current != nil && current.Status == adminJobStatusRunning {
+	if current := r.currentLocked(); current != nil && current.Status == adminJobStatusRunning {
 		return nil, errAdminJobRunning
 	}
 	if err := os.MkdirAll(r.jobsDir(), 0o755); err != nil {
@@ -1454,6 +1454,10 @@ func (r *adminCommandRunner) Get(id string) (*adminJob, bool) {
 func (r *adminCommandRunner) Current() *adminJob {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.currentLocked()
+}
+
+func (r *adminCommandRunner) currentLocked() *adminJob {
 	id, err := os.ReadFile(r.currentJobPath())
 	if err != nil || strings.TrimSpace(string(id)) == "" {
 		return nil

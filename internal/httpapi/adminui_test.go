@@ -36,6 +36,21 @@ func TestAdminUIRootServesHTMLShell(t *testing.T) {
 	}
 }
 
+func TestAdminUIAssetsDisableCaching(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for asset, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected no-store for admin asset, got %q", got)
+	}
+}
+
 func TestAdminUIBootstrapRequiresSession(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/api/bootstrap", nil)
@@ -482,6 +497,35 @@ func TestAdminUIMutatingRequestRequiresCSRFFromSession(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 when csrf header missing, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminCommandRunnerStartDoesNotDeadlock(t *testing.T) {
+	runner := &adminCommandRunner{rootDir: t.TempDir()}
+	done := make(chan *adminJob, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		job, err := runner.Start("unknown", "unknown")
+		if err != nil {
+			errCh <- err
+			return
+		}
+		done <- job
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("expected Start to return job without error, got %v", err)
+	case job := <-done:
+		if job == nil {
+			t.Fatalf("expected job payload, got nil")
+		}
+		if job.Status != adminJobStatusFailed {
+			t.Fatalf("expected failed unsupported job, got %#v", job)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("expected Start to return promptly, but it deadlocked")
 	}
 }
 
