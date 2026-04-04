@@ -19,6 +19,7 @@ const state = {
   editorZoom: loadEditorZoom(),
   lastSaveFeedback: null,
   toast: null,
+  statusRefreshInFlight: false,
 };
 
 const app = document.getElementById('app');
@@ -74,6 +75,9 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const message = typeof payload === 'object' && payload && payload.error ? payload.error.message : response.statusText;
     if (response.status === 401 && path !== '/_admin/api/login') {
+      if (hasRecoverableRestartJob()) {
+        throw new Error('Recoverable unauthorized during restart');
+      }
       state.authenticated = false;
       state.csrfToken = '';
       state.currentFile = null;
@@ -84,6 +88,10 @@ async function api(path, options = {}) {
     throw new Error(message || '请求失败');
   }
   return payload;
+}
+
+function hasRecoverableRestartJob() {
+  return !!(state.activeJob && state.activeJob.status === 'running' && ['restart', 'deploy'].includes(state.activeJob.action));
 }
 
 async function handleLoginSubmit(event) {
@@ -210,35 +218,48 @@ async function refreshStatus() {
 }
 
 async function refreshStatusWithRetry({ retryOnDisconnect = false, attempts = 1, silent = false } = {}) {
-  let remaining = Math.max(1, attempts);
-  while (remaining > 0) {
-    try {
-      const data = await api('/_admin/api/status');
-      state.validation = data.validation || state.validation;
-      state.status = data.status || state.status;
-      state.activeJob = data.job || null;
-      state.activeJobId = data.job?.id || '';
-      render();
-      return true;
-    } catch (error) {
-      remaining -= 1;
-      if (retryOnDisconnect && shouldRetryStatusRefresh(error) && remaining > 0) {
-        if (!silent && state.toast?.text !== '服务正在重启，等待重新连接') {
-          setToast('info', '服务正在重启，等待重新连接');
-        }
-        await delay(1500);
-        continue;
-      }
-      if (!silent) {
-        const message = error.message === 'Failed to fetch'
-          ? '状态刷新失败，服务可能正在重启或已断开'
-          : (error.message || '状态刷新失败');
-        setToast('error', message);
-      }
-      return false;
-    }
+  if (state.statusRefreshInFlight) {
+    return false;
   }
-  return false;
+  state.statusRefreshInFlight = true;
+  let remaining = Math.max(1, attempts);
+  try {
+    while (remaining > 0) {
+      try {
+        const data = await api('/_admin/api/status');
+        state.validation = data.validation || state.validation;
+        state.status = data.status || state.status;
+        if (data.job) {
+          state.activeJob = data.job;
+          state.activeJobId = data.job.id || state.activeJobId;
+        } else if (!hasRecoverableRestartJob()) {
+          state.activeJob = null;
+          state.activeJobId = '';
+        }
+        render();
+        return true;
+      } catch (error) {
+        remaining -= 1;
+        if (retryOnDisconnect && shouldRetryStatusRefresh(error) && remaining > 0) {
+          if (!silent && state.toast?.text !== '服务正在重启，等待重新连接') {
+            setToast('info', '服务正在重启，等待重新连接');
+          }
+          await delay(1500);
+          continue;
+        }
+        if (!silent) {
+          const message = error.message === 'Failed to fetch'
+            ? '状态刷新失败，服务可能正在重启或已断开'
+            : (error.message || '状态刷新失败');
+          setToast('error', message);
+        }
+        return false;
+      }
+    }
+    return false;
+  } finally {
+    state.statusRefreshInFlight = false;
+  }
 }
 
 async function runAction(action) {
@@ -340,6 +361,7 @@ function shouldRetryStatusRefresh(error) {
 function isRecoverableStatusDisconnect(error) {
   const message = String(error?.message || '');
   return message === 'Failed to fetch'
+    || /Recoverable unauthorized during restart/i.test(message)
     || /Unexpected token/i.test(message)
     || /not valid JSON/i.test(message)
     || /NetworkError/i.test(message)
@@ -628,7 +650,7 @@ function updateDirtyBadge() {
   const dirty = document.getElementById('file-dirty-badge');
   if (dirty) {
     dirty.textContent = state.currentFile?.dirty ? '未保存' : '已同步';
-    dirty.className = `badge ${state.currentFile?.dirty ? 'warn' : 'ok'}`;
+    dirty.className = `badge ${state.currentFile?.dirty ? 'warn' : 'ok'} material-state-chip editor-status-chip`;
   }
   const saveButton = document.getElementById('save-file-button');
   if (saveButton) {
@@ -728,7 +750,7 @@ function renderBrowserPage() {
             <span class="badge info material-state-chip">项目文件 ${items.length}</span>
           </div>
           <div class="tree-nav">
-            <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">根目录</button>
+            <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">/</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
             ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
           </div>
@@ -747,10 +769,8 @@ function renderStatusPage() {
       <section class="panel">
         <div class="panel-body">
           <div class="status-toolbar">
-            <div class="status-row material-chip-row status-toolbar-leading">
+            <div class="status-row material-chip-row status-toolbar-inline">
               ${validationBadge()}
-            </div>
-            <div class="status-row material-chip-row status-toolbar-trailing">
               ${healthBadge()}
               <button id="refresh-status-button" class="secondary-btn material-outlined-button status-refresh-btn" type="button">刷新状态</button>
             </div>
@@ -914,7 +934,7 @@ function renderEnvEditor() {
       </section>` : ''}
       ${state.editorPane === 'preview' ? `<section class="editor-card mode-scene">
         <div class="editor-body">
-          ${renderCodeEditorShell('env-source-editor', 'env-source-editor', state.currentFile.source_content || renderEnvRawPreview(), 'text-area auto-resize env-source-editor source-mode no-wrap-editor code-editor-textarea')}
+          ${renderCodeEditorShell('env-source-editor', 'env-source-editor', state.currentFile.source_content || renderEnvRawPreview(), 'text-area auto-resize env-source-editor source-mode no-wrap-editor code-editor-textarea env-highlight-textarea', 'env')}
         </div>
       </section>` : ''}
     </div>
@@ -942,11 +962,12 @@ function renderEnvEntry(entry, index, sourceIndex = index) {
   `;
 }
 
-function renderCodeEditorShell(id, name, value, className) {
+function renderCodeEditorShell(id, name, value, className, highlightLanguage = '') {
   return `
-    <div class="code-editor-shell" data-editor-shell="${escapeAttr(id)}">
+    <div class="code-editor-shell ${highlightLanguage ? `code-editor-shell-${escapeAttr(highlightLanguage)}` : ''}" data-editor-shell="${escapeAttr(id)}">
       <div id="${escapeAttr(id)}-gutter" class="code-editor-gutter">${renderLineNumbers(value)}</div>
-      <textarea id="${escapeAttr(id)}" name="${escapeAttr(name)}" class="${escapeAttr(className)}" spellcheck="false" wrap="off" style="${escapeAttr(editorZoomStyle())}">${escapeHtml(value || '')}</textarea>
+      ${highlightLanguage ? `<pre id="${escapeAttr(id)}-highlight" class="code-editor-highlight" aria-hidden="true">${highlightText(value || '', highlightLanguage)}</pre>` : ''}
+      <textarea id="${escapeAttr(id)}" name="${escapeAttr(name)}" class="${escapeAttr(className)}" data-highlight-language="${escapeAttr(highlightLanguage)}" spellcheck="false" wrap="off" style="${escapeAttr(editorZoomStyle())}">${escapeHtml(value || '')}</textarea>
     </div>
   `;
 }
@@ -1111,7 +1132,6 @@ function renderTopbarTitle() {
   if (state.view === 'editor') {
     return `
       <div class="topbar-title-group editor-title-group">
-        <span class="title-prefix">正在编辑</span>
         <button id="full-path-button" class="title-file-pill" type="button">${escapeHtml(displayFileName(pageHeadingByView()))}</button>
       </div>
     `;
@@ -1395,16 +1415,32 @@ function bindCodeEditor(textarea) {
 }
 
 function syncCodeEditor(textarea) {
+  const shell = textarea.closest('[data-editor-shell]');
   const gutter = document.getElementById(`${textarea.id}-gutter`);
   if (!gutter) {
     return;
   }
+  const highlight = document.getElementById(`${textarea.id}-highlight`);
   const totalLines = Math.max(1, String(textarea.value || '').split('\n').length);
   gutter.style.fontSize = `${state.editorZoom}px`;
   gutter.style.lineHeight = '1.5';
-  gutter.style.width = `${Math.max(String(totalLines).length + 2, 4)}ch`;
+  const gutterWidth = textarea.dataset.highlightLanguage === 'env'
+    ? `${Math.max(String(totalLines).length + 1, 3)}ch`
+    : `${Math.max(String(totalLines).length + 2, 4)}ch`;
+  if (shell) {
+    shell.style.gridTemplateColumns = `${gutterWidth} minmax(0, 1fr)`;
+  }
+  gutter.style.width = gutterWidth;
   gutter.innerHTML = renderLineNumbers(textarea.value || '');
   gutter.scrollTop = textarea.scrollTop;
+  if (highlight) {
+    highlight.style.fontSize = `${state.editorZoom}px`;
+    highlight.style.lineHeight = '1.5';
+    highlight.style.left = gutterWidth;
+    highlight.innerHTML = highlightText(textarea.value || '', textarea.dataset.highlightLanguage || '');
+    highlight.scrollTop = textarea.scrollTop;
+    highlight.scrollLeft = textarea.scrollLeft;
+  }
 }
 
 function touchDistance(a, b) {
