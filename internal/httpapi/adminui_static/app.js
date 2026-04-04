@@ -8,13 +8,14 @@ const state = {
   sidebarOpen: false,
   view: 'browser',
   browserFilter: 'all',
-  editorPane: 'split',
+  editorPane: 'edit',
   currentDir: '',
   treeItems: [],
   currentFile: null,
   envExpanded: {},
   activeJobId: '',
   activeJob: null,
+  lastSaveFeedback: null,
   toast: null,
 };
 
@@ -135,10 +136,18 @@ async function openDirectory(path) {
 async function openFile(path) {
   try {
     const data = await api(`/_admin/api/file?path=${encodeURIComponent(path)}`);
+    const prepared = data.mode === 'env'
+      ? {
+          ...data,
+          env_entries: (data.env_entries || []).map((entry) => normalizeEnvEntryForDisplay(entry)),
+          source_content: renderEnvRaw((data.env_entries || []).map((entry) => normalizeEnvEntryForDisplay(entry)), data.tail_lines || []),
+        }
+      : data;
     state.currentFile = {
-      ...data,
+      ...prepared,
       dirty: false,
     };
+    state.lastSaveFeedback = null;
     state.view = 'editor';
     state.sidebarOpen = false;
     state.envExpanded = {};
@@ -157,7 +166,7 @@ async function saveCurrentFile() {
     mode: state.currentFile.mode,
   };
   if (state.currentFile.mode === 'env') {
-    payload.env_entries = state.currentFile.env_entries || [];
+    payload.env_entries = serializeEnvEntries(state.currentFile.env_entries || []);
     payload.tail_lines = state.currentFile.tail_lines || [];
   } else {
     payload.content = state.currentFile.content || '';
@@ -170,12 +179,24 @@ async function saveCurrentFile() {
     state.currentFile.dirty = false;
     state.validation = data.validation || state.validation;
     state.status = state.status || {};
+    state.lastSaveFeedback = data.validation && data.validation.restart_ok === false
+      ? { tone: 'danger', text: '校验失败' }
+      : { tone: 'ok', text: '校验通过' };
     setToast(data.validation && data.validation.restart_ok === false ? 'error' : 'success', data.validation && data.validation.restart_ok === false ? '文件已保存，但重启校验未通过' : '文件已保存');
     await refreshStatus();
     render();
   } catch (error) {
+    state.lastSaveFeedback = { tone: 'danger', text: '保存失败' };
     setToast('error', error.message || '保存失败');
   }
+}
+
+function closeCurrentFile() {
+  state.currentFile = null;
+  state.lastSaveFeedback = null;
+  state.view = 'browser';
+  state.sidebarOpen = false;
+  render();
 }
 
 async function refreshStatus() {
@@ -189,7 +210,10 @@ async function refreshStatus() {
     }
     render();
   } catch (error) {
-    setToast('error', error.message || '状态刷新失败');
+    const message = error.message === 'Failed to fetch'
+      ? '状态刷新失败，服务可能正在重启或已断开'
+      : (error.message || '状态刷新失败');
+    setToast('error', message);
   }
 }
 
@@ -213,6 +237,12 @@ async function runAction(action) {
 }
 
 function confirmAction(action) {
+  if (action === 'deploy') {
+    return window.confirm('确认部署？这会重新编译并重启当前服务。');
+  }
+  if (action === 'restart') {
+    return window.confirm('确认重启？当前服务会短暂中断。');
+  }
   if (action === 'stop') {
     return window.confirm('停止服务后，当前页面将很快失去连接。确认继续？');
   }
@@ -322,6 +352,9 @@ function bindEvents() {
   document.querySelectorAll('[data-editor-pane]').forEach((button) => {
     button.addEventListener('click', () => {
       state.editorPane = button.dataset.editorPane;
+      if (state.currentFile?.mode === 'env') {
+        syncEnvSourceFromStructured();
+      }
       render();
     });
   });
@@ -365,16 +398,29 @@ function bindEvents() {
     saveButton.addEventListener('click', saveCurrentFile);
   }
 
+  const cancelButton = document.getElementById('cancel-file-button');
+  if (cancelButton) {
+    cancelButton.addEventListener('click', closeCurrentFile);
+  }
+
+  const fullPathButton = document.getElementById('full-path-button');
+  if (fullPathButton && state.currentFile?.path) {
+    fullPathButton.addEventListener('click', () => {
+      window.alert(state.currentFile.path);
+    });
+  }
+
   const textEditor = document.getElementById('text-editor');
   if (textEditor && state.currentFile) {
     textEditor.value = state.currentFile.content || '';
+    autoSizeTextarea(textEditor);
     textEditor.addEventListener('input', (event) => {
       state.currentFile.content = event.target.value;
       state.currentFile.dirty = true;
+      state.lastSaveFeedback = null;
+      autoSizeTextarea(event.target);
       updateDirtyBadge();
-      updatePreview();
     });
-    updatePreview();
   }
 
   const envContainer = document.getElementById('env-editor');
@@ -387,31 +433,50 @@ function bindEvents() {
         render();
       });
     });
-    const expandAll = document.getElementById('env-expand-all');
-    if (expandAll) {
-      expandAll.addEventListener('click', () => {
-        (state.currentFile.env_entries || []).forEach((entry, index) => {
-          state.envExpanded[envEntryId(entry, index)] = true;
-        });
-        render();
-      });
-    }
-    const collapseAll = document.getElementById('env-collapse-all');
-    if (collapseAll) {
-      collapseAll.addEventListener('click', () => {
-        state.envExpanded = {};
+    const toggleAll = document.getElementById('env-toggle-all');
+    if (toggleAll) {
+      toggleAll.addEventListener('click', () => {
+        const entries = state.currentFile.env_entries || [];
+        const allExpanded = entries.length > 0 && entries.every((entry, index) => state.envExpanded[envEntryId(entry, index)]);
+        if (allExpanded) {
+          state.envExpanded = {};
+        } else {
+          entries.forEach((entry, index) => {
+            state.envExpanded[envEntryId(entry, index)] = true;
+          });
+        }
         render();
       });
     }
     const tailInput = document.getElementById('env-tail-lines');
     if (tailInput) {
+      autoSizeTextarea(tailInput);
       tailInput.addEventListener('input', (event) => {
         state.currentFile.tail_lines = event.target.value.split('\n');
         state.currentFile.dirty = true;
+        state.lastSaveFeedback = null;
+        syncEnvSourceFromStructured();
+        autoSizeTextarea(event.target);
+        updateDirtyBadge();
+      });
+    }
+    const envSourceEditor = document.getElementById('env-source-editor');
+    if (envSourceEditor) {
+      autoSizeTextarea(envSourceEditor);
+      envSourceEditor.addEventListener('input', (event) => {
+        const parsed = parseEnvSource(event.target.value);
+        state.currentFile.source_content = event.target.value;
+        state.currentFile.env_entries = parsed.env_entries;
+        state.currentFile.tail_lines = parsed.tail_lines;
+        state.currentFile.dirty = true;
+        state.lastSaveFeedback = null;
+        autoSizeTextarea(event.target);
         updateDirtyBadge();
       });
     }
   }
+
+  autoSizeTextareas();
 }
 
 function handleEnvInput(event) {
@@ -430,11 +495,17 @@ function handleEnvInput(event) {
   }
   if (field === 'value') {
     entry.value = target.value;
+    syncEnvSourceFromStructured();
   }
   if (field === 'leading') {
     entry.leading_lines = target.value.split('\n');
+    syncEnvSourceFromStructured();
   }
   state.currentFile.dirty = true;
+  state.lastSaveFeedback = null;
+  if (target.tagName === 'TEXTAREA') {
+    autoSizeTextarea(target);
+  }
   updateDirtyBadge();
 }
 
@@ -444,14 +515,14 @@ function updateDirtyBadge() {
     dirty.textContent = state.currentFile?.dirty ? '未保存' : '已同步';
     dirty.className = `badge ${state.currentFile?.dirty ? 'warn' : 'ok'}`;
   }
-}
-
-function updatePreview() {
-  const preview = document.getElementById('syntax-preview');
-  if (!preview || !state.currentFile) {
-    return;
+  const saveButton = document.getElementById('save-file-button');
+  if (saveButton) {
+    saveButton.disabled = !state.currentFile;
   }
-  preview.innerHTML = highlightText(state.currentFile.content || '', state.currentFile.language || 'text');
+  const cancelButton = document.getElementById('cancel-file-button');
+  if (cancelButton) {
+    cancelButton.disabled = !state.currentFile;
+  }
 }
 
 function loginTemplate() {
@@ -461,7 +532,6 @@ function loginTemplate() {
         <div class="brand-mark">M3</div>
         <p class="brand-kicker">openai-compat-proxy</p>
         <h1>管理台</h1>
-        <p class="lead">基于 Material 3 层级重构的配置管理界面，用于浏览项目文件、编辑配置、检查运行状态，并执行受控脚本操作。</p>
         <form id="login-form" class="login-form">
           <label class="form-field">
             <span class="form-label">管理员密码</span>
@@ -479,12 +549,11 @@ function loginTemplate() {
 }
 
 function dashboardTemplate() {
-  const drawer = state.sidebarOpen ? `
-      <div id="sidebar-backdrop" class="sidebar-backdrop is-open"></div>
-      <aside id="navigation-drawer" class="sidebar material-drawer is-open" aria-label="主导航抽屉">
+  const drawer = `
+      <div id="sidebar-backdrop" class="sidebar-backdrop ${state.sidebarOpen ? 'is-open' : ''}"></div>
+      <aside id="navigation-drawer" class="sidebar material-drawer ${state.sidebarOpen ? 'is-open' : ''}" aria-label="主导航抽屉" aria-hidden="${state.sidebarOpen ? 'false' : 'true'}">
         <div class="material-drawer-topbar">
           <div>
-            <div class="brand-kicker">navigation drawer</div>
             <h2 class="material-drawer-title">openai-compat-proxy</h2>
           </div>
           <button id="sidebar-close" class="icon-btn sidebar-close material-icon-button" type="button" aria-label="关闭侧边栏">
@@ -492,19 +561,13 @@ function dashboardTemplate() {
           </button>
         </div>
         <div class="material-drawer-section">
-          <div class="material-label">Destinations</div>
           <div class="nav-list material-nav-list">
-            ${renderDrawerNavItem('browser', '文件浏览', '目录树与文件定位', drawerIconFolder())}
-            ${renderDrawerNavItem('editor', '文件编辑', state.currentFile ? escapeHtml(state.currentFile.path) : '先从文件浏览选择一个文件', drawerIconEdit())}
-            ${renderDrawerNavItem('status', '运行状态', '脚本、日志、健康检查', drawerIconMonitor())}
+            ${renderDrawerNavItem('browser', '文件浏览', drawerIconFolder())}
+            ${renderDrawerNavItem('editor', '文件编辑', drawerIconEdit())}
+            ${renderDrawerNavItem('status', '运行状态', drawerIconMonitor())}
           </div>
         </div>
         <div class="material-drawer-section material-drawer-supporting">
-          <div class="support-card">
-            <div class="material-label">Current context</div>
-            <div class="support-title">${escapeHtml(pageHeadingByView())}</div>
-            <div class="support-copy">${escapeHtml(pageDescriptionByView())}</div>
-          </div>
           <div class="support-card compact">
             <div class="support-kv"><span>当前目录</span><strong>${escapeHtml(state.currentDir || '/')}</strong></div>
             <div class="support-kv"><span>当前文件</span><strong>${escapeHtml(state.currentFile?.path || '未选择')}</strong></div>
@@ -512,7 +575,7 @@ function dashboardTemplate() {
           <button id="logout-button" class="ghost-btn material-outlined-button" type="button">退出登录</button>
         </div>
       </aside>
-  ` : '';
+  `;
   return `
     <div class="app-shell drawer-layout ${state.sidebarOpen ? 'drawer-open' : ''}">
       ${drawer}
@@ -525,9 +588,7 @@ function dashboardTemplate() {
               </button>
             </div>
             <div class="topbar-title">
-              <p class="brand-kicker">${escapeHtml(pageTitleByView())}</p>
-              <h1>${escapeHtml(pageHeadingByView())}</h1>
-              <p class="editor-subtitle">${escapeHtml(pageDescriptionByView())}</p>
+              ${renderTopbarTitle()}
             </div>
             <div class="topbar-meta">
               ${renderTopbarTools()}
@@ -541,40 +602,21 @@ function dashboardTemplate() {
 }
 
 function renderBrowserPage() {
-  const filteredItems = getFilteredTreeItems();
+  const items = state.treeItems || [];
   return `
-    <div class="browser-page-grid">
-      <section class="panel material-surface-grid">
-        <div class="panel-body compact-grid two-up">
-          <div class="material-overview-card emphasis">
-            <div class="material-label">Browse context</div>
-            <h3>项目根目录</h3>
-            <p>用一条清晰的文件列表路径浏览仓库，点击文件后进入独立的编辑页。</p>
-          </div>
-          <div class="material-overview-card compact">
-            <div class="overview-pair"><span>当前目录</span><strong>${escapeHtml(state.currentDir || '/')}</strong></div>
-            <div class="overview-pair"><span>筛选结果</span><strong>${filteredItems.length}</strong></div>
-          </div>
-        </div>
-      </section>
+    <div class="browser-page-grid page-scene">
       <section class="panel">
-        <div class="panel-head">
-          <h2 class="section-title">目录树</h2>
-          <p class="muted">Material 3 list 风格的文件浏览。主操作是定位目标文件，不在这里混入编辑表单。</p>
-        </div>
         <div class="panel-body">
-          <div class="material-chip-row browser-filter-row">
-            ${renderBrowserFilterChip('all', '全部')}
-            ${renderBrowserFilterChip('editable', '可编辑')}
-            ${renderBrowserFilterChip('dirs', '目录')}
-            ${renderBrowserFilterChip('config', '配置')}
+          <div class="status-row compact-meta-row">
+            <span class="badge info material-state-chip">当前目录 ${escapeHtml(state.currentDir || '/')}</span>
+            <span class="badge info material-state-chip">项目文件 ${items.length}</span>
           </div>
           <div class="tree-nav">
             <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">项目根</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
           </div>
           <div class="tree-list">
-            ${renderTreeItems(filteredItems)}
+            ${renderTreeItems(items)}
           </div>
         </div>
       </section>
@@ -584,16 +626,14 @@ function renderBrowserPage() {
 
 function renderStatusPage() {
   return `
-    <div class="editor-page-grid">
+    <div class="editor-page-grid page-scene status-page">
       <section class="panel">
-        <div class="panel-head">
-          <h2 class="section-title">脚本与运行状态</h2>
-          <p class="muted">按 Material 3 的页面级 action hierarchy 组织：状态在上，动作成组，日志独立承载。</p>
-        </div>
         <div class="panel-body">
-          <div class="status-row material-chip-row" style="margin-bottom: 18px;">
-            ${validationBadge()}
-            ${healthBadge()}
+          <div class="status-toolbar" style="margin-bottom: 18px;">
+            <div class="status-row material-chip-row">
+              ${validationBadge()}
+              ${healthBadge()}
+            </div>
             <button id="refresh-status-button" class="secondary-btn material-outlined-button" type="button">刷新状态</button>
           </div>
           <div class="button-row action-cluster" style="margin-bottom: 18px;">
@@ -607,32 +647,18 @@ function renderStatusPage() {
 }
 
 function renderEditorPage() {
+  const showEnvModeSwitch = state.currentFile?.mode === 'env';
   return `
-    <div class="editor-page-grid">
-      <section class="panel material-surface-grid">
-        <div class="panel-body compact-grid two-up">
-          <div class="material-overview-card emphasis">
-            <div class="material-label">Editing context</div>
-            <h3>${state.currentFile ? escapeHtml(state.currentFile.path) : '等待选择文件'}</h3>
-            <p>当前页面只保留编辑与预览，减少任务切换，避免把导航和运行状态塞回同一屏。</p>
-          </div>
-          <div class="material-overview-card compact">
-            <div class="overview-pair"><span>语言模式</span><strong>${state.currentFile ? escapeHtml(labelForLanguage(state.currentFile.language || 'text')) : '—'}</strong></div>
-            <div class="overview-pair"><span>保存状态</span><strong>${state.currentFile?.dirty ? '未保存' : '已同步'}</strong></div>
-          </div>
-        </div>
-      </section>
+    <div class="editor-page-grid page-scene">
       <section class="panel">
-        <div class="panel-head">
-          <h2 class="section-title">编辑器</h2>
-          <p class="muted">${state.currentFile ? escapeHtml(state.currentFile.path) : '先回到文件浏览页选择一个文件'}</p>
-        </div>
         <div class="panel-body">
-          <div class="segmented-row">
-            ${renderEditorPaneButton('split', '双栏')}
-            ${renderEditorPaneButton('edit', '仅编辑')}
-            ${renderEditorPaneButton('preview', '仅预览')}
-          </div>
+          ${showEnvModeSwitch ? `
+            <div class="pane-switch" data-pane="${state.editorPane}">
+              ${renderEditorPaneButton('edit', '条目式')}
+              ${renderEditorPaneButton('preview', '源文式')}
+            </div>
+            <div class="editor-mode-divider" aria-hidden="true"></div>
+          ` : ''}
           ${renderEditorSection()}
         </div>
       </section>
@@ -654,7 +680,7 @@ function renderTreeItems(items) {
           <span>${escapeHtml(item.name)}</span>
           <span class="badge ${item.is_dir ? 'info' : item.editable ? 'ok' : 'warn'}">${item.is_dir ? '目录' : item.editable ? '可编辑' : '只读'}</span>
         </div>
-        <div class="tree-meta">${item.path} · ${item.is_symlink ? '符号链接' : item.is_dir ? '文件夹' : formatBytes(item.size || 0)}</div>
+        <div class="tree-meta">${escapeHtml(formatTreeMeta(item))}</div>
       </div>
       <div class="tree-item-trailing">›</div>
     </button>
@@ -668,7 +694,7 @@ function renderStatusSection() {
     { label: '服务状态', value: status.health_ok ? '健康' : '异常', tone: status.health_ok ? 'ok' : 'warn' },
     { label: '配置校验', value: validation.restart_ok ? '可重启' : '需修复', tone: validation.restart_ok ? 'ok' : 'danger' },
     { label: '当前任务', value: state.activeJob ? (state.activeJob.label || labelForAction(state.activeJob.action)) : '空闲', tone: state.activeJob ? 'info' : 'info' },
-    { label: '项目目录', value: status.root_dir || '/', tone: 'info' },
+    { label: '日志目录', value: status.log_dir || '未启用', tone: 'info' },
   ];
   return `
     <div class="dashboard-metric-grid">
@@ -682,7 +708,7 @@ function renderStatusSection() {
     <div class="status-grid material-status-grid">
       <div class="status-card">
         <div class="status-label">监听地址</div>
-        <div class="status-value">${escapeHtml(status.listen_addr || '未知')}</div>
+        <div class="status-value">${escapeHtml(formatListenAddrDisplay(status.listen_addr))}</div>
       </div>
       <div class="status-card">
         <div class="status-label">运行健康</div>
@@ -711,14 +737,11 @@ function renderStatusSection() {
       </div>
     </div>
     <div class="job-output material-log-card">
-      <div class="job-head">
-        <div>
-          <h3 class="section-title">运行日志尾部</h3>
-          <p class="muted job-meta">来自 .proxy.log 的最近输出。</p>
-        </div>
+      <div class="job-head compact-head">
+        <h3 class="section-title">结构化日志</h3>
       </div>
-      <div class="job-body">
-        <pre class="runtime-log">${escapeHtml(status.log_tail || '暂无运行日志')}</pre>
+      <div class="job-body compact-copy">
+        当前运行使用新的结构化日志系统，日志目录：<strong>${escapeHtml(status.log_dir || '未启用')}</strong>
       </div>
     </div>
   `;
@@ -743,7 +766,7 @@ function renderValidationWarnings(validation) {
 
 function renderEditorSection() {
   if (!state.currentFile) {
-    return `<div class="empty-state material-empty-state"><p>先去「文件浏览」页选择一个文件。</p><button class="secondary-btn material-tonal-button" type="button" data-view="browser">打开文件浏览</button></div>`;
+    return `<div class="empty-state material-empty-state"><p>未选择文件</p><button class="secondary-btn material-tonal-button" type="button" data-view="browser">文件浏览</button></div>`;
   }
   if (state.currentFile.mode === 'env') {
     return renderEnvEditor();
@@ -752,68 +775,34 @@ function renderEditorSection() {
 }
 
 function renderTextEditor() {
-  const showEdit = state.editorPane !== 'preview';
-  const showPreview = state.editorPane !== 'edit';
   return `
-    <div class="text-editor-grid pane-${state.editorPane}">
-      ${showEdit ? `<section class="editor-card">
-        <div class="editor-head">
-          <div>
-            <h2>原文编辑</h2>
-            <p class="muted">${escapeHtml(labelForLanguage(state.currentFile.language || 'text'))} · Material 3 editor surface</p>
-          </div>
-        </div>
+    <div class="text-editor-grid pane-edit">
+      <section class="editor-card mode-scene">
         <div class="editor-body">
-          <textarea id="text-editor" class="text-area" spellcheck="false"></textarea>
+          <textarea id="text-editor" name="text-editor" class="text-area auto-resize source-mode" spellcheck="false"></textarea>
         </div>
-      </section>` : ''}
-      ${showPreview ? `<section class="preview-card">
-        <div class="preview-head">
-          <div>
-            <h2>高亮预览</h2>
-            <p class="muted">保存前先确认语法结构。</p>
-          </div>
-        </div>
-        <div class="preview-body">
-          <pre id="syntax-preview" class="syntax-preview"></pre>
-        </div>
-      </section>` : ''}
+      </section>
     </div>
   `;
 }
 
 function renderEnvEditor() {
   const entries = state.currentFile.env_entries || [];
-  const showEdit = state.editorPane !== 'preview';
-  const showPreview = state.editorPane !== 'edit';
+  const allExpanded = entries.length > 0 && entries.every((entry, index) => state.envExpanded[envEntryId(entry, index)]);
   return `
     <div id="env-editor" class="env-list pane-${state.editorPane}">
-      ${showEdit ? `<div class="env-toolbar">
-        <button id="env-expand-all" class="secondary-btn material-tonal-button" type="button">全部展开</button>
-        <button id="env-collapse-all" class="secondary-btn material-outlined-button" type="button">全部折叠</button>
-        <span class="helper-text">默认只显示字段；展开后可编辑其前置注释与空行。</span>
+      ${state.editorPane === 'edit' ? `<div class="env-toolbar">
+        <button id="env-toggle-all" class="secondary-btn material-tonal-button" type="button">${allExpanded ? '全部收起' : '全部展开'}</button>
       </div>` : ''}
-      ${showEdit ? entries.map((entry, index) => renderEnvEntry(entry, index)).join('') : ''}
-      ${showEdit ? `<section class="env-card">
-        <div class="env-head">
-          <div>
-            <h2>尾部内容</h2>
-            <p class="muted">如果文件末尾还有独立注释或空行，会保存在这里。</p>
-          </div>
-        </div>
+      ${state.editorPane === 'edit' ? entries.map((entry, index) => renderEnvEntry(entry, index)).join('') : ''}
+      ${state.editorPane === 'edit' ? `<section class="env-card mode-scene">
         <div class="env-body">
-          <textarea id="env-tail-lines" class="comment-input" spellcheck="false">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
+          <textarea id="env-tail-lines" name="env-tail-lines" class="comment-input auto-resize" spellcheck="false">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
         </div>
       </section>` : ''}
-      ${showPreview ? `<section class="preview-card">
-        <div class="preview-head">
-          <div>
-            <h2>原文预览</h2>
-            <p class="muted">方便在保存前确认最终写回的 .env 结构。</p>
-          </div>
-        </div>
-        <div class="preview-body">
-          <pre class="syntax-preview">${highlightText(renderEnvRawPreview(), 'env')}</pre>
+      ${state.editorPane === 'preview' ? `<section class="editor-card mode-scene">
+        <div class="editor-body">
+          <textarea id="env-source-editor" name="env-source-editor" class="text-area auto-resize env-source-editor source-mode" spellcheck="false">${escapeHtml(state.currentFile.source_content || renderEnvRawPreview())}</textarea>
         </div>
       </section>` : ''}
     </div>
@@ -825,24 +814,17 @@ function renderEnvEntry(entry, index) {
   const expanded = !!state.envExpanded[entryId];
   return `
     <section class="env-card">
-      <div class="env-head">
-        <div>
-          <h2>${escapeHtml(entry.key || `字段 ${index + 1}`)}</h2>
-          <p class="muted">${expanded ? '注释与空行已展开' : '注释已折叠，仅显示字段'}</p>
-        </div>
-      </div>
       <div class="env-body">
-        <div class="env-row">
-          <button class="icon-btn env-toggle material-outlined-button" type="button" data-env-toggle="${escapeAttr(entryId)}">${expanded ? '收起' : '展开'}</button>
-          <input class="env-key-input" data-index="${index}" data-field="key" value="${escapeAttr(entry.key || '')}">
-          <textarea class="env-value-input" data-index="${index}" data-field="value" spellcheck="false">${escapeHtml(entry.value || '')}</textarea>
+        <div class="env-key-row">
+          <div class="env-key-label">${escapeHtml(entry.key || `字段 ${index + 1}`)}</div>
+          <button class="env-toggle secondary-btn material-outlined-button" type="button" data-env-toggle="${escapeAttr(entryId)}">${expanded ? '收起' : '说明'}</button>
         </div>
         ${expanded ? `
-          <div class="env-extra">
-            <div class="helper-text">这些内容会保留在当前字段前方，用于保留原来的中文注释与分隔。</div>
-            <textarea class="comment-input" data-index="${index}" data-field="leading" spellcheck="false">${escapeHtml((entry.leading_lines || []).join('\n'))}</textarea>
-          </div>
+          <pre class="env-comment-block">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
         ` : ''}
+        <div class="env-value-row">
+          <textarea class="env-value-input auto-resize" name="env-value-${index}" data-index="${index}" data-field="value" spellcheck="false">${escapeHtml(entry.value || '')}</textarea>
+        </div>
       </div>
     </section>
   `;
@@ -851,17 +833,54 @@ function renderEnvEntry(entry, index) {
 function renderEnvRawPreview() {
   const entries = state.currentFile?.env_entries || [];
   const tailLines = state.currentFile?.tail_lines || [];
+  return renderEnvRaw(entries, tailLines);
+}
+
+function renderEnvRaw(entries, tailLines) {
   const lines = [];
-  entries.forEach((entry) => {
+  (entries || []).forEach((entry) => {
     (entry.leading_lines || []).forEach((line) => {
       lines.push(line);
     });
     lines.push(`${entry.key || ''}=${entry.value || ''}`);
   });
-  tailLines.forEach((line) => {
+  (tailLines || []).forEach((line) => {
     lines.push(line);
   });
   return `${lines.join('\n')}\n`;
+}
+
+function syncEnvSourceFromStructured() {
+  if (!state.currentFile || state.currentFile.mode !== 'env') {
+    return;
+  }
+  state.currentFile.source_content = renderEnvRaw(state.currentFile.env_entries || [], state.currentFile.tail_lines || []);
+}
+
+function parseEnvSource(content) {
+  const lines = String(content || '').replace(/\r\n/g, '\n').split('\n');
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  const envEntries = [];
+  const pending = [];
+  lines.forEach((line) => {
+    const matched = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!matched) {
+      pending.push(line);
+      return;
+    }
+    envEntries.push({
+      key: matched[1],
+      value: formatEnvValueForDisplay(matched[1], matched[2]),
+      leading_lines: [...pending],
+    });
+    pending.length = 0;
+  });
+  return {
+    env_entries: envEntries,
+    tail_lines: [...pending],
+  };
 }
 
 function validationBadge() {
@@ -891,9 +910,9 @@ function labelForAction(action) {
   return actionMap[action] || action;
 }
 
-function pageTitleByView() {
+function pageHeadingByView() {
   if (state.view === 'editor') {
-    return '文件编辑';
+    return state.currentFile ? state.currentFile.path : '文件编辑';
   }
   if (state.view === 'status') {
     return '运行状态';
@@ -901,72 +920,128 @@ function pageTitleByView() {
   return '文件浏览';
 }
 
-function pageHeadingByView() {
-  if (state.view === 'editor') {
-    return state.currentFile ? `正在编辑 ${state.currentFile.path}` : '文件编辑';
-  }
-  if (state.view === 'status') {
-    return '运行状态与脚本中心';
-  }
-  return '项目文件浏览';
-}
-
-function pageDescriptionByView() {
-  if (state.view === 'editor') {
-    return '这里只保留当前文件的编辑与预览，不再混入目录树和脚本控制。';
-  }
-  if (state.view === 'status') {
-    return '脚本按钮、健康检查、日志和任务输出只放在这一页。';
-  }
-  return '这里只做目录树与文件定位，点文件后自动切到编辑页。';
-}
-
-function renderBrowserFilterChip(filter, label) {
-  const active = state.browserFilter === filter;
-  return `<button class="filter-chip ${active ? 'active' : ''}" type="button" data-browser-filter="${filter}">${active ? '✓ ' : ''}${label}</button>`;
-}
-
 function renderEditorPaneButton(pane, label) {
   return `<button class="segmented-button ${state.editorPane === pane ? 'active' : ''}" type="button" data-editor-pane="${pane}">${label}</button>`;
-}
-
-function getFilteredTreeItems() {
-  const items = state.treeItems || [];
-  if (state.browserFilter === 'editable') {
-    return items.filter((item) => item.editable);
-  }
-  if (state.browserFilter === 'dirs') {
-    return items.filter((item) => item.is_dir);
-  }
-  if (state.browserFilter === 'config') {
-    return items.filter((item) => item.path === '.env' || item.name.endsWith('.env') || item.name.endsWith('.md') || item.name.endsWith('.txt') || item.name.endsWith('.json') || item.name.endsWith('.yaml') || item.name.endsWith('.yml'));
-  }
-  return items;
 }
 
 function renderTopbarTools() {
   if (state.view === 'editor') {
     return `
-      <button id="save-file-button" class="save-btn material-filled-button" type="button" ${state.currentFile ? '' : 'disabled'}>保存文件</button>
       <span id="file-dirty-badge" class="badge ${state.currentFile?.dirty ? 'warn' : 'ok'} material-state-chip">${state.currentFile?.dirty ? '未保存' : '已同步'}</span>
+      ${state.lastSaveFeedback ? `<span class="badge ${escapeAttr(state.lastSaveFeedback.tone)} material-state-chip">${escapeHtml(state.lastSaveFeedback.text)}</span>` : ''}
+      <button id="cancel-file-button" class="secondary-btn material-outlined-button" type="button" ${state.currentFile ? '' : 'disabled'}>取消</button>
+      <button id="save-file-button" class="save-btn" type="button" ${state.currentFile ? '' : 'disabled'}>保存</button>
     `;
   }
   if (state.view === 'status') {
-    return '<span class="badge info material-state-chip">脚本与日志页</span>';
+    return '';
   }
-  return '<span class="badge info material-state-chip">点文件后自动进入编辑页</span>';
+  return '';
 }
 
-function renderDrawerNavItem(view, title, subtitle, icon) {
+function renderDrawerNavItem(view, title, icon) {
   return `
     <button class="nav-button ${state.view === view ? 'active' : ''}" type="button" data-view="${view}">
       <span class="material-nav-indicator">${icon}</span>
       <span class="material-nav-copy">
         <strong>${title}</strong>
-        <span>${subtitle}</span>
       </span>
     </button>
   `;
+}
+
+function renderTopbarTitle() {
+  if (state.view === 'editor') {
+    return `
+      <div class="topbar-title-group">
+        <span class="title-prefix">正在编辑</span>
+        <button id="full-path-button" class="title-file-pill" type="button">${escapeHtml(displayFileName(pageHeadingByView()))}</button>
+      </div>
+    `;
+  }
+  return `<h1>${escapeHtml(pageHeadingByView())}</h1>`;
+}
+
+function displayFileName(path) {
+  const value = String(path || '');
+  const parts = value.split('/').filter(Boolean);
+  return parts[parts.length - 1] || value || '未选择文件';
+}
+
+function formatTreeMeta(item) {
+  const modified = formatTimestamp(item.modified);
+  const detail = item.is_symlink ? '符号链接' : item.is_dir ? '文件夹' : formatBytes(item.size || 0);
+  return `${modified} · ${detail}`;
+}
+
+function formatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value || '';
+  }
+  const parts = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ];
+  const time = [
+    String(date.getHours()).padStart(2, '0'),
+    String(date.getMinutes()).padStart(2, '0'),
+    String(date.getSeconds()).padStart(2, '0'),
+  ];
+  return `${parts.join('-')} ${time.join(':')}`;
+}
+
+function normalizeEnvEntryForDisplay(entry) {
+  return {
+    ...entry,
+    value: formatEnvValueForDisplay(entry.key, entry.value || ''),
+  };
+}
+
+function serializeEnvEntries(entries) {
+  return entries.map((entry) => ({
+    ...entry,
+    value: formatEnvValueForSave(entry.key, entry.value || ''),
+  }));
+}
+
+function formatEnvValueForDisplay(key, value) {
+  const trimmed = String(value ?? '').trim();
+  if (key === 'LISTEN_ADDR' && /^:\d+$/.test(trimmed)) {
+    return trimmed.slice(1);
+  }
+  return value || '';
+}
+
+function formatEnvValueForSave(key, value) {
+  const trimmed = String(value ?? '').trim();
+  if (key === 'LISTEN_ADDR' && /^:\d+$/.test(trimmed)) {
+    return trimmed.slice(1);
+  }
+  return value || '';
+}
+
+function formatListenAddrDisplay(value) {
+  const trimmed = String(value ?? '').trim();
+  if (/^:\d+$/.test(trimmed)) {
+    return trimmed.slice(1);
+  }
+  return trimmed || '未知';
+}
+
+function autoSizeTextareas(root = document) {
+  root.querySelectorAll('textarea.auto-resize').forEach((textarea) => {
+    autoSizeTextarea(textarea);
+  });
+}
+
+function autoSizeTextarea(textarea) {
+  if (!(textarea instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  textarea.style.height = 'auto';
+  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function drawerIconFolder() {
@@ -979,19 +1054,6 @@ function drawerIconEdit() {
 
 function drawerIconMonitor() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-6v2h3v2H7v-2h3v-2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm0 2v8h16V7zm2 6 2.5-3 2 2 3-4 4.5 5z" fill="currentColor"></path></svg>';
-}
-
-function labelForLanguage(language) {
-  const map = {
-    env: '.env',
-    markdown: 'Markdown',
-    json: 'JSON',
-    go: 'Go',
-    shell: 'Shell',
-    yaml: 'YAML',
-    text: '文本',
-  };
-  return map[language] || language;
 }
 
 function parentPath(path) {
