@@ -1594,6 +1594,7 @@ type chatStreamState struct {
 	roleSent            bool
 	textStarted         bool
 	realReasoningSeen   bool
+	thinkingTagStyle    string
 	planningSent        bool
 	toolStatusSent      bool
 	toolIDAliases       map[string]string
@@ -1607,13 +1608,14 @@ type chatStreamState struct {
 	pendingReasoningTag string
 }
 
-func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
+func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) error {
 	state := chatStreamState{
-		toolIDAliases:   map[string]string{},
-		toolMeta:        map[string]map[string]string{},
-		toolIndex:       map[string]int{},
-		toolSent:        map[string]bool{},
-		pendingToolArgs: map[string]string{},
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: thinkingTagStyle,
 	}
 	helper := &responseEventWriterHelper{
 		downstreamType:       "chat",
@@ -1876,15 +1878,11 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			delta = state.pendingReasoningTag + delta
 			state.pendingReasoningTag = ""
 		}
-		// Extract reasoning tags from content
-		cleanContent, reasoningContent := extractReasoningTags(delta)
-		// Check if we have an incomplete trailing tag
-		const tagOpen = "<think>"
-		const tagClose = "</think>"
-		if strings.HasSuffix(cleanContent, tagOpen) {
-			// Find where the incomplete tag starts
-			openIdx := strings.LastIndex(cleanContent, tagOpen)
-			if openIdx >= 0 {
+		cleanContent := delta
+		reasoningContent := ""
+		if state.thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy {
+			cleanContent, reasoningContent = extractReasoningTags(delta)
+			if tagOpen, openIdx := trailingReasoningOpenTag(cleanContent); tagOpen != "" && openIdx >= 0 {
 				state.pendingReasoningTag = cleanContent[openIdx:]
 				cleanContent = cleanContent[:openIdx]
 			}
@@ -2158,31 +2156,39 @@ func extractReasoningTags(text string) (cleanText string, reasoningContent strin
 	cleanText = text
 	reasoningContent = ""
 
-	// Pattern to match <think>...</think> pairs
-	// We need to handle multiple occurrences and extract all reasoning content
-	const tagOpen = "<think>"
-	const tagClose = "</think>"
-
-	for {
-		openIdx := strings.Index(cleanText, tagOpen)
-		if openIdx == -1 {
-			break
+	for _, tag := range []struct{ open, close string }{
+		{open: "<think>", close: "</think>"},
+		{open: "<thinking>", close: "</thinking>"},
+		{open: "<reasoning>", close: "</reasoning>"},
+	} {
+		for {
+			openIdx := strings.Index(cleanText, tag.open)
+			if openIdx == -1 {
+				break
+			}
+			closeIdx := strings.Index(cleanText[openIdx:], tag.close)
+			if closeIdx == -1 {
+				break
+			}
+			closeIdx += openIdx
+			reasoningContent += cleanText[openIdx+len(tag.open) : closeIdx]
+			cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(tag.close):]
 		}
-		closeIdx := strings.Index(cleanText[openIdx:], tagClose)
-		if closeIdx == -1 {
-			// Incomplete tag - leave as-is, stop processing
-			break
-		}
-		closeIdx += openIdx // Make it absolute index
-
-		// Extract reasoning content between the tags
-		reasoningContent += cleanText[openIdx+len(tagOpen) : closeIdx]
-
-		// Remove the tag pair from cleanText
-		cleanText = cleanText[:openIdx] + cleanText[closeIdx+len(tagClose):]
 	}
 
 	return cleanText, reasoningContent
+}
+
+func trailingReasoningOpenTag(text string) (tag string, openIdx int) {
+	for _, candidate := range []string{"<reasoning>", "<thinking>", "<think>"} {
+		if strings.HasSuffix(text, candidate) {
+			idx := strings.LastIndex(text, candidate)
+			if idx >= 0 {
+				return candidate, idx
+			}
+		}
+	}
+	return "", -1
 }
 
 func cloneMap(input map[string]any) map[string]any {

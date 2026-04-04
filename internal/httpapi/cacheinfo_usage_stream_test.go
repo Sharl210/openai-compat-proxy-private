@@ -103,6 +103,58 @@ func TestWriteChatEventCallsUsageRecorderOnCompletionWithoutIncludeUsage(t *test
 	}
 }
 
+func TestWriteChatEventDoesNotExtractReasoningTagsWhenThinkingTagStyleOff(t *testing.T) {
+	state := &chatStreamState{
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleOff,
+	}
+	w := httptest.NewRecorder()
+
+	err := writeChatEvent(w, nil, state, upstream.Event{
+		Event: "response.output_text.delta",
+		Data:  map[string]any{"delta": "<reasoning>literal reasoning</reasoning>final"},
+	}, false, nil)
+	if err != nil {
+		t.Fatalf("writeChatEvent: %v", err)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, `"reasoning_content":"literal reasoning"`) {
+		t.Fatalf("expected literal reasoning tags to remain in content when thinkingTagStyle=off, got %s", body)
+	}
+	if !strings.Contains(body, `literal reasoning`) || !strings.Contains(body, `\u003creasoning\u003e`) || !strings.Contains(body, `\u003c/reasoning\u003e`) {
+		t.Fatalf("expected literal reasoning tags to stay in downstream content, got %s", body)
+	}
+}
+
+func TestWriteChatEventExtractsReasoningTagsWhenThinkingTagStyleLegacy(t *testing.T) {
+	state := &chatStreamState{
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: config.UpstreamThinkingTagStyleLegacy,
+	}
+	w := httptest.NewRecorder()
+
+	err := writeChatEvent(w, nil, state, upstream.Event{
+		Event: "response.output_text.delta",
+		Data:  map[string]any{"delta": "<reasoning>literal reasoning</reasoning>final"},
+	}, false, nil)
+	if err != nil {
+		t.Fatalf("writeChatEvent: %v", err)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"literal reasoning"`) {
+		t.Fatalf("expected legacy thinking tag style to extract reasoning tags, got %s", body)
+	}
+	if !strings.Contains(body, `"content":"final"`) {
+		t.Fatalf("expected trailing final text preserved after extraction, got %s", body)
+	}
+}
+
 func TestCacheInfoUsageFromMapSupportsChatUsageShape(t *testing.T) {
 	parsed, ok := cacheInfoUsageFromMap(map[string]any{
 		"prompt_tokens":     9,

@@ -87,7 +87,7 @@ func handleChat() http.HandlerFunc {
 			}
 			defer stream.Close()
 			flusher := startSSE(w)
-			if err := writeChatSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, usageRecorder); err != nil {
+			if err := writeChatSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder); err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					return
