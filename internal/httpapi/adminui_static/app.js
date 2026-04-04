@@ -797,7 +797,7 @@ function renderBrowserPage() {
             <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">回到根目录/</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
             ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
-            ${canCreateMdInCurrentDir() ? `<button id="create-md-button" class="secondary-btn material-outlined-button" type="button">新增 md 文件</button>` : ''}
+            ${canCreateMdInCurrentDir() ? `<button id="create-md-button" class="secondary-btn material-outlined-button" type="button">新增 md</button>` : ''}
           </div>
           <div class="tree-list">
             ${renderTreeItems(items)}
