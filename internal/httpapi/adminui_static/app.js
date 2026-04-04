@@ -1398,7 +1398,7 @@ function persistEditorZoom() {
 }
 
 function clampEditorZoom(value) {
-  return Math.min(26, Math.max(12, Math.round(value)));
+  return Math.min(26, Math.max(8, Math.round(value * 2) / 2));
 }
 
 function editorZoomStyle() {
@@ -1451,7 +1451,7 @@ function bindCodeEditor(textarea) {
     const nextDistance = touchDistance(event.touches[0], event.touches[1]);
     const delta = nextDistance - pinchDistance;
     if (Math.abs(delta) >= 16) {
-      setEditorZoom(state.editorZoom + (delta > 0 ? 1 : -1));
+      setEditorZoom(state.editorZoom + (delta > 0 ? 0.5 : -0.5));
       pinchDistance = nextDistance;
     }
   }, { passive: false });
@@ -1472,7 +1472,7 @@ function syncCodeEditor(textarea) {
   const lineDigits = Math.max(String(totalLines).length, 2);
   gutter.style.fontSize = `${state.editorZoom}px`;
   gutter.style.lineHeight = '1.5';
-  const gutterWidth = `${Math.max(lineDigits + 2, 4)}ch`;
+  const gutterWidth = `${Math.max(lineDigits + 1.5, 3.5)}ch`;
   if (shell) {
     shell.style.gridTemplateColumns = `${gutterWidth} minmax(0, 1fr)`;
   }

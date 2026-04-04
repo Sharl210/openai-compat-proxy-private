@@ -417,12 +417,14 @@ button { cursor: pointer; }
   font-size: 13px;
 }
 
-.editor-status-chip {
-  min-height: 15px;
-  padding: 0 4px;
-  font-size: 6px;
+.badge.editor-status-chip,
+.material-state-chip.editor-status-chip {
+  min-height: 18px;
+  padding: 0 5px;
+  font-size: 8px;
   font-weight: 600;
   line-height: 1;
+  letter-spacing: 0;
 }
 
 .status-refresh-btn {
@@ -1043,7 +1045,7 @@ button { cursor: pointer; }
   flex: 0 0 auto;
   box-sizing: border-box;
   min-width: 0;
-  padding: 10px 1ch;
+  padding: 10px 0.75ch;
   background: transparent;
   border-right: 0;
   color: var(--md-sys-color-on-surface-variant);
@@ -1061,7 +1063,7 @@ button { cursor: pointer; }
   align-items: center;
   justify-content: flex-end;
   width: 100%;
-  min-height: 1.5em;
+  min-height: 1.3em;
 }
 
 .code-editor-textarea {
