@@ -343,6 +343,17 @@ func PreviewRequestObservability(req model.CanonicalRequest, endpointType string
 	return requestObservabilityPreviewFromBody(body)
 }
 
+func MarshalObservabilityJSON(payload map[string]any) (string, error) {
+	if len(payload) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
 func requestObservabilityPreviewFromBody(body []byte) (RequestObservabilityPreview, error) {
 	if len(body) == 0 {
 		return RequestObservabilityPreview{}, nil
@@ -878,6 +889,14 @@ func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[st
 		raw["summary"] = reasoningSummaryOrAuto(raw, reasoning.Summary)
 	}
 	return raw
+}
+
+func InferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
+	return inferReasoningEffortFromAnthropicRaw(raw)
+}
+
+func NormalizeOpenAIReasoningPayloadForObservability(reasoning *model.CanonicalReasoning) map[string]any {
+	return normalizeOpenAIReasoningPayload(reasoning)
 }
 
 func reasoningSummaryOrAuto(raw map[string]any, fallback string) string {
