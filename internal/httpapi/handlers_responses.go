@@ -28,17 +28,20 @@ func handleResponses() http.HandlerFunc {
 		usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
+			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
 
 		canon, err := responsesadapter.DecodeRequest(r.Body)
 		if err != nil {
+			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		clientModel := canon.Model
-		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning)
+		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
+		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
 		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 			canon.IncludeUsage = true
 		}
@@ -54,7 +57,7 @@ func handleResponses() http.HandlerFunc {
 		if ok {
 			normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
 		}
-		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningEffort); err != nil {
+		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningParameters, clientReasoningEffort); err != nil {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}

@@ -49,14 +49,57 @@ func TestResponsesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	assertDirectionalObservabilityHeaders(t, rec, directionalHeaderExpectation{
-		clientModel:           "gpt-5-high",
-		clientReasoningEffort: "high",
-		proxyUpstreamModel:    "claude-sonnet-4-5",
-		proxyReasoningPayload: map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}},
+		clientModel:               "gpt-5-high",
+		clientReasoningParameters: map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}},
+		clientReasoningEffort:     "high",
+		proxyUpstreamModel:        "claude-sonnet-4-5",
+		proxyReasoningPayload:     map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}},
 	})
 	if !strings.Contains(rec.Body.String(), `"output_text"`) {
 		t.Fatalf("expected responses payload, got %s", rec.Body.String())
 	}
+}
+
+func TestResponsesRouteClientReasoningEffortPrefersSuffixOverRequestBodyParameter(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_2","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeChat,
+			SupportsResponses:           true,
+			SupportsChat:                true,
+			EnableReasoningEffortSuffix: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-high","reasoning":{"effort":"low","summary":"auto"},"input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "high" {
+		t.Fatalf("expected suffix-derived client reasoning effort high, got %q", got)
+	}
+	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
 }
 
 func TestChatStreamExposesDirectionalObservabilityHeaders(t *testing.T) {
@@ -93,10 +136,11 @@ func TestChatStreamExposesDirectionalObservabilityHeaders(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	assertDirectionalObservabilityHeaders(t, rec, directionalHeaderExpectation{
-		clientModel:           "gpt-5-high",
-		clientReasoningEffort: "high",
-		proxyUpstreamModel:    "gpt-5-mini",
-		proxyReasoningPayload: map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}},
+		clientModel:               "gpt-5-high",
+		clientReasoningParameters: map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}},
+		clientReasoningEffort:     "high",
+		proxyUpstreamModel:        "gpt-5-mini",
+		proxyReasoningPayload:     map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}},
 	})
 	if !strings.Contains(rec.Body.String(), `"object":"chat.completion.chunk"`) {
 		t.Fatalf("expected chat stream body, got %s", rec.Body.String())
@@ -142,14 +186,15 @@ func TestMessagesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	assertDirectionalObservabilityHeaders(t, rec, directionalHeaderExpectation{
-		clientModel:           "gpt-5-high",
-		clientReasoningEffort: "high",
-		proxyUpstreamModel:    "claude-sonnet-4-5",
-		proxyReasoningPayload: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}},
+		clientModel:               "gpt-5-high",
+		clientReasoningParameters: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}},
+		clientReasoningEffort:     "high",
+		proxyUpstreamModel:        "claude-sonnet-4-5",
+		proxyReasoningPayload:     map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}},
 	})
 }
 
-func TestMessagesRouteDirectThinkingOmitsClientReasoningEffortHeader(t *testing.T) {
+func TestMessagesRouteDirectThinkingInfersClientReasoningEffortHeader(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" {
 			http.NotFound(w, r)
@@ -174,7 +219,7 @@ func TestMessagesRouteDirectThinkingOmitsClientReasoningEffortHeader(t *testing.
 		}},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":256,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":256,"thinking":{"type":"enabled","budget_tokens":2048},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
@@ -187,20 +232,22 @@ func TestMessagesRouteDirectThinkingOmitsClientReasoningEffortHeader(t *testing.
 	if got := rec.Header().Get(headerClientToProxyModel); got != "claude-sonnet-4-5" {
 		t.Fatalf("expected %s claude-sonnet-4-5, got %q", headerClientToProxyModel, got)
 	}
-	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "" {
-		t.Fatalf("expected %s to be omitted for direct thinking without explicit effort, got %q", headerClientToProxyReasoningEffort, got)
+	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "medium" {
+		t.Fatalf("expected %s medium for direct thinking without explicit effort, got %q", headerClientToProxyReasoningEffort, got)
 	}
+	assertJSONHeaderEquals(t, rec.Header().Get(headerClientToProxyReasoningParameters), map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(2048)}})
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "claude-sonnet-4-5" {
 		t.Fatalf("expected %s claude-sonnet-4-5, got %q", headerProxyToUpstreamModel, got)
 	}
-	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(1024)}})
+	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(2048)}})
 }
 
 type directionalHeaderExpectation struct {
-	clientModel           string
-	clientReasoningEffort string
-	proxyUpstreamModel    string
-	proxyReasoningPayload map[string]any
+	clientModel               string
+	clientReasoningParameters map[string]any
+	clientReasoningEffort     string
+	proxyUpstreamModel        string
+	proxyReasoningPayload     map[string]any
 }
 
 func assertDirectionalObservabilityHeaders(t *testing.T, rec *httptest.ResponseRecorder, expected directionalHeaderExpectation) {
@@ -208,6 +255,7 @@ func assertDirectionalObservabilityHeaders(t *testing.T, rec *httptest.ResponseR
 	if got := rec.Header().Get(headerClientToProxyModel); got != expected.clientModel {
 		t.Fatalf("expected %s %q, got %q", headerClientToProxyModel, expected.clientModel, got)
 	}
+	assertOptionalJSONHeaderEquals(t, rec.Header().Get(headerClientToProxyReasoningParameters), expected.clientReasoningParameters)
 	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != expected.clientReasoningEffort {
 		t.Fatalf("expected %s %q, got %q", headerClientToProxyReasoningEffort, expected.clientReasoningEffort, got)
 	}
@@ -233,4 +281,15 @@ func assertJSONHeaderEquals(t *testing.T, raw string, expected map[string]any) {
 	} else if string(diffExpected) != string(diffGot) {
 		t.Fatalf("expected header json %s, got %s", diffExpected, diffGot)
 	}
+}
+
+func assertOptionalJSONHeaderEquals(t *testing.T, raw string, expected map[string]any) {
+	t.Helper()
+	if len(expected) == 0 {
+		if raw != "" {
+			t.Fatalf("expected empty JSON header, got %q", raw)
+		}
+		return
+	}
+	assertJSONHeaderEquals(t, raw, expected)
 }

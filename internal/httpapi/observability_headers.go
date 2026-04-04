@@ -12,19 +12,117 @@ import (
 
 const (
 	headerClientToProxyModel                 = "X-Client-To-Proxy-Model"
+	headerClientToProxyReasoningParameters   = "X-Client-To-Proxy-Reasoning-Parameters"
 	headerClientToProxyReasoningEffort       = "X-Client-To-Proxy-Reasoning-Effort"
+	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
 	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
 )
 
-func clientToProxyReasoningEffort(model string, reasoning *modelpkg.CanonicalReasoning) string {
-	if _, effort, ok := reasoningpkg.SplitSuffix(strings.TrimSpace(model)); ok {
-		return effort
+const (
+	clientReasoningProtocolResponses = "responses"
+	clientReasoningProtocolChat      = "chat"
+	clientReasoningProtocolMessages  = "messages"
+)
+
+func clientToProxyReasoningEffort(model string, reasoning *modelpkg.CanonicalReasoning, suffixEnabled bool) string {
+	if suffixEnabled {
+		if _, effort, ok := reasoningpkg.SplitSuffix(strings.TrimSpace(model)); ok {
+			return effort
+		}
 	}
 	if reasoning == nil {
 		return ""
 	}
+	if inferred := upstream.InferReasoningEffortFromAnthropicRaw(reasoning.Raw); inferred != "" {
+		return inferred
+	}
 	return strings.TrimSpace(reasoning.Effort)
+}
+
+func clientToProxyReasoningParameters(protocol string, model string, reasoning *modelpkg.CanonicalReasoning, suffixEnabled bool, maxOutputTokens *int) string {
+	effective := clientToProxyEffectiveReasoning(protocol, model, reasoning, suffixEnabled, maxOutputTokens)
+	if effective == nil {
+		return ""
+	}
+	payload := map[string]any{}
+	switch protocol {
+	case clientReasoningProtocolResponses:
+		if reasoningPayload := clientResponsesReasoningPayload(effective); len(reasoningPayload) > 0 {
+			payload["reasoning"] = reasoningPayload
+		}
+	case clientReasoningProtocolChat:
+		if len(effective.Raw) > 0 {
+			payload["reasoning"] = upstream.NormalizeOpenAIReasoningPayloadForObservability(effective)
+		} else if effective.Effort != "" {
+			payload["reasoning_effort"] = effective.Effort
+		}
+	case clientReasoningProtocolMessages:
+		if thinking, ok := effective.Raw["thinking"]; ok {
+			payload["thinking"] = thinking
+		}
+		if outputConfig, ok := effective.Raw["output_config"]; ok {
+			payload["output_config"] = outputConfig
+		}
+	}
+	if len(payload) == 0 {
+		return ""
+	}
+	encoded, err := upstream.MarshalObservabilityJSON(payload)
+	if err != nil {
+		return ""
+	}
+	return encoded
+}
+
+func clientToProxyEffectiveReasoning(protocol string, model string, reasoning *modelpkg.CanonicalReasoning, suffixEnabled bool, maxOutputTokens *int) *modelpkg.CanonicalReasoning {
+	effective := cloneCanonicalReasoning(reasoning)
+	if suffixEnabled {
+		if _, effort, ok := reasoningpkg.SplitSuffix(strings.TrimSpace(model)); ok {
+			effective = applyResolvedReasoningEffort(effective, effort)
+			if protocol == clientReasoningProtocolMessages {
+				effective = applyAnthropicThinkingFromResolvedEffort(effective, true, model, maxOutputTokens)
+			}
+		}
+	}
+	return effective
+}
+
+func clientResponsesReasoningPayload(reasoning *modelpkg.CanonicalReasoning) map[string]any {
+	if reasoning == nil {
+		return nil
+	}
+	if len(reasoning.Raw) > 0 {
+		return upstream.NormalizeOpenAIReasoningPayloadForObservability(reasoning)
+	}
+	payload := map[string]any{}
+	if reasoning.Effort != "" {
+		payload["effort"] = reasoning.Effort
+	}
+	if reasoning.Summary != "" {
+		payload["summary"] = reasoning.Summary
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	if _, ok := payload["summary"]; !ok {
+		payload["summary"] = "auto"
+	}
+	return payload
+}
+
+func cloneCanonicalReasoning(reasoning *modelpkg.CanonicalReasoning) *modelpkg.CanonicalReasoning {
+	if reasoning == nil {
+		return nil
+	}
+	cloned := &modelpkg.CanonicalReasoning{
+		Effort:  reasoning.Effort,
+		Summary: reasoning.Summary,
+	}
+	if len(reasoning.Raw) > 0 {
+		cloned.Raw = cloneMap(reasoning.Raw)
+	}
+	return cloned
 }
 
 func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) {
@@ -39,13 +137,16 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	}
 }
 
-func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientReasoningEffort string) error {
+func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientReasoningParameters string, clientReasoningEffort string) error {
 	preview, err := upstream.PreviewRequestObservability(canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
 	if err != nil {
 		return err
 	}
 	if value := strings.TrimSpace(clientModel); value != "" {
 		w.Header().Set(headerClientToProxyModel, value)
+	}
+	if value := strings.TrimSpace(clientReasoningParameters); value != "" {
+		w.Header().Set(headerClientToProxyReasoningParameters, value)
 	}
 	if value := strings.TrimSpace(clientReasoningEffort); value != "" {
 		w.Header().Set(headerClientToProxyReasoningEffort, value)
@@ -57,4 +158,21 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg confi
 		w.Header().Set(headerProxyToUpstreamReasoningParameters, value)
 	}
 	return nil
+}
+
+func clearTransparencyHeaders(w http.ResponseWriter) {
+	for _, header := range []string{
+		"X-Env-Version",
+		headerCacheInfoTimezone,
+		"X-Provider-Name",
+		"X-Provider-Version",
+		"X-SYSTEM-PROMPT-ATTACH",
+		headerClientToProxyModel,
+		headerClientToProxyReasoningParameters,
+		headerClientToProxyReasoningEffort,
+		headerProxyToUpstreamModel,
+		headerProxyToUpstreamReasoningParameters,
+	} {
+		w.Header().Del(header)
+	}
 }

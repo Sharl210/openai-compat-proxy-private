@@ -50,6 +50,9 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	if got := first.Header().Get("X-Provider-Name"); got != "openai" {
 		t.Fatalf("expected X-Provider-Name openai, got %q", got)
 	}
+	if got := first.Header().Get(headerCacheInfoTimezone); got != "Asia/Shanghai" {
+		t.Fatalf("expected %s Asia/Shanghai, got %q", headerCacheInfoTimezone, got)
+	}
 
 	brokenProviderMTime := time.Date(2026, 3, 25, 11, 2, 0, 789000000, time.UTC)
 	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nMODEL_MAP={broken\n", brokenProviderMTime)
@@ -351,10 +354,93 @@ func TestUnauthorizedRequestDoesNotExposeVersionHeaders(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthorized request, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerClientToProxyModel, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamReasoningParameters} {
+	for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerClientToProxyModel, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamReasoningParameters} {
 		if got := rec.Header().Get(header); got != "" {
 			t.Fatalf("expected %s to be omitted on unauthorized response, got %q", header, got)
 		}
+	}
+}
+
+func TestEarlyLocalErrorsDoNotExposeTransparencyHeaders(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROXY_API_KEY=proxy-secret\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nCACHE_INFO_TIMEZONE=Asia/Shanghai\n", time.Date(2026, 3, 26, 11, 0, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.com/v1\nUPSTREAM_API_KEY=\nSUPPORTS_RESPONSES=true\nSUPPORTS_CHAT=true\nSUPPORTS_ANTHROPIC_MESSAGES=true\n", time.Date(2026, 3, 26, 11, 0, 30, 0, time.UTC))
+
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	server := NewServerWithStore(store, nil)
+
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		headers    map[string]string
+		statusCode int
+		code       string
+	}{
+		{
+			name:       "responses missing upstream auth",
+			path:       "/openai/v1/responses",
+			body:       `{"model":"gpt-5","input":"hello"}`,
+			headers:    map[string]string{"Content-Type": "application/json", "Authorization": "Bearer proxy-secret"},
+			statusCode: http.StatusUnauthorized,
+			code:       "missing_upstream_auth",
+		},
+		{
+			name:       "chat invalid request",
+			path:       "/openai/v1/chat/completions",
+			body:       `{"model":`,
+			headers:    map[string]string{"Content-Type": "application/json", "Authorization": "Bearer proxy-secret", "X-Upstream-Authorization": "Bearer upstream-token"},
+			statusCode: http.StatusBadRequest,
+			code:       "invalid_request",
+		},
+		{
+			name:       "messages invalid request",
+			path:       "/openai/v1/messages",
+			body:       `{"model":`,
+			headers:    map[string]string{"Content-Type": "application/json", "Authorization": "Bearer proxy-secret", "anthropic-version": "2023-06-01", "X-Upstream-Authorization": "Bearer upstream-token"},
+			statusCode: http.StatusBadRequest,
+			code:       "invalid_request",
+		},
+		{
+			name:       "messages missing anthropic version",
+			path:       "/openai/v1/messages",
+			body:       `{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			headers:    map[string]string{"Content-Type": "application/json", "Authorization": "Bearer proxy-secret", "X-Upstream-Authorization": "Bearer upstream-token"},
+			statusCode: http.StatusBadRequest,
+			code:       "invalid_request",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			for key, value := range tc.headers {
+				req.Header.Set(key, value)
+			}
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != tc.statusCode {
+				t.Fatalf("expected status %d, got %d body=%s", tc.statusCode, rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.code) {
+				t.Fatalf("expected body to contain %q, got %s", tc.code, rec.Body.String())
+			}
+			for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerClientToProxyModel, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamReasoningParameters} {
+				if got := rec.Header().Get(header); got != "" {
+					t.Fatalf("expected %s to be omitted on early local error, got %q", header, got)
+				}
+			}
+		})
 	}
 }
 
