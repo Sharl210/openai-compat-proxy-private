@@ -798,10 +798,6 @@ func (a *adminUI) resolvePath(rel string, wantDir bool) (string, error) {
 }
 
 func (a *adminUI) createEnvFromTemplate(dirRel string, name string) (string, error) {
-	cleanName, err := validateAdminFileName(name)
-	if err != nil {
-		return "", err
-	}
 	resolvedDir, err := a.resolvePath(dirRel, true)
 	if err != nil {
 		return "", err
@@ -815,7 +811,15 @@ func (a *adminUI) createEnvFromTemplate(dirRel string, name string) (string, err
 		return "", err
 	}
 	content := string(templateContent)
-	targetName := cleanName + ".env"
+	targetName := ".env"
+	cleanName := ""
+	if filepath.Clean(resolvedDir) != filepath.Clean(a.rootDir()) {
+		cleanName, err = validateAdminFileName(name)
+		if err != nil {
+			return "", err
+		}
+		targetName = cleanName + ".env"
+	}
 	targetPath := filepath.Join(resolvedDir, targetName)
 	if _, err := os.Stat(targetPath); err == nil {
 		return "", errors.New("target file already exists")

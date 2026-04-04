@@ -308,16 +308,42 @@ func TestAdminUICreateRootEnvFromTemplate(t *testing.T) {
 		"name": "staging",
 	}, []*http.Cookie{cookie}, csrf)
 
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected create 400 when root .env exists, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminUICreateRootDotEnvWithoutName(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	rootEnv := filepath.Join(server.admin.rootDir(), ".env")
+	if err := os.Remove(rootEnv); err != nil {
+		t.Fatalf("remove existing root env: %v", err)
+	}
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "",
+		"name": "",
+	}, []*http.Cookie{cookie}, csrf)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected create 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	created := filepath.Join(server.admin.rootDir(), "staging.env")
-	content, err := os.ReadFile(created)
+	content, err := os.ReadFile(rootEnv)
 	if err != nil {
-		t.Fatalf("read created env: %v", err)
+		t.Fatalf("read created root env: %v", err)
 	}
 	if !strings.Contains(string(content), "PROXY_API_KEY=") {
 		t.Fatalf("expected root template content, got %s", string(content))
+	}
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if payload.Path != ".env" {
+		t.Fatalf("expected response path .env, got %q", payload.Path)
 	}
 }
 
