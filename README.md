@@ -1,8 +1,8 @@
 # openai-compat-proxy
 
-一个 Go 单二进制代理：**每个 provider 只选一种上游正规协议**，但对外继续统一提供 OpenAI Responses、Chat Completions 和 Anthropic Messages 三套兼容入口。
+一个面向正式长期使用场景的 Go 单二进制代理：**每个 provider 内部只走一种上游正规协议**，但对外统一提供 OpenAI Responses、Chat Completions、Anthropic Messages 三套兼容入口，并由代理层完成协议互转、语义补全与流式兜底。
 
-> 适合把不同上游站点收敛到一套稳定入口，同时保留多 provider 路由、热加载、流式转发、工具调用、reasoning 兼容和部署脚本。
+> 适合把不同上游站点收敛到一套稳定入口：三套下游入口 × 三种上游协议类型可交叉组合，代理层负责多 provider 路由、热加载、流式容错、工具调用适配、reasoning / thinking 兼容和部署运维兜底。
 
 ---
 
@@ -11,12 +11,13 @@
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
 | 多 provider 路由 | ✅ | 支持 `providers/*.env`、显式 `/{providerId}/v1/*` 和默认 provider 裸 `/v1/*` |
-| 三套兼容入口 | ✅ | `POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`GET /v1/models` |
-| provider 内部统一走一种上游协议 | ✅ | `UPSTREAM_ENDPOINT_TYPE=responses/chat/anthropic` |
-| 流式 / 非流式 | ✅ | 支持 SSE 转发，也支持 `proxy_buffer` / `upstream_non_stream` |
-| 工具调用与多轮 tool result 回传 | ✅ | `/v1/responses` 主路径最完整 |
-| reasoning / thinking 兼容 | ✅ | 支持 reasoning 映射、suffix → effort、Anthropic thinking 映射 |
-| 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0/$1/$2` 占位符、`MANUAL_MODELS` |
+| 三套兼容入口 | ✅ | `POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`GET /v1/models` 全部可用 |
+| `3×3` 协议矩阵 | ✅ | 三个下游入口可分别对接 `responses / chat / anthropic` 三种上游协议类型 |
+| provider 内部统一走一种上游协议 | ✅ | `UPSTREAM_ENDPOINT_TYPE=responses/chat/anthropic`，代理层负责跨协议适配 |
+| 流式 / 非流式 | ✅ | 支持 SSE 转发、超时兜底、错误终态补发，也支持 `proxy_buffer` / `upstream_non_stream` |
+| 工具调用与多轮 tool result 回传 | ✅ | 三套入口都已实现；其中 `/v1/responses` 的高层语义覆盖最全面 |
+| reasoning / thinking 兼容 | ✅ | 支持请求体参数、模型 suffix、Anthropic thinking、上游 reasoning 内容回写与流式拆分 |
+| 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0` 与 `$1..$N` 占位符、`MANUAL_MODELS` |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
 | 调试归档 | ✅ | `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 写出 `request/raw/canonical/final.ndjson` |
@@ -41,7 +42,7 @@ flowchart LR
 
 1. **路由先选 provider**
 2. **provider 决定内部走哪条上游正规协议**
-3. **代理层继续统一对外暴露三套兼容接口**
+3. **代理层继续统一对外暴露三套兼容接口，并补齐跨协议语义差异**
 
 ---
 
@@ -177,7 +178,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `chat`
 - `anthropic`
 
-它只决定**代理内部如何请求上游**，不影响对外公开的三套兼容入口。
+它只决定**代理内部如何请求上游**，不影响对外公开的三套兼容入口。也就是说，真正暴露给客户端的是 `3×3` 组合能力，而不是“每个 provider 只能服务一种下游接口”。
 
 ### 2. 流式与非流式策略
 
@@ -185,18 +186,39 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 - `proxy_buffer`：下游非流时，代理继续向上游请求 SSE，再本地聚合
 - `upstream_non_stream`：下游非流时，代理直接向上游请求非流 JSON
-- `UPSTREAM_THINKING_TAG_STYLE=true/false`：当 `UPSTREAM_ENDPOINT_TYPE=chat` 时，决定是否把 `<think>` / `<thinking>` 标签拆成 reasoning 内容
+- `UPSTREAM_THINKING_TAG_STYLE=true/false`：当 `UPSTREAM_ENDPOINT_TYPE=chat` 时，决定是否把 `<think>` / `<thinking>` / `<reasoning>` 标签拆成 reasoning 内容
+
+这层还有几项专门做稳定性的代理侧兜底：
+
+- 首字节前失败可按 provider 配置重试
+- 已开始 SSE 后出错会尽量保持下游流协议终态，而不是中途退化成 JSON 错误体
+- chat 上游的 reasoning 标签、reasoning_content、tool_calls 会在代理层统一归一后再下发
 
 ### 3. 模型映射与 reasoning suffix
 
 支持：
 
 - `MODEL_MAP` 通配符映射
-- `$0/$1/$2` 占位符替换
+- `$0` 与 `$1..$N` 占位符替换（按通配符捕获数量动态生效，没有写死到 `$2`）
 - `MANUAL_MODELS` 手动补模型
 - `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-low/-medium/-high/-xhigh`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
-- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix effort 自动映射到 Anthropic thinking
+- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix 或请求体里解析出的 effort 自动映射到 Anthropic thinking
+
+这些变量的实际含义：
+
+- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名
+- `MANUAL_MODELS`：当上游不返回 `/models` 列表或列表不完整时，手动补齐可展示模型
+- `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
+- `EXPOSE_REASONING_SUFFIX_MODELS`：让 `/models` 也把这些后缀变体展示给客户端
+- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把 effort 自动翻译成 `thinking` / `output_config`
+
+当前已验证的推理强度入口包括：
+
+- `/v1/responses` 请求体 `reasoning.effort`
+- `/v1/chat/completions` 请求体 `reasoning_effort` 或 `reasoning.effort`
+- 模型名 suffix：`-low / -medium / -high / -xhigh`
+- `/v1/messages` 请求体 `thinking` 直传
 
 ### 4. provider 级系统提示词
 
@@ -278,15 +300,15 @@ Claude 相关还有两个配套开关：
 
 ---
 
-## 📌 当前行为边界
+## 📌 适配策略与已知边界
 
-这些都是当前代码里的真实边界，建议在接入前明确：
+这些都是当前代码里的真实适配策略，建议在接入前明确：
 
-1. **`/v1/responses` 是能力最完整的主路径**  
-   `previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation`、`store`、`include` 这类高层字段，优先在这条链完整保留。
+1. **三套入口都已实现，但 `/v1/responses` 的高层语义覆盖最全面**  
+   `previous_response_id`、`metadata`、`parallel_tool_calls`、`truncation`、`store`、`include` 这类字段，代理会优先在 `/v1/responses` 这条链完整保留；并不代表另外两条入口不可用，而是它们会按各自协议语义做兼容转换。
 
-2. **当 provider 内部上游不是 `responses` 时，不承诺所有 `responses` 顶层字段一比一透传**  
-   尤其像 `store`、`include` 这种字段，在转到 `chat` / `anthropic` 上游时不应理解成“继续原样透传”。
+2. **当 provider 内部上游不是 `responses` 时，Responses 顶层字段按代理语义兼容，而不是逐字面透传**  
+   尤其像 `store`、`include` 这种字段，在转到 `chat` / `anthropic` 上游时，含义由代理层接管并做协议适配，不应理解成“继续原样透传”。
 
 3. **`/v1/messages` 必须带 `anthropic-version`，且当前只校验存在且非空**  
    建议仍然传 `2023-06-01`。
@@ -296,6 +318,9 @@ Claude 相关还有两个配套开关：
 
 5. **`cache_control` 当前是兼容输入，不等于真实上游 prompt caching 支持**  
    代理会接受，但不会把它继续透传为真正的 Anthropic prompt caching 语义。
+
+6. **chat 上游的思维标签当前支持三种写法**  
+   当 `UPSTREAM_THINKING_TAG_STYLE=true` 时，代理会把 `<think>`、`<thinking>`、`<reasoning>` 识别为 reasoning 内容，再按目标下游协议重写。
 
 ---
 
