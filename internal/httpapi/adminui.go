@@ -478,9 +478,20 @@ func (a *adminUI) handleFileWrite() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "write_failed", err.Error())
 			return
 		}
+		finalPath := filepath.ToSlash(req.Path)
+		if a.isProviderEnvFile(resolved) {
+			renamedPath, err := a.syncProviderEnvFilename(resolved, content)
+			if err != nil {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "write_failed", err.Error())
+				return
+			}
+			if renamedPath != "" {
+				finalPath = filepath.ToSlash(renamedPath)
+			}
+		}
 		writeAdminJSON(w, http.StatusOK, map[string]any{
 			"ok":         true,
-			"path":       filepath.ToSlash(req.Path),
+			"path":       finalPath,
 			"validation": a.evaluateValidation(),
 		})
 	}
@@ -932,6 +943,53 @@ func rewriteProviderID(content string, providerID string) string {
 		lines = append([]string{"PROVIDER_ID=" + providerID}, lines...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func extractProviderID(content string) string {
+	for _, rawLine := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		if strings.TrimSpace(key) == "PROVIDER_ID" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func (a *adminUI) syncProviderEnvFilename(resolved string, content string) (string, error) {
+	providerID := strings.TrimSpace(extractProviderID(content))
+	if providerID == "" {
+		return "", nil
+	}
+	targetPath := filepath.Join(filepath.Dir(resolved), providerID+".env")
+	if filepath.Clean(targetPath) == filepath.Clean(resolved) {
+		root := a.rootDir()
+		rel, err := filepath.Rel(root, resolved)
+		if err != nil {
+			return "", err
+		}
+		return filepath.ToSlash(rel), nil
+	}
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", errors.New("target provider env already exists")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.Rename(resolved, targetPath); err != nil {
+		return "", err
+	}
+	root := a.rootDir()
+	rel, err := filepath.Rel(root, targetPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func (a *adminUI) isTextFile(path string) (bool, error) {

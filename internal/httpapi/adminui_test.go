@@ -293,6 +293,40 @@ func TestAdminUIRenameProviderEnvRewritesProviderIDAndDeleteRemovesFile(t *testi
 	}
 }
 
+func TestAdminUISaveProviderEnvRewritesFilenameFromProviderID(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	rec := adminJSONRequest(t, server, http.MethodPut, "/_admin/api/file", map[string]any{
+		"path": "providers/openai.env",
+		"mode": "env",
+		"env_entries": []map[string]any{
+			{"key": "PROVIDER_ID", "value": "中文提供商", "leading_lines": []string{}},
+			{"key": "PROVIDER_ENABLED", "value": "true", "leading_lines": []string{}},
+			{"key": "UPSTREAM_BASE_URL", "value": "https://example.com/v1", "leading_lines": []string{}},
+			{"key": "UPSTREAM_API_KEY", "value": "upstream-secret", "leading_lines": []string{}},
+		},
+		"tail_lines": []string{},
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected save 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	if data["path"] != "providers/中文提供商.env" {
+		t.Fatalf("expected renamed provider env path, got %#v", data["path"])
+	}
+	content, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "providers", "中文提供商.env"))
+	if err != nil {
+		t.Fatalf("read renamed provider env: %v", err)
+	}
+	if !strings.Contains(string(content), "PROVIDER_ID=中文提供商") {
+		t.Fatalf("expected provider file content synced, got %s", string(content))
+	}
+	if _, err := os.Stat(filepath.Join(server.admin.rootDir(), "providers", "openai.env")); !os.IsNotExist(err) {
+		t.Fatalf("expected old provider file removed, err=%v", err)
+	}
+}
+
 func TestAdminUIMutatingRequestRequiresCSRFFromSession(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, _ := adminLogin(t, server)
