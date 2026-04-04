@@ -285,6 +285,9 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			if err != nil {
 				continue
 			}
+			if !info.IsDir() && !a.isVisibleTreeFile(entry.Name()) {
+				continue
+			}
 			itemRel := filepath.ToSlash(filepath.Join(rel, entry.Name()))
 			mode := info.Mode()
 			isSymlink := mode&os.ModeSymlink != 0
@@ -334,6 +337,11 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			"items": items,
 		})
 	}
+}
+
+func (a *adminUI) isVisibleTreeFile(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".example") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json")
 }
 
 func (a *adminUI) isLogDirectory(resolved string) bool {

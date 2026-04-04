@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,6 +119,42 @@ func TestAdminUIEnvFileReturnsStructuredBlocks(t *testing.T) {
 	first := entries[0].(map[string]any)
 	if first["key"] != "LISTEN_ADDR" {
 		t.Fatalf("expected first env key LISTEN_ADDR, got %#v", first["key"])
+	}
+}
+
+func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "notes.md"), []byte("hidden"), 0o644); err != nil {
+		t.Fatalf("write md file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "visible.txt"), []byte("shown"), 0o644); err != nil {
+		t.Fatalf("write txt file: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected tree 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	items, ok := data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected tree items, got %#v", data["items"])
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.(map[string]any)["name"].(string))
+	}
+	if slices.Contains(names, "notes.md") {
+		t.Fatalf("expected notes.md hidden from tree, got %v", names)
+	}
+	if !slices.Contains(names, "visible.txt") {
+		t.Fatalf("expected visible.txt shown in tree, got %v", names)
 	}
 }
 
