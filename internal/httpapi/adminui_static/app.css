@@ -418,10 +418,11 @@ button { cursor: pointer; }
 }
 
 .editor-status-chip {
-  min-height: 22px;
-  padding: 0 5px;
-  font-size: 9px;
+  min-height: 15px;
+  padding: 0 4px;
+  font-size: 6px;
   font-weight: 600;
+  line-height: 1;
 }
 
 .status-refresh-btn {
@@ -769,13 +770,14 @@ button { cursor: pointer; }
 }
 
 .tree-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
   flex: 1;
   min-height: 0;
   overflow: auto;
-  align-content: start;
-  grid-auto-rows: min-content;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 .tree-item {
@@ -1039,8 +1041,9 @@ button { cursor: pointer; }
   align-items: flex-end;
   justify-content: flex-start;
   flex: 0 0 auto;
+  box-sizing: border-box;
   min-width: 0;
-  padding: 10px 2px 10px 0;
+  padding: 10px 1ch;
   background: transparent;
   border-right: 0;
   color: var(--md-sys-color-on-surface-variant);
@@ -1063,7 +1066,7 @@ button { cursor: pointer; }
 
 .code-editor-textarea {
   min-height: 420px;
-  padding: 10px 8px;
+  padding: 10px 8px 10px 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1153,7 +1156,7 @@ button { cursor: pointer; }
   bottom: 0;
   left: 3ch;
   margin: 0;
-  padding: 10px 8px;
+  padding: 10px 8px 10px 0;
   overflow: hidden auto;
   pointer-events: none;
   white-space: pre;
@@ -1173,8 +1176,8 @@ button { cursor: pointer; }
 
 .code-editor-shell-env .code-editor-gutter {
   min-width: 0;
-  padding-left: 0;
-  padding-right: 1px;
+  padding-left: 1ch;
+  padding-right: 1ch;
 }
 .env-comment-block {
   margin: 6px 0 0;
