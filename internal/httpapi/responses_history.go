@@ -109,7 +109,7 @@ func shouldRestorePreviousConversation(messages []model.CanonicalMessage) bool {
 		return true
 	}
 	for _, msg := range messages {
-		if msg.Role != "tool" {
+		if msg.Role == "assistant" {
 			return false
 		}
 	}

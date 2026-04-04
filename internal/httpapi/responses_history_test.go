@@ -126,3 +126,21 @@ func TestBuildResponsesHistorySnapshotKeepsSuccessfulToolOutputs(t *testing.T) {
 		t.Fatalf("expected successful tool message to remain, got %#v", snapshot)
 	}
 }
+
+func TestShouldRestorePreviousConversationAllowsNewUserTurnWithoutClientHistory(t *testing.T) {
+	messages := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "follow up"}}}}
+	if !shouldRestorePreviousConversation(messages) {
+		t.Fatalf("expected previous conversation restore for a new user turn without assistant history")
+	}
+}
+
+func TestShouldRestorePreviousConversationSkipsWhenClientAlreadySendsAssistantHistory(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"weather"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+	}
+	if shouldRestorePreviousConversation(messages) {
+		t.Fatalf("expected restore to be skipped when client already sends assistant history")
+	}
+}

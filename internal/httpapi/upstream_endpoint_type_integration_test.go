@@ -644,6 +644,64 @@ func TestResponsesRouteMapsExplicitReasoningEffortToAnthropicThinkingWhenEnabled
 	}
 }
 
+func TestAnthropicRouteMapsThinkingConfigToResponsesReasoningWhenUpstreamIsResponses(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":2048},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"medium","summary":"auto"}`) {
+		t.Fatalf("expected anthropic thinking config to map into responses reasoning payload, got %s", gotBody)
+	}
+	if strings.Contains(gotBody, `"thinking":`) {
+		t.Fatalf("expected responses upstream payload to avoid anthropic thinking field, got %s", gotBody)
+	}
+}
+
+func TestAnthropicRouteMapsThinkingConfigToChatReasoningWhenUpstreamIsChat(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeChat, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":2048},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"medium","summary":"auto"}`) {
+		t.Fatalf("expected anthropic thinking config to map into chat reasoning payload, got %s", gotBody)
+	}
+	if strings.Contains(gotBody, `"thinking":`) {
+		t.Fatalf("expected chat upstream payload to avoid anthropic thinking field, got %s", gotBody)
+	}
+}
+
 func TestChatRouteDoesNotMapThinkingWhenUpstreamIsNotAnthropic(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -971,6 +1029,57 @@ func TestResponsesRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T)
 	}
 	if !strings.Contains(secondBody, `"role":"user"`) || !strings.Contains(secondBody, `"hello"`) {
 		t.Fatalf("expected second anthropic request to preserve original user question context, got %s", secondBody)
+	}
+}
+
+func TestResponsesRouteRestoresPreviousConversationForAnthropicNewUserTurn(t *testing.T) {
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"first answer"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"second answer"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstResp map[string]any
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("unmarshal first response: %v", err)
+	}
+	responseID, _ := firstResp["id"].(string)
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","input":"follow up"}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"hello"`) {
+		t.Fatalf("expected restored anthropic request to include original user turn, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"first answer"`) {
+		t.Fatalf("expected restored anthropic request to include previous assistant turn, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"follow up"`) {
+		t.Fatalf("expected restored anthropic request to include new user turn, got %s", secondBody)
 	}
 }
 
