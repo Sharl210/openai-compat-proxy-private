@@ -39,14 +39,17 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		clientModel := canon.Model
+		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning)
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
+		normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
+		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningEffort); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+			return
+		}
 		canon.RequestID = requestID
 		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
-		mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
-		canon.Model = mappedModel
-		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
-		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking, canon.Model, canon.MaxOutputTokens)
 		ctx := r.Context()
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {

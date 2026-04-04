@@ -311,7 +311,7 @@ func TestUnauthorizedRequestDoesNotExposeVersionHeaders(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthorized request, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH"} {
+	for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerClientToProxyModel, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamReasoningParameters} {
 		if got := rec.Header().Get(header); got != "" {
 			t.Fatalf("expected %s to be omitted on unauthorized response, got %q", header, got)
 		}

@@ -37,6 +37,8 @@ func handleResponses() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		clientModel := canon.Model
+		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning)
 		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 			canon.IncludeUsage = true
 		}
@@ -50,12 +52,11 @@ func handleResponses() http.HandlerFunc {
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
-			mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
-			canon.Model = mappedModel
-			canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
-			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-				canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking, canon.Model, canon.MaxOutputTokens)
-			}
+			normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
+		}
+		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningEffort); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+			return
 		}
 		canon.RequestID = requestID
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
