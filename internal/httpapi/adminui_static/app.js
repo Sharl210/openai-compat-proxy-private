@@ -640,7 +640,7 @@ function dashboardTemplate() {
             <div class="support-kv"><span>当前目录</span><strong>${escapeHtml(state.currentDir || '/')}</strong></div>
             <div class="support-kv"><span>当前文件</span><strong>${escapeHtml(state.currentFile?.path || '未选择')}</strong></div>
           </div>
-          <button id="logout-button" class="ghost-btn material-outlined-button" type="button">退出登录</button>
+          <button id="logout-button" class="ghost-btn material-outlined-button logout-btn" type="button">退出登录</button>
         </div>
       </aside>
   `;
@@ -655,7 +655,7 @@ function dashboardTemplate() {
                 <span></span><span></span><span></span>
               </button>
             </div>
-            <div class="topbar-title">
+            <div class="topbar-title ${state.view === 'editor' ? 'compact-title' : ''}">
               ${renderTopbarTitle()}
             </div>
             <div class="topbar-meta">
@@ -762,7 +762,7 @@ function renderStatusSection() {
   const validation = state.validation || {};
   const dashboardCards = [
     { label: '服务状态', value: status.health_ok ? '健康' : '异常', tone: status.health_ok ? 'ok' : 'warn' },
-    { label: '配置校验', value: validation.restart_ok ? '可重启' : '需修复', tone: validation.restart_ok ? 'ok' : 'danger' },
+    { label: '配置校验', value: validation.restart_ok ? '通过' : '失败', tone: validation.restart_ok ? 'ok' : 'danger' },
     { label: '当前任务', value: state.activeJob ? (state.activeJob.label || labelForAction(state.activeJob.action)) : '空闲', tone: state.activeJob ? 'info' : 'info' },
     { label: '日志目录', value: status.log_dir || '未启用', tone: 'info' },
   ];
@@ -804,14 +804,6 @@ function renderStatusSection() {
       </div>
       <div class="job-body">
         <pre class="job-log">${escapeHtml(state.activeJob?.output || '暂无脚本输出')}</pre>
-      </div>
-    </div>
-    <div class="job-output material-log-card">
-      <div class="job-head compact-head">
-        <h3 class="section-title">结构化日志</h3>
-      </div>
-      <div class="job-body compact-copy">
-        当前运行使用新的结构化日志系统，日志目录：<strong>${escapeHtml(status.log_dir || '未启用')}</strong>
       </div>
     </div>
   `;
@@ -857,15 +849,16 @@ function renderTextEditor() {
 }
 
 function renderEnvEditor() {
-  const entries = state.currentFile.env_entries || [];
-  const allExpanded = entries.length > 0 && entries.every((entry, index) => state.envExpanded[envEntryId(entry, index)]);
+  const entries = getVisibleEnvEntries();
+  const allExpanded = entries.length > 0 && entries.every(({ entry, sourceIndex }) => state.envExpanded[envEntryId(entry, sourceIndex)]);
+  const hasTailLines = (state.currentFile?.tail_lines || []).some((line) => String(line || '').trim() !== '');
   return `
     <div id="env-editor" class="env-list pane-${state.editorPane}">
       ${state.editorPane === 'edit' ? `<div class="env-toolbar">
         <button id="env-toggle-all" class="secondary-btn material-tonal-button" type="button">${allExpanded ? '全部收起' : '全部展开'}</button>
       </div>` : ''}
-      ${state.editorPane === 'edit' ? entries.map((entry, index) => renderEnvEntry(entry, index)).join('') : ''}
-      ${state.editorPane === 'edit' ? `<section class="env-card mode-scene">
+      ${state.editorPane === 'edit' ? entries.map(({ entry, sourceIndex }, index) => renderEnvEntry(entry, index, sourceIndex)).join('') : ''}
+      ${state.editorPane === 'edit' && hasTailLines ? `<section class="env-card mode-scene">
         <div class="env-body">
           <textarea id="env-tail-lines" name="env-tail-lines" rows="1" class="comment-input auto-resize no-wrap-editor" spellcheck="false" wrap="off">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
         </div>
@@ -879,8 +872,8 @@ function renderEnvEditor() {
   `;
 }
 
-function renderEnvEntry(entry, index) {
-  const entryId = envEntryId(entry, index);
+function renderEnvEntry(entry, index, sourceIndex = index) {
+  const entryId = envEntryId(entry, sourceIndex);
   const expanded = !!state.envExpanded[entryId];
   return `
     <section class="env-card">
@@ -893,7 +886,7 @@ function renderEnvEntry(entry, index) {
           <pre class="env-comment-block">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
         ` : ''}
         <div class="env-value-row">
-          <textarea class="env-value-input auto-resize no-wrap-editor" rows="1" name="env-value-${index}" data-index="${index}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
+          <textarea class="env-value-input auto-resize no-wrap-editor" rows="1" name="env-value-${sourceIndex}" data-index="${sourceIndex}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
         </div>
       </div>
     </section>
@@ -911,7 +904,17 @@ function renderCodeEditorShell(id, name, value, className) {
 
 function renderLineNumbers(content) {
   const total = Math.max(1, String(content || '').split('\n').length);
-  return Array.from({ length: total }, (_, index) => `<span>${index + 1}</span>`).join('');
+  return Array.from({ length: total }, (_, index) => `<span aria-hidden="true">${index + 1}</span>`).join('');
+}
+
+function getVisibleEnvEntries() {
+  return (state.currentFile?.env_entries || [])
+    .map((entry, sourceIndex) => ({ entry, sourceIndex }))
+    .filter(({ entry }) => isVisibleEnvEntry(entry));
+}
+
+function isVisibleEnvEntry(entry) {
+  return String(entry?.key || '').trim() !== '';
 }
 
 function renderEnvRawPreview() {
@@ -1213,7 +1216,9 @@ function normalizeEnvEntryForDisplay(entry) {
 }
 
 function serializeEnvEntries(entries) {
-  return entries.map((entry) => ({
+  return entries
+    .filter((entry) => isVisibleEnvEntry(entry))
+    .map((entry) => ({
     ...entry,
     value: formatEnvValueForSave(entry.key, entry.value || ''),
   }));
@@ -1345,6 +1350,10 @@ function syncCodeEditor(textarea) {
   if (!gutter) {
     return;
   }
+  const totalLines = Math.max(1, String(textarea.value || '').split('\n').length);
+  gutter.style.fontSize = `${state.editorZoom}px`;
+  gutter.style.lineHeight = '1.5';
+  gutter.style.width = `${Math.max(String(totalLines).length + 2, 4)}ch`;
   gutter.innerHTML = renderLineNumbers(textarea.value || '');
   gutter.scrollTop = textarea.scrollTop;
 }
