@@ -342,7 +342,7 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 
 func (a *adminUI) isVisibleTreeFile(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	return lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".example") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json")
+	return lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json")
 }
 
 func (a *adminUI) isLogDirectory(resolved string) bool {

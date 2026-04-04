@@ -214,6 +214,9 @@ func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "notes.md"), []byte("hidden"), 0o644); err != nil {
 		t.Fatalf("write md file: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "hidden.env.example"), []byte("template"), 0o644); err != nil {
+		t.Fatalf("write example file: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "visible.txt"), []byte("shown"), 0o644); err != nil {
 		t.Fatalf("write txt file: %v", err)
 	}
@@ -238,6 +241,9 @@ func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	}
 	if slices.Contains(names, "notes.md") {
 		t.Fatalf("expected notes.md hidden from tree, got %v", names)
+	}
+	if slices.Contains(names, "hidden.env.example") {
+		t.Fatalf("expected hidden.env.example hidden from tree, got %v", names)
 	}
 	if !slices.Contains(names, "visible.txt") {
 		t.Fatalf("expected visible.txt shown in tree, got %v", names)
