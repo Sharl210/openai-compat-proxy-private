@@ -63,7 +63,7 @@ button { cursor: pointer; }
 .material-content-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: 2px;
   position: relative;
   min-height: 100vh;
   padding: 8px 10px 10px;
@@ -328,7 +328,7 @@ button { cursor: pointer; }
   top: 0;
   z-index: 30;
   border-radius: 18px;
-  padding: 8px 10px;
+  padding: 5px 8px;
 }
 
 .material-topbar {
@@ -343,22 +343,27 @@ button { cursor: pointer; }
 .topbar-line {
   display: flex;
   flex-wrap: nowrap;
-  gap: 10px;
+  gap: 6px;
   justify-content: space-between;
   align-items: center;
 }
 
-.topbar-leading { display: flex; align-items: center; }
+.topbar-leading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+}
 .topbar-title { flex: 1; min-width: 0; }
 .topbar-title.compact-title { flex: 0 1 auto; }
 .topbar-title-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 .title-prefix {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -367,12 +372,12 @@ button { cursor: pointer; }
   max-width: min(38vw, 320px);
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: var(--md-sys-color-primary-container);
   color: var(--md-sys-color-on-primary-container);
   border: 1px solid rgba(47, 91, 218, 0.14);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,7 +391,35 @@ button { cursor: pointer; }
   text-overflow: ellipsis;
 }
 .topbar-title p { margin: 0; }
-.topbar-meta { flex-wrap: nowrap; gap: 6px; margin-left: auto; }
+.topbar-meta {
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-left: auto;
+  align-items: center;
+}
+
+.topbar-action-btn,
+.editor-status-chip,
+.status-refresh-btn,
+.tree-nav > .secondary-btn,
+.tree-nav > .ghost-btn,
+.tree-nav > .save-btn,
+.tree-nav > .action-btn {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.topbar-action-btn {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.editor-status-chip {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
 
 .pane-switch {
   position: relative;
@@ -717,8 +750,13 @@ button { cursor: pointer; }
 .overview-pair:last-child { border-bottom: 0; }
 .overview-pair span { color: var(--md-sys-color-on-surface-variant); }
 
-.tree-nav { margin-bottom: 14px; }
-.tree-nav { margin-bottom: 10px; }
+.tree-nav {
+  margin-bottom: 3px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+}
 
 .tree-list {
   display: grid;
@@ -736,6 +774,8 @@ button { cursor: pointer; }
   align-items: center;
   text-align: left;
   padding: 5px 8px;
+  min-height: 56px;
+  height: 56px;
   border-radius: 12px;
   border: 1px solid var(--md-sys-color-outline-variant);
   background: var(--md-sys-color-surface-container-high);
@@ -775,10 +815,16 @@ button { cursor: pointer; }
 .tree-item-icon.folder { color: var(--md-sys-color-on-secondary-container); }
 .tree-item-icon.file { color: var(--md-sys-color-primary); }
 
-.tree-item-body { min-width: 0; display: grid; gap: 1px; }
+.tree-item-body { min-width: 0; display: grid; gap: 1px; align-content: center; }
 .tree-item-title { display: flex; justify-content: space-between; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; line-height: 1.2; }
 .tree-item .badge { min-height: 18px; padding: 0 7px; font-size: 10px; }
-.tree-meta { font-size: 11px; line-height: 1.2; }
+.tree-meta {
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tree-item-trailing { color: var(--md-sys-color-on-surface-variant); font-size: 18px; }
 
 .status-grid,
@@ -803,7 +849,26 @@ button { cursor: pointer; }
 }
 
 .status-toolbar {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.status-toolbar-leading,
+.status-toolbar-trailing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-toolbar-trailing {
+  margin-left: auto;
+}
+
+.action-cluster {
+  margin-bottom: 10px;
 }
 
 .status-page .dashboard-metric-card,
@@ -828,9 +893,13 @@ button { cursor: pointer; }
 .status-page .dashboard-metric-card,
 .status-page .status-card,
 .status-page .info-card {
-  padding: 8px 0;
+  padding: 6px 0;
   border-radius: 0;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 58px;
 }
 
 .status-page .job-output {
@@ -842,6 +911,10 @@ button { cursor: pointer; }
 .status-page .job-body {
   padding-left: 0;
   padding-right: 0;
+}
+
+.status-page .panel-body {
+  padding-top: 3px;
 }
 
 .dashboard-metric-card.ok { background: linear-gradient(180deg, rgba(20,55,38,.95), var(--md-sys-color-surface-container-high)); }
@@ -878,7 +951,7 @@ button { cursor: pointer; }
 
 .status-value,
 .info-value {
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 14px;
   color: var(--md-sys-color-on-surface);
   word-break: break-word;
@@ -988,32 +1061,32 @@ button { cursor: pointer; }
   width: 100%;
 }
 .env-key-label {
-  min-height: 24px;
+  min-height: 22px;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 10px;
   background: var(--md-sys-color-surface-container);
   border: 1px solid var(--md-sys-color-outline-variant);
   color: var(--md-sys-color-on-surface);
   font-weight: 700;
-  font-size: 11px;
+  font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 0 1 auto;
   width: fit-content;
-  max-width: calc(100% - 56px);
+  max-width: calc(100% - 42px);
 }
 .env-toggle {
-  min-width: 42px;
-  min-height: 24px;
-  width: auto;
-  padding: 0 7px;
+  min-width: 34px;
+  min-height: 22px;
+  width: fit-content;
+  padding: 0 5px;
   flex-direction: row;
   gap: 0;
-  flex: 0 0 auto;
-  font-size: 11px;
+  flex: 0 1 auto;
+  font-size: 10px;
 }
 .env-value-input {
   min-height: 24px;
@@ -1023,6 +1096,7 @@ button { cursor: pointer; }
   width: 100%;
   min-width: 0;
 }
+.env-value-row { margin-top: 6px; }
 .env-comment-block {
   margin: 6px 0 0;
   padding: 8px 10px;
@@ -1162,6 +1236,7 @@ button { cursor: pointer; }
 
   .status-toolbar {
     align-items: stretch;
+    margin-bottom: 10px;
   }
 
   .sidebar {

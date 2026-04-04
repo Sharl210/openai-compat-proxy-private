@@ -206,21 +206,39 @@ function closeCurrentFile() {
 }
 
 async function refreshStatus() {
-  try {
-    const data = await api('/_admin/api/status');
-    state.validation = data.validation || state.validation;
-    state.status = data.status || state.status;
-    if (data.job) {
-      state.activeJob = data.job;
-      state.activeJobId = data.job.id || state.activeJobId;
+  return refreshStatusWithRetry({ retryOnDisconnect: false, attempts: 1, silent: false });
+}
+
+async function refreshStatusWithRetry({ retryOnDisconnect = false, attempts = 1, silent = false } = {}) {
+  let remaining = Math.max(1, attempts);
+  while (remaining > 0) {
+    try {
+      const data = await api('/_admin/api/status');
+      state.validation = data.validation || state.validation;
+      state.status = data.status || state.status;
+      state.activeJob = data.job || null;
+      state.activeJobId = data.job?.id || '';
+      render();
+      return true;
+    } catch (error) {
+      remaining -= 1;
+      if (retryOnDisconnect && shouldRetryStatusRefresh(error) && remaining > 0) {
+        if (!silent && state.toast?.text !== '服务正在重启，等待重新连接') {
+          setToast('info', '服务正在重启，等待重新连接');
+        }
+        await delay(1500);
+        continue;
+      }
+      if (!silent) {
+        const message = error.message === 'Failed to fetch'
+          ? '状态刷新失败，服务可能正在重启或已断开'
+          : (error.message || '状态刷新失败');
+        setToast('error', message);
+      }
+      return false;
     }
-    render();
-  } catch (error) {
-    const message = error.message === 'Failed to fetch'
-      ? '状态刷新失败，服务可能正在重启或已断开'
-      : (error.message || '状态刷新失败');
-    setToast('error', message);
   }
+  return false;
 }
 
 async function runAction(action) {
@@ -236,6 +254,9 @@ async function runAction(action) {
     state.activeJobId = data.job ? data.job.id : '';
     render();
     setToast('info', `${labelForAction(action)}已开始`);
+    if (['restart', 'deploy'].includes(action)) {
+      void refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: true });
+    }
     pollActiveJob();
   } catch (error) {
     setToast('error', error.message || '任务启动失败');
@@ -270,7 +291,7 @@ async function pollActiveJob() {
       render();
       if (!state.activeJob || state.activeJob.status !== 'running') {
         keepPolling = false;
-        await refreshStatus();
+        await refreshStatusWithRetry({ retryOnDisconnect: false, attempts: 1, silent: true });
         if (state.activeJob) {
           setToast(state.activeJob.status === 'succeeded' ? 'success' : 'error', `${state.activeJob.label || labelForAction(state.activeJob.action)}已${state.activeJob.status === 'succeeded' ? '完成' : '失败'}`);
         }
@@ -293,10 +314,27 @@ async function pollActiveJob() {
 }
 
 function shouldKeepPollingAfterDisconnect(error) {
-  return error?.message === 'Failed to fetch'
+  return isRecoverableStatusDisconnect(error)
     && state.activeJob
     && state.activeJob.status === 'running'
     && ['restart', 'deploy'].includes(state.activeJob.action);
+}
+
+function shouldRetryStatusRefresh(error) {
+  return isRecoverableStatusDisconnect(error)
+    && (
+      (state.activeJob && state.activeJob.status === 'running' && ['restart', 'deploy'].includes(state.activeJob.action))
+      || ['status', 'editor', 'browser'].includes(state.view)
+    );
+}
+
+function isRecoverableStatusDisconnect(error) {
+  const message = String(error?.message || '');
+  return message === 'Failed to fetch'
+    || /Unexpected token/i.test(message)
+    || /not valid JSON/i.test(message)
+    || /NetworkError/i.test(message)
+    || /Load failed/i.test(message);
 }
 
 function delay(ms) {
@@ -434,7 +472,7 @@ function bindEvents() {
 
   const refreshButton = document.getElementById('refresh-status-button');
   if (refreshButton) {
-    refreshButton.addEventListener('click', refreshStatus);
+    refreshButton.addEventListener('click', () => refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: false }));
   }
 
   const createEnvButton = document.getElementById('create-env-button');
@@ -699,14 +737,16 @@ function renderStatusPage() {
     <div class="editor-page-grid page-scene status-page">
       <section class="panel">
         <div class="panel-body">
-          <div class="status-toolbar" style="margin-bottom: 18px;">
-            <div class="status-row material-chip-row">
+          <div class="status-toolbar">
+            <div class="status-row material-chip-row status-toolbar-leading">
               ${validationBadge()}
-              ${healthBadge()}
             </div>
-            <button id="refresh-status-button" class="secondary-btn material-outlined-button" type="button">刷新状态</button>
+            <div class="status-row material-chip-row status-toolbar-trailing">
+              ${healthBadge()}
+              <button id="refresh-status-button" class="secondary-btn material-outlined-button status-refresh-btn" type="button">刷新状态</button>
+            </div>
           </div>
-          <div class="button-row action-cluster" style="margin-bottom: 18px;">
+          <div class="button-row action-cluster">
             ${(state.actions || []).map((action) => `<button class="action-btn material-action-button" type="button" data-action-run="${escapeAttr(action.action)}" data-action="${escapeAttr(action.action)}">${escapeHtml(action.label)}</button>`).join('')}
           </div>
           ${renderStatusSection()}
@@ -1035,10 +1075,10 @@ function canCreateEnvInCurrentDir() {
 function renderTopbarTools() {
   if (state.view === 'editor') {
     return `
-      <span id="file-dirty-badge" class="badge ${state.currentFile?.dirty ? 'warn' : 'ok'} material-state-chip">${state.currentFile?.dirty ? '未保存' : '已同步'}</span>
-      ${state.lastSaveFeedback ? `<span class="badge ${escapeAttr(state.lastSaveFeedback.tone)} material-state-chip">${escapeHtml(state.lastSaveFeedback.text)}</span>` : ''}
-      <button id="cancel-file-button" class="secondary-btn material-outlined-button" type="button" ${state.currentFile ? '' : 'disabled'}>取消</button>
-      <button id="save-file-button" class="save-btn" type="button" ${state.currentFile ? '' : 'disabled'}>保存</button>
+      <span id="file-dirty-badge" class="badge ${state.currentFile?.dirty ? 'warn' : 'ok'} material-state-chip editor-status-chip">${state.currentFile?.dirty ? '未保存' : '已同步'}</span>
+      ${state.lastSaveFeedback ? `<span class="badge ${escapeAttr(state.lastSaveFeedback.tone)} material-state-chip editor-status-chip">${escapeHtml(state.lastSaveFeedback.text)}</span>` : ''}
+      <button id="cancel-file-button" class="secondary-btn material-outlined-button topbar-action-btn" type="button" ${state.currentFile ? '' : 'disabled'}>取消</button>
+      <button id="save-file-button" class="save-btn topbar-action-btn" type="button" ${state.currentFile ? '' : 'disabled'}>保存</button>
     `;
   }
   if (state.view === 'status') {
@@ -1061,7 +1101,7 @@ function renderDrawerNavItem(view, title, icon) {
 function renderTopbarTitle() {
   if (state.view === 'editor') {
     return `
-      <div class="topbar-title-group">
+      <div class="topbar-title-group editor-title-group">
         <span class="title-prefix">正在编辑</span>
         <button id="full-path-button" class="title-file-pill" type="button">${escapeHtml(displayFileName(pageHeadingByView()))}</button>
       </div>
