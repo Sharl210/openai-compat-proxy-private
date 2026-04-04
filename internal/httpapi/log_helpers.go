@@ -22,6 +22,12 @@ func nestedCachedTokens(usage map[string]any) any {
 			return cachedTokens
 		}
 	}
+	if cachedTokens, ok := usage["cache_read_input_tokens"]; ok {
+		return cachedTokens
+	}
+	if cachedTokens, ok := usage["cached_tokens"]; ok {
+		return cachedTokens
+	}
 	return nil
 }
 
