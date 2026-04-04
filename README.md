@@ -162,6 +162,39 @@ curl http://127.0.0.1:21021/healthz
 
 ---
 
+## 📡 响应头与透明度
+
+代理会在**鉴权成功**的正常请求里额外返回一组透明度响应头，用来帮助客户端确认：
+
+- 客户端实际把什么模型 / 推理强度发给了代理
+- 代理最终把什么模型 / 推理参数发给了上游
+
+当前默认返回：
+
+| 响应头 | 作用 | 示例 |
+|---|---|---|
+| `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
+| `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
+| `X-Client-To-Proxy-Reasoning-Effort` | 客户端这一侧最终体现出来的推理强度；如果请求体没写，但模型名 suffix 命中了，这里也会展示结果 | `high` |
+| `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
+| `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
+| `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
+| `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
+| `X-Provider-Version` | 当前 provider 配置的热加载版本戳 | `2026-03-25T11:04:00.222Z` |
+| `X-SYSTEM-PROMPT-ATTACH` | 当 provider 级系统提示词真的注入时，展示注入位置与原始文件串 | `prepend:prompt.md, prompts/extra.md` |
+
+补充说明：
+
+- 这组透明度响应头**不需要额外配置变量**，默认直接返回。
+- `X-Client-To-Proxy-*` 关注的是**客户端 → 代理**这段链路。
+- `X-Proxy-To-Upstream-*` 关注的是**代理 → 上游**这段链路。
+- `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
+  - `responses/chat` 常见为 `{"reasoning":{...}}`
+  - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
+- `401 unauthorized`、`400 invalid_request` 这类在代理真正建立请求链路之前就失败的响应，不会暴露这组透明度 header。
+
+---
+
 ## 🧩 关键能力说明
 
 ### 1. provider 内部统一上游协议
