@@ -325,7 +325,31 @@ function bindEvents() {
   });
 
   document.querySelectorAll('[data-tree-open]').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (button.dataset.type !== 'dir') {
+      let pressTimer = 0;
+      button.addEventListener('pointerdown', () => {
+        button.classList.add('danger-press');
+        pressTimer = window.setTimeout(() => {
+          button.dataset.longPressTriggered = 'true';
+          openTreeItemActionMenu(button.dataset.treeOpen);
+        }, 650);
+      });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((eventName) => {
+        button.addEventListener(eventName, () => {
+          if (pressTimer) {
+            window.clearTimeout(pressTimer);
+            pressTimer = 0;
+          }
+          button.classList.remove('danger-press');
+        });
+      });
+    }
+    button.addEventListener('click', (event) => {
+      if (button.dataset.longPressTriggered === 'true') {
+        button.dataset.longPressTriggered = '';
+        event.preventDefault();
+        return;
+      }
       if (button.dataset.type === 'dir') {
         openDirectory(button.dataset.treeOpen);
       } else {
@@ -391,6 +415,11 @@ function bindEvents() {
   const refreshButton = document.getElementById('refresh-status-button');
   if (refreshButton) {
     refreshButton.addEventListener('click', refreshStatus);
+  }
+
+  const createEnvButton = document.getElementById('create-env-button');
+  if (createEnvButton) {
+    createEnvButton.addEventListener('click', createEnvFromCurrentDir);
   }
 
   const saveButton = document.getElementById('save-file-button');
@@ -614,6 +643,7 @@ function renderBrowserPage() {
           <div class="tree-nav">
             <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">项目根</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
+            ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
           </div>
           <div class="tree-list">
             ${renderTreeItems(items)}
@@ -924,6 +954,10 @@ function renderEditorPaneButton(pane, label) {
   return `<button class="segmented-button ${state.editorPane === pane ? 'active' : ''}" type="button" data-editor-pane="${pane}">${label}</button>`;
 }
 
+function canCreateEnvInCurrentDir() {
+  return state.currentDir === '' || state.currentDir === 'providers';
+}
+
 function renderTopbarTools() {
   if (state.view === 'editor') {
     return `
@@ -966,6 +1000,81 @@ function displayFileName(path) {
   const value = String(path || '');
   const parts = value.split('/').filter(Boolean);
   return parts[parts.length - 1] || value || '未选择文件';
+}
+
+async function createEnvFromCurrentDir() {
+  const name = window.prompt('输入文件名（不用 .env 后缀）', '');
+  if (!name) {
+    return;
+  }
+  try {
+    const data = await api('/_admin/api/file', {
+      method: 'POST',
+      body: {
+        dir: state.currentDir,
+        name,
+      },
+    });
+    await loadTree(state.currentDir);
+    await openFile(data.path);
+    setToast('success', '新 env 已创建');
+  } catch (error) {
+    setToast('error', error.message || '新建 env 失败');
+  }
+}
+
+async function openTreeItemActionMenu(path) {
+  const action = window.prompt('输入 rename 或 delete', 'rename');
+  if (!action) {
+    return;
+  }
+  const normalized = action.trim().toLowerCase();
+  if (normalized === 'rename') {
+    const currentName = displayFileName(path);
+    const newName = window.prompt('输入新文件名', currentName);
+    if (!newName || newName === currentName) {
+      return;
+    }
+    try {
+      const data = await api('/_admin/api/file', {
+        method: 'PATCH',
+        body: {
+          path,
+          new_name: newName,
+        },
+      });
+      await loadTree(state.currentDir);
+      if (state.currentFile?.path === path) {
+        await openFile(data.path);
+      } else {
+        render();
+      }
+      setToast('success', '文件已重命名');
+    } catch (error) {
+      setToast('error', error.message || '重命名失败');
+    }
+    return;
+  }
+  if (normalized === 'delete') {
+    if (!window.confirm('确定删除这个文件？')) {
+      return;
+    }
+    try {
+      await api('/_admin/api/file', {
+        method: 'DELETE',
+        body: { path },
+      });
+      await loadTree(state.currentDir);
+      if (state.currentFile?.path === path) {
+        closeCurrentFile();
+        return;
+      }
+      render();
+      setToast('success', '文件已删除');
+    } catch (error) {
+      setToast('error', error.message || '删除失败');
+    }
+  }
 }
 
 function formatTreeMeta(item) {
