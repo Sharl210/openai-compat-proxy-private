@@ -187,7 +187,7 @@ func TestRestartReplacesStubbornOldProcess(t *testing.T) {
 	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
-func TestRestartStopsManagedServiceBeforePreflightFailure(t *testing.T) {
+func TestRestartKeepsManagedServiceRunningWhenPreflightFails(t *testing.T) {
 	repoDir := newScriptTestRepo(t)
 	port := mustReservePort(t)
 	goodProviders := filepath.Join(repoDir, "providers-ok")
@@ -210,13 +210,15 @@ func TestRestartStopsManagedServiceBeforePreflightFailure(t *testing.T) {
 	if result.err == nil {
 		t.Fatalf("expected restart to fail on missing providers after stop, stdout=%s stderr=%s", result.stdout, result.stderr)
 	}
-	if processAlive(oldPID) {
-		t.Fatalf("expected old process %d to be stopped before restart preflight failure", oldPID)
+	if !processAlive(oldPID) {
+		t.Fatalf("expected old process %d to remain alive when restart preflight fails", oldPID)
 	}
-	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
-		t.Fatalf("expected pid file removed after restart stop phase, got err=%v", err)
+	pidText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	if pidText != strconv.Itoa(oldPID) {
+		t.Fatalf("expected pid file to keep old pid %d after preflight failure, got %q", oldPID, pidText)
 	}
-	_, _ = oldCmd.Process.Wait()
+	stopProcess(t, oldCmd)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
 func TestStopLinuxStopsStubbornProcessAndKeepsArtifacts(t *testing.T) {

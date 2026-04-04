@@ -526,13 +526,11 @@ deploy_service() {
 }
 
 restart_service() {
-  load_env
-  prepare_runtime_dependencies
+  preflight_deploy
   local port
   port="$(extract_port "$LISTEN_ADDR")"
-  stop_managed_service "$port"
-  preflight_deploy
   build_candidate_binary
+  stop_managed_service "$port"
   install_candidate_binary
   if start_service "$port"; then
     rm -f "$BACKUP_BIN_PATH"
