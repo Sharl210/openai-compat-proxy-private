@@ -841,6 +841,37 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicRequestBodyPreservesCacheControlOnContentBlocks(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "text",
+				Text: "hello",
+				Raw:  map[string]any{"cache_control": map[string]any{"type": "ephemeral"}},
+			}},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	cacheControl, _ := part["cache_control"].(map[string]any)
+	if got := cacheControl["type"]; got != "ephemeral" {
+		t.Fatalf("expected anthropic cache_control to survive, got %#v", part)
+	}
+}
+
 func TestBuildRequestBodyMapsAnthropicThinkingToResponsesReasoning(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model:     "gpt-5",

@@ -138,19 +138,24 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 	}
 	out := make([]model.CanonicalContentPart, 0, len(parts))
 	for _, part := range parts {
+		cacheControl := decodeAnthropicCacheControl(part.CacheControl)
 		switch part.Type {
 		case "text":
-			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text})
+			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text, Raw: anthropicContentPartRaw(cacheControl)})
 		case "image":
 			imagePart, err := decodeAnthropicImagePart(part.Source)
 			if err != nil {
 				return nil, err
 			}
+			attachAnthropicCacheControl(&imagePart, cacheControl)
 			out = append(out, imagePart)
 		case "document":
 			docParts, err := decodeAnthropicDocumentParts(part.Source)
 			if err != nil {
 				return nil, err
+			}
+			for i := range docParts {
+				attachAnthropicCacheControl(&docParts[i], cacheControl)
 			}
 			out = append(out, docParts...)
 		case "tool_use", "tool_result", "thinking", "redacted_thinking":
@@ -358,6 +363,34 @@ func decodeAnthropicToolChoice(raw json.RawMessage) model.CanonicalToolChoice {
 		}
 	}
 	return model.CanonicalToolChoice{}
+}
+
+func decodeAnthropicCacheControl(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil || len(value) == 0 {
+		return nil
+	}
+	return value
+}
+
+func anthropicContentPartRaw(cacheControl map[string]any) map[string]any {
+	if len(cacheControl) == 0 {
+		return nil
+	}
+	return map[string]any{"cache_control": cacheControl}
+}
+
+func attachAnthropicCacheControl(part *model.CanonicalContentPart, cacheControl map[string]any) {
+	if part == nil || len(cacheControl) == 0 {
+		return
+	}
+	if part.Raw == nil {
+		part.Raw = map[string]any{}
+	}
+	part.Raw["cache_control"] = cacheControl
 }
 
 func decodeAnthropicThinking(raw json.RawMessage) *model.CanonicalReasoning {

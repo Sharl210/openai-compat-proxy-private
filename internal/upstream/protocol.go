@@ -1183,18 +1183,33 @@ func buildAnthropicContentParts(parts []model.CanonicalContentPart) []any {
 	for _, part := range parts {
 		switch part.Type {
 		case "text":
-			content = append(content, map[string]any{"type": "text", "text": part.Text})
+			block := map[string]any{"type": "text", "text": part.Text}
+			attachAnthropicCacheControlBlock(block, part.Raw)
+			content = append(content, block)
 		case "image_url", "input_image":
 			if block := buildAnthropicImageBlock(part); block != nil {
+				attachAnthropicCacheControlBlock(block, part.Raw)
 				content = append(content, block)
 			}
 		case "input_file":
 			if block := buildAnthropicDocumentBlock(part); block != nil {
+				attachAnthropicCacheControlBlock(block, part.Raw)
 				content = append(content, block)
 			}
 		}
 	}
 	return content
+}
+
+func attachAnthropicCacheControlBlock(block map[string]any, raw map[string]any) {
+	if len(block) == 0 || len(raw) == 0 {
+		return
+	}
+	cacheControl, _ := raw["cache_control"].(map[string]any)
+	if len(cacheControl) == 0 {
+		return
+	}
+	block["cache_control"] = cloneMap(cacheControl)
 }
 
 func buildAnthropicToolResultContent(parts []model.CanonicalContentPart) any {
