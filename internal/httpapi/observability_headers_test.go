@@ -149,6 +149,53 @@ func TestMessagesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	})
 }
 
+func TestMessagesRouteDirectThinkingOmitsClientReasoningEffortHeader(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "anthropic",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":256,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyModel); got != "claude-sonnet-4-5" {
+		t.Fatalf("expected %s claude-sonnet-4-5, got %q", headerClientToProxyModel, got)
+	}
+	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "" {
+		t.Fatalf("expected %s to be omitted for direct thinking without explicit effort, got %q", headerClientToProxyReasoningEffort, got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "claude-sonnet-4-5" {
+		t.Fatalf("expected %s claude-sonnet-4-5, got %q", headerProxyToUpstreamModel, got)
+	}
+	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(1024)}})
+}
+
 type directionalHeaderExpectation struct {
 	clientModel           string
 	clientReasoningEffort string

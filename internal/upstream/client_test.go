@@ -937,6 +937,26 @@ func TestPreviewRequestObservabilityForAnthropic(t *testing.T) {
 	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}})
 }
 
+func TestPreviewRequestObservabilityForAdaptiveAnthropicThinkingIncludesOutputConfig(t *testing.T) {
+	preview, err := PreviewRequestObservability(model.CanonicalRequest{
+		Model: "claude-opus-4-6",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{
+			"thinking":      map[string]any{"type": "adaptive"},
+			"output_config": map[string]any{"effort": "high"},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("PreviewRequestObservability error: %v", err)
+	}
+	if preview.UpstreamModel != "claude-opus-4-6" {
+		t.Fatalf("expected upstream model claude-opus-4-6, got %#v", preview)
+	}
+	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{
+		"thinking":      map[string]any{"type": "adaptive"},
+		"output_config": map[string]any{"effort": "high"},
+	})
+}
+
 func assertPreviewReasoningJSON(t *testing.T, raw string, expected map[string]any) {
 	t.Helper()
 	var got map[string]any
