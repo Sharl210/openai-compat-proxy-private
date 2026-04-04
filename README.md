@@ -174,8 +174,10 @@ curl http://127.0.0.1:21021/healthz
 | 响应头 | 作用 | 示例 |
 |---|---|---|
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
+| `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
-| `X-Client-To-Proxy-Reasoning-Effort` | 客户端这一侧最终体现出来的推理强度；如果请求体没写，但模型名 suffix 命中了，这里也会展示结果 | `high` |
+| `X-Client-To-Proxy-Reasoning-Parameters` | 客户端 → 代理这段链路里，代理按本地优先级（如 suffix 优先于请求体）处理后得到的客户端侧推理参数组；不同下游端口会保持各自协议视角 | `{"thinking":{"type":"enabled","budget_tokens":2048}}` |
+| `X-Client-To-Proxy-Reasoning-Effort` | 客户端这一侧最终体现出来的推理强度摘要，便于快速看出 `low/medium/high/xhigh` | `high` |
 | `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
 | `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
 | `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
@@ -188,10 +190,13 @@ curl http://127.0.0.1:21021/healthz
 - 这组透明度响应头**不需要额外配置变量**，默认直接返回。
 - `X-Client-To-Proxy-*` 关注的是**客户端 → 代理**这段链路。
 - `X-Proxy-To-Upstream-*` 关注的是**代理 → 上游**这段链路。
+- `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
+- `X-Client-To-Proxy-Reasoning-Effort` 是客户端侧的**摘要值**；如果同一请求里模型 suffix 和请求体参数同时存在，代理会按本地优先级先决出最终强度，再把这个摘要值写进来。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
   - `responses/chat` 常见为 `{"reasoning":{...}}`
   - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
-- 如果 `/v1/messages` 是直接传 `thinking`，但**没有**显式 effort，也**没有**模型 suffix，那么 `X-Client-To-Proxy-Reasoning-Effort` 可能为空或直接不返回；这表示客户端这一侧没有直接给出可归一成 `low/medium/high/xhigh` 的强度值。
+- `X-Cache-Info-Timezone` 展示的是当前运行时实际使用的时区；它不只影响 Cache_Info 统计展示，也会影响 `X-Env-Version` / `X-Provider-Version` 这类版本时间响应头的格式化结果。
+- 如果 `/v1/messages` 是直接传 `thinking`，但**没有**显式 effort，也**没有**模型 suffix，代理会保留 `thinking` 参数组到 `X-Client-To-Proxy-Reasoning-Parameters`，同时根据 `thinking` 里的预算或 `output_config` 反推出一个客户端视角的强度摘要，填到 `X-Client-To-Proxy-Reasoning-Effort`。
 - 当上游命中 Anthropic adaptive thinking（例如部分 `opus-4-6` 族模型）时，`X-Proxy-To-Upstream-Reasoning-Parameters` 里除了 `thinking` 之外，还可能同时看到 `output_config`，用来展示代理最终发给上游的 adaptive effort 配置。
 - `401 unauthorized`、`400 invalid_request` 这类在代理真正建立请求链路之前就失败的响应，不会暴露这组透明度 header。
 
