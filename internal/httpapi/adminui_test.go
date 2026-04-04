@@ -177,6 +177,85 @@ func TestAdminUIScriptActionUsesWhitelistRunner(t *testing.T) {
 	}
 }
 
+func TestAdminUICreateRootEnvFromTemplate(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "",
+		"name": "staging",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected create 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	created := filepath.Join(server.admin.rootDir(), "staging.env")
+	content, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatalf("read created env: %v", err)
+	}
+	if !strings.Contains(string(content), "PROXY_API_KEY=") {
+		t.Fatalf("expected root template content, got %s", string(content))
+	}
+}
+
+func TestAdminUICreateProviderEnvRewritesProviderID(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "providers",
+		"name": "demo",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected create 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	created := filepath.Join(server.admin.rootDir(), "providers", "demo.env")
+	content, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatalf("read created provider env: %v", err)
+	}
+	if !strings.Contains(string(content), "PROVIDER_ID=demo") {
+		t.Fatalf("expected provider id rewrite, got %s", string(content))
+	}
+}
+
+func TestAdminUIRenameProviderEnvRewritesProviderIDAndDeleteRemovesFile(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	providerPath := filepath.Join(server.admin.rootDir(), "providers", "rename-me.env")
+	if err := os.WriteFile(providerPath, []byte("PROVIDER_ID=rename-me\nUPSTREAM_BASE_URL=https://example.com/v1\n"), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	renameRec := adminJSONRequest(t, server, http.MethodPatch, "/_admin/api/file", map[string]any{
+		"path":     "providers/rename-me.env",
+		"new_name": "renamed.env",
+	}, []*http.Cookie{cookie}, csrf)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("expected rename 200, got %d body=%s", renameRec.Code, renameRec.Body.String())
+	}
+	renamedPath := filepath.Join(server.admin.rootDir(), "providers", "renamed.env")
+	content, err := os.ReadFile(renamedPath)
+	if err != nil {
+		t.Fatalf("read renamed provider env: %v", err)
+	}
+	if !strings.Contains(string(content), "PROVIDER_ID=renamed") {
+		t.Fatalf("expected renamed provider id, got %s", string(content))
+	}
+
+	deleteRec := adminJSONRequest(t, server, http.MethodDelete, "/_admin/api/file", map[string]any{
+		"path": "providers/renamed.env",
+	}, []*http.Cookie{cookie}, csrf)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete 200, got %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	if _, err := os.Stat(renamedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected renamed provider env deleted, err=%v", err)
+	}
+}
+
 func TestAdminUIMutatingRequestRequiresCSRFFromSession(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, _ := adminLogin(t, server)
@@ -237,6 +316,17 @@ func newAdminUITestServer(t *testing.T) *Server {
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte(rootEnv), 0o644); err != nil {
 		t.Fatalf("write root env: %v", err)
 	}
+	rootTemplate := strings.Join([]string{
+		"# 根配置模板",
+		"LISTEN_ADDR=:21021",
+		"PROXY_API_KEY=",
+		"PROVIDERS_DIR=./providers",
+		"DEFAULT_PROVIDER=openai",
+		"ENABLE_LEGACY_V1_ROUTES=true",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(root, ".env.example"), []byte(rootTemplate), 0o644); err != nil {
+		t.Fatalf("write root env template: %v", err)
+	}
 	providerEnv := strings.Join([]string{
 		"PROVIDER_ID=openai",
 		"PROVIDER_ENABLED=true",
@@ -250,6 +340,15 @@ func newAdminUITestServer(t *testing.T) *Server {
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(providersDir, "openai.env"), []byte(providerEnv), 0o644); err != nil {
 		t.Fatalf("write provider env: %v", err)
+	}
+	providerTemplate := strings.Join([]string{
+		"# provider 模板",
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://example.com/v1",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(providersDir, ".env.example"), []byte(providerTemplate), 0o644); err != nil {
+		t.Fatalf("write provider env template: %v", err)
 	}
 	store, err := config.NewRuntimeStore(filepath.Join(root, ".env"))
 	if err != nil {

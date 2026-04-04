@@ -357,10 +357,16 @@ func (a *adminUI) handleFile() http.HandlerFunc {
 		switch r.Method {
 		case http.MethodGet:
 			a.handleFileRead()(w, r)
+		case http.MethodPost:
+			a.handleFileCreate()(w, r)
+		case http.MethodPatch:
+			a.handleFileRename()(w, r)
+		case http.MethodDelete:
+			a.handleFileDelete()(w, r)
 		case http.MethodPut:
 			a.handleFileWrite()(w, r)
 		default:
-			w.Header().Set("Allow", http.MethodGet+", "+http.MethodPut)
+			w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost+", "+http.MethodPatch+", "+http.MethodPut+", "+http.MethodDelete)
 			errorsx.WriteJSON(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		}
 	}
@@ -468,6 +474,95 @@ func (a *adminUI) handleFileWrite() http.HandlerFunc {
 			"ok":         true,
 			"path":       filepath.ToSlash(req.Path),
 			"validation": a.evaluateValidation(),
+		})
+	}
+}
+
+func (a *adminUI) handleFileCreate() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, _, err := a.requireSession(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "admin login required")
+			return
+		}
+		if err := a.requireCSRF(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusForbidden, "csrf_invalid", "missing or invalid csrf token")
+			return
+		}
+		var req struct {
+			Dir  string `json:"dir"`
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "invalid json body")
+			return
+		}
+		path, err := a.createEnvFromTemplate(req.Dir, req.Name)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "create_failed", err.Error())
+			return
+		}
+		writeAdminJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"path": filepath.ToSlash(path),
+		})
+	}
+}
+
+func (a *adminUI) handleFileRename() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, _, err := a.requireSession(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "admin login required")
+			return
+		}
+		if err := a.requireCSRF(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusForbidden, "csrf_invalid", "missing or invalid csrf token")
+			return
+		}
+		var req struct {
+			Path    string `json:"path"`
+			NewName string `json:"new_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "invalid json body")
+			return
+		}
+		newPath, err := a.renameAdminFile(req.Path, req.NewName)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "rename_failed", err.Error())
+			return
+		}
+		writeAdminJSON(w, http.StatusOK, map[string]any{
+			"ok":       true,
+			"old_path": filepath.ToSlash(req.Path),
+			"path":     filepath.ToSlash(newPath),
+		})
+	}
+}
+
+func (a *adminUI) handleFileDelete() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, _, err := a.requireSession(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "admin login required")
+			return
+		}
+		if err := a.requireCSRF(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusForbidden, "csrf_invalid", "missing or invalid csrf token")
+			return
+		}
+		var req struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "invalid json body")
+			return
+		}
+		if err := a.deleteAdminFile(req.Path); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "delete_failed", err.Error())
+			return
+		}
+		writeAdminJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"path": filepath.ToSlash(req.Path),
 		})
 	}
 }
@@ -681,6 +776,154 @@ func (a *adminUI) resolvePath(rel string, wantDir bool) (string, error) {
 		return "", errors.New("path escapes project root")
 	}
 	return resolvedPath, nil
+}
+
+func (a *adminUI) createEnvFromTemplate(dirRel string, name string) (string, error) {
+	cleanName, err := validateAdminFileName(name)
+	if err != nil {
+		return "", err
+	}
+	resolvedDir, err := a.resolvePath(dirRel, true)
+	if err != nil {
+		return "", err
+	}
+	if !a.canCreateEnvInDir(resolvedDir) {
+		return "", errors.New("new env is only allowed in project root or providers root")
+	}
+	templatePath := filepath.Join(resolvedDir, ".env.example")
+	templateContent, err := os.ReadFile(templatePath)
+	if err != nil {
+		return "", err
+	}
+	content := string(templateContent)
+	targetName := cleanName + ".env"
+	targetPath := filepath.Join(resolvedDir, targetName)
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", errors.New("target file already exists")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if a.isProvidersDirectory(resolvedDir) {
+		content = rewriteProviderID(content, cleanName)
+	}
+	if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	if dirRel == "" {
+		return targetName, nil
+	}
+	return filepath.ToSlash(filepath.Join(dirRel, targetName)), nil
+}
+
+func (a *adminUI) renameAdminFile(path string, newName string) (string, error) {
+	cleanName, err := validateAdminFileName(newName)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := a.resolvePath(path, false)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("only regular files can be renamed")
+	}
+	newPath := filepath.Join(filepath.Dir(resolved), cleanName)
+	if _, err := os.Stat(newPath); err == nil {
+		return "", errors.New("target file already exists")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if a.isProviderEnvFile(resolved) && strings.HasSuffix(cleanName, ".env") {
+		content, err := os.ReadFile(resolved)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(resolved, []byte(rewriteProviderID(string(content), strings.TrimSuffix(cleanName, ".env"))), info.Mode().Perm()); err != nil {
+			return "", err
+		}
+	}
+	if err := os.Rename(resolved, newPath); err != nil {
+		return "", err
+	}
+	root := a.rootDir()
+	rel, err := filepath.Rel(root, newPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+func (a *adminUI) deleteAdminFile(path string) error {
+	resolved, err := a.resolvePath(path, false)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("only regular files can be deleted")
+	}
+	return os.Remove(resolved)
+}
+
+func (a *adminUI) canCreateEnvInDir(resolved string) bool {
+	return filepath.Clean(resolved) == filepath.Clean(a.rootDir()) || a.isProvidersDirectory(resolved)
+}
+
+func (a *adminUI) isProvidersDirectory(resolved string) bool {
+	snapshot := a.store.Active()
+	if snapshot == nil {
+		return false
+	}
+	return filepath.Clean(resolved) == filepath.Clean(snapshot.Config.ProvidersDir)
+}
+
+func (a *adminUI) isProviderEnvFile(resolved string) bool {
+	if !strings.HasSuffix(strings.ToLower(resolved), ".env") {
+		return false
+	}
+	return filepath.Clean(filepath.Dir(resolved)) == filepath.Clean(a.providersDir())
+}
+
+func (a *adminUI) providersDir() string {
+	snapshot := a.store.Active()
+	if snapshot == nil {
+		return ""
+	}
+	return snapshot.Config.ProvidersDir
+}
+
+func validateAdminFileName(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", errors.New("file name is required")
+	}
+	if strings.ContainsAny(trimmed, `/\\`) {
+		return "", errors.New("file name must not contain path separators")
+	}
+	return trimmed, nil
+}
+
+func rewriteProviderID(content string, providerID string) string {
+	lines := strings.Split(content, "\n")
+	replaced := false
+	for index, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "PROVIDER_ID=") {
+			lines[index] = "PROVIDER_ID=" + providerID
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		lines = append([]string{"PROVIDER_ID=" + providerID}, lines...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (a *adminUI) isTextFile(path string) (bool, error) {
