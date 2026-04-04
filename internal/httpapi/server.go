@@ -14,6 +14,7 @@ type Server struct {
 	store   *config.RuntimeStore
 	mux     *http.ServeMux
 	handler http.Handler
+	admin   *adminUI
 
 	CacheInfo *cacheinfo.Manager
 }
@@ -27,8 +28,12 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 		store:     store,
 		CacheInfo: cacheMgr,
 	}
+	srv.admin = newAdminUI(store)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
+	if srv.admin != nil {
+		srv.admin.registerRoutes(mux)
+	}
 	mux.HandleFunc("/v1/models", allowMethods(handleModels(), http.MethodGet))
 	mux.HandleFunc("/v1/responses", allowMethods(handleResponses(), http.MethodPost))
 	mux.HandleFunc("/v1/chat/completions", allowMethods(handleChat(), http.MethodPost))
@@ -74,6 +79,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+	if s.admin != nil && s.admin.matchesPath(r.URL.Path) {
+		s.admin.applyHeaders(w)
 		s.mux.ServeHTTP(w, r)
 		return
 	}
