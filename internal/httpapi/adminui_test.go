@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 )
@@ -122,6 +124,41 @@ func TestAdminUIEnvFileReturnsStructuredBlocks(t *testing.T) {
 	}
 }
 
+func TestAdminUIEnvFileSkipsBlankKeyEntries(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	brokenEnv := strings.Join([]string{
+		"# 管理界面测试配置",
+		"LISTEN_ADDR=:21021",
+		"=",
+		"PROXY_API_KEY=root-secret",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), ".env"), []byte(brokenEnv), 0o644); err != nil {
+		t.Fatalf("write broken env: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/file?path=.env", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected env file 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	entries, ok := data["env_entries"].([]any)
+	if !ok {
+		t.Fatalf("expected env entries array, got %#v", data["env_entries"])
+	}
+	for _, raw := range entries {
+		entry := raw.(map[string]any)
+		if strings.TrimSpace(entry["key"].(string)) == "" {
+			t.Fatalf("expected blank env entry skipped, got %#v", entry)
+		}
+	}
+}
+
 func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -211,6 +248,54 @@ func TestAdminUIScriptActionUsesWhitelistRunner(t *testing.T) {
 	data := decodeAdminJSON(t, rec.Body.Bytes())
 	if data["action"] != "restart" {
 		t.Fatalf("expected restart action payload, got %#v", data)
+	}
+}
+
+func TestAdminUIRunnerScriptWritesLifecycleLogs(t *testing.T) {
+	root := t.TempDir()
+	runner := &adminCommandRunner{rootDir: root}
+	if err := os.MkdirAll(runner.jobsDir(), 0o755); err != nil {
+		t.Fatalf("mkdir jobs dir: %v", err)
+	}
+	scriptPath := filepath.Join(root, "sample.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\nprintf 'script-body\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write sample script: %v", err)
+	}
+	job := &adminJob{
+		ID:        "job-lifecycle",
+		Action:    "restart",
+		Label:     "重启",
+		Status:    adminJobStatusRunning,
+		StartedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	if err := os.WriteFile(runner.currentJobPath(), []byte(job.ID), 0o644); err != nil {
+		t.Fatalf("write current job: %v", err)
+	}
+	if err := runner.writeWrapperScript(job, scriptPath); err != nil {
+		t.Fatalf("write wrapper script: %v", err)
+	}
+
+	cmd := exec.Command("bash", runner.jobScriptPath(job.ID))
+	cmd.Dir = root
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run wrapper script: %v output=%s", err, string(output))
+	}
+
+	stored, err := runner.readJob(job.ID)
+	if err != nil {
+		t.Fatalf("read stored job: %v", err)
+	}
+	if stored.Status != adminJobStatusSucceeded {
+		t.Fatalf("expected succeeded job status, got %#v", stored.Status)
+	}
+	if !strings.Contains(stored.Output, "[admin-ui] start") {
+		t.Fatalf("expected start marker in output, got %q", stored.Output)
+	}
+	if !strings.Contains(stored.Output, "script-body") {
+		t.Fatalf("expected script output in output, got %q", stored.Output)
+	}
+	if !strings.Contains(stored.Output, "[admin-ui] finish exit=0") {
+		t.Fatalf("expected finish marker in output, got %q", stored.Output)
 	}
 }
 

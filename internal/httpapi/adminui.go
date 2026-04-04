@@ -1156,6 +1156,10 @@ func parseAdminEnvText(text string) ([]adminEnvEntry, []string) {
 			continue
 		}
 		key, value, _ := strings.Cut(line, "=")
+		if strings.TrimSpace(key) == "" {
+			leading = append(leading, line)
+			continue
+		}
 		entries = append(entries, adminEnvEntry{
 			Key:          strings.TrimSpace(key),
 			Value:        value,
@@ -1169,6 +1173,9 @@ func parseAdminEnvText(text string) ([]adminEnvEntry, []string) {
 func renderAdminEnvText(entries []adminEnvEntry, tail []string) string {
 	lines := make([]string, 0)
 	for _, entry := range entries {
+		if strings.TrimSpace(entry.Key) == "" {
+			continue
+		}
 		lines = append(lines, entry.LeadingLines...)
 		lines = append(lines, fmt.Sprintf("%s=%s", strings.TrimSpace(entry.Key), entry.Value))
 	}
@@ -1387,9 +1394,11 @@ func (r *adminCommandRunner) writeWrapperScript(job *adminJob, scriptPath string
 		"set +e",
 		"cd " + rootDir,
 		"printf %s " + initial + " > " + jsonFile,
+		"printf '[admin-ui] start %s at %s\\n' " + scriptFile + " \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >> " + logFile,
 		"bash " + scriptFile + " >> " + logFile + " 2>&1",
 		"exit_code=$?",
 		"finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+		"printf '[admin-ui] finish exit=%s at %s\\n' \"${exit_code}\" \"${finished_at}\" >> " + logFile,
 		"status=" + statusSuccess,
 		"if [ \"$exit_code\" -ne 0 ]; then status=" + statusFailed + "; fi",
 		"cat > " + jsonFile + " <<EOF",
