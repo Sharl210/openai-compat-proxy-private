@@ -16,6 +16,7 @@ const state = {
   fileActionMenu: null,
   activeJobId: '',
   activeJob: null,
+  editorZoom: loadEditorZoom(),
   lastSaveFeedback: null,
   toast: null,
 };
@@ -177,6 +178,9 @@ async function saveCurrentFile() {
       method: 'PUT',
       body: payload,
     });
+    if (data.path) {
+      state.currentFile.path = data.path;
+    }
     state.currentFile.dirty = false;
     state.validation = data.validation || state.validation;
     state.status = state.status || {};
@@ -184,6 +188,7 @@ async function saveCurrentFile() {
       ? { tone: 'danger', text: '校验失败' }
       : { tone: 'ok', text: '校验通过' };
     setToast(data.validation && data.validation.restart_ok === false ? 'error' : 'success', data.validation && data.validation.restart_ok === false ? '文件已保存，但重启校验未通过' : '文件已保存');
+    await loadTree(state.currentDir);
     await refreshStatus();
     render();
   } catch (error) {
@@ -475,6 +480,7 @@ function bindEvents() {
   if (textEditor && state.currentFile) {
     textEditor.value = state.currentFile.content || '';
     autoSizeTextarea(textEditor);
+    bindCodeEditor(textEditor);
     textEditor.addEventListener('input', (event) => {
       state.currentFile.content = event.target.value;
       state.currentFile.dirty = true;
@@ -524,6 +530,7 @@ function bindEvents() {
     const envSourceEditor = document.getElementById('env-source-editor');
     if (envSourceEditor) {
       autoSizeTextarea(envSourceEditor);
+      bindCodeEditor(envSourceEditor);
       envSourceEditor.addEventListener('input', (event) => {
         const parsed = parseEnvSource(event.target.value);
         state.currentFile.source_content = event.target.value;
@@ -842,7 +849,7 @@ function renderTextEditor() {
     <div class="text-editor-grid pane-edit">
       <section class="editor-card mode-scene">
         <div class="editor-body">
-          <textarea id="text-editor" name="text-editor" class="text-area auto-resize source-mode no-wrap-editor" spellcheck="false" wrap="off"></textarea>
+          ${renderCodeEditorShell('text-editor', 'text-editor', '', 'text-area auto-resize source-mode no-wrap-editor code-editor-textarea')}
         </div>
       </section>
     </div>
@@ -860,12 +867,12 @@ function renderEnvEditor() {
       ${state.editorPane === 'edit' ? entries.map((entry, index) => renderEnvEntry(entry, index)).join('') : ''}
       ${state.editorPane === 'edit' ? `<section class="env-card mode-scene">
         <div class="env-body">
-          <textarea id="env-tail-lines" name="env-tail-lines" class="comment-input auto-resize no-wrap-editor" spellcheck="false" wrap="off">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
+          <textarea id="env-tail-lines" name="env-tail-lines" rows="1" class="comment-input auto-resize no-wrap-editor" spellcheck="false" wrap="off">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
         </div>
       </section>` : ''}
       ${state.editorPane === 'preview' ? `<section class="editor-card mode-scene">
         <div class="editor-body">
-          <textarea id="env-source-editor" name="env-source-editor" class="text-area auto-resize env-source-editor source-mode no-wrap-editor" spellcheck="false" wrap="off">${escapeHtml(state.currentFile.source_content || renderEnvRawPreview())}</textarea>
+          ${renderCodeEditorShell('env-source-editor', 'env-source-editor', state.currentFile.source_content || renderEnvRawPreview(), 'text-area auto-resize env-source-editor source-mode no-wrap-editor code-editor-textarea')}
         </div>
       </section>` : ''}
     </div>
@@ -886,11 +893,25 @@ function renderEnvEntry(entry, index) {
           <pre class="env-comment-block">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
         ` : ''}
         <div class="env-value-row">
-          <textarea class="env-value-input auto-resize no-wrap-editor" name="env-value-${index}" data-index="${index}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
+          <textarea class="env-value-input auto-resize no-wrap-editor" rows="1" name="env-value-${index}" data-index="${index}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
         </div>
       </div>
     </section>
   `;
+}
+
+function renderCodeEditorShell(id, name, value, className) {
+  return `
+    <div class="code-editor-shell" data-editor-shell="${escapeAttr(id)}">
+      <div id="${escapeAttr(id)}-gutter" class="code-editor-gutter">${renderLineNumbers(value)}</div>
+      <textarea id="${escapeAttr(id)}" name="${escapeAttr(name)}" class="${escapeAttr(className)}" spellcheck="false" wrap="off" style="${escapeAttr(editorZoomStyle())}">${escapeHtml(value || '')}</textarea>
+    </div>
+  `;
+}
+
+function renderLineNumbers(content) {
+  const total = Math.max(1, String(content || '').split('\n').length);
+  return Array.from({ length: total }, (_, index) => `<span>${index + 1}</span>`).join('');
 }
 
 function renderEnvRawPreview() {
@@ -1232,8 +1253,104 @@ function autoSizeTextarea(textarea) {
   if (!(textarea instanceof HTMLTextAreaElement)) {
     return;
   }
-  textarea.style.height = 'auto';
-  textarea.style.height = `${textarea.scrollHeight}px`;
+  if (!textarea.dataset.baseMinHeight) {
+    textarea.dataset.baseMinHeight = String(parseFloat(window.getComputedStyle(textarea).minHeight) || 0);
+  }
+  const minHeight = Number(textarea.dataset.baseMinHeight || 0);
+  textarea.style.height = '0px';
+  textarea.style.height = `${Math.max(textarea.scrollHeight, minHeight)}px`;
+  syncCodeEditor(textarea);
+}
+
+function loadEditorZoom() {
+  try {
+    const saved = Number(window.localStorage.getItem('admin-editor-zoom') || '14');
+    return Number.isFinite(saved) ? clampEditorZoom(saved) : 14;
+  } catch {
+    return 14;
+  }
+}
+
+function persistEditorZoom() {
+  try {
+    window.localStorage.setItem('admin-editor-zoom', String(state.editorZoom));
+  } catch {
+  }
+}
+
+function clampEditorZoom(value) {
+  return Math.min(26, Math.max(12, Math.round(value)));
+}
+
+function editorZoomStyle() {
+  return `font-size:${state.editorZoom}px; line-height:1.5;`;
+}
+
+function setEditorZoom(value) {
+  const next = clampEditorZoom(value);
+  if (next === state.editorZoom) {
+    return;
+  }
+  state.editorZoom = next;
+  persistEditorZoom();
+  document.querySelectorAll('.code-editor-textarea').forEach((textarea) => {
+    textarea.style.fontSize = `${state.editorZoom}px`;
+    textarea.style.lineHeight = '1.5';
+    autoSizeTextarea(textarea);
+  });
+}
+
+function bindCodeEditor(textarea) {
+  if (!(textarea instanceof HTMLTextAreaElement) || textarea.dataset.editorBound === 'true') {
+    return;
+  }
+  textarea.dataset.editorBound = 'true';
+  textarea.style.fontSize = `${state.editorZoom}px`;
+  textarea.style.lineHeight = '1.5';
+  textarea.addEventListener('input', () => syncCodeEditor(textarea));
+  textarea.addEventListener('scroll', () => syncCodeEditor(textarea));
+  textarea.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey) {
+      return;
+    }
+    event.preventDefault();
+    setEditorZoom(state.editorZoom + (event.deltaY < 0 ? 1 : -1));
+  }, { passive: false });
+
+  let pinchDistance = 0;
+  textarea.addEventListener('touchstart', (event) => {
+    if (event.touches.length === 2) {
+      pinchDistance = touchDistance(event.touches[0], event.touches[1]);
+    }
+  }, { passive: true });
+  textarea.addEventListener('touchmove', (event) => {
+    if (event.touches.length !== 2 || pinchDistance <= 0) {
+      return;
+    }
+    const nextDistance = touchDistance(event.touches[0], event.touches[1]);
+    const delta = nextDistance - pinchDistance;
+    if (Math.abs(delta) >= 16) {
+      setEditorZoom(state.editorZoom + (delta > 0 ? 1 : -1));
+      pinchDistance = nextDistance;
+    }
+  }, { passive: true });
+  textarea.addEventListener('touchend', () => {
+    pinchDistance = 0;
+  });
+  syncCodeEditor(textarea);
+}
+
+function syncCodeEditor(textarea) {
+  const gutter = document.getElementById(`${textarea.id}-gutter`);
+  if (!gutter) {
+    return;
+  }
+  gutter.innerHTML = renderLineNumbers(textarea.value || '');
+  gutter.scrollTop = textarea.scrollTop;
+}
+
+function touchDistance(a, b) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
 function drawerIconFolder() {
