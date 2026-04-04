@@ -22,6 +22,7 @@
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
 | 调试归档 | ✅ | `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 写出 `request/raw/canonical/final.ndjson` |
 | 健康检查与 Linux 部署脚本 | ✅ | 自带 `healthz`、deploy / restart / stop / uninstall |
+| 内置 Web 管理台 | ✅ | 裸根路径 `/` 提供 Material 3 风格管理界面：文件浏览 / 文件编辑 / 运行状态 |
 
 ---
 
@@ -114,6 +115,25 @@ bash scripts/deploy-linux.sh
 curl http://127.0.0.1:21021/healthz
 ```
 
+### 5）打开内置 Web 管理台
+
+浏览器直接访问：
+
+```text
+http://127.0.0.1:21021/
+```
+
+登录密码就是当前根 `.env` 里的 `PROXY_API_KEY`。
+
+管理台当前提供：
+
+- **文件浏览**：按项目根目录浏览文件与目录，支持常用筛选
+- **文件编辑**：编辑 `.env / .md / .txt / .json / .yaml / .go / .sh` 等文本文件，并带语法高亮预览
+- **`.env` 专用折叠编辑**：默认只显示字段，点展开后才显示对应注释与空行；支持全部展开 / 全部折叠
+- **运行状态**：查看健康状态、最近日志、当前脚本任务，并执行 `部署 / 重启 / 停止 / 卸载`
+
+> 管理台的目标是“改错配置后界面尽量还能继续用”。保存文件后会立刻返回热加载 / 重启校验结果，但不会因为配置校验失败就把当前网页界面直接做没。
+
 ---
 
 ## 🌐 路由规则
@@ -140,6 +160,12 @@ curl http://127.0.0.1:21021/healthz
 - `/v1/messages`
 - `/v1/models`
 
+### 管理台裸根路径
+
+- `/`：内置 Web 管理台入口
+- `/_admin/assets/*`：管理台静态资源
+- `/_admin/api/*`：管理台内部接口
+
 ---
 
 ## 🔐 鉴权约定
@@ -149,6 +175,8 @@ curl http://127.0.0.1:21021/healthz
 - `Authorization: Bearer <proxy-key>`
 - `X-API-Key: <proxy-key>`
 - `Api-Key: <proxy-key>`
+
+内置 Web 管理台也使用同一个 `PROXY_API_KEY` 作为登录密码，但不会把这个密码明文持久化在浏览器里；登录后会下发 HttpOnly 会话 cookie，并对写操作额外做 CSRF 校验。
 
 上游 key 透传支持：
 
@@ -372,6 +400,13 @@ Claude 相关还有两个配套开关：
 | `bash scripts/restart-linux.sh` | 重启服务 |
 | `bash scripts/stop-linux.sh` | 停止服务 |
 | `bash scripts/uninstall-linux.sh` | 卸载部署产物 |
+
+如果你主要通过内置管理台维护服务，推荐的工作流是：
+
+1. 在 `/` 登录管理台
+2. 先到“文件编辑”里修改 `.env` 或 provider 配置
+3. 根据页面里的热加载 / 重启校验结果确认配置是否合法
+4. 再到“运行状态”页执行 `重启` 或 `部署`
 
 如果前面还有 1Panel / Nginx / OpenResty，建议先把长连接超时放宽：
 
