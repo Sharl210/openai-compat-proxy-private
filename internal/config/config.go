@@ -76,7 +76,7 @@ func LoadFromValues(values map[string]string) Config {
 func loadFromLookup(lookup func(string) string) Config {
 	cfg := Default()
 	if value := lookup("LISTEN_ADDR"); value != "" {
-		cfg.ListenAddr = value
+		cfg.ListenAddr = normalizeListenAddr(value)
 	}
 	if value := lookup("CACHE_INFO_TIMEZONE"); value != "" {
 		cfg.CacheInfoTimezone = value
@@ -186,7 +186,39 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateProvidersDir(values, "PROVIDERS_DIR"); err != nil {
 		return err
 	}
+	if err := validateListenAddr(values, "LISTEN_ADDR"); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateListenAddr(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	normalized := normalizeListenAddr(value)
+	if strings.HasPrefix(normalized, ":") {
+		if _, err := strconv.Atoi(strings.TrimPrefix(normalized, ":")); err != nil {
+			return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+		}
+		return nil
+	}
+	if _, _, found := strings.Cut(normalized, ":"); !found {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func normalizeListenAddr(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return trimmed
+	}
+	if _, err := strconv.Atoi(trimmed); err == nil {
+		return ":" + trimmed
+	}
+	return trimmed
 }
 
 func validateTimezone(values map[string]string, key string) error {

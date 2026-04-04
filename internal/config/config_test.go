@@ -35,6 +35,15 @@ func TestLoadFromEnvParsesCacheInfoTimezone(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvNormalizesPlainPortListenAddr(t *testing.T) {
+	t.Setenv("LISTEN_ADDR", "21021")
+
+	cfg := LoadFromEnv()
+	if got := cfg.ListenAddr; got != ":21021" {
+		t.Fatalf("expected LISTEN_ADDR to normalize to %q, got %q", ":21021", got)
+	}
+}
+
 func TestConfigCacheInfoLocationResolvesTimezone(t *testing.T) {
 	cfg := Config{CacheInfoTimezone: "Asia/Shanghai"}
 
