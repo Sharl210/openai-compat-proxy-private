@@ -13,6 +13,7 @@ const state = {
   treeItems: [],
   currentFile: null,
   envExpanded: {},
+  fileActionMenu: null,
   activeJobId: '',
   activeJob: null,
   lastSaveFeedback: null,
@@ -271,12 +272,26 @@ async function pollActiveJob() {
         break;
       }
     } catch (error) {
+      if (shouldKeepPollingAfterDisconnect(error)) {
+        if (state.toast?.text !== '服务正在重启，等待重新连接') {
+          setToast('info', '服务正在重启，等待重新连接');
+        }
+        await delay(1500);
+        continue;
+      }
       keepPolling = false;
       setToast('error', error.message || '任务状态查询失败');
       break;
     }
     await delay(1000);
   }
+}
+
+function shouldKeepPollingAfterDisconnect(error) {
+  return error?.message === 'Failed to fetch'
+    && state.activeJob
+    && state.activeJob.status === 'running'
+    && ['restart', 'deploy'].includes(state.activeJob.action);
 }
 
 function delay(ms) {
@@ -420,6 +435,23 @@ function bindEvents() {
   const createEnvButton = document.getElementById('create-env-button');
   if (createEnvButton) {
     createEnvButton.addEventListener('click', createEnvFromCurrentDir);
+  }
+
+  const fileActionBackdrop = document.getElementById('file-action-backdrop');
+  if (fileActionBackdrop) {
+    fileActionBackdrop.addEventListener('click', closeTreeItemActionMenu);
+  }
+  const fileActionCancel = document.getElementById('file-action-cancel');
+  if (fileActionCancel) {
+    fileActionCancel.addEventListener('click', closeTreeItemActionMenu);
+  }
+  const fileActionRename = document.getElementById('file-action-rename');
+  if (fileActionRename) {
+    fileActionRename.addEventListener('click', renameTreeItemFromMenu);
+  }
+  const fileActionDelete = document.getElementById('file-action-delete');
+  if (fileActionDelete) {
+    fileActionDelete.addEventListener('click', deleteTreeItemFromMenu);
   }
 
   const saveButton = document.getElementById('save-file-button');
@@ -626,6 +658,7 @@ function dashboardTemplate() {
         </header>
         ${state.view === 'browser' ? renderBrowserPage() : state.view === 'status' ? renderStatusPage() : renderEditorPage()}
       </div>
+      ${renderFileActionMenu()}
     </div>
   `;
 }
@@ -641,7 +674,7 @@ function renderBrowserPage() {
             <span class="badge info material-state-chip">项目文件 ${items.length}</span>
           </div>
           <div class="tree-nav">
-            <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">项目根</button>
+            <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">根目录</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
             ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
           </div>
@@ -809,7 +842,7 @@ function renderTextEditor() {
     <div class="text-editor-grid pane-edit">
       <section class="editor-card mode-scene">
         <div class="editor-body">
-          <textarea id="text-editor" name="text-editor" class="text-area auto-resize source-mode" spellcheck="false"></textarea>
+          <textarea id="text-editor" name="text-editor" class="text-area auto-resize source-mode no-wrap-editor" spellcheck="false" wrap="off"></textarea>
         </div>
       </section>
     </div>
@@ -827,12 +860,12 @@ function renderEnvEditor() {
       ${state.editorPane === 'edit' ? entries.map((entry, index) => renderEnvEntry(entry, index)).join('') : ''}
       ${state.editorPane === 'edit' ? `<section class="env-card mode-scene">
         <div class="env-body">
-          <textarea id="env-tail-lines" name="env-tail-lines" class="comment-input auto-resize" spellcheck="false">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
+          <textarea id="env-tail-lines" name="env-tail-lines" class="comment-input auto-resize no-wrap-editor" spellcheck="false" wrap="off">${escapeHtml((state.currentFile.tail_lines || []).join('\n'))}</textarea>
         </div>
       </section>` : ''}
       ${state.editorPane === 'preview' ? `<section class="editor-card mode-scene">
         <div class="editor-body">
-          <textarea id="env-source-editor" name="env-source-editor" class="text-area auto-resize env-source-editor source-mode" spellcheck="false">${escapeHtml(state.currentFile.source_content || renderEnvRawPreview())}</textarea>
+          <textarea id="env-source-editor" name="env-source-editor" class="text-area auto-resize env-source-editor source-mode no-wrap-editor" spellcheck="false" wrap="off">${escapeHtml(state.currentFile.source_content || renderEnvRawPreview())}</textarea>
         </div>
       </section>` : ''}
     </div>
@@ -853,7 +886,7 @@ function renderEnvEntry(entry, index) {
           <pre class="env-comment-block">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
         ` : ''}
         <div class="env-value-row">
-          <textarea class="env-value-input auto-resize" name="env-value-${index}" data-index="${index}" data-field="value" spellcheck="false">${escapeHtml(entry.value || '')}</textarea>
+          <textarea class="env-value-input auto-resize no-wrap-editor" name="env-value-${index}" data-index="${index}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
         </div>
       </div>
     </section>
@@ -954,6 +987,23 @@ function renderEditorPaneButton(pane, label) {
   return `<button class="segmented-button ${state.editorPane === pane ? 'active' : ''}" type="button" data-editor-pane="${pane}">${label}</button>`;
 }
 
+function renderFileActionMenu() {
+  if (!state.fileActionMenu?.path) {
+    return '';
+  }
+  return `
+    <div id="file-action-backdrop" class="file-action-backdrop is-open"></div>
+    <div class="file-action-modal" role="dialog" aria-modal="true" aria-label="文件操作菜单">
+      <div class="file-action-title">${escapeHtml(displayFileName(state.fileActionMenu.path))}</div>
+      <div class="file-action-buttons">
+        <button id="file-action-rename" class="secondary-btn material-tonal-button" type="button">重命名</button>
+        <button id="file-action-delete" class="secondary-btn material-outlined-button danger-btn" type="button">删除</button>
+      </div>
+      <button id="file-action-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
+    </div>
+  `;
+}
+
 function canCreateEnvInCurrentDir() {
   return state.currentDir === '' || state.currentDir === 'providers';
 }
@@ -1023,58 +1073,91 @@ async function createEnvFromCurrentDir() {
   }
 }
 
-async function openTreeItemActionMenu(path) {
-  const action = window.prompt('输入 rename 或 delete', 'rename');
-  if (!action) {
+function openTreeItemActionMenu(path) {
+  state.fileActionMenu = { path };
+  render();
+}
+
+function closeTreeItemActionMenu() {
+  state.fileActionMenu = null;
+  render();
+}
+
+async function renameTreeItemFromMenu() {
+  const path = state.fileActionMenu?.path;
+  if (!path) {
     return;
   }
-  const normalized = action.trim().toLowerCase();
-  if (normalized === 'rename') {
-    const currentName = displayFileName(path);
-    const newName = window.prompt('输入新文件名', currentName);
-    if (!newName || newName === currentName) {
-      return;
-    }
-    try {
-      const data = await api('/_admin/api/file', {
-        method: 'PATCH',
-        body: {
-          path,
-          new_name: newName,
-        },
-      });
-      await loadTree(state.currentDir);
-      if (state.currentFile?.path === path) {
-        await openFile(data.path);
-      } else {
-        render();
-      }
-      setToast('success', '文件已重命名');
-    } catch (error) {
-      setToast('error', error.message || '重命名失败');
-    }
+  const currentName = displayFileName(path);
+  const currentStem = currentName.endsWith('.env') ? currentName.slice(0, -4) : currentName;
+  const input = window.prompt('输入新文件名', currentStem);
+  state.fileActionMenu = null;
+  if (!input) {
+    render();
     return;
   }
-  if (normalized === 'delete') {
-    if (!window.confirm('确定删除这个文件？')) {
-      return;
-    }
-    try {
-      await api('/_admin/api/file', {
-        method: 'DELETE',
-        body: { path },
-      });
-      await loadTree(state.currentDir);
-      if (state.currentFile?.path === path) {
-        closeCurrentFile();
-        return;
-      }
+  const newName = normalizeRenameInput(currentName, input.trim());
+  try {
+    const data = await api('/_admin/api/file', {
+      method: 'PATCH',
+      body: {
+        path,
+        new_name: newName,
+      },
+    });
+    await loadTree(state.currentDir);
+    if (state.currentFile?.path === path) {
+      await openFile(data.path);
+    } else {
       render();
-      setToast('success', '文件已删除');
-    } catch (error) {
-      setToast('error', error.message || '删除失败');
     }
+    setToast('success', '文件已重命名');
+  } catch (error) {
+    setToast('error', error.message || '重命名失败');
   }
+}
+
+async function deleteTreeItemFromMenu() {
+  const path = state.fileActionMenu?.path;
+  state.fileActionMenu = null;
+  if (!path) {
+    return;
+  }
+  if (!window.confirm('确定删除这个文件？')) {
+    render();
+    return;
+  }
+  try {
+    await api('/_admin/api/file', {
+      method: 'DELETE',
+      body: { path },
+    });
+    await loadTree(state.currentDir);
+    if (state.currentFile?.path === path) {
+      closeCurrentFile();
+      return;
+    }
+    render();
+    setToast('success', '文件已删除');
+  } catch (error) {
+    setToast('error', error.message || '删除失败');
+  }
+}
+
+function normalizeRenameInput(currentName, input) {
+  if (input.includes('.')) {
+    return input;
+  }
+  if (currentName === '.env') {
+    return `${input}.env`;
+  }
+  if (currentName.endsWith('.env.example')) {
+    return `${input}.env.example`;
+  }
+  if (currentName.endsWith('.env')) {
+    return `${input}.env`;
+  }
+  return input;
 }
 
 function formatTreeMeta(item) {
