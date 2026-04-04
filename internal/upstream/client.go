@@ -35,6 +35,11 @@ type Client struct {
 	upstreamThinkingTagStyle       string
 }
 
+type RequestObservabilityPreview struct {
+	UpstreamModel       string
+	ReasoningParameters string
+}
+
 type EventStream struct {
 	resp          *http.Response
 	scanner       *bufio.Scanner
@@ -328,6 +333,42 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		"response":   payload,
 	})
 	return payload, nil
+}
+
+func PreviewRequestObservability(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) (RequestObservabilityPreview, error) {
+	body, err := buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
+	if err != nil {
+		return RequestObservabilityPreview{}, err
+	}
+	return requestObservabilityPreviewFromBody(body)
+}
+
+func requestObservabilityPreviewFromBody(body []byte) (RequestObservabilityPreview, error) {
+	if len(body) == 0 {
+		return RequestObservabilityPreview{}, nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return RequestObservabilityPreview{}, err
+	}
+	preview := RequestObservabilityPreview{}
+	if modelName, _ := payload["model"].(string); modelName != "" {
+		preview.UpstreamModel = modelName
+	}
+	reasoningPayload := map[string]any{}
+	for _, key := range []string{"reasoning", "reasoning_effort", "thinking", "output_config"} {
+		if value, ok := payload[key]; ok {
+			reasoningPayload[key] = value
+		}
+	}
+	if len(reasoningPayload) > 0 {
+		reasoningJSON, err := json.Marshal(reasoningPayload)
+		if err != nil {
+			return RequestObservabilityPreview{}, err
+		}
+		preview.ReasoningParameters = string(reasoningJSON)
+	}
+	return preview, nil
 }
 
 func (c *Client) Models(ctx context.Context, authorization string) (int, []byte, string, error) {

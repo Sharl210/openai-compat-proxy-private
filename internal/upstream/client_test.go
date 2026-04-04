@@ -894,6 +894,68 @@ func TestBuildChatRequestBodyMapsAnthropicThinkingToChatReasoning(t *testing.T) 
 	}
 }
 
+func TestPreviewRequestObservabilityForResponses(t *testing.T) {
+	preview, err := PreviewRequestObservability(model.CanonicalRequest{
+		Model:     "gpt-5-mini",
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
+	}, config.UpstreamEndpointTypeResponses, "", false, false)
+	if err != nil {
+		t.Fatalf("PreviewRequestObservability error: %v", err)
+	}
+	if preview.UpstreamModel != "gpt-5-mini" {
+		t.Fatalf("expected upstream model gpt-5-mini, got %#v", preview)
+	}
+	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
+}
+
+func TestPreviewRequestObservabilityForChat(t *testing.T) {
+	preview, err := PreviewRequestObservability(model.CanonicalRequest{
+		Model:     "gpt-5-mini",
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("PreviewRequestObservability error: %v", err)
+	}
+	if preview.UpstreamModel != "gpt-5-mini" {
+		t.Fatalf("expected upstream model gpt-5-mini, got %#v", preview)
+	}
+	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
+}
+
+func TestPreviewRequestObservabilityForAnthropic(t *testing.T) {
+	preview, err := PreviewRequestObservability(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Reasoning:       &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 128}}},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("PreviewRequestObservability error: %v", err)
+	}
+	if preview.UpstreamModel != "claude-sonnet-4-5" {
+		t.Fatalf("expected upstream model claude-sonnet-4-5, got %#v", preview)
+	}
+	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}})
+}
+
+func assertPreviewReasoningJSON(t *testing.T, raw string, expected map[string]any) {
+	t.Helper()
+	var got map[string]any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("unmarshal preview reasoning json: %v raw=%q", err, raw)
+	}
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got reasoning json: %v", err)
+	}
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatalf("marshal expected reasoning json: %v", err)
+	}
+	if string(gotJSON) != string(expectedJSON) {
+		t.Fatalf("expected reasoning json %s, got %s", expectedJSON, gotJSON)
+	}
+}
+
 func TestCachedTokensFromEventReadsTopLevelCachedTokens(t *testing.T) {
 	evt := Event{Data: map[string]any{"usage": map[string]any{"cached_tokens": 321}}}
 	if got := cachedTokensFromEvent(evt); got != 321 {
