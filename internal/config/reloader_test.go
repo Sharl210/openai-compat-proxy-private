@@ -36,6 +36,40 @@ func TestBuildRuntimeSnapshotCapturesSourceFileModTimes(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeSnapshotFormatsVersionsWithConfiguredTimezone(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	rootMTime := time.Date(2026, 3, 25, 9, 10, 11, 123000000, time.UTC)
+	providerMTime := time.Date(2026, 3, 25, 9, 20, 21, 456000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "CACHE_INFO_TIMEZONE=Asia/Shanghai\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", rootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", providerMTime)
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("LoadLocation returned error: %v", err)
+	}
+	if got := snapshot.RootEnvVersion; got != FormatVersionTimeInLocation(rootMTime, loc) {
+		t.Fatalf("expected root env version %q, got %q", FormatVersionTimeInLocation(rootMTime, loc), got)
+	}
+	if got := snapshot.ProviderVersionByID["openai"]; got != FormatVersionTimeInLocation(providerMTime, loc) {
+		t.Fatalf("expected provider version %q, got %q", FormatVersionTimeInLocation(providerMTime, loc), got)
+	}
+	if rootVersion := snapshot.RootEnvVersion; rootVersion == rootMTime.UTC().Format(versionTimeLayout) {
+		t.Fatalf("expected timezone-aware root version to differ from UTC formatting, got %q", rootVersion)
+	}
+}
+
 func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidProviderConfig(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

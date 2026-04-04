@@ -85,6 +85,46 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	}
 }
 
+func TestVersionHeadersUseConfiguredTimezone(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	rootMTime := time.Date(2026, 3, 25, 11, 0, 0, 123000000, time.UTC)
+	providerMTime := time.Date(2026, 3, 25, 11, 1, 0, 456000000, time.UTC)
+
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	writeConfigFileWithMTime(t, rootEnvPath, "CACHE_INFO_TIMEZONE=Asia/Shanghai\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nTOTAL_TIMEOUT=1h\n", rootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL="+upstream.URL+"\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", providerMTime)
+
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	server := NewServerWithStore(store, nil)
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("LoadLocation returned error: %v", err)
+	}
+
+	rec := performResponsesRequest(t, server)
+	if got := rec.Header().Get("X-Env-Version"); got != config.FormatVersionTimeInLocation(rootMTime, loc) {
+		t.Fatalf("expected X-Env-Version %q, got %q", config.FormatVersionTimeInLocation(rootMTime, loc), got)
+	}
+	if got := rec.Header().Get("X-Provider-Version"); got != config.FormatVersionTimeInLocation(providerMTime, loc) {
+		t.Fatalf("expected X-Provider-Version %q, got %q", config.FormatVersionTimeInLocation(providerMTime, loc), got)
+	}
+}
+
 func TestVersionHeadersIgnoreStartupOnlyRootConfigChanges(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

@@ -27,7 +27,21 @@ func FormatVersionTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format(versionTimeLayout)
+	loc, err := Default().CacheInfoLocation()
+	if err != nil || loc == nil {
+		return t.UTC().Format(versionTimeLayout)
+	}
+	return t.In(loc).Format(versionTimeLayout)
+}
+
+func FormatVersionTimeInLocation(t time.Time, loc *time.Location) string {
+	if t.IsZero() {
+		return ""
+	}
+	if loc == nil {
+		return FormatVersionTime(t)
+	}
+	return t.In(loc).Format(versionTimeLayout)
 }
 
 func formatVersionTime(t time.Time) string {
@@ -75,7 +89,11 @@ func BuildRuntimeSnapshotForRefresh(rootEnvPath string, previous Config) (*Runti
 func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, values map[string]string) (*RuntimeSnapshot, error) {
 	cfg := LoadFromValues(values)
 	cfg.ProvidersDir = ResolveProvidersDir(rootEnvPath, cfg.ProvidersDir)
-	providers, providerVersions, providerPaths, promptPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir)
+	versionLocation, err := cfg.CacheInfoLocation()
+	if err != nil {
+		return nil, err
+	}
+	providers, providerVersions, providerPaths, promptPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir, versionLocation)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +105,7 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 		Config:              cfg,
 		RootEnvPath:         rootEnvPath,
 		RootEnvMTime:        rootEnvMTime,
-		RootEnvVersion:      FormatVersionTime(rootEnvMTime),
+		RootEnvVersion:      FormatVersionTimeInLocation(rootEnvMTime, versionLocation),
 		ProviderVersionByID: providerVersions,
 		ProviderPathByID:    providerPaths,
 		PromptPathsByID:     promptPaths,
@@ -152,7 +170,7 @@ func parseEnvFile(path string) (map[string]string, error) {
 	return values, nil
 }
 
-func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string, map[string]string, map[string][]string, map[string]time.Time, error) {
+func loadProvidersWithMetadata(dir string, versionLocation *time.Location) ([]ProviderConfig, map[string]string, map[string]string, map[string][]string, map[string]time.Time, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -194,7 +212,7 @@ func loadProvidersWithMetadata(dir string) ([]ProviderConfig, map[string]string,
 		}
 		seen[provider.ID] = struct{}{}
 		providers = append(providers, provider)
-		versions[provider.ID] = FormatVersionTime(providerVersionTime)
+		versions[provider.ID] = FormatVersionTimeInLocation(providerVersionTime, versionLocation)
 		paths[provider.ID] = fullPath
 		promptPaths[provider.ID] = append([]string(nil), provider.SystemPromptFiles...)
 		mtimes[provider.ID] = providerVersionTime
