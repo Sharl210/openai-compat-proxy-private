@@ -284,8 +284,11 @@ async function pollActiveJob() {
     return;
   }
   let keepPolling = true;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 40;
   while (keepPolling && state.activeJobId) {
     try {
+      reconnectAttempts = 0;
       const data = await api(`/_admin/api/jobs?id=${encodeURIComponent(state.activeJobId)}`);
       state.activeJob = data.job || null;
       render();
@@ -299,6 +302,12 @@ async function pollActiveJob() {
       }
     } catch (error) {
       if (shouldKeepPollingAfterDisconnect(error)) {
+        reconnectAttempts += 1;
+        if (reconnectAttempts >= maxReconnectAttempts) {
+          keepPolling = false;
+          setToast('error', '服务长时间未恢复连接，请手动刷新状态确认结果');
+          break;
+        }
         if (state.toast?.text !== '服务正在重启，等待重新连接') {
           setToast('info', '服务正在重启，等待重新连接');
         }

@@ -63,7 +63,7 @@ button { cursor: pointer; }
 .material-content-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 2px;
+  gap: 0;
   position: relative;
   min-height: 100vh;
   padding: 8px 10px 10px;
@@ -78,6 +78,7 @@ button { cursor: pointer; }
 .page-scene {
   animation: page-enter 180ms ease;
   transform-origin: top center;
+  margin-top: 1px;
 }
 
 @keyframes page-enter {
@@ -237,6 +238,7 @@ button { cursor: pointer; }
   border: 1px solid transparent;
   padding: 0 10px;
   font-size: 13px;
+  font-weight: 600;
   transition: transform 160ms ease, background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
@@ -369,16 +371,16 @@ button { cursor: pointer; }
 }
 .title-file-pill {
   min-width: 0;
-  max-width: min(38vw, 320px);
+  max-width: min(16vw, 132px);
   display: inline-flex;
   align-items: center;
-  padding: 3px 8px;
+  padding: 2px 7px;
   border-radius: 999px;
   background: var(--md-sys-color-primary-container);
   color: var(--md-sys-color-on-primary-container);
   border: 1px solid rgba(47, 91, 218, 0.14);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -392,10 +394,12 @@ button { cursor: pointer; }
 }
 .topbar-title p { margin: 0; }
 .topbar-meta {
+  display: flex;
   flex-wrap: nowrap;
   gap: 4px;
   margin-left: auto;
   align-items: center;
+  min-width: 0;
 }
 
 .topbar-action-btn,
@@ -407,18 +411,20 @@ button { cursor: pointer; }
 .tree-nav > .action-btn {
   width: fit-content;
   max-width: 100%;
+  white-space: nowrap;
 }
 
 .topbar-action-btn {
   min-height: 28px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .editor-status-chip {
   min-height: 28px;
-  padding: 0 10px;
-  font-size: 11px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .pane-switch {
@@ -471,7 +477,8 @@ button { cursor: pointer; }
   background: var(--md-sys-color-surface-container-high);
   border: 1px solid var(--md-sys-color-outline-variant);
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 
@@ -628,7 +635,7 @@ button { cursor: pointer; }
 }
 
 .compact-meta-row {
-  margin-bottom: 14px;
+  margin-bottom: 4px;
 }
 
 .compact-head {
@@ -751,7 +758,7 @@ button { cursor: pointer; }
 .overview-pair span { color: var(--md-sys-color-on-surface-variant); }
 
 .tree-nav {
-  margin-bottom: 3px;
+  margin-bottom: 10px;
   display: flex;
   flex-wrap: nowrap;
   gap: 6px;
@@ -771,7 +778,7 @@ button { cursor: pointer; }
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 6px;
-  align-items: center;
+  align-items: start;
   text-align: left;
   padding: 5px 8px;
   min-height: 56px;
@@ -815,7 +822,7 @@ button { cursor: pointer; }
 .tree-item-icon.folder { color: var(--md-sys-color-on-secondary-container); }
 .tree-item-icon.file { color: var(--md-sys-color-primary); }
 
-.tree-item-body { min-width: 0; display: grid; gap: 1px; align-content: center; }
+.tree-item-body { min-width: 0; display: grid; gap: 3px; align-content: start; align-self: start; padding-top: 2px; }
 .tree-item-title { display: flex; justify-content: space-between; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; line-height: 1.2; }
 .tree-item .badge { min-height: 18px; padding: 0 7px; font-size: 10px; }
 .tree-meta {
@@ -1069,24 +1076,27 @@ button { cursor: pointer; }
   background: var(--md-sys-color-surface-container);
   border: 1px solid var(--md-sys-color-outline-variant);
   color: var(--md-sys-color-on-surface);
-  font-weight: 700;
-  font-size: 10px;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 0 1 auto;
   width: fit-content;
-  max-width: calc(100% - 42px);
+  max-width: min(16ch, calc(100% - 52px));
 }
 .env-toggle {
-  min-width: 34px;
+  min-width: 0;
   min-height: 22px;
   width: fit-content;
-  padding: 0 5px;
+  padding: 0 4px;
   flex-direction: row;
   gap: 0;
   flex: 0 1 auto;
-  font-size: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-left: auto;
+  white-space: nowrap;
 }
 .env-value-input {
   min-height: 24px;
@@ -1215,23 +1225,19 @@ button { cursor: pointer; }
   }
 
   .topbar-line {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    align-items: center;
   }
 
   .topbar-title {
-    flex: 1 1 calc(100% - 56px);
+    flex: 1 1 auto;
   }
 
   .topbar-meta {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  }
-
-  .topbar-meta > * {
-    width: 100%;
-    justify-content: center;
+    width: auto;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
   }
 
   .status-toolbar {
@@ -1248,27 +1254,27 @@ button { cursor: pointer; }
 @media (max-width: 820px) {
   .topbar, .panel, .material-login-card { border-radius: 24px; }
   .sidebar { border-radius: 0; }
-  .topbar-line { gap: 8px; flex-wrap: wrap; }
+  .topbar-line { gap: 8px; flex-wrap: nowrap; align-items: center; }
   .topbar-title,
-  .topbar-meta { min-width: 0; width: 100%; }
+  .topbar-meta { min-width: 0; width: auto; }
   .topbar-title h1 { font-size: 16px; }
   .topbar-meta {
     gap: 6px;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .topbar-meta > * {
-    width: 100%;
-    justify-content: center;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
   }
   .tree-item { grid-template-columns: auto minmax(0, 1fr); }
   .tree-item-trailing { display: none; }
   .env-key-row,
-  .env-value-row,
-  .topbar-title-group {
+  .env-value-row {
     flex-wrap: wrap;
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .env-toggle {
+    margin-left: 0;
   }
   .pane-switch,
   .pane-switch .segmented-button,
@@ -1289,7 +1295,7 @@ button { cursor: pointer; }
   .ghost-btn,
   .action-btn,
   .save-btn,
-  .icon-btn { font-size: 16px; }
+  .icon-btn { font-size: 13px; }
   .text-area,
   .syntax-preview { min-height: 360px; }
   .code-editor-shell,
