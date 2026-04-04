@@ -356,8 +356,8 @@ Claude 相关还有两个配套开关：
 4. **`/v1/messages` 当前对 `input_audio` 走显式拒绝**  
    不会静默吞掉。
 
-5. **`cache_control` 当前是兼容输入，不等于真实上游 prompt caching 支持**  
-   代理会接受，但不会把它继续透传为真正的 Anthropic prompt caching 语义。
+5. **`cache_control` 现在区分“同端点透传”和“跨协议兼容”两种语义**  
+   当 `/v1/messages` 直接对接 `anthropic` 上游时，代理会把内容块里的 `cache_control` 一并继续传给上游；但跨协议转换时，它仍然只是兼容输入，不承诺把它翻译成真正的 Anthropic prompt caching 语义。
 
 6. **chat 上游的思维标签当前支持三种写法**  
    当 `UPSTREAM_THINKING_TAG_STYLE=true` 时，代理会把 `<think>`、`<thinking>`、`<reasoning>` 识别为 reasoning 内容，再按目标下游协议重写。
