@@ -368,7 +368,7 @@ button { cursor: pointer; }
 }
 .title-file-pill {
   min-width: 0;
-  max-width: min(16vw, 132px);
+  max-width: min(60vw, 720px);
   display: inline-flex;
   align-items: center;
   padding: 2px 7px;
@@ -420,7 +420,7 @@ button { cursor: pointer; }
 .editor-status-chip {
   min-height: 22px;
   padding: 0 5px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
 }
 
@@ -770,10 +770,12 @@ button { cursor: pointer; }
 
 .tree-list {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   flex: 1;
   min-height: 0;
   overflow: auto;
+  align-content: start;
+  grid-auto-rows: min-content;
 }
 
 .tree-item {
@@ -783,9 +785,9 @@ button { cursor: pointer; }
   gap: 6px;
   align-items: start;
   text-align: left;
-  padding: 5px 8px;
-  min-height: 56px;
-  height: 56px;
+  padding: 4px 8px;
+  min-height: 42px;
+  height: auto;
   border-radius: 12px;
   border: 1px solid var(--md-sys-color-outline-variant);
   background: var(--md-sys-color-surface-container-high);
@@ -825,7 +827,7 @@ button { cursor: pointer; }
 .tree-item-icon.folder { color: var(--md-sys-color-on-secondary-container); }
 .tree-item-icon.file { color: var(--md-sys-color-primary); }
 
-.tree-item-body { min-width: 0; display: grid; gap: 3px; align-content: start; align-self: start; padding-top: 2px; }
+.tree-item-body { min-width: 0; display: grid; gap: 1px; align-content: start; align-self: start; padding-top: 0; }
 .tree-item-title { display: flex; justify-content: space-between; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; line-height: 1.2; }
 .tree-item .badge { min-height: 18px; padding: 0 7px; font-size: 10px; }
 .tree-meta {
@@ -1037,8 +1039,8 @@ button { cursor: pointer; }
   align-items: flex-end;
   justify-content: flex-start;
   flex: 0 0 auto;
-  min-width: 30px;
-  padding: 10px 4px 10px 2px;
+  min-width: 0;
+  padding: 10px 2px 10px 0;
   background: transparent;
   border-right: 0;
   color: var(--md-sys-color-on-surface-variant);
@@ -1104,12 +1106,14 @@ button { cursor: pointer; }
   color: var(--md-sys-color-on-surface);
   font-size: 13px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 0 1 auto;
-  width: fit-content;
-  max-width: min(14ch, calc(100% - 46px));
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
 }
 .env-toggle {
   min-width: 0;
@@ -1133,6 +1137,14 @@ button { cursor: pointer; }
   min-width: 0;
 }
 .env-value-row { margin-top: 6px; }
+
+.env-card {
+  width: 100%;
+}
+
+.env-body {
+  width: 100%;
+}
 
 .code-editor-highlight {
   position: absolute;
@@ -1162,7 +1174,7 @@ button { cursor: pointer; }
 .code-editor-shell-env .code-editor-gutter {
   min-width: 0;
   padding-left: 0;
-  padding-right: 2px;
+  padding-right: 1px;
 }
 .env-comment-block {
   margin: 6px 0 0;

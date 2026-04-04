@@ -16,6 +16,8 @@ const state = {
   fileActionMenu: null,
   activeJobId: '',
   activeJob: null,
+  recoveryAction: '',
+  recoveryDeadline: 0,
   editorZoom: loadEditorZoom(),
   lastSaveFeedback: null,
   toast: null,
@@ -91,7 +93,24 @@ async function api(path, options = {}) {
 }
 
 function hasRecoverableRestartJob() {
-  return !!(state.activeJob && state.activeJob.status === 'running' && ['restart', 'deploy'].includes(state.activeJob.action));
+  return isRecoveryWindowActive() || !!(state.activeJob && state.activeJob.status === 'running' && ['restart', 'deploy'].includes(state.activeJob.action));
+}
+
+function startRecoveryWindow(action) {
+  if (!['restart', 'deploy'].includes(action)) {
+    return;
+  }
+  state.recoveryAction = action;
+  state.recoveryDeadline = Date.now() + 90_000;
+}
+
+function clearRecoveryWindow() {
+  state.recoveryAction = '';
+  state.recoveryDeadline = 0;
+}
+
+function isRecoveryWindowActive() {
+  return ['restart', 'deploy'].includes(state.recoveryAction) && Date.now() < state.recoveryDeadline;
 }
 
 async function handleLoginSubmit(event) {
@@ -236,6 +255,9 @@ async function refreshStatusWithRetry({ retryOnDisconnect = false, attempts = 1,
           state.activeJob = null;
           state.activeJobId = '';
         }
+        if (!state.activeJob || state.activeJob.status !== 'running') {
+          clearRecoveryWindow();
+        }
         render();
         return true;
       } catch (error) {
@@ -276,6 +298,7 @@ async function runAction(action) {
     render();
     setToast('info', `${labelForAction(action)}已开始`);
     if (['restart', 'deploy'].includes(action)) {
+      startRecoveryWindow(action);
       void refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: true });
     }
     pollActiveJob();
@@ -315,7 +338,7 @@ async function pollActiveJob() {
       render();
       if (!state.activeJob || state.activeJob.status !== 'running') {
         keepPolling = false;
-        await refreshStatusWithRetry({ retryOnDisconnect: false, attempts: 1, silent: true });
+        await refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: false });
         if (state.activeJob) {
           setToast(state.activeJob.status === 'succeeded' ? 'success' : 'error', `${state.activeJob.label || labelForAction(state.activeJob.action)}已${state.activeJob.status === 'succeeded' ? '完成' : '失败'}`);
         }
@@ -362,8 +385,10 @@ function isRecoverableStatusDisconnect(error) {
   const message = String(error?.message || '');
   return message === 'Failed to fetch'
     || /Recoverable unauthorized during restart/i.test(message)
+    || /Unexpected end of JSON input/i.test(message)
     || /Unexpected token/i.test(message)
     || /not valid JSON/i.test(message)
+    || /JSON/i.test(message) && /unexpected end|unterminated|end of data/i.test(message)
     || /NetworkError/i.test(message)
     || /Load failed/i.test(message);
 }
@@ -750,7 +775,7 @@ function renderBrowserPage() {
             <span class="badge info material-state-chip">项目文件 ${items.length}</span>
           </div>
           <div class="tree-nav">
-            <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">/</button>
+            <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">回到根目录/</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
             ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
           </div>
@@ -1099,7 +1124,10 @@ function renderFileActionMenu() {
 }
 
 function canCreateEnvInCurrentDir() {
-  return state.currentDir === '' || state.currentDir === 'providers';
+	if (state.currentDir === '') {
+		return !(state.treeItems || []).some((item) => !item.is_dir && item.name === '.env');
+	}
+	return state.currentDir === 'providers';
 }
 
 function renderTopbarTools() {
@@ -1107,7 +1135,7 @@ function renderTopbarTools() {
     return `
       <span id="file-dirty-badge" class="badge ${state.currentFile?.dirty ? 'warn' : 'ok'} material-state-chip editor-status-chip">${state.currentFile?.dirty ? '未保存' : '已同步'}</span>
       ${state.lastSaveFeedback ? `<span class="badge ${escapeAttr(state.lastSaveFeedback.tone)} material-state-chip editor-status-chip">${escapeHtml(state.lastSaveFeedback.text)}</span>` : ''}
-      <button id="cancel-file-button" class="secondary-btn material-outlined-button topbar-action-btn" type="button" ${state.currentFile ? '' : 'disabled'}>取消</button>
+      <button id="cancel-file-button" class="secondary-btn material-outlined-button topbar-action-btn" type="button" ${state.currentFile ? '' : 'disabled'}>返回</button>
       <button id="save-file-button" class="save-btn topbar-action-btn" type="button" ${state.currentFile ? '' : 'disabled'}>保存</button>
     `;
   }
@@ -1146,24 +1174,27 @@ function displayFileName(path) {
 }
 
 async function createEnvFromCurrentDir() {
-  const name = window.prompt('输入文件名（不用 .env 后缀）', '');
-  if (!name) {
-    return;
-  }
-  try {
-    const data = await api('/_admin/api/file', {
-      method: 'POST',
-      body: {
-        dir: state.currentDir,
-        name,
-      },
-    });
-    await loadTree(state.currentDir);
-    await openFile(data.path);
-    setToast('success', '新 env 已创建');
-  } catch (error) {
-    setToast('error', error.message || '新建 env 失败');
-  }
+	let name = '';
+	if (state.currentDir !== '') {
+		name = window.prompt('输入文件名（不用 .env 后缀）', '');
+		if (!name) {
+			return;
+		}
+	}
+	try {
+		const data = await api('/_admin/api/file', {
+			method: 'POST',
+			body: {
+				dir: state.currentDir,
+				name,
+			},
+		});
+		await loadTree(state.currentDir);
+		await openFile(data.path);
+		setToast('success', state.currentDir === '' ? '.env 已创建' : '新 env 已创建');
+	} catch (error) {
+		setToast('error', error.message || '新建 env 失败');
+	}
 }
 
 function openTreeItemActionMenu(path) {
@@ -1425,7 +1456,7 @@ function syncCodeEditor(textarea) {
   gutter.style.fontSize = `${state.editorZoom}px`;
   gutter.style.lineHeight = '1.5';
   const gutterWidth = textarea.dataset.highlightLanguage === 'env'
-    ? `${Math.max(String(totalLines).length + 1, 3)}ch`
+    ? `${Math.max(String(totalLines).length, 2)}ch`
     : `${Math.max(String(totalLines).length + 2, 4)}ch`;
   if (shell) {
     shell.style.gridTemplateColumns = `${gutterWidth} minmax(0, 1fr)`;
