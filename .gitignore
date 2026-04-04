@@ -1,8 +1,8 @@
 .env
-.proxy.log
 .proxy.pid
 bin/
 providers/*.env
+providers/Cache_Info/
 docs/
 tests/
 # Local worktrees

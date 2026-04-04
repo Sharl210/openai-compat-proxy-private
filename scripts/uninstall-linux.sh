@@ -12,6 +12,6 @@ if load_env_if_present; then
   port="$(extract_port "$LISTEN_ADDR")"
 fi
 stop_managed_service "$port"
-rm -f "$LOG_FILE" "$BIN_PATH" "$BACKUP_BIN_PATH" "$TMP_BIN_PATH"
+rm -f "$BIN_PATH" "$BACKUP_BIN_PATH" "$TMP_BIN_PATH"
 
 echo "stopped and cleaned runtime artifacts"

@@ -9,7 +9,6 @@ BIN_PATH="${BIN_PATH:-$BIN_DIR/openai-compat-proxy}"
 TMP_BIN_PATH="${TMP_BIN_PATH:-$BIN_DIR/openai-compat-proxy.new}"
 BACKUP_BIN_PATH="${BACKUP_BIN_PATH:-$BIN_DIR/openai-compat-proxy.bak}"
 PID_FILE="${PID_FILE:-$ROOT_DIR/.proxy.pid}"
-LOG_FILE="${LOG_FILE:-$ROOT_DIR/.proxy.log}"
 LOCK_DIR="${LOCK_DIR:-$ROOT_DIR/.proxy.lock}"
 GO_PROFILE_FILE="${GO_PROFILE_FILE:-/etc/profile.d/go.sh}"
 
@@ -255,12 +254,29 @@ ensure_go() {
 
 extract_port() {
   local listen_addr="$1"
+  if [[ "$listen_addr" =~ ^([0-9]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
   [[ "$listen_addr" =~ :([0-9]+)$ ]] || fail "LISTEN_ADDR must end with a numeric TCP port: $listen_addr"
   printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
+normalize_listen_addr() {
+  local listen_addr="$1"
+  if [[ "$listen_addr" =~ ^([0-9]+)$ ]]; then
+    printf ':%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf '%s\n' "$listen_addr"
+}
+
 extract_host() {
   local listen_addr="$1"
+  if [[ "$listen_addr" =~ ^([0-9]+)$ ]]; then
+    printf '\n'
+    return 0
+  fi
   if [[ "$listen_addr" =~ ^:([0-9]+)$ ]]; then
     printf '\n'
     return 0
@@ -430,11 +446,6 @@ install_candidate_binary() {
   chmod +x "$BIN_PATH"
 }
 
-append_log_banner() {
-  mkdir -p "$(dirname "$LOG_FILE")"
-  printf '\n===== %s =====\n' "$1" >> "$LOG_FILE"
-}
-
 health_url() {
   local port="$1"
   local host
@@ -451,9 +462,10 @@ health_url() {
 
 start_service() {
   local port="$1"
-  append_log_banner "starting $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local normalized_listen_addr
+  normalized_listen_addr="$(normalize_listen_addr "$LISTEN_ADDR")"
   nohup env \
-    LISTEN_ADDR="$LISTEN_ADDR" \
+    LISTEN_ADDR="$normalized_listen_addr" \
     PROXY_API_KEY="${PROXY_API_KEY:-}" \
     PROVIDERS_DIR="${PROVIDERS_DIR:-}" \
     DEFAULT_PROVIDER="${DEFAULT_PROVIDER:-}" \
@@ -464,7 +476,7 @@ start_service() {
     TOTAL_TIMEOUT="${TOTAL_TIMEOUT:-}" \
     LOG_ENABLE="${LOG_ENABLE:-}" \
     LOG_FILE_PATH="${LOG_FILE_PATH:-}" \
-    "$BIN_PATH" >>"$LOG_FILE" 2>&1 &
+    "$BIN_PATH" >/dev/null 2>&1 &
   local new_pid=$!
   echo "$new_pid" > "$PID_FILE"
 
@@ -517,7 +529,6 @@ deploy_service() {
   fi
   rollback_binary
   if [[ "$had_running_service" == "1" ]] && [[ -x "$BIN_PATH" ]]; then
-    append_log_banner "rollback $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if start_service "$port"; then
       fail "new deployment failed; rolled back to previous binary"
     fi

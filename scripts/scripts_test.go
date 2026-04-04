@@ -76,6 +76,31 @@ func TestDeployUsesListenHostForHealthCheck(t *testing.T) {
 	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
+func TestDeployAcceptsPlainPortListenAddr(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	result := runScript(t, repoDir, "deploy-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected deploy to accept plain port listen addr, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	newPID, err := strconv.Atoi(newPIDText)
+	if err != nil {
+		t.Fatalf("parse new pid: %v text=%q", err, newPIDText)
+	}
+	if !processAlive(newPID) {
+		t.Fatalf("expected deployed pid %d to stay alive", newPID)
+	}
+	mustWaitHealth(t, port)
+	stopPID(t, newPID)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
 func TestDeployPassesCurrentLogEnvNamesToProcess(t *testing.T) {
 	repoDir := newScriptTestRepo(t)
 	port := mustReservePort(t)
@@ -105,6 +130,30 @@ func TestDeployPassesCurrentLogEnvNamesToProcess(t *testing.T) {
 		}
 	}
 
+	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	newPID, err := strconv.Atoi(newPIDText)
+	if err != nil {
+		t.Fatalf("parse new pid: %v text=%q", err, newPIDText)
+	}
+	stopPID(t, newPID)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
+func TestDeployDoesNotCreateLegacyProxyLog(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+
+	result := runScript(t, repoDir, "deploy-linux.sh")
+	if result.err != nil {
+		t.Fatalf("expected deploy to succeed, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.log")); !os.IsNotExist(err) {
+		t.Fatalf("expected deploy to stop creating legacy .proxy.log, err=%v", err)
+	}
 	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
 	newPID, err := strconv.Atoi(newPIDText)
 	if err != nil {
@@ -228,8 +277,6 @@ func TestStopLinuxStopsStubbornProcessAndKeepsArtifacts(t *testing.T) {
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
 	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
-	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
-
 	oldCmd := startFakeProxy(t, repoDir, map[string]string{
 		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
 		"PROVIDERS_DIR": providersDir,
@@ -249,9 +296,6 @@ func TestStopLinuxStopsStubbornProcessAndKeepsArtifacts(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
 		t.Fatalf("expected pid file removed, got err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.log")); err != nil {
-		t.Fatalf("expected log file retained by stop script, err=%v", err)
-	}
 	if _, err := os.Stat(filepath.Join(repoDir, "bin", "openai-compat-proxy")); err != nil {
 		t.Fatalf("expected binary retained by stop script, err=%v", err)
 	}
@@ -264,8 +308,6 @@ func TestStopLinuxStopsWithoutEnvFileUsingPidFile(t *testing.T) {
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
 	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
-	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
-
 	oldCmd := startFakeProxy(t, repoDir, map[string]string{
 		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
 		"PROVIDERS_DIR": providersDir,
@@ -287,9 +329,6 @@ func TestStopLinuxStopsWithoutEnvFileUsingPidFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.pid")); !os.IsNotExist(err) {
 		t.Fatalf("expected pid file removed, got err=%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(repoDir, ".proxy.log")); err != nil {
-		t.Fatalf("expected log file retained by stop script, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "bin", "openai-compat-proxy")); err != nil {
 		t.Fatalf("expected binary retained by stop script, err=%v", err)
@@ -367,8 +406,6 @@ func TestUninstallStopsStubbornProcessBeforeCleanup(t *testing.T) {
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
 	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
-	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
-
 	oldCmd := startFakeProxy(t, repoDir, map[string]string{
 		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
 		"PROVIDERS_DIR": providersDir,
@@ -385,7 +422,7 @@ func TestUninstallStopsStubbornProcessBeforeCleanup(t *testing.T) {
 	if processAlive(oldPID) {
 		t.Fatalf("expected uninstall to fully stop old process %d", oldPID)
 	}
-	for _, rel := range []string{".proxy.pid", ".proxy.log", filepath.Join("bin", "openai-compat-proxy")} {
+	for _, rel := range []string{".proxy.pid", filepath.Join("bin", "openai-compat-proxy")} {
 		if _, err := os.Stat(filepath.Join(repoDir, rel)); !os.IsNotExist(err) {
 			t.Fatalf("expected %s removed, err=%v", rel, err)
 		}
@@ -399,8 +436,6 @@ func TestUninstallStopsWithoutEnvFileUsingPidFile(t *testing.T) {
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
 	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
-	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
-
 	oldCmd := startFakeProxy(t, repoDir, map[string]string{
 		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
 		"PROVIDERS_DIR": providersDir,
@@ -420,7 +455,7 @@ func TestUninstallStopsWithoutEnvFileUsingPidFile(t *testing.T) {
 	if processAlive(oldPID) {
 		t.Fatalf("expected uninstall to fully stop old process %d without env", oldPID)
 	}
-	for _, rel := range []string{".proxy.pid", ".proxy.log", filepath.Join("bin", "openai-compat-proxy")} {
+	for _, rel := range []string{".proxy.pid", filepath.Join("bin", "openai-compat-proxy")} {
 		if _, err := os.Stat(filepath.Join(repoDir, rel)); !os.IsNotExist(err) {
 			t.Fatalf("expected %s removed, err=%v", rel, err)
 		}
@@ -463,8 +498,6 @@ func TestUninstallStopsWithBrokenEnvUsingPidFileFallback(t *testing.T) {
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
 	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
-	mustWriteFile(t, filepath.Join(repoDir, ".proxy.log"), "hello\n")
-
 	oldCmd := startFakeProxy(t, repoDir, map[string]string{
 		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
 		"PROVIDERS_DIR": providersDir,
@@ -482,7 +515,7 @@ func TestUninstallStopsWithBrokenEnvUsingPidFileFallback(t *testing.T) {
 	if processAlive(oldPID) {
 		t.Fatalf("expected uninstall to stop old process %d with broken env fallback", oldPID)
 	}
-	for _, rel := range []string{".proxy.pid", ".proxy.log", filepath.Join("bin", "openai-compat-proxy")} {
+	for _, rel := range []string{".proxy.pid", filepath.Join("bin", "openai-compat-proxy")} {
 		if _, err := os.Stat(filepath.Join(repoDir, rel)); !os.IsNotExist(err) {
 			t.Fatalf("expected %s removed, err=%v", rel, err)
 		}
@@ -534,7 +567,7 @@ func startFakeProxy(t *testing.T, repoDir string, env map[string]string) *exec.C
 	cmd := exec.Command(filepath.Join(repoDir, "bin", "openai-compat-proxy"))
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), envList(env)...)
-	logFile, err := os.OpenFile(filepath.Join(repoDir, ".proxy.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(filepath.Join(repoDir, ".fake-proxy.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		t.Fatalf("open log file: %v", err)
 	}
