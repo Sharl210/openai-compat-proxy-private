@@ -230,3 +230,55 @@ func TestModelsFallsBackOnGenericNotFoundWhenConfiguredAliasesExist(t *testing.T
 		t.Fatalf("expected fallback alias public-gpt, got %#v", entry)
 	}
 }
+
+func TestModelsFallbackIncludesManualModelsWhenUpstreamNotFound(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"models not found upstream"}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         true,
+			UpstreamBaseURL: upstream.URL,
+			UpstreamAPIKey:  "test-key",
+			SupportsModels:  true,
+			ManualModels:    []string{"manual-alpha", "manual-beta"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected manual models fallback to return 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode fallback models response: %v body=%s", err, rec.Body.String())
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if len(ids) != 2 || !contains(ids, "manual-alpha") || !contains(ids, "manual-beta") {
+		t.Fatalf("expected manual models in fallback response, got %#v", ids)
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}

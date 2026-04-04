@@ -132,6 +132,21 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 
 func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool) {
 	ids := sortedPublicModelAliases(provider.ModelMap)
+	seen := make(map[string]struct{}, len(ids)+len(provider.ManualModels))
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	for _, manualModel := range provider.ManualModels {
+		manualModel = strings.TrimSpace(manualModel)
+		if manualModel == "" {
+			continue
+		}
+		if _, exists := seen[manualModel]; exists {
+			continue
+		}
+		ids = append(ids, manualModel)
+		seen[manualModel] = struct{}{}
+	}
 	if len(ids) == 0 {
 		return nil, false
 	}
