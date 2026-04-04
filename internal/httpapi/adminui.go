@@ -286,7 +286,7 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			if err != nil {
 				continue
 			}
-			if !info.IsDir() && !a.isVisibleTreeFile(entry.Name()) {
+			if !info.IsDir() && !a.isVisibleTreeFile(resolved, entry.Name()) {
 				continue
 			}
 			itemRel := filepath.ToSlash(filepath.Join(rel, entry.Name()))
@@ -340,9 +340,15 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 	}
 }
 
-func (a *adminUI) isVisibleTreeFile(name string) bool {
+func (a *adminUI) isVisibleTreeFile(parentDir string, name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
-	return lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json")
+	if lower == "agents.md" {
+		return false
+	}
+	if lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json") {
+		return true
+	}
+	return strings.HasSuffix(lower, ".md") && a.isProvidersDirectory(parentDir)
 }
 
 func (a *adminUI) isLogDirectory(resolved string) bool {
@@ -511,12 +517,13 @@ func (a *adminUI) handleFileCreate() http.HandlerFunc {
 		var req struct {
 			Dir  string `json:"dir"`
 			Name string `json:"name"`
+			Kind string `json:"kind"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "invalid json body")
 			return
 		}
-		path, err := a.createEnvFromTemplate(req.Dir, req.Name)
+		path, err := a.createFileFromTemplate(req.Dir, req.Name, req.Kind)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "create_failed", err.Error())
 			return
@@ -799,9 +806,20 @@ func (a *adminUI) resolvePath(rel string, wantDir bool) (string, error) {
 }
 
 func (a *adminUI) createEnvFromTemplate(dirRel string, name string) (string, error) {
+	return a.createFileFromTemplate(dirRel, name, "env")
+}
+
+func (a *adminUI) createFileFromTemplate(dirRel string, name string, kind string) (string, error) {
 	resolvedDir, err := a.resolvePath(dirRel, true)
 	if err != nil {
 		return "", err
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		kind = "env"
+	}
+	if kind == "md" {
+		return a.createMarkdownFile(resolvedDir, dirRel, name)
 	}
 	if !a.canCreateEnvInDir(resolvedDir) {
 		return "", errors.New("new env is only allowed in project root or providers root")
@@ -838,6 +856,27 @@ func (a *adminUI) createEnvFromTemplate(dirRel string, name string) (string, err
 	}
 	if dirRel == "" {
 		return targetName, nil
+	}
+	return filepath.ToSlash(filepath.Join(dirRel, targetName)), nil
+}
+
+func (a *adminUI) createMarkdownFile(resolvedDir string, dirRel string, name string) (string, error) {
+	if !a.isProvidersDirectory(resolvedDir) {
+		return "", errors.New("new md is only allowed in providers root")
+	}
+	cleanName, err := validateAdminFileName(name)
+	if err != nil {
+		return "", err
+	}
+	targetName := cleanName + ".md"
+	targetPath := filepath.Join(resolvedDir, targetName)
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", errors.New("target file already exists")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.WriteFile(targetPath, nil, 0o644); err != nil {
+		return "", err
 	}
 	return filepath.ToSlash(filepath.Join(dirRel, targetName)), nil
 }

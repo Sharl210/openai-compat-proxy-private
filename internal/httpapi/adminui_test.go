@@ -250,6 +250,62 @@ func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	}
 }
 
+func TestAdminUITreeShowsMarkdownOnlyInProvidersRoot(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	providersDir := filepath.Join(server.admin.rootDir(), "providers")
+	if err := os.WriteFile(filepath.Join(providersDir, "prompt.md"), []byte("provider prompt"), 0o644); err != nil {
+		t.Fatalf("write provider markdown: %v", err)
+	}
+	nestedDir := filepath.Join(providersDir, "prompts")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested providers dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "extra.md"), []byte("nested prompt"), 0o644); err != nil {
+		t.Fatalf("write nested markdown: %v", err)
+	}
+
+	providersRec := httptest.NewRecorder()
+	providersReq := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=providers", nil)
+	providersReq.AddCookie(cookie)
+	providersReq.Header.Set("X-Admin-CSRF", csrf)
+	server.ServeHTTP(providersRec, providersReq)
+	if providersRec.Code != http.StatusOK {
+		t.Fatalf("expected providers tree 200, got %d body=%s", providersRec.Code, providersRec.Body.String())
+	}
+	providersItems, ok := decodeAdminJSON(t, providersRec.Body.Bytes())["items"].([]any)
+	if !ok {
+		t.Fatalf("expected providers items array")
+	}
+	providersNames := make([]string, 0, len(providersItems))
+	for _, item := range providersItems {
+		providersNames = append(providersNames, item.(map[string]any)["name"].(string))
+	}
+	if !slices.Contains(providersNames, "prompt.md") {
+		t.Fatalf("expected prompt.md shown in providers root, got %v", providersNames)
+	}
+
+	nestedRec := httptest.NewRecorder()
+	nestedReq := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=providers/prompts", nil)
+	nestedReq.AddCookie(cookie)
+	nestedReq.Header.Set("X-Admin-CSRF", csrf)
+	server.ServeHTTP(nestedRec, nestedReq)
+	if nestedRec.Code != http.StatusOK {
+		t.Fatalf("expected nested providers tree 200, got %d body=%s", nestedRec.Code, nestedRec.Body.String())
+	}
+	nestedItems, ok := decodeAdminJSON(t, nestedRec.Body.Bytes())["items"].([]any)
+	if !ok {
+		t.Fatalf("expected nested items array")
+	}
+	nestedNames := make([]string, 0, len(nestedItems))
+	for _, item := range nestedItems {
+		nestedNames = append(nestedNames, item.(map[string]any)["name"].(string))
+	}
+	if slices.Contains(nestedNames, "extra.md") {
+		t.Fatalf("expected extra.md hidden in nested providers dir, got %v", nestedNames)
+	}
+}
+
 func TestAdminUISaveEnvReportsRestartValidationErrorsButUIStaysAlive(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -459,6 +515,38 @@ func TestAdminUICreateProviderEnvUsesOpenAIExampleTemplate(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "PROVIDER_ID=demo2") {
 		t.Fatalf("expected provider id rewrite from openai template, got %s", string(content))
+	}
+}
+
+func TestAdminUICreateProviderMarkdownFileWithoutSuffix(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "providers",
+		"name": "prompt",
+		"kind": "md",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected markdown create 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	created := filepath.Join(server.admin.rootDir(), "providers", "prompt.md")
+	content, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatalf("read created markdown file: %v", err)
+	}
+	if string(content) != "" {
+		t.Fatalf("expected empty markdown file, got %q", string(content))
+	}
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode markdown create response: %v", err)
+	}
+	if payload.Path != "providers/prompt.md" {
+		t.Fatalf("expected markdown response path providers/prompt.md, got %q", payload.Path)
 	}
 }
 

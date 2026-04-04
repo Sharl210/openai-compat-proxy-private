@@ -550,6 +550,11 @@ function bindEvents() {
     createEnvButton.addEventListener('click', createEnvFromCurrentDir);
   }
 
+  const createMdButton = document.getElementById('create-md-button');
+  if (createMdButton) {
+    createMdButton.addEventListener('click', createMdFromCurrentDir);
+  }
+
   const fileActionBackdrop = document.getElementById('file-action-backdrop');
   if (fileActionBackdrop) {
     fileActionBackdrop.addEventListener('click', closeTreeItemActionMenu);
@@ -792,6 +797,7 @@ function renderBrowserPage() {
             <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">回到根目录/</button>
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
             ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
+            ${canCreateMdInCurrentDir() ? `<button id="create-md-button" class="secondary-btn material-outlined-button" type="button">新增 md 文件</button>` : ''}
           </div>
           <div class="tree-list">
             ${renderTreeItems(items)}
@@ -1144,6 +1150,10 @@ function canCreateEnvInCurrentDir() {
 	return state.currentDir === 'providers';
 }
 
+function canCreateMdInCurrentDir() {
+	return state.currentDir === 'providers';
+}
+
 function renderTopbarTools() {
   if (state.view === 'editor') {
     return `
@@ -1208,6 +1218,31 @@ async function createEnvFromCurrentDir() {
 		setToast('success', state.currentDir === '' ? '.env 已创建' : '新 env 已创建');
 	} catch (error) {
 		setToast('error', error.message || '新建 env 失败');
+	}
+}
+
+async function createMdFromCurrentDir() {
+	if (!canCreateMdInCurrentDir()) {
+		return;
+	}
+	const name = window.prompt('输入文件名（不用 .md 后缀）', '');
+	if (!name) {
+		return;
+	}
+	try {
+		const data = await api('/_admin/api/file', {
+			method: 'POST',
+			body: {
+				dir: state.currentDir,
+				name,
+				kind: 'md',
+			},
+		});
+		await loadTree(state.currentDir);
+		await openFile(data.path);
+		setToast('success', '新 md 文件已创建');
+	} catch (error) {
+		setToast('error', error.message || '新建 md 文件失败');
 	}
 }
 
