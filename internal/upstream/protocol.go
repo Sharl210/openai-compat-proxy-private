@@ -887,7 +887,9 @@ func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	}
 	if req.Reasoning != nil {
 		if len(req.Reasoning.Raw) > 0 {
-			payload["reasoning"] = cloneMap(req.Reasoning.Raw)
+			if reasoning := normalizeOpenAIReasoningPayload(req.Reasoning); len(reasoning) > 0 {
+				payload["reasoning"] = reasoning
+			}
 		} else if req.Reasoning.Effort != "" {
 			payload["reasoning_effort"] = req.Reasoning.Effort
 		}

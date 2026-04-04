@@ -841,6 +841,73 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBodyMapsAnthropicThinkingToResponsesReasoning(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "medium" {
+		t.Fatalf("expected anthropic thinking to map to medium effort, got %#v", payload)
+	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("expected summary auto, got %#v", payload)
+	}
+	if _, exists := reasoning["thinking"]; exists {
+		t.Fatalf("expected responses upstream reasoning to avoid anthropic thinking field, got %#v", payload)
+	}
+}
+
+func TestBuildChatRequestBodyMapsAnthropicThinkingToChatReasoning(t *testing.T) {
+	body, err := buildChatRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
+	})
+	if err != nil {
+		t.Fatalf("buildChatRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "medium" {
+		t.Fatalf("expected anthropic thinking to map to medium effort, got %#v", payload)
+	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("expected summary auto, got %#v", payload)
+	}
+	if _, exists := reasoning["thinking"]; exists {
+		t.Fatalf("expected chat upstream reasoning to avoid anthropic thinking field, got %#v", payload)
+	}
+	if _, exists := payload["reasoning_effort"]; exists {
+		t.Fatalf("expected mapped chat payload to use reasoning object instead of reasoning_effort, got %#v", payload)
+	}
+}
+
+func TestCachedTokensFromEventReadsTopLevelCachedTokens(t *testing.T) {
+	evt := Event{Data: map[string]any{"usage": map[string]any{"cached_tokens": 321}}}
+	if got := cachedTokensFromEvent(evt); got != 321 {
+		t.Fatalf("expected top-level cached_tokens to be returned, got %#v", got)
+	}
+}
+
+func TestCachedTokensFromEventReadsTopLevelCacheReadInputTokens(t *testing.T) {
+	evt := Event{Data: map[string]any{"response": map[string]any{"usage": map[string]any{"cache_read_input_tokens": 654}}}}
+	if got := cachedTokensFromEvent(evt); got != 654 {
+		t.Fatalf("expected top-level cache_read_input_tokens to be returned, got %#v", got)
+	}
+}
+
 func TestBuildAnthropicRequestBodyRejectsInputAudio(t *testing.T) {
 	_, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
 		Model:           "claude-sonnet-4-5",

@@ -798,11 +798,9 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	}
 	if req.Reasoning != nil {
 		if len(req.Reasoning.Raw) > 0 {
-			reasoning := cloneMap(req.Reasoning.Raw)
-			if _, ok := reasoning["summary"]; !ok {
-				reasoning["summary"] = "auto"
+			if reasoning := normalizeOpenAIReasoningPayload(req.Reasoning); len(reasoning) > 0 {
+				payload["reasoning"] = reasoning
 			}
-			payload["reasoning"] = reasoning
 		} else if req.Reasoning.Effort != "" || req.Reasoning.Summary != "" {
 			reasoning := map[string]any{}
 			if req.Reasoning.Effort != "" {
@@ -819,6 +817,106 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[string]any {
+	if reasoning == nil {
+		return nil
+	}
+	if len(reasoning.Raw) == 0 {
+		return nil
+	}
+	raw := cloneMap(reasoning.Raw)
+	if inferred := inferReasoningEffortFromAnthropicRaw(raw); inferred != "" {
+		return map[string]any{
+			"effort":  inferred,
+			"summary": reasoningSummaryOrAuto(raw, reasoning.Summary),
+		}
+	}
+	if _, ok := raw["summary"]; !ok {
+		raw["summary"] = reasoningSummaryOrAuto(raw, reasoning.Summary)
+	}
+	return raw
+}
+
+func reasoningSummaryOrAuto(raw map[string]any, fallback string) string {
+	if summary := stringValue(raw["summary"]); summary != "" {
+		return summary
+	}
+	if strings.TrimSpace(fallback) != "" {
+		return fallback
+	}
+	return "auto"
+}
+
+func inferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
+	if raw == nil {
+		return ""
+	}
+	if effort := anthropicOutputEffortToReasoningEffort(raw); effort != "" {
+		return effort
+	}
+	thinking, _ := raw["thinking"].(map[string]any)
+	if thinking == nil {
+		return ""
+	}
+	if effort := anthropicOutputEffortToReasoningEffort(thinking); effort != "" {
+		return effort
+	}
+	budget := intFromAny(thinking["budget_tokens"])
+	if budget <= 0 {
+		return ""
+	}
+	switch {
+	case budget >= 8192:
+		return "xhigh"
+	case budget >= 4096:
+		return "high"
+	case budget >= 2048:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func anthropicOutputEffortToReasoningEffort(raw map[string]any) string {
+	if raw == nil {
+		return ""
+	}
+	outputConfig, _ := raw["output_config"].(map[string]any)
+	effort := stringValue(raw["effort"])
+	if effort == "" {
+		effort = stringValue(outputConfig["effort"])
+	}
+	switch effort {
+	case "low", "medium", "high":
+		return effort
+	case "max":
+		return "xhigh"
+	default:
+		return ""
+	}
+}
+
+func intFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil {
+			return int(parsed)
+		}
+	}
+	return 0
 }
 
 func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
@@ -1037,20 +1135,39 @@ func cachedTokensFromEvents(events []Event) any {
 func cachedTokensFromEvent(evt Event) any {
 	data := evt.Data
 	if usage, _ := data["usage"].(map[string]any); len(usage) > 0 {
-		if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-			if cachedTokens, ok := details["cached_tokens"]; ok {
-				return cachedTokens
-			}
+		if cachedTokens := cachedTokensFromUsageMap(usage); cachedTokens != nil {
+			return cachedTokens
 		}
 	}
 	if response, _ := data["response"].(map[string]any); response != nil {
 		if usage, _ := response["usage"].(map[string]any); len(usage) > 0 {
-			if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-				if cachedTokens, ok := details["cached_tokens"]; ok {
-					return cachedTokens
-				}
+			if cachedTokens := cachedTokensFromUsageMap(usage); cachedTokens != nil {
+				return cachedTokens
 			}
 		}
+	}
+	return nil
+}
+
+func cachedTokensFromUsageMap(usage map[string]any) any {
+	if len(usage) == 0 {
+		return nil
+	}
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if cachedTokens, ok := details["cached_tokens"]; ok {
+			return cachedTokens
+		}
+	}
+	if details, _ := usage["prompt_tokens_details"].(map[string]any); len(details) > 0 {
+		if cachedTokens, ok := details["cached_tokens"]; ok {
+			return cachedTokens
+		}
+	}
+	if cachedTokens, ok := usage["cache_read_input_tokens"]; ok {
+		return cachedTokens
+	}
+	if cachedTokens, ok := usage["cached_tokens"]; ok {
+		return cachedTokens
 	}
 	return nil
 }
