@@ -424,6 +424,44 @@ func TestAdminUICreateProviderEnvRewritesProviderID(t *testing.T) {
 	}
 }
 
+func TestAdminUICreateProviderEnvUsesOpenAIExampleTemplate(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	providersDir := filepath.Join(server.admin.rootDir(), "providers")
+	if err := os.Remove(filepath.Join(providersDir, ".env.example")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove legacy provider template: %v", err)
+	}
+	customTemplate := strings.Join([]string{
+		"# provider template",
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://new-template.example/v1",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(providersDir, "openai.env.example"), []byte(customTemplate), 0o644); err != nil {
+		t.Fatalf("write openai provider template: %v", err)
+	}
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "providers",
+		"name": "demo2",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected create 200 from openai template, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	created := filepath.Join(providersDir, "demo2.env")
+	content, err := os.ReadFile(created)
+	if err != nil {
+		t.Fatalf("read created provider env: %v", err)
+	}
+	if !strings.Contains(string(content), "UPSTREAM_BASE_URL=https://new-template.example/v1") {
+		t.Fatalf("expected openai provider template content, got %s", string(content))
+	}
+	if !strings.Contains(string(content), "PROVIDER_ID=demo2") {
+		t.Fatalf("expected provider id rewrite from openai template, got %s", string(content))
+	}
+}
+
 func TestAdminUIRenameProviderEnvRewritesProviderIDAndDeleteRemovesFile(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -613,7 +651,7 @@ func newAdminUITestServer(t *testing.T) *Server {
 		"PROVIDER_ENABLED=true",
 		"UPSTREAM_BASE_URL=https://example.com/v1",
 	}, "\n") + "\n"
-	if err := os.WriteFile(filepath.Join(providersDir, ".env.example"), []byte(providerTemplate), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(providersDir, "openai.env.example"), []byte(providerTemplate), 0o644); err != nil {
 		t.Fatalf("write provider env template: %v", err)
 	}
 	store, err := config.NewRuntimeStore(filepath.Join(root, ".env"))

@@ -807,6 +807,9 @@ func (a *adminUI) createEnvFromTemplate(dirRel string, name string) (string, err
 		return "", errors.New("new env is only allowed in project root or providers root")
 	}
 	templatePath := filepath.Join(resolvedDir, ".env.example")
+	if a.isProvidersDirectory(resolvedDir) {
+		templatePath = filepath.Join(resolvedDir, "openai.env.example")
+	}
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
 		return "", err
