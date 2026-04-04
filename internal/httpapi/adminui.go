@@ -279,6 +279,7 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			return
 		}
 		items := make([]adminFileEntry, 0, len(entries))
+		modifiedAt := make(map[string]time.Time, len(entries))
 		for _, entry := range entries {
 			info, err := entry.Info()
 			if err != nil {
@@ -306,18 +307,49 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 				Modified:  info.ModTime().Format(time.RFC3339),
 				IsSymlink: isSymlink,
 			})
+			modifiedAt[itemRel] = info.ModTime()
 		}
-		sort.Slice(items, func(i, j int) bool {
-			if items[i].IsDir != items[j].IsDir {
-				return items[i].IsDir
-			}
-			return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
-		})
+		if a.isLogDirectory(resolved) {
+			sort.Slice(items, func(i, j int) bool {
+				if items[i].IsDir != items[j].IsDir {
+					return items[i].IsDir
+				}
+				left := modifiedAt[items[i].Path]
+				right := modifiedAt[items[j].Path]
+				if !left.Equal(right) {
+					return left.After(right)
+				}
+				return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+			})
+		} else {
+			sort.Slice(items, func(i, j int) bool {
+				if items[i].IsDir != items[j].IsDir {
+					return items[i].IsDir
+				}
+				return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+			})
+		}
 		writeAdminJSON(w, http.StatusOK, map[string]any{
 			"path":  filepath.ToSlash(rel),
 			"items": items,
 		})
 	}
+}
+
+func (a *adminUI) isLogDirectory(resolved string) bool {
+	snapshot := a.store.Active()
+	if snapshot == nil {
+		return false
+	}
+	logDir := strings.TrimSpace(snapshot.Config.LogFilePath)
+	if logDir == "" {
+		return false
+	}
+	logDirPath := logDir
+	if !filepath.IsAbs(logDirPath) {
+		logDirPath = filepath.Join(a.rootDir(), logDirPath)
+	}
+	return filepath.Clean(resolved) == filepath.Clean(logDirPath)
 }
 
 func (a *adminUI) handleFile() http.HandlerFunc {
@@ -692,18 +724,16 @@ func (a *adminUI) runtimeStatus() map[string]any {
 		"health_ok":            false,
 		"proxy_key_configured": a.proxyKey() != "",
 		"pid":                  "",
-		"log_tail":             "",
+		"log_dir":              "",
 	}
 	if snapshot == nil {
 		return status
 	}
 	status["listen_addr"] = snapshot.Config.ListenAddr
 	status["health_ok"] = a.checkHealth(snapshot.Config.ListenAddr)
+	status["log_dir"] = strings.TrimSpace(snapshot.Config.LogFilePath)
 	if pidBytes, err := os.ReadFile(filepath.Join(a.rootDir(), ".proxy.pid")); err == nil {
 		status["pid"] = strings.TrimSpace(string(pidBytes))
-	}
-	if tail, err := readAdminTail(filepath.Join(a.rootDir(), ".proxy.log"), adminLogTailSize); err == nil {
-		status["log_tail"] = tail
 	}
 	if current := a.runner.Current(); current != nil {
 		status["job"] = current
