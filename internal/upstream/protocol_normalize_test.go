@@ -42,9 +42,13 @@ func TestNormalizeChatFrame_TextOnly(t *testing.T) {
 		t.Logf("  [%d] %s: %s", i, evt.Event, mustMarshal(evt.Data))
 	}
 
-	// 应该有 response.created, response.output_text.delta x2, response.completed
-	if len(allEvents) < 3 {
-		t.Errorf("expected at least 3 events, got %d", len(allEvents))
+	if len(allEvents) < 2 {
+		t.Errorf("expected at least 2 events, got %d", len(allEvents))
+	}
+	for _, evt := range allEvents {
+		if evt.Event == "response.completed" {
+			t.Fatalf("expected no synthetic response.completed before raw [DONE], got %#v", allEvents)
+		}
 	}
 }
 
@@ -200,7 +204,7 @@ func TestNormalizeChatFrame_UsageAndCompletion(t *testing.T) {
 	}
 }
 
-func TestChatEventBatchReader_FinalizesOnEOFWithoutCompletedEvent(t *testing.T) {
+func TestChatEventBatchReaderDoesNotFinalizeOnEOFWithoutTerminalEvent(t *testing.T) {
 	rawSSE := strings.Join([]string{
 		"event: chat",
 		`data: {"id":"chat-123","choices":[{"delta":{"reasoning_content":"thinking"}}]}`,
@@ -225,15 +229,13 @@ func TestChatEventBatchReader_FinalizesOnEOFWithoutCompletedEvent(t *testing.T) 
 		allEvents = append(allEvents, events...)
 	}
 
-	if len(allEvents) < 4 {
-		t.Fatalf("expected created + reasoning + text + completed events, got %d %#v", len(allEvents), allEvents)
+	if len(allEvents) < 3 {
+		t.Fatalf("expected created + reasoning + text events, got %d %#v", len(allEvents), allEvents)
 	}
-	if allEvents[len(allEvents)-1].Event != "response.completed" {
-		t.Fatalf("expected final event response.completed, got %#v", allEvents[len(allEvents)-1])
-	}
-	response, _ := allEvents[len(allEvents)-1].Data["response"].(map[string]any)
-	if id, _ := response["id"].(string); id != "chat-123" {
-		t.Fatalf("expected completed response id chat-123, got %#v", response)
+	for _, evt := range allEvents {
+		if evt.Event == "response.completed" {
+			t.Fatalf("expected EOF without raw terminal event to avoid response.completed, got %#v", allEvents)
+		}
 	}
 }
 
@@ -541,7 +543,7 @@ func TestNormalizeChatFrame_Done(t *testing.T) {
 		t.Fatal("expected done=true for [DONE]")
 	}
 	if len(events) != 0 {
-		t.Errorf("expected 0 events for [DONE] (response.completed comes from finish_reason+usage frame, not [DONE]), got %d", len(events))
+		t.Fatalf("expected bare [DONE] without stream state to emit no events, got %#v", events)
 	}
 }
 

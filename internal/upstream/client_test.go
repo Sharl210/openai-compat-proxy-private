@@ -671,9 +671,9 @@ func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
-			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
-			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n" +
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n" +
 			"data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -686,14 +686,14 @@ func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
 	if gotPath != "/chat/completions" {
 		t.Fatalf("expected chat endpoint path, got %q", gotPath)
 	}
-	if len(events) < 2 || events[0].Event != "response.output_text.delta" || events[1].Event != "response.completed" {
+	if len(events) < 3 || events[0].Event != "response.created" || events[1].Event != "response.output_text.delta" || events[2].Event != "response.completed" {
 		t.Fatalf("expected normalized response events, got %#v", events)
 	}
-	if got := events[0].Data["delta"]; got != "hello" {
+	if got := events[1].Data["delta"]; got != "hello" {
 		t.Fatalf("expected delta hello, got %#v", got)
 	}
 	// Usage is now wrapped inside response object (unified format)
-	response, _ := events[1].Data["response"].(map[string]any)
+	response, _ := events[2].Data["response"].(map[string]any)
 	usage, _ := response["usage"].(map[string]any)
 	if got := usage["input_tokens"]; got != float64(3) {
 		t.Fatalf("expected input_tokens 3, got %#v", got)
@@ -703,9 +703,9 @@ func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
 func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrames(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
-			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\n" +
-			"data: {\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"prompt_tokens_details\":{\"cached_tokens\":1}}}\n\n" +
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"prompt_tokens_details\":{\"cached_tokens\":1}}}\n\n" +
 			"data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -715,8 +715,8 @@ func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrame
 	if err != nil {
 		t.Fatalf("Stream error: %v", err)
 	}
-	if len(events) < 2 {
-		t.Fatalf("expected at least delta + completed events, got %#v", events)
+	if len(events) < 3 {
+		t.Fatalf("expected created + delta + completed events, got %#v", events)
 	}
 	completed := events[len(events)-1]
 	if completed.Event != "response.completed" {
@@ -735,8 +735,8 @@ func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrame
 	if got := response["finish_reason"]; got != "stop" {
 		t.Fatalf("expected finish_reason stop on completed event, got %#v events=%#v", got, events)
 	}
-	if len(events) != 2 {
-		t.Fatalf("expected no extra terminal event after usage-only frame, got %#v", events)
+	if len(events) != 3 {
+		t.Fatalf("expected created + delta + completed events only, got %#v", events)
 	}
 }
 
