@@ -50,7 +50,7 @@ func Default() Config {
 		ListenAddr:                  ":21021",
 		CacheInfoTimezone:           "Asia/Shanghai",
 		LogEnable:                   true,
-		ConnectTimeout:              10 * time.Second,
+		ConnectTimeout:              30 * time.Second,
 		FirstByteTimeout:            20 * time.Minute,
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
