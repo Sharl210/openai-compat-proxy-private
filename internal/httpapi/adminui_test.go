@@ -220,6 +220,9 @@ func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "visible.txt"), []byte("shown"), 0o644); err != nil {
 		t.Fatalf("write txt file: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "visible.ndjson"), []byte("{\"a\":1}\n{\"a\":2}\n"), 0o644); err != nil {
+		t.Fatalf("write ndjson file: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=", nil)
 	req.AddCookie(cookie)
 	req.Header.Set("X-Admin-CSRF", csrf)
@@ -247,6 +250,53 @@ func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	}
 	if !slices.Contains(names, "visible.txt") {
 		t.Fatalf("expected visible.txt shown in tree, got %v", names)
+	}
+	if !slices.Contains(names, "visible.ndjson") {
+		t.Fatalf("expected visible.ndjson shown in tree, got %v", names)
+	}
+}
+
+func TestAdminUIReadNDJSONFileUsesJSONLanguage(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), "sample.ndjson"), []byte("{\"a\":1}\n{\"a\":2}\n"), 0o644); err != nil {
+		t.Fatalf("write ndjson file: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/file?path=sample.ndjson", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected ndjson file 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	if data["mode"] != "text" {
+		t.Fatalf("expected ndjson mode text, got %#v", data["mode"])
+	}
+	if data["language"] != "json" {
+		t.Fatalf("expected ndjson language json, got %#v", data["language"])
+	}
+}
+
+func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected css asset 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, ".code-editor-textarea {") || !strings.Contains(body, "width: 100%;") {
+		t.Fatalf("expected text editor css to enforce full-width textarea, got %s", body)
+	}
+	if !strings.Contains(body, ".title-file-pill {") || !strings.Contains(body, "max-width: 10ch;") {
+		t.Fatalf("expected editor title pill css to clamp filename width to 10ch, got %s", body)
 	}
 }
 

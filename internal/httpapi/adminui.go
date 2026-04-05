@@ -345,7 +345,7 @@ func (a *adminUI) isVisibleTreeFile(parentDir string, name string) bool {
 	if lower == "agents.md" {
 		return false
 	}
-	if lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json") {
+	if lower == ".env" || strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".txt") || strings.HasSuffix(lower, ".json") || strings.HasSuffix(lower, ".ndjson") {
 		return true
 	}
 	return strings.HasSuffix(lower, ".md") && a.isProvidersDirectory(parentDir)
@@ -1238,7 +1238,7 @@ func detectAdminLanguage(rel string) string {
 	switch strings.ToLower(filepath.Ext(rel)) {
 	case ".md":
 		return "markdown"
-	case ".json":
+	case ".json", ".ndjson":
 		return "json"
 	case ".go":
 		return "go"
