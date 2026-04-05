@@ -83,6 +83,10 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
+		if msg.Role == "user" && len(toolResults) > 0 {
+			canon.Messages = append(canon.Messages, toolResults...)
+			toolResults = nil
+		}
 		if len(parts) > 0 {
 			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls})
 			toolCalls = nil

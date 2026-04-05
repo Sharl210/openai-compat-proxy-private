@@ -1127,6 +1127,13 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 			pendingToolResults = append(pendingToolResults, map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": buildAnthropicToolResultContent(msg.Parts)})
 			continue
 		}
+		if len(pendingToolResults) > 0 && msg.Role == "user" && len(msg.ToolCalls) == 0 {
+			content := append([]any{}, pendingToolResults...)
+			content = append(content, buildAnthropicContentParts(msg.Parts)...)
+			messages = append(messages, map[string]any{"role": "user", "content": content})
+			pendingToolResults = nil
+			continue
+		}
 		pendingToolResults = appendPendingToolResults(pendingToolResults)
 		content := buildAnthropicContentParts(msg.Parts)
 		if msg.Role == "assistant" && msg.ReasoningContent != "" {

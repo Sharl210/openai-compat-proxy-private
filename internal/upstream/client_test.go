@@ -342,6 +342,37 @@ func TestBuildAnthropicMessagesMergesAdjacentToolResultsIntoSingleUserMessage(t 
 	}
 }
 
+func TestBuildAnthropicMessagesMergesPendingToolResultsWithFollowingUserText(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"hello"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"items":[]}`}}},
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续处理"}}},
+	}})
+
+	if len(messages) != 2 {
+		t.Fatalf("expected assistant message plus single merged user message, got %#v", messages)
+	}
+	userMsg, _ := messages[1].(map[string]any)
+	if got, _ := userMsg["role"].(string); got != "user" {
+		t.Fatalf("expected second message role user, got %#v", userMsg)
+	}
+	content, _ := userMsg["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected merged tool_result plus trailing text, got %#v", userMsg)
+	}
+	first, _ := content[0].(map[string]any)
+	second, _ := content[1].(map[string]any)
+	if first["type"] != "tool_result" {
+		t.Fatalf("expected first block tool_result, got %#v", userMsg)
+	}
+	if first["tool_use_id"] != "call_1" {
+		t.Fatalf("expected tool_result to preserve call id, got %#v", userMsg)
+	}
+	if second["type"] != "text" || second["text"] != "继续处理" {
+		t.Fatalf("expected trailing user text in same message, got %#v", userMsg)
+	}
+}
+
 func TestBuildAnthropicMessagesPreservesAssistantReasoningContentAsThinkingBlock(t *testing.T) {
 	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
 		Role:             "assistant",

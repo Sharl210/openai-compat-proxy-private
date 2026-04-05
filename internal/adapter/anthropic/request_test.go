@@ -216,6 +216,40 @@ func TestDecodeRequestPreservesToolResultMultimodalContent(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestKeepsToolResultAheadOfTrailingUserText(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"messages":[
+			{
+				"role":"assistant",
+				"content":[{"type":"tool_use","id":"call_1","name":"search_web","input":{"query":"hello"}}]
+			},
+			{
+				"role":"user",
+				"content":[
+					{"type":"tool_result","tool_use_id":"call_1","content":"{\"items\":[]}"},
+					{"type":"text","text":"继续处理"}
+				]
+			}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 3 {
+		t.Fatalf("expected 3 canonical messages, got %#v", canon.Messages)
+	}
+	if canon.Messages[1].Role != "tool" || canon.Messages[1].ToolCallID != "call_1" {
+		t.Fatalf("expected tool result before trailing user text, got %#v", canon.Messages)
+	}
+	if canon.Messages[2].Role != "user" || len(canon.Messages[2].Parts) != 1 || canon.Messages[2].Parts[0].Text != "继续处理" {
+		t.Fatalf("expected trailing user text as final message, got %#v", canon.Messages[2])
+	}
+}
+
 func TestDecodeRequestPreservesThinkingConfig(t *testing.T) {
 	req := `{
 		"model":"claude-sonnet-4-5",
