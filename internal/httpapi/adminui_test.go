@@ -805,6 +805,63 @@ func TestAdminUIRenameProviderEnvRewritesProviderIDAndDeleteRemovesFile(t *testi
 	}
 }
 
+func TestAdminUICopyRenameAndDeleteDirectory(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	sourceDir := filepath.Join(server.admin.rootDir(), "providers", "menus")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "child.txt"), []byte("hello dir\n"), 0o640); err != nil {
+		t.Fatalf("write child file: %v", err)
+	}
+
+	copyRec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"path": "providers/menus",
+		"name": "menus-副本",
+		"kind": "copy",
+	}, []*http.Cookie{cookie}, csrf)
+	if copyRec.Code != http.StatusOK {
+		t.Fatalf("expected directory copy 200, got %d body=%s", copyRec.Code, copyRec.Body.String())
+	}
+	copyPath := filepath.Join(server.admin.rootDir(), "providers", "menus-副本", "child.txt")
+	copyContent, err := os.ReadFile(copyPath)
+	if err != nil {
+		t.Fatalf("read copied directory child: %v", err)
+	}
+	if string(copyContent) != "hello dir\n" {
+		t.Fatalf("expected copied directory content preserved, got %q", string(copyContent))
+	}
+
+	renameRec := adminJSONRequest(t, server, http.MethodPatch, "/_admin/api/file", map[string]any{
+		"path":     "providers/menus",
+		"new_name": "menus-renamed",
+	}, []*http.Cookie{cookie}, csrf)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("expected directory rename 200, got %d body=%s", renameRec.Code, renameRec.Body.String())
+	}
+	renamedChild := filepath.Join(server.admin.rootDir(), "providers", "menus-renamed", "child.txt")
+	if _, err := os.Stat(renamedChild); err != nil {
+		t.Fatalf("expected renamed directory child to exist, err=%v", err)
+	}
+	if _, err := os.Stat(sourceDir); !os.IsNotExist(err) {
+		t.Fatalf("expected original directory moved away, err=%v", err)
+	}
+
+	deleteRec := adminJSONRequest(t, server, http.MethodDelete, "/_admin/api/file", map[string]any{
+		"path": "providers/menus-renamed",
+	}, []*http.Cookie{cookie}, csrf)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected directory delete 200, got %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(server.admin.rootDir(), "providers", "menus-renamed")); !os.IsNotExist(err) {
+		t.Fatalf("expected renamed directory deleted, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(server.admin.rootDir(), "providers", "menus-副本")); err != nil {
+		t.Fatalf("expected copied directory to remain after deleting renamed source, err=%v", err)
+	}
+}
+
 func TestAdminUISaveProviderEnvRewritesFilenameFromProviderID(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)

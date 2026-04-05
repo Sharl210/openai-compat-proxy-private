@@ -824,6 +824,24 @@ func (a *adminUI) requireCSRF(r *http.Request) error {
 }
 
 func (a *adminUI) resolvePath(rel string, wantDir bool) (string, error) {
+	resolvedPath, err := a.resolvePathAny(rel)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(resolvedPath)
+	if err != nil {
+		return "", err
+	}
+	if wantDir && !info.IsDir() {
+		return "", errors.New("path is not a directory")
+	}
+	if !wantDir && info.IsDir() {
+		return "", errors.New("path is a directory")
+	}
+	return resolvedPath, nil
+}
+
+func (a *adminUI) resolvePathAny(rel string) (string, error) {
 	root := a.rootDir()
 	if root == "" {
 		return "", errors.New("admin root unavailable")
@@ -842,12 +860,6 @@ func (a *adminUI) resolvePath(rel string, wantDir bool) (string, error) {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("symlink targets are not editable from admin ui")
-	}
-	if wantDir && !info.IsDir() {
-		return "", errors.New("path is not a directory")
-	}
-	if !wantDir && info.IsDir() {
-		return "", errors.New("path is a directory")
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -948,7 +960,7 @@ func (a *adminUI) copyAdminFile(path string, newName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := a.resolvePath(path, false)
+	resolved, err := a.resolvePathAny(path)
 	if err != nil {
 		return "", err
 	}
@@ -956,8 +968,8 @@ func (a *adminUI) copyAdminFile(path string, newName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("only regular files can be copied")
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("symlink targets are not editable from admin ui")
 	}
 	targetPath := filepath.Join(filepath.Dir(resolved), cleanName)
 	if _, err := os.Stat(targetPath); err == nil {
@@ -965,15 +977,21 @@ func (a *adminUI) copyAdminFile(path string, newName string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	content, err := os.ReadFile(resolved)
-	if err != nil {
-		return "", err
-	}
-	if a.isProviderEnvFile(resolved) && strings.HasSuffix(cleanName, ".env") {
-		content = []byte(rewriteProviderID(string(content), strings.TrimSuffix(cleanName, ".env")))
-	}
-	if err := os.WriteFile(targetPath, content, info.Mode().Perm()); err != nil {
-		return "", err
+	if info.IsDir() {
+		if err := copyAdminEntry(resolved, targetPath); err != nil {
+			return "", err
+		}
+	} else {
+		content, err := os.ReadFile(resolved)
+		if err != nil {
+			return "", err
+		}
+		if a.isProviderEnvFile(resolved) && strings.HasSuffix(cleanName, ".env") {
+			content = []byte(rewriteProviderID(string(content), strings.TrimSuffix(cleanName, ".env")))
+		}
+		if err := os.WriteFile(targetPath, content, info.Mode().Perm()); err != nil {
+			return "", err
+		}
 	}
 	root := a.rootDir()
 	rel, err := filepath.Rel(root, targetPath)
@@ -988,7 +1006,7 @@ func (a *adminUI) renameAdminFile(path string, newName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := a.resolvePath(path, false)
+	resolved, err := a.resolvePathAny(path)
 	if err != nil {
 		return "", err
 	}
@@ -996,8 +1014,8 @@ func (a *adminUI) renameAdminFile(path string, newName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("only regular files can be renamed")
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("symlink targets are not editable from admin ui")
 	}
 	newPath := filepath.Join(filepath.Dir(resolved), cleanName)
 	if _, err := os.Stat(newPath); err == nil {
@@ -1005,7 +1023,7 @@ func (a *adminUI) renameAdminFile(path string, newName string) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	if a.isProviderEnvFile(resolved) && strings.HasSuffix(cleanName, ".env") {
+	if !info.IsDir() && a.isProviderEnvFile(resolved) && strings.HasSuffix(cleanName, ".env") {
 		content, err := os.ReadFile(resolved)
 		if err != nil {
 			return "", err
@@ -1026,7 +1044,7 @@ func (a *adminUI) renameAdminFile(path string, newName string) (string, error) {
 }
 
 func (a *adminUI) deleteAdminFile(path string) error {
-	resolved, err := a.resolvePath(path, false)
+	resolved, err := a.resolvePathAny(path)
 	if err != nil {
 		return err
 	}
@@ -1034,10 +1052,43 @@ func (a *adminUI) deleteAdminFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("only regular files can be deleted")
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("symlink targets are not editable from admin ui")
+	}
+	if info.IsDir() {
+		return os.RemoveAll(resolved)
 	}
 	return os.Remove(resolved)
+}
+
+func copyAdminEntry(sourcePath string, targetPath string) error {
+	info, err := os.Lstat(sourcePath)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("symlink targets are not editable from admin ui")
+	}
+	if info.IsDir() {
+		if err := os.Mkdir(targetPath, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(sourcePath)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := copyAdminEntry(filepath.Join(sourcePath, entry.Name()), filepath.Join(targetPath, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(targetPath, content, info.Mode().Perm())
 }
 
 func (a *adminUI) canCreateEnvInDir(resolved string) bool {
