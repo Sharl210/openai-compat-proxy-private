@@ -20,7 +20,7 @@
 | 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0` 与 `$1..$N` 占位符、`MANUAL_MODELS` |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
-| 调试归档 | ✅ | `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 写出 `request/raw/canonical/final.ndjson` |
+| 调试归档 | ✅ | `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 写出 `request/raw/canonical/final.ndjson`，并复用 `LOG_MAX_REQUESTS` 清理旧 request_id 目录 |
 | 健康检查与 Linux 部署脚本 | ✅ | 自带 `healthz`、deploy / restart / stop / uninstall |
 | 内置 Web 管理台 | ✅ | 裸根路径 `/` 提供 Material 3 风格管理界面：文件浏览 / 文件编辑 / 运行状态 |
 
@@ -127,8 +127,8 @@ http://127.0.0.1:21021/
 
 管理台当前提供：
 
-- **文件浏览**：按项目根目录浏览目录，以及 `.env / *.env / *.txt / *.json` 文件；`.example` 模板文件默认不直接显示在文件列表里；`.md` 文件只会在 `providers/` 顶层显示，根目录和 providers 子目录都不会直接显示；日志目录按最新修改时间优先显示
-- **文件编辑**：紧凑顶栏显示当前文件，点击文件名可查看完整路径；编辑器默认不自动换行，可横向滚动查看长内容
+- **文件浏览**：按项目根目录浏览目录，以及 `.env / *.env / *.txt / *.json / *.ndjson` 文件；`.example` 模板文件默认不直接显示在文件列表里；`.md` 文件只会在 `providers/` 顶层显示，根目录和 providers 子目录都不会直接显示；日志目录按最新修改时间优先显示
+- **文件编辑**：紧凑顶栏显示当前文件，点击文件名可查看完整路径；顶部文件名会自动截断，避免把保存按钮挤出屏幕；编辑器默认不自动换行，可横向滚动查看长内容
 - **`.env` 专用双模式编辑**：支持“条目式 / 源文式”滑动切换；条目式里字段名固定、注释只读；`LISTEN_ADDR` 为纯端口时无需手写前导冒号；移动端也支持继续缩小编辑器字号，以便同屏显示更多内容
 - **管理动作**：
   - 根目录只有在 `.env` **不存在**时才显示“新建 env”，点击后会直接按根模板创建 `.env`
@@ -319,6 +319,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
   - `raw.ndjson`
   - `canonical.ndjson`
   - `final.ndjson`
+  - 目录最大保留数量复用 `LOG_MAX_REQUESTS`，超过后按目录修改时间自动清理旧 request_id 目录
 
 ---
 
