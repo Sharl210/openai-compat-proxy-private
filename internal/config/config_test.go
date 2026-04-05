@@ -17,6 +17,12 @@ func TestDefaultCacheInfoTimezoneIsAsiaShanghai(t *testing.T) {
 	}
 }
 
+func TestDefaultDebugArchiveRootDirUsesNamedDirectory(t *testing.T) {
+	if got := Default().DebugArchiveRootDir; got != "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR" {
+		t.Fatalf("expected default debug archive root dir %q, got %q", "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR", got)
+	}
+}
+
 func TestLoadFromEnvParsesDownstreamNonStreamStrategy(t *testing.T) {
 	t.Setenv("DOWNSTREAM_NON_STREAM_STRATEGY", DownstreamNonStreamStrategyUpstreamNonStream)
 
@@ -74,6 +80,13 @@ func TestLoadFromEnvParsesTimeouts(t *testing.T) {
 	}
 	if cfg.TotalTimeout != 12*time.Minute {
 		t.Fatalf("expected TotalTimeout 12m, got %v", cfg.TotalTimeout)
+	}
+}
+
+func TestLoadFromValuesAllowsExplicitlyDisablingDebugArchive(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{"OPENAI_COMPAT_DEBUG_ARCHIVE_DIR": ""})
+	if cfg.DebugArchiveRootDir != "" {
+		t.Fatalf("expected explicit empty debug archive dir to disable archive, got %q", cfg.DebugArchiveRootDir)
 	}
 }
 

@@ -60,91 +60,97 @@ func Default() Config {
 		LogFilePath:                 "logs",
 		LogMaxRequests:              50,
 		LogMaxBodySizeMB:            5.0,
+		DebugArchiveRootDir:         "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR",
 	}
 }
 
 func LoadFromEnv() Config {
-	return loadFromLookup(os.Getenv)
+	return loadFromLookup(os.LookupEnv)
 }
 
 func LoadFromValues(values map[string]string) Config {
-	return loadFromLookup(func(key string) string {
-		return values[key]
+	return loadFromLookup(func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
 	})
 }
 
-func loadFromLookup(lookup func(string) string) Config {
+func loadFromLookup(lookup func(string) (string, bool)) Config {
 	cfg := Default()
-	if value := lookup("LISTEN_ADDR"); value != "" {
+	if value, ok := lookup("LISTEN_ADDR"); ok && value != "" {
 		cfg.ListenAddr = normalizeListenAddr(value)
 	}
-	if value := lookup("CACHE_INFO_TIMEZONE"); value != "" {
+	if value, ok := lookup("CACHE_INFO_TIMEZONE"); ok && value != "" {
 		cfg.CacheInfoTimezone = value
 	}
-	if value := lookup("PROXY_API_KEY"); value != "" {
+	if value, ok := lookup("PROXY_API_KEY"); ok && value != "" {
 		cfg.ProxyAPIKey = value
 	}
-	if value := lookup("PROVIDERS_DIR"); value != "" {
+	if value, ok := lookup("PROVIDERS_DIR"); ok && value != "" {
 		cfg.ProvidersDir = value
 	}
-	if value := lookup("DEFAULT_PROVIDER"); value != "" {
+	if value, ok := lookup("DEFAULT_PROVIDER"); ok && value != "" {
 		cfg.DefaultProvider = value
 	}
-	if value := lookup("ENABLE_LEGACY_V1_ROUTES"); value != "" {
+	if value, ok := lookup("ENABLE_LEGACY_V1_ROUTES"); ok && value != "" {
 		cfg.EnableLegacyV1Routes = parseRootBool(value)
 	}
-	if value := lookup("DOWNSTREAM_NON_STREAM_STRATEGY"); value != "" {
+	if value, ok := lookup("DOWNSTREAM_NON_STREAM_STRATEGY"); ok && value != "" {
 		if normalized, err := normalizeDownstreamNonStreamStrategy(value); err == nil {
 			cfg.DownstreamNonStreamStrategy = normalized
 		}
 	}
-	if value := lookup("LOG_ENABLE"); value != "" {
+	if value, ok := lookup("LOG_ENABLE"); ok && value != "" {
 		cfg.LogEnable = parseRootBool(value)
 	}
-	if value := lookup("LOG_FILE_PATH"); value != "" {
+	if value, ok := lookup("LOG_FILE_PATH"); ok && value != "" {
 		cfg.LogFilePath = value
 	}
-	if value := lookup("LOG_MAX_REQUESTS"); value != "" {
+	if value, ok := lookup("LOG_MAX_REQUESTS"); ok && value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
 			cfg.LogMaxRequests = parsed
 		}
 	}
-	if value := lookup("LOG_MAX_BODY_SIZE_MB"); value != "" {
+	if value, ok := lookup("LOG_MAX_BODY_SIZE_MB"); ok && value != "" {
 		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed >= 0 {
 			cfg.LogMaxBodySizeMB = parsed
 		}
 	}
-	if value := lookup("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR"); value != "" {
+	if value, ok := lookup("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR"); ok {
 		cfg.DebugArchiveRootDir = value
 	}
-	if value := lookup("CONNECT_TIMEOUT"); value != "" {
+	if value, ok := lookup("CONNECT_TIMEOUT"); ok && value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.ConnectTimeout = parsed
 		}
 	}
-	if value := lookup("FIRST_BYTE_TIMEOUT"); value != "" {
+	if value, ok := lookup("FIRST_BYTE_TIMEOUT"); ok && value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.FirstByteTimeout = parsed
 		}
 	}
-	if value := lookup("IDLE_TIMEOUT"); value != "" {
+	if value, ok := lookup("IDLE_TIMEOUT"); ok && value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.IdleTimeout = parsed
 		}
 	}
-	if value := lookup("TOTAL_TIMEOUT"); value != "" {
+	if value, ok := lookup("TOTAL_TIMEOUT"); ok && value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.TotalTimeout = parsed
 		}
 	}
-	if value := lookup("UPSTREAM_USER_AGENT"); value != "" {
+	if value, ok := lookup("UPSTREAM_USER_AGENT"); ok && value != "" {
 		cfg.UpstreamUserAgent = value
 	}
-	if value := lookup("UPSTREAM_MASQUERADE_TARGET"); value != "" {
+	if value, ok := lookup("UPSTREAM_MASQUERADE_TARGET"); ok && value != "" {
 		cfg.MasqueradeTarget = strings.ToLower(value)
 	}
-	cfg.InjectClaudeCodeMetadataUserID = strings.ToLower(lookup("UPSTREAM_INJECT_METADATA_USER_ID")) == "true"
-	cfg.InjectClaudeCodeSystemPrompt = strings.ToLower(lookup("UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT")) == "true"
+	if value, ok := lookup("UPSTREAM_INJECT_METADATA_USER_ID"); ok {
+		cfg.InjectClaudeCodeMetadataUserID = strings.ToLower(value) == "true"
+	}
+	if value, ok := lookup("UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT"); ok {
+		cfg.InjectClaudeCodeSystemPrompt = strings.ToLower(value) == "true"
+	}
 	return cfg
 }
 
