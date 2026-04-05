@@ -454,25 +454,23 @@ function bindEvents() {
   });
 
   document.querySelectorAll('[data-tree-open]').forEach((button) => {
-    if (button.dataset.type !== 'dir') {
-      let pressTimer = 0;
-      button.addEventListener('pointerdown', () => {
-        button.classList.add('danger-press');
-        pressTimer = window.setTimeout(() => {
-          button.dataset.longPressTriggered = 'true';
-          openTreeItemActionMenu(button.dataset.treeOpen);
-        }, 650);
+    let pressTimer = 0;
+    button.addEventListener('pointerdown', () => {
+      button.classList.add('danger-press');
+      pressTimer = window.setTimeout(() => {
+        button.dataset.longPressTriggered = 'true';
+        openTreeItemActionMenu(button.dataset.treeOpen, button.dataset.type);
+      }, 650);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((eventName) => {
+      button.addEventListener(eventName, () => {
+        if (pressTimer) {
+          window.clearTimeout(pressTimer);
+          pressTimer = 0;
+        }
+        button.classList.remove('danger-press');
       });
-      ['pointerup', 'pointerleave', 'pointercancel'].forEach((eventName) => {
-        button.addEventListener(eventName, () => {
-          if (pressTimer) {
-            window.clearTimeout(pressTimer);
-            pressTimer = 0;
-          }
-          button.classList.remove('danger-press');
-        });
-      });
-    }
+    });
     button.addEventListener('click', (event) => {
       if (button.dataset.longPressTriggered === 'true') {
         button.dataset.longPressTriggered = '';
@@ -1162,15 +1160,17 @@ function renderFileActionMenu() {
   if (!state.fileActionMenu?.path) {
     return '';
   }
+  const isDir = state.fileActionMenu.type === 'dir';
   return `
     <div id="file-action-backdrop" class="file-action-backdrop is-open"></div>
-    <div class="file-action-modal" role="dialog" aria-modal="true" aria-label="文件操作菜单">
+    <div class="file-action-modal" role="dialog" aria-modal="true" aria-label="条目操作菜单">
       <div class="file-action-title">${escapeHtml(displayFileName(state.fileActionMenu.path))}</div>
       <div class="file-action-buttons">
         <button id="file-action-copy" class="secondary-btn material-tonal-button" type="button">复制</button>
         <button id="file-action-rename" class="secondary-btn material-tonal-button" type="button">重命名</button>
         <button id="file-action-delete" class="secondary-btn material-outlined-button danger-btn" type="button">删除</button>
       </div>
+      <div class="muted file-action-kind">${isDir ? '目录操作' : '文件操作'}</div>
       <button id="file-action-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
     </div>
   `;
@@ -1317,8 +1317,8 @@ async function createMdFromCurrentDir() {
 	}
 }
 
-function openTreeItemActionMenu(path) {
-  state.fileActionMenu = { path };
+function openTreeItemActionMenu(path, type = 'file') {
+  state.fileActionMenu = { path, type };
   render();
 }
 
@@ -1402,6 +1402,7 @@ async function confirmClearCache() {
 
 async function renameTreeItemFromMenu() {
   const path = state.fileActionMenu?.path;
+  const isDir = state.fileActionMenu?.type === 'dir';
   if (!path) {
     return;
   }
@@ -1428,7 +1429,7 @@ async function renameTreeItemFromMenu() {
     } else {
       render();
     }
-    setToast('success', '文件已重命名');
+    setToast('success', isDir ? '目录已重命名' : '文件已重命名');
   } catch (error) {
     setToast('error', error.message || '重命名失败');
   }
@@ -1436,6 +1437,7 @@ async function renameTreeItemFromMenu() {
 
 async function copyTreeItemFromMenu() {
   const path = state.fileActionMenu?.path;
+  const isDir = state.fileActionMenu?.type === 'dir';
   if (!path) {
     return;
   }
@@ -1457,8 +1459,12 @@ async function copyTreeItemFromMenu() {
       },
     });
     await loadTree(state.currentDir);
-    await openFile(data.path);
-    setToast('success', '文件已复制');
+    if (isDir) {
+      render();
+    } else {
+      await openFile(data.path);
+    }
+    setToast('success', isDir ? '目录已复制' : '文件已复制');
   } catch (error) {
     setToast('error', error.message || '复制失败');
   }
@@ -1466,11 +1472,12 @@ async function copyTreeItemFromMenu() {
 
 async function deleteTreeItemFromMenu() {
   const path = state.fileActionMenu?.path;
+  const isDir = state.fileActionMenu?.type === 'dir';
   state.fileActionMenu = null;
   if (!path) {
     return;
   }
-  if (!window.confirm('确定删除这个文件？')) {
+  if (!window.confirm(isDir ? '确定删除这个目录及其内容？' : '确定删除这个文件？')) {
     render();
     return;
   }
@@ -1485,7 +1492,7 @@ async function deleteTreeItemFromMenu() {
       return;
     }
     render();
-    setToast('success', '文件已删除');
+    setToast('success', isDir ? '目录已删除' : '文件已删除');
   } catch (error) {
     setToast('error', error.message || '删除失败');
   }
