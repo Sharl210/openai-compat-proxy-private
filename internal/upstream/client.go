@@ -1324,17 +1324,35 @@ func parseSSEStreaming(resp *http.Response, onEvent func(Event) error) error {
 }
 
 func consumeSSEScanner(scanner *bufio.Scanner, onEvent func(Event) error) error {
+	seenEvent := false
+	seenTerminal := false
 	for {
 		evt, err := readNextSSEEvent(scanner)
 		if err != nil {
 			return err
 		}
 		if evt == nil {
+			if seenEvent && !seenTerminal {
+				return io.ErrUnexpectedEOF
+			}
 			return nil
+		}
+		seenEvent = true
+		if isTerminalStreamEvent(*evt) {
+			seenTerminal = true
 		}
 		if err := onEvent(*evt); err != nil {
 			return err
 		}
+	}
+}
+
+func isTerminalStreamEvent(evt Event) bool {
+	switch evt.Event {
+	case "response.completed", "response.incomplete", "response.done":
+		return true
+	default:
+		return false
 	}
 }
 

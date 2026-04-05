@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -411,15 +412,17 @@ func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{
 		Body: io.NopCloser(strings.NewReader("event: response.output_item.done\n" +
-			"data: {\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + large + "\"}}\n\n")),
+			"data: {\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + large + "\"}}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")),
 	}
 
 	events, err := parseSSE(resp)
 	if err != nil {
 		t.Fatalf("parseSSE error: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected one event, got %#v", events)
+	if len(events) != 2 {
+		t.Fatalf("expected two events, got %#v", events)
 	}
 	item, _ := events[0].Data["item"].(map[string]any)
 	if got, _ := item["encrypted_content"].(string); got != large {
@@ -431,20 +434,44 @@ func TestParseSSEStreamingAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("y", 128*1024)
 	resp := &http.Response{
 		Body: io.NopCloser(strings.NewReader("event: response.output_item.done\n" +
-			"data: {\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + large + "\"}}\n\n")),
+			"data: {\"item\":{\"type\":\"reasoning\",\"encrypted_content\":\"" + large + "\"}}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")),
 	}
 
-	var seen Event
+	var seen []Event
 	err := parseSSEStreaming(resp, func(evt Event) error {
-		seen = evt
+		seen = append(seen, evt)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("parseSSEStreaming error: %v", err)
 	}
-	item, _ := seen.Data["item"].(map[string]any)
+	if len(seen) != 2 {
+		t.Fatalf("expected two events, got %#v", seen)
+	}
+	item, _ := seen[0].Data["item"].(map[string]any)
 	if got, _ := item["encrypted_content"].(string); got != large {
 		t.Fatalf("expected encrypted_content length %d, got %d", len(large), len(got))
+	}
+}
+
+func TestParseSSEStreamingReturnsUnexpectedEOFWhenStreamEndsWithoutTerminalEvent(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n")),
+	}
+
+	var events []Event
+	err := parseSSEStreaming(resp, func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected unexpected EOF, got %v", err)
+	}
+	if len(events) != 1 || events[0].Event != "response.output_text.delta" {
+		t.Fatalf("expected streamed delta before EOF, got %#v", events)
 	}
 }
 

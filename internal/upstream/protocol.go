@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -213,15 +214,24 @@ func consumeSSEScannerWithReader(scanner *bufio.Scanner, readNext func(*bufio.Sc
 	if readNext == nil {
 		readNext = readNextResponsesEventBatch
 	}
+	seenEvent := false
+	seenTerminal := false
 	for {
 		events, err := readNext(scanner)
 		if err != nil {
 			return err
 		}
 		if len(events) == 0 {
+			if seenEvent && !seenTerminal {
+				return io.ErrUnexpectedEOF
+			}
 			return nil
 		}
 		for _, evt := range events {
+			seenEvent = true
+			if isTerminalStreamEvent(evt) {
+				seenTerminal = true
+			}
 			if err := onEvent(evt); err != nil {
 				return err
 			}
