@@ -58,6 +58,7 @@ func aggregateStats(timezone string, today time.Time, statsList []*ProviderStats
 func addTokenTotals(dst, src TokenTotals) TokenTotals {
 	dst.InputTokens += src.InputTokens
 	dst.CachedTokens += src.CachedTokens
+	dst.CacheCreationTokens += src.CacheCreationTokens
 	dst.OutputTokens += src.OutputTokens
 	dst.TotalTokens += src.TotalTokens
 	dst.RequestCount += src.RequestCount

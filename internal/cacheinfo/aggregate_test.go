@@ -84,3 +84,16 @@ func TestLoadAllProviderStats_SkipsCorruptJSONWithLog(t *testing.T) {
 		t.Fatalf("expected corrupt-json log, got %q", buf.String())
 	}
 }
+
+func TestAddTokenTotalsIncludesCacheCreationTokens(t *testing.T) {
+	got := addTokenTotals(
+		TokenTotals{InputTokens: 10, CachedTokens: 2, CacheCreationTokens: 3, OutputTokens: 4, TotalTokens: 14, RequestCount: 1},
+		TokenTotals{InputTokens: 20, CachedTokens: 5, CacheCreationTokens: 7, OutputTokens: 8, TotalTokens: 28, RequestCount: 2},
+	)
+	if got.CacheCreationTokens != 10 {
+		t.Fatalf("expected aggregated cache creation tokens 10, got %#v", got)
+	}
+	if got.TotalTokens != 42 {
+		t.Fatalf("expected aggregated total tokens 42, got %#v", got)
+	}
+}
