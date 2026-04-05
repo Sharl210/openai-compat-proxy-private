@@ -269,6 +269,66 @@ func TestBuildRequestBodyPreservesInputFileAndStructuredToolOutput(t *testing.T)
 	}
 }
 
+func TestBuildRequestBodyPrefersStructuredToolOutputRaw(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:       "tool",
+			ToolCallID: "call_1",
+			Parts: []model.CanonicalContentPart{{
+				Type: "text",
+				Text: `{"items":[{"id":"v1"}]}`,
+				Raw:  map[string]any{"tool_output_structured": map[string]any{"items": []any{map[string]any{"id": "v1"}}}},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected one tool output item, got %#v", payload["input"])
+	}
+	toolOutput, _ := input[0].(map[string]any)
+	output, _ := toolOutput["output"].(map[string]any)
+	items, _ := output["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected structured tool output object, got %#v", toolOutput)
+	}
+}
+
+func TestBuildRequestBodyLeavesPlainTextToolOutputUntouched(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:       "tool",
+			ToolCallID: "call_1",
+			Parts: []model.CanonicalContentPart{{
+				Type: "text",
+				Text: `{"query":"hello"`,
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	toolOutput, _ := input[0].(map[string]any)
+	if got, _ := toolOutput["output"].(string); got != `{"query":"hello"` {
+		t.Fatalf("expected plain text tool output preserved verbatim, got %#v", toolOutput)
+	}
+}
+
 func TestBuildRequestBodyForwardsAssistantReasoningContentAsReasoningSummary(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
@@ -340,6 +400,46 @@ func TestBuildAnthropicMessagesMergesAdjacentToolResultsIntoSingleUserMessage(t 
 	}
 	if first["tool_use_id"] != "call_1" || second["tool_use_id"] != "call_2" {
 		t.Fatalf("expected merged tool_result order preserved, got %#v", userMsg)
+	}
+}
+
+func TestBuildAnthropicMessagesRepairsMalformedToolArguments(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
+		Role: "assistant",
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call_1",
+			Type:      "function",
+			Name:      "search_web",
+			Arguments: `{"query":"hello"`,
+		}},
+	}}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant message, got %#v", messages)
+	}
+	assistantMsg, _ := messages[0].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected one tool_use block, got %#v", assistantMsg)
+	}
+	toolUse, _ := content[0].(map[string]any)
+	input, _ := toolUse["input"].(map[string]any)
+	if got, _ := input["query"].(string); got != "hello" {
+		t.Fatalf("expected malformed tool arguments to be repaired into structured input, got %#v", toolUse)
+	}
+}
+
+func TestBuildAnthropicMessagesLeavesPlainTextToolResultUntouched(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"hello"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"query":"hello"`}}},
+	}})
+
+	userMsg, _ := messages[1].(map[string]any)
+	content, _ := userMsg["content"].([]any)
+	toolResult, _ := content[0].(map[string]any)
+	if got, _ := toolResult["content"].(string); got != `{"query":"hello"` {
+		t.Fatalf("expected plain text tool_result preserved verbatim, got %#v", toolResult)
 	}
 }
 

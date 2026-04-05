@@ -23,6 +23,12 @@ func TestDefaultDebugArchiveRootDirUsesNamedDirectory(t *testing.T) {
 	}
 }
 
+func TestDefaultLogMaxRequestsIsTwoHundred(t *testing.T) {
+	if got := Default().LogMaxRequests; got != 200 {
+		t.Fatalf("expected default log max requests 200, got %d", got)
+	}
+}
+
 func TestLoadFromEnvParsesDownstreamNonStreamStrategy(t *testing.T) {
 	t.Setenv("DOWNSTREAM_NON_STREAM_STRATEGY", DownstreamNonStreamStrategyUpstreamNonStream)
 

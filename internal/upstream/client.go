@@ -820,7 +820,7 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 					"type":      "function_call",
 					"call_id":   toolCall.ID,
 					"name":      toolCall.Name,
-					"arguments": toolCall.Arguments,
+					"arguments": sanitizeToolArguments(toolCall.Arguments),
 				})
 			}
 		}
@@ -1003,6 +1003,11 @@ func joinTextParts(parts []model.CanonicalContentPart) string {
 }
 
 func buildToolOutput(parts []model.CanonicalContentPart) any {
+	if len(parts) == 1 {
+		if structured := cloneToolOutputStructured(parts[0].Raw); structured != nil {
+			return structured
+		}
+	}
 	structured := normalizeContentParts(parts)
 	if len(structured) == 0 {
 		return ""
@@ -1028,6 +1033,17 @@ func buildToolOutput(parts []model.CanonicalContentPart) any {
 		return joinTextParts(parts)
 	}
 	return string(encoded)
+}
+
+func cloneToolOutputStructured(raw map[string]any) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	structured, ok := raw["tool_output_structured"]
+	if !ok || structured == nil {
+		return nil
+	}
+	return cloneJSONValue(structured)
 }
 
 func normalizeContentParts(parts []model.CanonicalContentPart) []map[string]any {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"openai-compat-proxy/internal/aggregate"
+	"openai-compat-proxy/internal/syntaxrepair"
 )
 
 func BuildResponse(result aggregate.Result, requestID string, modelName string) map[string]any {
@@ -124,8 +125,8 @@ func parseArguments(arguments string) any {
 	if arguments == "" {
 		return map[string]any{}
 	}
-	var decoded any
-	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
+	decoded, _, ok := syntaxrepair.ParseJSONValue(arguments)
+	if !ok {
 		return map[string]any{"raw": arguments}
 	}
 	return decoded

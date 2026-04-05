@@ -53,3 +53,28 @@ func TestResultFromResponsePayloadCopiesUsageIntoReasoning(t *testing.T) {
 		t.Fatalf("expected top-level usage.total_tokens to be preserved, got %#v", result.Usage)
 	}
 }
+
+func TestResultFromResponsePayloadRepairsMalformedToolArguments(t *testing.T) {
+	payload := map[string]any{
+		"output": []any{
+			map[string]any{
+				"type":      "function_call",
+				"id":        "fc_1",
+				"call_id":   "call_1",
+				"name":      "search_web",
+				"arguments": `{"query":"hello"`,
+			},
+		},
+	}
+
+	result, err := ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload returned error: %v", err)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %#v", result.ToolCalls)
+	}
+	if got := result.ToolCalls[0].Arguments; got != `{"query":"hello"}` {
+		t.Fatalf("expected malformed function arguments to be repaired, got %q", got)
+	}
+}

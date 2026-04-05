@@ -626,7 +626,7 @@ func TestProviderResponsesRouteStreamsMetadataAddedAndSingleArgumentsDoneForRikk
 	}
 }
 
-func TestProviderResponsesRouteDoesNotEmitMalformedFunctionArgumentsDoneForChatUpstream(t *testing.T) {
+func TestProviderResponsesRouteRepairsMalformedFunctionArgumentsDoneForChatUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
@@ -666,31 +666,31 @@ func TestProviderResponsesRouteDoesNotEmitMalformedFunctionArgumentsDoneForChatU
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	if strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
-		t.Fatalf("expected malformed tool arguments to avoid synthetic arguments.done emission, got %s", body)
+	if !strings.Contains(body, `"type":"response.output_item.added"`) || !strings.Contains(body, `"name":"scrape_web"`) {
+		t.Fatalf("expected repaired tool call metadata to emit added item, got %s", body)
 	}
-	if strings.Contains(body, `"type":"response.output_item.done"`) && strings.Contains(body, `"name":"scrape_web"`) {
-		t.Fatalf("expected malformed tool arguments to avoid completed function_call emission, got %s", body)
+	if !strings.Contains(body, `"type":"response.output_item.done"`) || !strings.Contains(body, `"parameters":{"url":"https://github.com/k3ss-official/g0dm"}`) {
+		t.Fatalf("expected repaired malformed tool arguments to emit completed function_call, got %s", body)
 	}
-	if strings.Contains(body, `"type":"response.output_item.added"`) && strings.Contains(body, `"name":"scrape_web"`) {
-		t.Fatalf("expected malformed tool call to be suppressed instead of leaving a dangling added item, got %s", body)
+	if !strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
+		t.Fatalf("expected repaired malformed tool arguments to emit synthetic arguments.done, got %s", body)
 	}
 }
 
-func TestResponsesStreamCompatibilitySuppressesMalformedFunctionArgumentsDone(t *testing.T) {
+func TestResponsesStreamCompatibilityRepairsMalformedFunctionArgumentsDone(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "call_1", "type": "function_call", "call_id": "call_1", "name": "scrape_web", "arguments": `{"url": "https://github.com/k3ss-official/g0dm`}}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	if strings.Contains(body, `{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
-		t.Fatalf("expected malformed arguments to avoid function_call_arguments.done emission, got %s", body)
+	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+		t.Fatalf("expected repaired malformed tool call to emit added metadata item, got %s", body)
 	}
-	if strings.Contains(body, `{"item":{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm","call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.done"}`) {
-		t.Fatalf("expected malformed arguments to avoid completed function_call emission, got %s", body)
+	if !strings.Contains(body, `{"item":{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://github.com/k3ss-official/g0dm"},"type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected repaired malformed arguments to emit completed function_call, got %s", body)
 	}
-	if strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
-		t.Fatalf("expected malformed tool call to be fully suppressed, got %s", body)
+	if !strings.Contains(body, `{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected repaired arguments to emit function_call_arguments.done, got %s", body)
 	}
 }
 

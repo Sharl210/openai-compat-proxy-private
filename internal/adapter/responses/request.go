@@ -305,7 +305,7 @@ func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error
 		if err != nil {
 			return nil, err
 		}
-		return []model.CanonicalContentPart{{Type: "text", Text: string(encoded)}}, nil
+		return []model.CanonicalContentPart{{Type: "text", Text: string(encoded), Raw: map[string]any{"tool_output_structured": typed}}}, nil
 	}
 }
 

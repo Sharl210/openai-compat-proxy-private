@@ -58,7 +58,7 @@ func Default() Config {
 		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 "logs",
-		LogMaxRequests:              50,
+		LogMaxRequests:              200,
 		LogMaxBodySizeMB:            5.0,
 		DebugArchiveRootDir:         "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR",
 	}

@@ -13,6 +13,7 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -223,10 +224,14 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 			continue
 		}
 		itemCopy := cloneJSONValueForResponse(toolState.item).(map[string]any)
+		arguments := toolState.arguments.String()
 		if toolState.arguments.Len() > 0 {
-			itemCopy["arguments"] = toolState.arguments.String()
+			if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
+				arguments = repaired
+			}
+			itemCopy["arguments"] = arguments
 		}
-		if compatCompleteToolArgs && toolState.arguments.Len() > 0 && !isValidToolArgumentsJSON(toolState.arguments.String()) {
+		if compatCompleteToolArgs && toolState.arguments.Len() > 0 && !isValidToolArgumentsJSON(arguments) {
 			continue
 		}
 		if compatCompleteToolArgs && !toolState.addedSent {
@@ -238,7 +243,7 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 		}
 		h.addToolItemDoneEvent(itemCopy)
 		if compatCompleteToolArgs && toolState.arguments.Len() > 0 {
-			h.addFunctionCallArgumentsDoneEvent(itemID, toolState.arguments.String())
+			h.addFunctionCallArgumentsDoneEvent(itemID, arguments)
 		}
 		toolState.doneSent = true
 	}
@@ -401,6 +406,10 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				toolState := h.ensureToolItemState(itemID)
 				toolState.item = cloneJSONValueForResponse(item).(map[string]any)
 				if args, _ := item["arguments"].(string); args != "" {
+					if repaired, ok := syntaxrepair.RepairJSON(args); ok {
+						args = repaired
+						item["arguments"] = repaired
+					}
 					toolState.arguments.Reset()
 					toolState.arguments.WriteString(args)
 				}
@@ -937,9 +946,12 @@ func withParsedToolParameters(item map[string]any) map[string]any {
 	if _, exists := item["parameters"]; exists {
 		return item
 	}
-	var parsedMap map[string]any
-	if err := json.Unmarshal([]byte(arguments), &parsedMap); err == nil && len(parsedMap) > 0 {
+	parsedMap, normalized, ok := syntaxrepair.ParseJSONObject(arguments)
+	if ok && len(parsedMap) > 0 {
 		itemCopy := cloneMap(item)
+		if normalized != arguments {
+			itemCopy["arguments"] = normalized
+		}
 		itemCopy["parameters"] = parsedMap
 		return itemCopy
 	}
@@ -951,7 +963,8 @@ func isValidToolArgumentsJSON(arguments string) bool {
 	if trimmed == "" {
 		return true
 	}
-	return json.Valid([]byte(trimmed))
+	_, _, ok := syntaxrepair.ParseJSONValue(trimmed)
+	return ok
 }
 
 func truncateForLog(text string, max int) string {
@@ -1283,6 +1296,9 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				if arguments == "" {
 					return nil
 				}
+				if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
+					arguments = repaired
+				}
 				state.toolDeltaSent = true
 				return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 					"type":  "content_block_delta",
@@ -1328,6 +1344,9 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 		if directArguments := stringValue(item["arguments"]); directArguments != "" {
 			arguments += directArguments
+		}
+		if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
+			arguments = repaired
 		}
 		delete(state.pendingToolArgs, itemID)
 		if rawItemID != "" && rawItemID != itemID {
@@ -1886,6 +1905,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 		toolDelta := chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], state.pendingToolArgs[itemID], true)
+		if repaired, ok := syntaxrepair.RepairJSON(state.pendingToolArgs[itemID]); ok {
+			toolDelta = chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], repaired, true)
+		}
 		if err := writeChatChunk(w, flusher, state, toolDelta, "", nil); err != nil {
 			return err
 		}
@@ -1945,6 +1967,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 					"call_id": stringValue(item["call_id"]),
 				}
 				if directArgs := stringValue(item["arguments"]); directArgs != "" {
+					if repaired, ok := syntaxrepair.RepairJSON(directArgs); ok {
+						directArgs = repaired
+					}
 					state.pendingToolArgs[itemID] = directArgs
 				}
 				if state.pendingToolArgs[itemID] != "" {

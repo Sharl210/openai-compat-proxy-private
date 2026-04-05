@@ -11,6 +11,7 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/syntaxrepair"
 )
 
 const (
@@ -973,58 +974,24 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 
 func sanitizeToolArguments(arguments string) string {
 	trimmed := strings.TrimSpace(arguments)
-	if trimmed == "" || json.Valid([]byte(trimmed)) {
+	if trimmed == "" {
 		return arguments
 	}
-	if normalized, ok := sanitizeRepeatedJSONObject(trimmed); ok {
+	if normalized, ok := syntaxrepair.RepairJSON(trimmed); ok {
 		return normalized
 	}
 	for i := 0; i < len(trimmed); i++ {
 		if trimmed[i] != '{' && trimmed[i] != '[' {
 			continue
 		}
-		if normalized, ok := sanitizeRepeatedJSONObject(trimmed[i:]); ok {
+		if normalized, ok := syntaxrepair.RepairJSON(trimmed[i:]); ok {
 			return normalized
 		}
 	}
+	if json.Valid([]byte(trimmed)) {
+		return arguments
+	}
 	return arguments
-}
-
-func sanitizeRepeatedJSONObject(input string) (string, bool) {
-	decoder := json.NewDecoder(strings.NewReader(input))
-	decoder.UseNumber()
-	var first any
-	if err := decoder.Decode(&first); err != nil {
-		return "", false
-	}
-	canonical, err := json.Marshal(first)
-	if err != nil {
-		return "", false
-	}
-	canonicalTrimmed := strings.TrimSpace(string(canonical))
-	if canonicalTrimmed == "" {
-		return "", false
-	}
-	offset := int(decoder.InputOffset())
-	if offset < 0 || offset > len(input) {
-		return "", false
-	}
-	remainder := strings.TrimSpace(input[offset:])
-	if remainder == "" {
-		return canonicalTrimmed, true
-	}
-	count := 1
-	for remainder != "" {
-		if !strings.HasPrefix(remainder, canonicalTrimmed) {
-			return "", false
-		}
-		remainder = strings.TrimSpace(strings.TrimPrefix(remainder, canonicalTrimmed))
-		count++
-	}
-	if count < 2 {
-		return "", false
-	}
-	return canonicalTrimmed, true
 }
 
 func buildChatContentParts(parts []model.CanonicalContentPart) []any {
@@ -1304,8 +1271,8 @@ func parseJSONArguments(arguments string) any {
 	if arguments == "" {
 		return map[string]any{}
 	}
-	var decoded any
-	if err := json.Unmarshal([]byte(arguments), &decoded); err != nil {
+	decoded, _, ok := syntaxrepair.ParseJSONValue(arguments)
+	if !ok {
 		return map[string]any{"raw": arguments}
 	}
 	return decoded

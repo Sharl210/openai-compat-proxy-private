@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -159,6 +160,10 @@ func (c *Collector) Accept(evt upstream.Event) {
 			call.CallID = callID
 		}
 		if arguments, _ := item["arguments"].(string); arguments != "" {
+			if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
+				arguments = repaired
+				item["arguments"] = repaired
+			}
 			call.Arguments = arguments
 		}
 	case "response.completed", "response.done":
@@ -212,7 +217,11 @@ func (c *Collector) Result() (Result, error) {
 	result.Refusal = c.refusal
 	result.FinishReason = c.finishReason
 	for _, id := range c.order {
-		result.ToolCalls = append(result.ToolCalls, *c.toolCalls[id])
+		call := *c.toolCalls[id]
+		if repaired, ok := syntaxrepair.RepairJSON(call.Arguments); ok {
+			call.Arguments = repaired
+		}
+		result.ToolCalls = append(result.ToolCalls, call)
 	}
 	if len(c.reasoning) > 0 {
 		result.Reasoning = c.reasoning

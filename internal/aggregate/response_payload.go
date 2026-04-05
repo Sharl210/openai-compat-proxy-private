@@ -3,6 +3,7 @@ package aggregate
 import (
 	"fmt"
 
+	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -37,6 +38,14 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 		item, _ := rawItem.(map[string]any)
 		if item == nil {
 			continue
+		}
+		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			if arguments, _ := item["arguments"].(string); arguments != "" {
+				if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
+					item = cloneMap(item)
+					item["arguments"] = repaired
+				}
+			}
 		}
 		result.ResponseOutputItems = append(result.ResponseOutputItems, cloneMap(item))
 		switch itemType, _ := item["type"].(string); itemType {
@@ -81,6 +90,9 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 				call.Name = name
 			}
 			if arguments, _ := item["arguments"].(string); arguments != "" {
+				if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
+					arguments = repaired
+				}
 				call.Arguments = arguments
 			}
 			result.ToolCalls = append(result.ToolCalls, call)

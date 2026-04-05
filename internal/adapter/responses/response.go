@@ -1,9 +1,8 @@
 package responses
 
 import (
-	"encoding/json"
-
 	"openai-compat-proxy/internal/aggregate"
+	"openai-compat-proxy/internal/syntaxrepair"
 )
 
 func BuildResponse(result aggregate.Result) map[string]any {
@@ -123,8 +122,8 @@ func parseToolParameters(arguments string) map[string]any {
 	if arguments == "" {
 		return nil
 	}
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(arguments), &parsed); err != nil || len(parsed) == 0 {
+	parsed, _, ok := syntaxrepair.ParseJSONObject(arguments)
+	if !ok || len(parsed) == 0 {
 		return nil
 	}
 	return parsed
