@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"openai-compat-proxy/internal/model"
@@ -15,14 +16,16 @@ type RawEventEnvelope struct {
 }
 
 type FinalSnapshot struct {
-	StatusCode int                `json:"status_code"`
-	Response   map[string]any     `json:"response,omitempty"`
-	Error      map[string]any     `json:"error,omitempty"`
+	StatusCode int            `json:"status_code"`
+	Response   map[string]any `json:"response,omitempty"`
+	Error      map[string]any `json:"error,omitempty"`
 }
 
 type ArchiveWriter struct {
 	baseDir   string
+	rootDir   string
 	requestID string
+	maxDirs   int
 
 	reqFile       *os.File
 	rawFile       *os.File
@@ -32,7 +35,13 @@ type ArchiveWriter struct {
 	mu sync.Mutex
 }
 
+var pruneMu sync.Mutex
+
 func NewArchiveWriter(rootDir, requestID string) *ArchiveWriter {
+	return NewArchiveWriterWithRetention(rootDir, requestID, 0)
+}
+
+func NewArchiveWriterWithRetention(rootDir, requestID string, maxDirs int) *ArchiveWriter {
 	reqDir := filepath.Join(rootDir, requestID)
 	if err := os.MkdirAll(reqDir, 0755); err != nil {
 		return nil
@@ -40,7 +49,9 @@ func NewArchiveWriter(rootDir, requestID string) *ArchiveWriter {
 
 	w := &ArchiveWriter{
 		baseDir:   reqDir,
+		rootDir:   rootDir,
 		requestID: requestID,
+		maxDirs:   maxDirs,
 	}
 
 	w.reqFile = w.openFile("request.ndjson")
@@ -93,25 +104,69 @@ func (w *ArchiveWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	var errs []error
 	if w.reqFile != nil {
-		errs = append(errs, w.reqFile.Close())
+		if err := w.reqFile.Close(); err != nil {
+			return err
+		}
 		w.reqFile = nil
 	}
 	if w.rawFile != nil {
-		errs = append(errs, w.rawFile.Close())
+		if err := w.rawFile.Close(); err != nil {
+			return err
+		}
 		w.rawFile = nil
 	}
 	if w.canonicalFile != nil {
-		errs = append(errs, w.canonicalFile.Close())
+		if err := w.canonicalFile.Close(); err != nil {
+			return err
+		}
 		w.canonicalFile = nil
 	}
 	if w.finalFile != nil {
-		errs = append(errs, w.finalFile.Close())
+		if err := w.finalFile.Close(); err != nil {
+			return err
+		}
 		w.finalFile = nil
 	}
-	if len(errs) > 0 {
-		return errs[0]
-	}
+	w.cleanupOldRequestDirs()
 	return nil
+}
+
+func (w *ArchiveWriter) cleanupOldRequestDirs() {
+	if w == nil || w.rootDir == "" || w.maxDirs <= 0 {
+		return
+	}
+	pruneMu.Lock()
+	defer pruneMu.Unlock()
+	entries, err := os.ReadDir(w.rootDir)
+	if err != nil {
+		return
+	}
+	type dirInfo struct {
+		name    string
+		modTime int64
+	}
+	var dirs []dirInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		dirs = append(dirs, dirInfo{name: entry.Name(), modTime: info.ModTime().UnixNano()})
+	}
+	if len(dirs) <= w.maxDirs {
+		return
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		if dirs[i].modTime == dirs[j].modTime {
+			return dirs[i].name < dirs[j].name
+		}
+		return dirs[i].modTime < dirs[j].modTime
+	})
+	for _, dir := range dirs[:len(dirs)-w.maxDirs] {
+		_ = os.RemoveAll(filepath.Join(w.rootDir, dir.name))
+	}
 }

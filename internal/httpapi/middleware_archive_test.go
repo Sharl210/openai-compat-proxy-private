@@ -67,3 +67,36 @@ func TestWithRequestIDPrefersRuntimeConfigArchiveDirOverEnvironment(t *testing.T
 		t.Fatalf("expected env archive dir to stay unused, but found %s", envPath)
 	}
 }
+
+func TestWithRequestIDPrunesOldArchiveDirectoriesUsingLogMaxRequests(t *testing.T) {
+	archiveDir := t.TempDir()
+	store := config.NewStaticRuntimeStore(config.Config{
+		DebugArchiveRootDir: archiveDir,
+		LogMaxRequests:      2,
+	})
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	var requestIDs []string
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		requestID := rec.Header().Get("X-Request-Id")
+		if requestID == "" {
+			t.Fatalf("request %d missing request id", i)
+		}
+		requestIDs = append(requestIDs, requestID)
+	}
+
+	if _, err := os.Stat(filepath.Join(archiveDir, requestIDs[0])); !os.IsNotExist(err) {
+		t.Fatalf("expected oldest archive dir %s to be pruned, got err=%v", requestIDs[0], err)
+	}
+	if _, err := os.Stat(filepath.Join(archiveDir, requestIDs[1])); err != nil {
+		t.Fatalf("expected second archive dir %s to remain: %v", requestIDs[1], err)
+	}
+	if _, err := os.Stat(filepath.Join(archiveDir, requestIDs[2])); err != nil {
+		t.Fatalf("expected newest archive dir %s to remain: %v", requestIDs[2], err)
+	}
+}

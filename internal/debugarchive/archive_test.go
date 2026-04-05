@@ -286,6 +286,52 @@ func TestArchiveWriter_DirectoryExists_NoPanic(t *testing.T) {
 	writer.Close()
 }
 
+func TestArchiveWriterWithRetentionPrunesOldRequestDirectoriesOnClose(t *testing.T) {
+	tmp := t.TempDir()
+	writer1 := NewArchiveWriterWithRetention(tmp, "req-1", 2)
+	if writer1 == nil {
+		t.Fatal("expected first writer")
+	}
+	if err := writer1.WriteRequest(map[string]any{"request_id": "req-1"}); err != nil {
+		t.Fatalf("WriteRequest(1) failed: %v", err)
+	}
+	if err := writer1.Close(); err != nil {
+		t.Fatalf("Close(1) failed: %v", err)
+	}
+
+	writer2 := NewArchiveWriterWithRetention(tmp, "req-2", 2)
+	if writer2 == nil {
+		t.Fatal("expected second writer")
+	}
+	if err := writer2.WriteRequest(map[string]any{"request_id": "req-2"}); err != nil {
+		t.Fatalf("WriteRequest(2) failed: %v", err)
+	}
+	if err := writer2.Close(); err != nil {
+		t.Fatalf("Close(2) failed: %v", err)
+	}
+
+	writer3 := NewArchiveWriterWithRetention(tmp, "req-3", 2)
+	if writer3 == nil {
+		t.Fatal("expected third writer")
+	}
+	if err := writer3.WriteRequest(map[string]any{"request_id": "req-3"}); err != nil {
+		t.Fatalf("WriteRequest(3) failed: %v", err)
+	}
+	if err := writer3.Close(); err != nil {
+		t.Fatalf("Close(3) failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, "req-1")); !os.IsNotExist(err) {
+		t.Fatalf("expected oldest archive directory to be pruned, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "req-2")); err != nil {
+		t.Fatalf("expected second archive directory to remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "req-3")); err != nil {
+		t.Fatalf("expected newest archive directory to remain: %v", err)
+	}
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	i := 0

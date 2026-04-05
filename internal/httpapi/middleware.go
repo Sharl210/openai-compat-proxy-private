@@ -67,7 +67,7 @@ func archiveWriterForRequest(store *config.RuntimeStore, requestID string) *debu
 	if store != nil {
 		if snapshot := store.Active(); snapshot != nil {
 			if root := snapshot.Config.DebugArchiveRootDir; root != "" {
-				return debugarchive.NewArchiveWriter(root, requestID)
+				return debugarchive.NewArchiveWriterWithRetention(root, requestID, snapshot.Config.LogMaxRequests)
 			}
 		}
 	}
