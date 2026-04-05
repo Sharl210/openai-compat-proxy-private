@@ -112,7 +112,7 @@ func TestMessagesStreamUsesRequestIdentityInMessageStart(t *testing.T) {
 	}
 }
 
-func TestMessagesStreamDoesNotEmitSyntheticZeroUsageInMessageStart(t *testing.T) {
+func TestMessagesStreamEmitsNumericUsageFieldsInMessageStart(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -145,11 +145,8 @@ func TestMessagesStreamDoesNotEmitSyntheticZeroUsageInMessageStart(t *testing.T)
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if strings.Contains(body, `"usage":{"input_tokens":0,"output_tokens":0}`) {
-		t.Fatalf("expected message_start to avoid synthetic zero usage, got %s", body)
-	}
-	if !strings.Contains(body, `"usage":{}`) {
-		t.Fatalf("expected message_start to include empty usage object, got %s", body)
+	if !strings.Contains(body, `"usage":{"input_tokens":0,"output_tokens":0}`) {
+		t.Fatalf("expected message_start to include numeric usage placeholders, got %s", body)
 	}
 	if !strings.Contains(body, `"usage":{"input_tokens":12,"output_tokens":7}`) {
 		t.Fatalf("expected final anthropic usage to carry real totals, got %s", body)

@@ -1486,12 +1486,15 @@ func anthropicMessageStartMessage(state *anthropicStreamState) map[string]any {
 		modelName = state.modelName
 	}
 	return map[string]any{
-		"id":            messageID,
-		"type":          "message",
-		"role":          "assistant",
-		"model":         modelName,
-		"content":       []any{},
-		"usage":         map[string]any{},
+		"id":      messageID,
+		"type":    "message",
+		"role":    "assistant",
+		"model":   modelName,
+		"content": []any{},
+		"usage": map[string]any{
+			"input_tokens":  0,
+			"output_tokens": 0,
+		},
 		"stop_reason":   nil,
 		"stop_sequence": nil,
 	}
