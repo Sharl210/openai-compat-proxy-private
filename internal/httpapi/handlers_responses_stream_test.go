@@ -328,6 +328,41 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 	}
 }
 
+func TestResponsesStreamUpstreamDisconnectsWithoutTerminalEventStaysInSSEProtocol(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"delta":"hello"`) {
+		t.Fatalf("expected streamed content before upstream disconnect, got %s", body)
+	}
+	if !strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected response.incomplete terminal SSE event on upstream disconnect, got %s", body)
+	}
+	if !strings.Contains(body, `"health_flag":"upstreamStreamBroken","message":"unexpected EOF"`) {
+		t.Fatalf("expected unexpected EOF to surface in response.incomplete event, got %s", body)
+	}
+	if strings.Count(body, `event: response.incomplete`) != 1 {
+		t.Fatalf("expected exactly one response.incomplete terminal SSE event, got %s", body)
+	}
+	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
+		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	}
+}
+
 func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

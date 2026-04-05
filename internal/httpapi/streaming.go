@@ -51,6 +51,7 @@ type anthropicStreamState struct {
 	toolItemID       string
 	toolDeltaSent    bool
 	pendingToolArgs  map[string]string
+	toolMeta         map[string]map[string]string
 	terminalSeen     bool
 	terminalFailure  *aggregate.TerminalFailureError
 }
@@ -215,7 +216,7 @@ func (h *responseEventWriterHelper) currentResponseID() string {
 }
 
 func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
-	compatCompleteToolArgs := h.upstreamEndpointType != config.UpstreamEndpointTypeResponses
+	compatCompleteToolArgs := h.shouldBufferCompatToolArgs()
 	for _, itemID := range h.toolOrder {
 		toolState := h.toolItems[itemID]
 		if toolState == nil || toolState.doneSent || toolState.item == nil {
@@ -241,6 +242,10 @@ func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
 		}
 		toolState.doneSent = true
 	}
+}
+
+func (h *responseEventWriterHelper) shouldBufferCompatToolArgs() bool {
+	return h.downstreamType == "responses" && normalizeHTTPAPIUpstreamEndpointType(h.upstreamEndpointType) != config.UpstreamEndpointTypeResponses
 }
 
 func newResponsesStreamState(requestID, upstreamEndpointType string) *responsesStreamState {
@@ -343,7 +348,7 @@ func (h *responseEventWriterHelper) shouldMergeChatReasoningIntoSynthetic() bool
 
 func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (processResponseEventResult, error) {
 	result := processResponseEventResult{}
-	compatCompleteToolArgs := normalizeHTTPAPIUpstreamEndpointType(h.upstreamEndpointType) != config.UpstreamEndpointTypeResponses
+	compatCompleteToolArgs := h.shouldBufferCompatToolArgs()
 	if h.toolIDAliases == nil {
 		h.toolIDAliases = map[string]string{}
 	}
@@ -406,11 +411,15 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			}
 		}
 	case "response.output_text.delta":
-		h.flushPendingFunctionCalls()
+		if compatCompleteToolArgs {
+			h.flushPendingFunctionCalls()
+		}
 		h.closeSyntheticReasoning()
 		h.reasoningStarted = true
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
-		h.flushPendingFunctionCalls()
+		if compatCompleteToolArgs {
+			h.flushPendingFunctionCalls()
+		}
 		if h.shouldMergeChatReasoningIntoSynthetic() && evt.Event == "response.reasoning.delta" {
 			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
 				if h.syntheticSummary != nil {
@@ -1083,6 +1092,9 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if state.pendingToolArgs == nil {
 		state.pendingToolArgs = map[string]string{}
 	}
+	if state.toolMeta == nil {
+		state.toolMeta = map[string]map[string]string{}
+	}
 	helper := &responseEventWriterHelper{
 		downstreamType:       "anthropic",
 		upstreamEndpointType: upstreamEndpointType,
@@ -1248,6 +1260,20 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 	startToolBlock := func(item map[string]any) error {
 		rawItemID := stringValue(item["id"])
 		itemID := anthropicToolStateKey(item)
+		if state.toolMeta == nil {
+			state.toolMeta = map[string]map[string]string{}
+		}
+		meta := map[string]string{
+			"id":      rawItemID,
+			"call_id": stringValue(item["call_id"]),
+			"name":    stringValue(item["name"]),
+		}
+		if itemID != "" {
+			state.toolMeta[itemID] = meta
+		}
+		if rawItemID != "" {
+			state.toolMeta[rawItemID] = meta
+		}
 		if state.toolStarted && !state.toolStopped {
 			if state.toolItemID == itemID && itemID != "" {
 				if state.toolDeltaSent {
@@ -1386,6 +1412,14 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			})
 		}
 		state.pendingToolArgs[itemID] += partial
+		if meta := state.toolMeta[itemID]; meta != nil {
+			return startToolBlock(map[string]any{
+				"type":    "function_call",
+				"id":      meta["id"],
+				"call_id": meta["call_id"],
+				"name":    meta["name"],
+			})
+		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
 		if err := closeTextBlock(state, w, flusher); err != nil {
@@ -1742,7 +1776,6 @@ func streamLiveWithSyntheticTicks(
 		case <-ctx.Done():
 		default:
 			signals <- streamSignal{err: err, done: true}
-			close(signals)
 		}
 	}()
 
@@ -1769,7 +1802,7 @@ func streamLiveWithSyntheticTicks(
 			}
 		case sig, ok := <-signals:
 			if !ok {
-				return nil
+				return io.ErrUnexpectedEOF
 			}
 			if sig.evt != nil {
 				if err := onEvent(*sig.evt); err != nil {
