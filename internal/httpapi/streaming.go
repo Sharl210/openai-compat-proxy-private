@@ -58,6 +58,7 @@ type anthropicStreamState struct {
 type responsesStreamState struct {
 	createdSent          bool
 	createdResponseID    string
+	modelName            string
 	textStarted          bool
 	realReasoningSeen    bool
 	planningSent         bool
@@ -103,6 +104,7 @@ type processedResponseEvents struct {
 type responseProjectionState struct {
 	createdSent          bool
 	createdResponseID    string
+	modelName            string
 	toolIDAliases        map[string]string
 	toolItems            map[string]*responsesToolItemState
 	toolOrder            []string
@@ -122,6 +124,7 @@ type responseEventWriterHelper struct {
 	upstreamEndpointType string
 	createdSent          bool
 	createdResponseID    string
+	modelName            string
 	toolIDAliases        map[string]string
 	toolItems            map[string]*responsesToolItemState
 	toolOrder            []string
@@ -183,7 +186,11 @@ func (h *responseEventWriterHelper) addCreatedEvent(id string) {
 	if id == "" {
 		id = h.currentResponseID()
 	}
-	h.addEvent("response.created", map[string]any{"response": map[string]any{"id": id, "object": "response"}})
+	response := map[string]any{"id": id, "object": "response", "status": "in_progress"}
+	if h.modelName != "" {
+		response["model"] = h.modelName
+	}
+	h.addEvent("response.created", map[string]any{"response": response})
 	h.createdSent = true
 	h.createdResponseID = id
 }
@@ -356,6 +363,17 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			if id := stringValue(response["id"]); id != "" {
 				h.createdResponseID = id
 			}
+			if _, ok := response["object"]; !ok {
+				response["object"] = "response"
+			}
+			if _, ok := response["status"]; !ok {
+				response["status"] = "in_progress"
+			}
+			if model := stringValue(response["model"]); model != "" {
+				h.modelName = model
+			} else if h.modelName != "" {
+				response["model"] = h.modelName
+			}
 		}
 		h.createdSent = true
 	case "response.output_item.added", "response.output_item.done":
@@ -448,6 +466,14 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if _, ok := response["object"]; !ok {
 			response["object"] = "response"
 		}
+		if _, ok := response["status"]; !ok {
+			response["status"] = "completed"
+		}
+		if model := stringValue(response["model"]); model != "" {
+			h.modelName = model
+		} else if h.modelName != "" {
+			response["model"] = h.modelName
+		}
 		if usage, _ := evt.Data["usage"].(map[string]any); len(usage) > 0 {
 			if _, ok := response["usage"]; !ok {
 				response["usage"] = cloneMap(usage)
@@ -471,6 +497,14 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		if _, ok := response["object"]; !ok {
 			response["object"] = "response"
+		}
+		if _, ok := response["status"]; !ok {
+			response["status"] = "completed"
+		}
+		if model := stringValue(response["model"]); model != "" {
+			h.modelName = model
+		} else if h.modelName != "" {
+			response["model"] = h.modelName
 		}
 		if usage, _ := evt.Data["usage"].(map[string]any); len(usage) > 0 {
 			if _, ok := response["usage"]; !ok {
@@ -734,10 +768,11 @@ func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc, initialState *responsesStreamState) (aggregate.Result, error) {
 	state := cloneResponsesStreamState(initialState, req.RequestID, upstreamEndpointType)
+	state.modelName = req.Model
 	collector := aggregate.NewCollector()
 	writer := &ResponsesEventWriter{w: w, flusher: flusher}
 	if syntheticResponseID := stream.FirstPendingResponseID(); shouldEmitSyntheticResponsesCreated(upstreamEndpointType) && syntheticResponseID != "" {
-		createdHelper := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{requestID: state.requestID, upstreamEndpointType: state.upstreamEndpointType, createdSent: state.createdSent})
+		createdHelper := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{requestID: state.requestID, upstreamEndpointType: state.upstreamEndpointType, createdSent: state.createdSent, modelName: state.modelName})
 		createdHelper.addCreatedEvent(syntheticResponseID)
 		state.createdSent = createdHelper.createdSent
 		state.createdResponseID = createdHelper.createdResponseID
@@ -789,6 +824,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	h := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{
 		createdSent:          state.createdSent,
 		createdResponseID:    state.createdResponseID,
+		modelName:            state.modelName,
 		toolIDAliases:        state.toolIDAliases,
 		toolItems:            state.toolItems,
 		toolOrder:            state.toolOrder,
@@ -811,6 +847,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.toolIDAliases = h.toolIDAliases
 	state.createdSent = h.createdSent
 	state.createdResponseID = h.createdResponseID
+	state.modelName = h.modelName
 	state.toolItems = h.toolItems
 	state.toolOrder = h.toolOrder
 	state.reasoningStarted = h.reasoningStarted
@@ -921,6 +958,7 @@ func newResponseEventWriterHelper(downstreamType string, state responseProjectio
 		upstreamEndpointType: state.upstreamEndpointType,
 		createdSent:          state.createdSent,
 		createdResponseID:    state.createdResponseID,
+		modelName:            state.modelName,
 		toolIDAliases:        state.toolIDAliases,
 		toolItems:            state.toolItems,
 		toolOrder:            state.toolOrder,
@@ -1367,7 +1405,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
-			"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil},
+			"delta": map[string]any{"stop_reason": stopReason},
 			"usage": usage,
 		}); err != nil {
 			return err
@@ -1495,8 +1533,7 @@ func anthropicMessageStartMessage(state *anthropicStreamState) map[string]any {
 			"input_tokens":  0,
 			"output_tokens": 0,
 		},
-		"stop_reason":   nil,
-		"stop_sequence": nil,
+		"stop_reason": nil,
 	}
 }
 
@@ -1595,6 +1632,8 @@ func usageNumberAsFloatForStreaming(v any) (float64, bool) {
 }
 
 type chatStreamState struct {
+	chunkID             string
+	modelName           string
 	roleSent            bool
 	textStarted         bool
 	realReasoningSeen   bool
@@ -1614,12 +1653,17 @@ type chatStreamState struct {
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) error {
 	state := chatStreamState{
+		chunkID:          "chatcmpl_proxy",
+		modelName:        req.Model,
 		toolIDAliases:    map[string]string{},
 		toolMeta:         map[string]map[string]string{},
 		toolIndex:        map[string]int{},
 		toolSent:         map[string]bool{},
 		pendingToolArgs:  map[string]string{},
 		thinkingTagStyle: thinkingTagStyle,
+	}
+	if req.RequestID != "" {
+		state.chunkID = "chatcmpl_" + req.RequestID
 	}
 	helper := &responseEventWriterHelper{
 		downstreamType:       "chat",
@@ -1630,7 +1674,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": syntheticReasoningPrelude()}, "", nil); err != nil {
+	if err := writeChatChunk(w, flusher, &state, map[string]any{"reasoning_content": syntheticReasoningPrelude()}, "", nil); err != nil {
 		return err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
@@ -1639,7 +1683,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 			if state.textStarted || state.realReasoningSeen {
 				return nil
 			}
-			return writeChatChunk(w, flusher, map[string]any{"reasoning_content": "\u200b"}, "", nil)
+			return writeChatChunk(w, flusher, &state, map[string]any{"reasoning_content": "\u200b"}, "", nil)
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
@@ -1742,6 +1786,7 @@ func streamLiveWithSyntheticTicks(
 
 func writeChatSSE(w http.ResponseWriter, flusher http.Flusher, events []upstream.Event, includeUsage bool) error {
 	state := chatStreamState{
+		chunkID:         "chatcmpl_proxy",
 		toolIDAliases:   map[string]string{},
 		toolMeta:        map[string]map[string]string{},
 		toolIndex:       map[string]int{},
@@ -1783,7 +1828,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if state.roleSent {
 			return nil
 		}
-		if err := writeChatChunk(w, flusher, map[string]any{"role": "assistant"}, "", nil); err != nil {
+		if err := writeChatChunk(w, flusher, state, map[string]any{"role": "assistant"}, "", nil); err != nil {
 			return err
 		}
 		state.roleSent = true
@@ -1808,7 +1853,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 		toolDelta := chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], state.pendingToolArgs[itemID], true)
-		if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
+		if err := writeChatChunk(w, flusher, state, toolDelta, "", nil); err != nil {
 			return err
 		}
 		state.toolSent[itemID] = true
@@ -1825,6 +1870,14 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	}
 	switch evt.Event {
 	case "response.created":
+		if response, _ := evt.Data["response"].(map[string]any); response != nil {
+			if id := stringValue(response["id"]); id != "" {
+				state.chunkID = id
+			}
+			if model := stringValue(response["model"]); model != "" {
+				state.modelName = model
+			}
+		}
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
 		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
@@ -1832,7 +1885,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			if err := ensureRoleSent(); err != nil {
 				return err
 			}
-			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
+			if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
 				return err
 			}
 		}
@@ -1893,12 +1946,12 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 		if reasoningContent != "" {
 			state.realReasoningSeen = true
-			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
+			if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
 				return err
 			}
 		}
 		if cleanContent != "" {
-			if err := writeChatChunk(w, flusher, map[string]any{"content": cleanContent}, "", nil); err != nil {
+			if err := writeChatChunk(w, flusher, state, map[string]any{"content": cleanContent}, "", nil); err != nil {
 				return err
 			}
 		}
@@ -1908,7 +1961,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			if err := ensureRoleSent(); err != nil {
 				return err
 			}
-			if err := writeChatChunk(w, flusher, map[string]any{"reasoning_content": delta}, "", nil); err != nil {
+			if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": delta}, "", nil); err != nil {
 				return err
 			}
 		}
@@ -1930,7 +1983,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				return err
 			}
 			toolDelta := chatToolDelta(state.toolIndex[itemID], state.toolMeta[itemID]["call_id"], state.toolMeta[itemID]["name"], state.pendingToolArgs[itemID], true)
-			if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
+			if err := writeChatChunk(w, flusher, state, toolDelta, "", nil); err != nil {
 				return err
 			}
 			state.toolSent[itemID] = true
@@ -1939,11 +1992,19 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 		index := state.toolIndex[itemID]
 		toolDelta := chatToolDelta(index, "", "", delta, false)
-		if err := writeChatChunk(w, flusher, toolDelta, "", nil); err != nil {
+		if err := writeChatChunk(w, flusher, state, toolDelta, "", nil); err != nil {
 			return err
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		if response, _ := evt.Data["response"].(map[string]any); response != nil {
+			if id := stringValue(response["id"]); id != "" {
+				state.chunkID = id
+			}
+			if model := stringValue(response["model"]); model != "" {
+				state.modelName = model
+			}
+		}
 		if err := flushAllPendingToolCalls(); err != nil {
 			return err
 		}
@@ -1965,7 +2026,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				usagePayload = usage
 			}
 		}
-		if err := writeChatChunk(w, flusher, map[string]any{}, finishReason, usagePayload); err != nil {
+		if err := writeChatChunk(w, flusher, state, map[string]any{}, finishReason, usagePayload); err != nil {
 			return err
 		}
 		if usageRecorder != nil && len(rawUsage) > 0 {
@@ -2009,8 +2070,16 @@ func syntheticReasoningStatus(text string) map[string]any {
 	return map[string]any{"reasoning_content": text}
 }
 
-func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[string]any, finishReason string, usage any) error {
+func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, delta map[string]any, finishReason string, usage any) error {
 	chunk := map[string]any{"object": "chat.completion.chunk"}
+	if state != nil {
+		if state.chunkID != "" {
+			chunk["id"] = state.chunkID
+		}
+		if state.modelName != "" {
+			chunk["model"] = state.modelName
+		}
+	}
 	if delta == nil {
 		chunk["choices"] = []any{}
 	} else {
@@ -2039,7 +2108,7 @@ func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, delta map[strin
 }
 
 func writeChatTerminalFailure(w http.ResponseWriter, flusher http.Flusher, healthFlag string, message string) error {
-	if err := writeChatChunk(w, flusher, map[string]any{"error": map[string]any{"health_flag": healthFlag, "message": message}}, "error", nil); err != nil {
+	if err := writeChatChunk(w, flusher, nil, map[string]any{"error": map[string]any{"health_flag": healthFlag, "message": message}}, "error", nil); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {

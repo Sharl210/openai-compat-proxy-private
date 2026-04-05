@@ -112,6 +112,12 @@ func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *tes
 	if createdIdx := strings.Index(beforeText, `event: response.created`); createdIdx == -1 {
 		t.Fatalf("expected at least one response.created before first text, got %s", body)
 	}
+	if !strings.Contains(beforeText, `"status":"in_progress"`) {
+		t.Fatalf("expected response.created to include in_progress status before first text, got %s", body)
+	}
+	if !strings.Contains(beforeText, `"model":"gpt-5"`) {
+		t.Fatalf("expected response.created to include downstream model before first text, got %s", body)
+	}
 	if !strings.Contains(beforeText, `event: response.output_item.added`) || !strings.Contains(beforeText, `event: response.reasoning_summary_text.delta`) {
 		t.Fatalf("expected visible synthetic reasoning block before first text, got %s", body)
 	}

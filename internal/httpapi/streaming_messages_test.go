@@ -189,6 +189,9 @@ func TestMessagesStreamDoesNotEmitNullUsageInMessageDelta(t *testing.T) {
 	if strings.Contains(body, `"usage":null`) {
 		t.Fatalf("expected anthropic message_delta to avoid null usage, got %s", body)
 	}
+	if strings.Contains(body, `"stop_sequence":null`) {
+		t.Fatalf("expected anthropic message_delta to omit null stop_sequence, got %s", body)
+	}
 	if !strings.Contains(body, `"usage":{}`) {
 		t.Fatalf("expected anthropic message_delta to emit an object usage payload when totals are unavailable, got %s", body)
 	}

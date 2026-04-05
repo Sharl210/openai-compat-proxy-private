@@ -12,6 +12,28 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
+func collectChatStreamChunks(t *testing.T, body string) []map[string]any {
+	t.Helper()
+	var chunks []map[string]any
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" || payload == "" {
+			continue
+		}
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		if object, _ := chunk["object"].(string); object == "chat.completion.chunk" {
+			chunks = append(chunks, chunk)
+		}
+	}
+	return chunks
+}
+
 func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
@@ -45,6 +67,50 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
 		t.Fatalf("expected chat placeholder reasoning to use titled format, got %s", body)
+	}
+}
+
+func TestChatStreamChunksCarryIDAndModel(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	chunks := collectChatStreamChunks(t, rec.Body.String())
+	if len(chunks) == 0 {
+		t.Fatalf("expected chat completion chunks, got %s", rec.Body.String())
+	}
+	for _, chunk := range chunks {
+		if _, ok := chunk["id"].(string); !ok {
+			t.Fatalf("expected every chat completion chunk to include string id, got %#v", chunk)
+		}
+		if got, _ := chunk["model"].(string); got != "gpt-5" {
+			t.Fatalf("expected every chat completion chunk to include model gpt-5, got %#v", chunk)
+		}
 	}
 }
 

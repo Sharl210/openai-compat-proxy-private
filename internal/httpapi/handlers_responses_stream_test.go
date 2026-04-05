@@ -259,6 +259,9 @@ func TestResponsesStreamCompletedCarriesStableResponseIDForToolFollowUp(t *testi
 	if !strings.Contains(body, `"object":"response"`) {
 		t.Fatalf("expected completed response payload to identify response object, got %s", body)
 	}
+	if !strings.Contains(body, `"status":"completed"`) {
+		t.Fatalf("expected completed response payload to include completed status, got %s", body)
+	}
 }
 
 func TestResponsesStreamCompletedMirrorsTopLevelUsageIntoResponseUsageForCompatibility(t *testing.T) {
@@ -271,8 +274,8 @@ func TestResponsesStreamCompletedMirrorsTopLevelUsageIntoResponseUsageForCompati
 	if !strings.Contains(body, `"usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}`) {
 		t.Fatalf("expected top-level usage to stay in completed event, got %s", body)
 	}
-	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`) {
-		t.Fatalf("expected completed event to also include response.usage for compatibility, got %s", body)
+	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","status":"completed","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`) {
+		t.Fatalf("expected completed event to also include response.usage and status for compatibility, got %s", body)
 	}
 }
 
@@ -286,8 +289,8 @@ func TestResponsesStreamDoneMirrorsTopLevelUsageIntoResponseUsageForCompatibilit
 	if !strings.Contains(body, `event: response.done`) {
 		t.Fatalf("expected response.done event, got %s", body)
 	}
-	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}`) {
-		t.Fatalf("expected done event to also include response.usage for compatibility, got %s", body)
+	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}`) {
+		t.Fatalf("expected done event to also include response.usage and status for compatibility, got %s", body)
 	}
 }
 
@@ -371,8 +374,8 @@ func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
-	if !strings.Contains(body, `"response":{"finish_reason":"stop","id":"chatcmpl_123","object":"response","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens":2,"total_tokens":5}}`) {
-		t.Fatalf("expected provider /chat/v1/responses stream to include usage by default, got %s", body)
+	if !strings.Contains(body, `"response":{"finish_reason":"stop","id":"chatcmpl_123","model":"gpt-5","object":"response","status":"completed","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens":2,"total_tokens":5}}`) {
+		t.Fatalf("expected provider /chat/v1/responses stream to include usage, model, and status by default, got %s", body)
 	}
 	if !strings.Contains(body, `"cached_tokens":1`) {
 		t.Fatalf("expected cached_tokens to be surfaced in usage payload, got %s", body)
