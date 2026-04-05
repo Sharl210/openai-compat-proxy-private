@@ -164,7 +164,7 @@ func testResponsesConfigWithStrategy(upstreamURL string, strategy string) config
 	return cfg
 }
 
-func TestResponsesProxyBufferWithChatUpstreamFinalizesOnEOFWithoutCompletedEvent(t *testing.T) {
+func TestResponsesProxyBufferWithChatUpstreamTreatsEOFWithoutTerminalEventAsError(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
@@ -203,22 +203,11 @@ func TestResponsesProxyBufferWithChatUpstreamFinalizesOnEOFWithoutCompletedEvent
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502 for missing terminal event, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
-	}
-	if got, _ := payload["id"].(string); got != "chat-123" {
-		t.Fatalf("expected response id chat-123, got %#v", payload)
-	}
-	if reasoning, _ := payload["reasoning"].(map[string]any); reasoning == nil || reasoning["summary"] != "thinking" {
-		t.Fatalf("expected reasoning summary thinking, got %#v body=%s", payload["reasoning"], rec.Body.String())
-	}
-	output, _ := payload["output"].([]any)
-	if len(output) == 0 {
-		t.Fatalf("expected output items, got %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"message":"unexpected EOF"`) {
+		t.Fatalf("expected upstream EOF surfaced to client, got %s", rec.Body.String())
 	}
 }
 

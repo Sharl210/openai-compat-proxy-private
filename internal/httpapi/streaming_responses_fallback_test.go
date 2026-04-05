@@ -432,6 +432,8 @@ func TestResponsesStreamSkipsWhitespaceOnlyOutputAfterThinkExtraction(t *testing
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"fetch_webpage\",\"arguments\":\"{\\\"url\\\":\\\"https://github.com/k3ss-official/g0dm0d3\\\"}\"}}]}}]}\n\n")
 		_, _ = fmt.Fprint(w, "event: chat\n")
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer upstream.Close()
 
@@ -470,6 +472,8 @@ func TestResponsesStreamSkipsSplitWhitespaceOnlyFrameAfterThinkExtraction(t *tes
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank-split\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"fetch_webpage\",\"arguments\":\"{\\\"url\\\":\\\"https://github.com/k3ss-official/g0dm0d3\\\"}\"}}]}}]}\n\n")
 		_, _ = fmt.Fprint(w, "event: chat\n")
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-blank-split\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"tool_calls\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer upstream.Close()
 
