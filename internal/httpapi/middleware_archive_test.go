@@ -100,3 +100,55 @@ func TestWithRequestIDPrunesOldArchiveDirectoriesUsingLogMaxRequests(t *testing.
 		t.Fatalf("expected newest archive dir %s to remain: %v", requestIDs[2], err)
 	}
 }
+
+func TestWithRequestIDResolvesRelativeArchiveDirAgainstRootEnv(t *testing.T) {
+	root := t.TempDir()
+	providersDir := filepath.Join(root, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers: %v", err)
+	}
+	providerEnv := []byte("PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.com/v1\nUPSTREAM_API_KEY=test-key\n")
+	if err := os.WriteFile(filepath.Join(providersDir, "openai.env"), providerEnv, 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+	rootEnvPath := filepath.Join(root, ".env")
+	rootEnv := []byte("PROXY_API_KEY=test\nPROVIDERS_DIR=" + providersDir + "\nDEFAULT_PROVIDER=openai\nOPENAI_COMPAT_DEBUG_ARCHIVE_DIR=OPENAI_COMPAT_DEBUG_ARCHIVE_DIR\n")
+	if err := os.WriteFile(rootEnvPath, rootEnv, 0o644); err != nil {
+		t.Fatalf("write root env: %v", err)
+	}
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore: %v", err)
+	}
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	archivePath := filepath.Join(root, debugarchive.EnvRootDir, requestID, "request.ndjson")
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("expected relative archive dir resolved under root env dir at %s: %v", archivePath, err)
+	}
+}
+
+func TestWithRequestIDSkipsDefaultArchiveDirWithoutRootEnvPath(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{DebugArchiveRootDir: debugarchive.EnvRootDir})
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	if _, err := os.Stat(filepath.Join(debugarchive.EnvRootDir, requestID, "request.ndjson")); err == nil {
+		t.Fatalf("expected default archive placeholder dir to stay disabled when root env path is unavailable")
+	}
+}

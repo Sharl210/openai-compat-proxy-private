@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -67,6 +68,13 @@ func archiveWriterForRequest(store *config.RuntimeStore, requestID string) *debu
 	if store != nil {
 		if snapshot := store.Active(); snapshot != nil {
 			if root := snapshot.Config.DebugArchiveRootDir; root != "" {
+				if !filepath.IsAbs(root) {
+					if snapshot.RootEnvPath != "" {
+						root = filepath.Join(filepath.Dir(snapshot.RootEnvPath), root)
+					} else if root == debugarchive.EnvRootDir {
+						return nil
+					}
+				}
 				return debugarchive.NewArchiveWriterWithRetention(root, requestID, snapshot.Config.LogMaxRequests)
 			}
 		}
