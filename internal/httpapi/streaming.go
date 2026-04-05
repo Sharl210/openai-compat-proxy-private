@@ -1491,6 +1491,7 @@ func anthropicMessageStartMessage(state *anthropicStreamState) map[string]any {
 		"role":          "assistant",
 		"model":         modelName,
 		"content":       []any{},
+		"usage":         map[string]any{},
 		"stop_reason":   nil,
 		"stop_sequence": nil,
 	}
