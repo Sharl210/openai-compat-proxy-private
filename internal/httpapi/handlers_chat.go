@@ -51,7 +51,7 @@ func handleChat() http.HandlerFunc {
 			return
 		}
 		canon.RequestID = requestID
-		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
+		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType)
 		canon.AuthMode = authModeForUpstream(r, providerCfg)
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,

@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"openai-compat-proxy/internal/cacheinfo"
+	"openai-compat-proxy/internal/config"
 )
 
-func cacheInfoUsageRecorder(r *http.Request, requestID, providerID string) usageRecorderFunc {
+func cacheInfoUsageRecorder(r *http.Request, requestID, providerID, upstreamEndpointType string) usageRecorderFunc {
 	manager := cacheInfoManagerFromRequest(r)
 	if manager == nil {
 		return nil
@@ -23,7 +24,7 @@ func cacheInfoUsageRecorder(r *http.Request, requestID, providerID string) usage
 		if usage == nil {
 			return
 		}
-		parsed, ok := cacheInfoUsageFromMap(usage)
+		parsed, ok := cacheInfoUsageFromMap(usage, upstreamEndpointType)
 		if !ok {
 			return
 		}
@@ -31,7 +32,7 @@ func cacheInfoUsageRecorder(r *http.Request, requestID, providerID string) usage
 	}
 }
 
-func cacheInfoUsageFromMap(usage map[string]any) (*cacheinfo.Usage, bool) {
+func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*cacheinfo.Usage, bool) {
 	if len(usage) == 0 {
 		return nil, false
 	}
@@ -72,11 +73,16 @@ func cacheInfoUsageFromMap(usage map[string]any) (*cacheinfo.Usage, bool) {
 	if !hasValues {
 		return nil, false
 	}
+	if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+		parsed.InputTokens += parsed.CachedTokens + parsed.CacheCreationTokens
+	}
 	if parsed.TotalTokens == 0 {
 		sum := parsed.InputTokens + parsed.OutputTokens
 		if sum > 0 {
 			parsed.TotalTokens = sum
 		}
+	} else if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+		parsed.TotalTokens = parsed.InputTokens + parsed.OutputTokens
 	}
 	return parsed, true
 }

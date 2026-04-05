@@ -163,7 +163,7 @@ func TestCacheInfoUsageFromMapSupportsChatUsageShape(t *testing.T) {
 		"prompt_tokens_details": map[string]any{
 			"cached_tokens": 2,
 		},
-	})
+	}, config.UpstreamEndpointTypeResponses)
 	if !ok {
 		t.Fatalf("expected chat usage shape to parse")
 	}
@@ -181,12 +181,30 @@ func TestCacheInfoUsageFromMapIncludesCacheCreationTokens(t *testing.T) {
 			"cached_tokens":         3,
 			"cache_creation_tokens": 4,
 		},
-	})
+	}, config.UpstreamEndpointTypeResponses)
 	if !ok {
 		t.Fatalf("expected usage shape to parse")
 	}
 	if parsed.CachedTokens != 3 || parsed.CacheCreationTokens != 4 {
 		t.Fatalf("unexpected parsed cache usage: %#v", parsed)
+	}
+}
+
+func TestCacheInfoUsageFromMapNormalizesAnthropicUsageToOpenAIStyleTotals(t *testing.T) {
+	parsed, ok := cacheInfoUsageFromMap(map[string]any{
+		"input_tokens":                20,
+		"output_tokens":               5,
+		"cache_read_input_tokens":     6,
+		"cache_creation_input_tokens": 4,
+	}, config.UpstreamEndpointTypeAnthropic)
+	if !ok {
+		t.Fatalf("expected anthropic usage shape to parse")
+	}
+	if parsed.InputTokens != 30 || parsed.OutputTokens != 5 || parsed.TotalTokens != 35 {
+		t.Fatalf("expected anthropic usage normalized to openai-style totals, got %#v", parsed)
+	}
+	if parsed.CachedTokens != 6 || parsed.CacheCreationTokens != 4 {
+		t.Fatalf("expected anthropic cache fields preserved, got %#v", parsed)
 	}
 }
 
@@ -197,7 +215,7 @@ func TestCacheInfoUsageRecorderPersistsMappedChatUsageShape(t *testing.T) {
 	defer cancel()
 	manager.Start(ctx)
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(withCacheInfoManager(context.Background(), manager))
-	recorder := cacheInfoUsageRecorder(req, "req-1", "openai")
+	recorder := cacheInfoUsageRecorder(req, "req-1", "openai", config.UpstreamEndpointTypeResponses)
 	if recorder == nil {
 		t.Fatalf("expected recorder to be created")
 	}
@@ -232,7 +250,7 @@ func TestCacheInfoUsageRecorderPersistsCacheCreationTokens(t *testing.T) {
 	defer cancel()
 	manager.Start(ctx)
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(withCacheInfoManager(context.Background(), manager))
-	recorder := cacheInfoUsageRecorder(req, "req-creation", "openai")
+	recorder := cacheInfoUsageRecorder(req, "req-creation", "openai", config.UpstreamEndpointTypeResponses)
 	if recorder == nil {
 		t.Fatalf("expected recorder to be created")
 	}
@@ -253,5 +271,41 @@ func TestCacheInfoUsageRecorderPersistsCacheCreationTokens(t *testing.T) {
 	}
 	if stats == nil || stats.Today.CachedTokens != 6 || stats.Today.CacheCreationTokens != 4 {
 		t.Fatalf("expected recorder to persist cache read and creation tokens, got %#v", stats)
+	}
+}
+
+func TestCacheInfoUsageRecorderNormalizesAnthropicUsagePerRequest(t *testing.T) {
+	providersDir := t.TempDir()
+	manager := cacheinfo.NewManager(providersDir, time.UTC, []string{"claude"}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(withCacheInfoManager(context.Background(), manager))
+	recorder := cacheInfoUsageRecorder(req, "req-anthropic", "claude", config.UpstreamEndpointTypeAnthropic)
+	if recorder == nil {
+		t.Fatalf("expected recorder to be created")
+	}
+
+	recorder(map[string]any{
+		"input_tokens":                20,
+		"output_tokens":               5,
+		"cache_read_input_tokens":     6,
+		"cache_creation_input_tokens": 4,
+	})
+
+	cancel()
+	manager.Stop()
+	stats, err := cacheinfo.LoadProviderStats(providersDir, "claude")
+	if err != nil {
+		t.Fatalf("LoadProviderStats: %v", err)
+	}
+	if stats == nil {
+		t.Fatalf("expected anthropic provider stats to be written")
+	}
+	if stats.Today.InputTokens != 30 || stats.Today.OutputTokens != 5 || stats.Today.TotalTokens != 35 {
+		t.Fatalf("expected anthropic usage converted to openai-style totals, got %#v", stats.Today)
+	}
+	if stats.Today.CachedTokens != 6 || stats.Today.CacheCreationTokens != 4 {
+		t.Fatalf("expected anthropic cached and cache-creation tokens preserved, got %#v", stats.Today)
 	}
 }

@@ -25,7 +25,7 @@ func handleResponses() http.HandlerFunc {
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
 		providerID := provider.ID
-		usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID)
+		usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			clearTransparencyHeaders(w)

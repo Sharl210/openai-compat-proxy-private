@@ -53,7 +53,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		canon.RequestID = requestID
-		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID)
+		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType)
 		ctx := r.Context()
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {
