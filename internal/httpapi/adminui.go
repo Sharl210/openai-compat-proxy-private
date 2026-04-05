@@ -27,6 +27,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 )
@@ -55,6 +56,7 @@ var errAdminJobRunning = errors.New("admin job already running")
 
 type adminUI struct {
 	store        *config.RuntimeStore
+	cacheInfo    *cacheinfo.Manager
 	assets       fs.FS
 	runner       adminActionRunner
 	loginLimiter *adminLoginLimiter
@@ -124,10 +126,11 @@ type adminCommandRunner struct {
 	mu      sync.Mutex
 }
 
-func newAdminUI(store *config.RuntimeStore) *adminUI {
+func newAdminUI(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *adminUI {
 	assets, _ := fs.Sub(adminStaticFiles, "adminui_static")
 	ui := &adminUI{
 		store:        store,
+		cacheInfo:    cacheMgr,
 		assets:       assets,
 		loginLimiter: &adminLoginLimiter{stateByIP: map[string]adminLoginState{}},
 		client:       &http.Client{Timeout: 2 * time.Second},
@@ -145,6 +148,7 @@ func (a *adminUI) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/_admin/api/tree", allowMethods(a.handleTree(), http.MethodGet))
 	mux.HandleFunc("/_admin/api/file", a.handleFile())
 	mux.HandleFunc("/_admin/api/action", allowMethods(a.handleAction(), http.MethodPost))
+	mux.HandleFunc("/_admin/api/cacheinfo/providers/clear", allowMethods(a.handleClearProviderCacheInfoHistory(), http.MethodPost))
 	mux.HandleFunc("/_admin/api/jobs", allowMethods(a.handleJob(), http.MethodGet))
 	mux.HandleFunc("/_admin/api/status", allowMethods(a.handleStatus(), http.MethodGet))
 }
@@ -515,6 +519,7 @@ func (a *adminUI) handleFileCreate() http.HandlerFunc {
 			return
 		}
 		var req struct {
+			Path string `json:"path"`
 			Dir  string `json:"dir"`
 			Name string `json:"name"`
 			Kind string `json:"kind"`
@@ -523,7 +528,14 @@ func (a *adminUI) handleFileCreate() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "invalid json body")
 			return
 		}
-		path, err := a.createFileFromTemplate(req.Dir, req.Name, req.Kind)
+		kind := strings.ToLower(strings.TrimSpace(req.Kind))
+		path := ""
+		var err error
+		if kind == "copy" {
+			path, err = a.copyAdminFile(req.Path, req.Name)
+		} else {
+			path, err = a.createFileFromTemplate(req.Dir, req.Name, kind)
+		}
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "create_failed", err.Error())
 			return
@@ -654,6 +666,56 @@ func (a *adminUI) handleJob() http.HandlerFunc {
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]any{"job": job})
+	}
+}
+
+func (a *adminUI) handleClearProviderCacheInfoHistory() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, _, err := a.requireSession(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "admin login required")
+			return
+		}
+		if err := a.requireCSRF(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusForbidden, "csrf_invalid", "missing or invalid csrf token")
+			return
+		}
+		if a.cacheInfo == nil {
+			errorsx.WriteJSON(w, http.StatusServiceUnavailable, "cacheinfo_unavailable", "cacheinfo manager unavailable")
+			return
+		}
+		var req struct {
+			ProviderID string `json:"provider_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "invalid json body")
+			return
+		}
+		providerID := strings.TrimSpace(req.ProviderID)
+		if providerID == "" {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "provider_id is required")
+			return
+		}
+		snapshot := a.store.Active()
+		if snapshot == nil {
+			errorsx.WriteJSON(w, http.StatusServiceUnavailable, "config_unavailable", "runtime config unavailable")
+			return
+		}
+		if _, err := snapshot.Config.ProviderByID(providerID); err != nil {
+			errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "provider not found")
+			return
+		}
+		if err := a.cacheInfo.ClearProviderHistory(providerID); err != nil {
+			if errors.Is(err, cacheinfo.ErrProviderHistoryNotFound) {
+				errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "provider history not found")
+				return
+			}
+			errorsx.WriteJSON(w, http.StatusInternalServerError, "cacheinfo_clear_failed", err.Error())
+			return
+		}
+		writeAdminJSON(w, http.StatusOK, map[string]any{
+			"ok":          true,
+			"provider_id": providerID,
+		})
 	}
 }
 
@@ -879,6 +941,46 @@ func (a *adminUI) createMarkdownFile(resolvedDir string, dirRel string, name str
 		return "", err
 	}
 	return filepath.ToSlash(filepath.Join(dirRel, targetName)), nil
+}
+
+func (a *adminUI) copyAdminFile(path string, newName string) (string, error) {
+	cleanName, err := validateAdminFileName(newName)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := a.resolvePath(path, false)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("only regular files can be copied")
+	}
+	targetPath := filepath.Join(filepath.Dir(resolved), cleanName)
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", errors.New("target file already exists")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", err
+	}
+	if a.isProviderEnvFile(resolved) && strings.HasSuffix(cleanName, ".env") {
+		content = []byte(rewriteProviderID(string(content), strings.TrimSuffix(cleanName, ".env")))
+	}
+	if err := os.WriteFile(targetPath, content, info.Mode().Perm()); err != nil {
+		return "", err
+	}
+	root := a.rootDir()
+	rel, err := filepath.Rel(root, targetPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func (a *adminUI) renameAdminFile(path string, newName string) (string, error) {

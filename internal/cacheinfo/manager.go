@@ -2,12 +2,16 @@ package cacheinfo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
+
+var ErrProviderHistoryNotFound = errors.New("cacheinfo provider history not found")
 
 type Usage struct {
 	InputTokens         int64
@@ -318,6 +322,46 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
+func (m *Manager) ClearProviderHistory(providerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.syncEnabledProvidersLocked()
+	stats, ok := m.stats[providerID]
+	if !ok {
+		return ErrProviderHistoryNotFound
+	}
+	now := m.clock.Now().In(m.location)
+	resetProviderStats(stats, now, m.location.String())
+	m.removeSubmittedForProviderLocked(providerID)
+	m.persistAllLocked()
+	return nil
+}
+
+func resetProviderStats(stats *ProviderStats, now time.Time, timezone string) {
+	if stats == nil {
+		return
+	}
+	stats.Timezone = timezone
+	stats.RecentDays = []DailyStats{{Date: now.Format("2006-01-02")}}
+	stats.HistoryTotal = TokenTotals{}
+	stats.UpdatedAt = now
+	syncLegacyFields(stats)
+}
+
+func (m *Manager) removeSubmittedForProviderLocked(providerID string) {
+	prefix := fmt.Sprintf("%d:%s", len(providerID), providerID)
+	filtered := m.submittedOrder[:0]
+	for _, key := range m.submittedOrder {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.submitted, key)
+			continue
+		}
+		filtered = append(filtered, key)
+	}
+	m.submittedOrder = filtered
+}
+
 func (m *Manager) flushAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -327,8 +371,14 @@ func (m *Manager) flushAll() {
 		m.checkCrossDayAndReset(pid)
 	}
 
+	m.persistAllLocked()
+}
+
+func (m *Manager) persistAllLocked() {
 	for pid, stats := range m.stats {
-		_ = SaveProviderStats(m.providersDir, pid, stats)
+		if err := SaveProviderStats(m.providersDir, pid, stats); err != nil {
+			log.Printf("[cacheinfo] 写入 provider %s 失败: %v", pid, err)
+		}
 	}
 	if err := writeAggregateTXTFiles(m.providersDir, m.enabledStatsSnapshotLocked(), m.clock.Now().In(m.location), m.location.String()); err != nil {
 		log.Printf("[cacheinfo] 写入聚合 TXT 失败: %v", err)

@@ -1256,6 +1256,105 @@ button { cursor: pointer; }
   word-break: break-word;
 }
 
+.clear-cache-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(480px, calc(100vh - 48px));
+  padding: 16px;
+  border-radius: 18px;
+  background: var(--md-sys-color-surface-bright);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-shadow: var(--md-elevation-3);
+  z-index: 66;
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto auto auto 1fr auto;
+}
+
+.clear-cache-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+}
+
+.clear-cache-desc {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin: -4px 0;
+}
+
+.clear-cache-filter-row {
+  display: flex;
+  gap: 8px;
+}
+
+.clear-cache-filter-row .text-input {
+  flex: 1;
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.clear-cache-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 120px;
+  max-height: 240px;
+  padding: 4px 0;
+}
+
+.clear-cache-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.clear-cache-item:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.clear-cache-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--md-sys-color-primary);
+}
+
+.clear-cache-empty {
+  text-align: center;
+  padding: 16px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 13px;
+}
+
+.clear-cache-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 820px) {
+  .clear-cache-modal {
+    width: min(100%, calc(100vw - 16px));
+    max-height: min(80vh, calc(100vh - 32px));
+  }
+  .clear-cache-actions {
+    flex-direction: column;
+  }
+  .clear-cache-actions button {
+    width: 100%;
+  }
+}
+
 .file-action-buttons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

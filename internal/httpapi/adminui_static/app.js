@@ -14,6 +14,7 @@ const state = {
   currentFile: null,
   envExpanded: {},
   fileActionMenu: null,
+  clearCacheModal: null,
   activeJobId: '',
   activeJob: null,
   recoveryAction: '',
@@ -567,10 +568,38 @@ function bindEvents() {
   if (fileActionRename) {
     fileActionRename.addEventListener('click', renameTreeItemFromMenu);
   }
+  const fileActionCopy = document.getElementById('file-action-copy');
+  if (fileActionCopy) {
+    fileActionCopy.addEventListener('click', copyTreeItemFromMenu);
+  }
   const fileActionDelete = document.getElementById('file-action-delete');
   if (fileActionDelete) {
     fileActionDelete.addEventListener('click', deleteTreeItemFromMenu);
   }
+
+  const clearCacheButton = document.getElementById('clear-cache-button');
+  if (clearCacheButton) {
+    clearCacheButton.addEventListener('click', openClearCacheModal);
+  }
+  const clearCacheBackdrop = document.getElementById('clear-cache-backdrop');
+  if (clearCacheBackdrop) {
+    clearCacheBackdrop.addEventListener('click', closeClearCacheModal);
+  }
+  const clearCacheCancel = document.getElementById('clear-cache-cancel');
+  if (clearCacheCancel) {
+    clearCacheCancel.addEventListener('click', closeClearCacheModal);
+  }
+  const clearCacheConfirm = document.getElementById('clear-cache-confirm');
+  if (clearCacheConfirm) {
+    clearCacheConfirm.addEventListener('click', confirmClearCache);
+  }
+  const clearCacheFilter = document.getElementById('clear-cache-filter');
+  if (clearCacheFilter) {
+    clearCacheFilter.addEventListener('input', handleClearCacheFilter);
+  }
+  document.querySelectorAll('.clear-cache-checkbox').forEach((cb) => {
+    cb.addEventListener('change', handleClearCacheCheckbox);
+  });
 
   const saveButton = document.getElementById('save-file-button');
   if (saveButton) {
@@ -779,12 +808,14 @@ function dashboardTemplate() {
         ${state.view === 'browser' ? renderBrowserPage() : state.view === 'status' ? renderStatusPage() : renderEditorPage()}
       </div>
       ${renderFileActionMenu()}
+      ${renderClearCacheModal()}
     </div>
   `;
 }
 
 function renderBrowserPage() {
   const items = state.treeItems || [];
+  const isCacheInfoDir = pathBaseName(state.currentDir) === 'Cache_Info';
   return `
     <div class="browser-page-grid page-scene">
       <section class="panel">
@@ -798,6 +829,7 @@ function renderBrowserPage() {
             ${state.currentDir ? `<button class="secondary-btn material-outlined-button" type="button" data-tree-open="${escapeAttr(parentPath(state.currentDir))}" data-type="dir">返回上级</button>` : ''}
             ${canCreateEnvInCurrentDir() ? `<button id="create-env-button" class="secondary-btn material-outlined-button" type="button">新建 env</button>` : ''}
             ${canCreateMdInCurrentDir() ? `<button id="create-md-button" class="secondary-btn material-outlined-button" type="button">新增 md</button>` : ''}
+            ${isCacheInfoDir ? `<button id="clear-cache-button" class="secondary-btn material-outlined-button danger-btn" type="button">清除缓存</button>` : ''}
           </div>
           <div class="tree-list">
             ${renderTreeItems(items)}
@@ -1135,10 +1167,43 @@ function renderFileActionMenu() {
     <div class="file-action-modal" role="dialog" aria-modal="true" aria-label="文件操作菜单">
       <div class="file-action-title">${escapeHtml(displayFileName(state.fileActionMenu.path))}</div>
       <div class="file-action-buttons">
+        <button id="file-action-copy" class="secondary-btn material-tonal-button" type="button">复制</button>
         <button id="file-action-rename" class="secondary-btn material-tonal-button" type="button">重命名</button>
         <button id="file-action-delete" class="secondary-btn material-outlined-button danger-btn" type="button">删除</button>
       </div>
       <button id="file-action-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
+    </div>
+  `;
+}
+
+function renderClearCacheModal() {
+  if (!state.clearCacheModal?.open) {
+    return '';
+  }
+  const providers = state.clearCacheModal.providers || [];
+  const selected = state.clearCacheModal.selected || [];
+  const filter = state.clearCacheModal.filter || '';
+  const filtered = providers.filter((p) => p.toLowerCase().includes(filter.toLowerCase()));
+  return `
+    <div id="clear-cache-backdrop" class="file-action-backdrop is-open"></div>
+    <div class="clear-cache-modal" role="dialog" aria-modal="true" aria-label="清除缓存">
+      <div class="clear-cache-title">清除缓存</div>
+      <div class="clear-cache-desc">选择要清除缓存的 provider，清除后无法恢复。</div>
+      <div class="clear-cache-filter-row">
+        <input id="clear-cache-filter" type="text" class="text-input" placeholder="搜索 provider..." value="${escapeAttr(filter)}">
+      </div>
+      <div id="clear-cache-list" class="clear-cache-list">
+        ${filtered.length === 0 ? '<div class="clear-cache-empty">没有匹配的 provider</div>' : filtered.map((p) => `
+          <label class="clear-cache-item">
+            <input type="checkbox" class="clear-cache-checkbox" value="${escapeAttr(p)}" ${selected.includes(p) ? 'checked' : ''}>
+            <span>${escapeHtml(p)}</span>
+          </label>
+        `).join('')}
+      </div>
+      <div class="clear-cache-actions">
+        <button id="clear-cache-confirm" class="secondary-btn material-outlined-button danger-btn" type="button" ${selected.length === 0 ? 'disabled' : ''}>确认清除</button>
+        <button id="clear-cache-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
+      </div>
     </div>
   `;
 }
@@ -1195,6 +1260,12 @@ function displayFileName(path) {
   const value = String(path || '');
   const parts = value.split('/').filter(Boolean);
   return parts[parts.length - 1] || value || '未选择文件';
+}
+
+function pathBaseName(path) {
+  const value = String(path || '');
+  const parts = value.split('/').filter(Boolean);
+  return parts[parts.length - 1] || '';
 }
 
 async function createEnvFromCurrentDir() {
@@ -1256,6 +1327,79 @@ function closeTreeItemActionMenu() {
   render();
 }
 
+async function openClearCacheModal() {
+  const items = state.treeItems || [];
+  const providers = [...new Set(items
+    .filter((item) => !item.is_dir && (item.name.endsWith('.json') || item.name.endsWith('.txt')))
+    .map((item) => item.name.replace(/\.(json|txt)$/, ''))
+    .filter((name) => name && name !== '全提供商总计' && name !== '已启用提供商总计'))];
+  state.clearCacheModal = { open: true, providers, selected: [], filter: '' };
+  render();
+}
+
+function closeClearCacheModal() {
+  state.clearCacheModal = null;
+  render();
+}
+
+function handleClearCacheFilter(event) {
+  if (!state.clearCacheModal) {
+    return;
+  }
+  state.clearCacheModal.filter = event.target.value;
+  render();
+}
+
+function handleClearCacheCheckbox(event) {
+  if (!state.clearCacheModal) {
+    return;
+  }
+  const value = event.target.value;
+  const checked = event.target.checked;
+  if (checked) {
+    if (!state.clearCacheModal.selected.includes(value)) {
+      state.clearCacheModal.selected = [...state.clearCacheModal.selected, value];
+    }
+  } else {
+    state.clearCacheModal.selected = state.clearCacheModal.selected.filter((v) => v !== value);
+  }
+  const confirmBtn = document.getElementById('clear-cache-confirm');
+  if (confirmBtn) {
+    confirmBtn.disabled = state.clearCacheModal.selected.length === 0;
+  }
+}
+
+async function confirmClearCache() {
+  const selected = state.clearCacheModal?.selected || [];
+  if (selected.length === 0) {
+    return;
+  }
+  if (!window.confirm(`确认清除 ${selected.length} 个 provider 的缓存记录？`)) {
+    return;
+  }
+  closeClearCacheModal();
+  const results = [];
+  for (const provider of selected) {
+    try {
+      await api('/_admin/api/cacheinfo/providers/clear', {
+        method: 'POST',
+        body: { provider_id: provider },
+      });
+      results.push({ provider, ok: true });
+    } catch (error) {
+      results.push({ provider, ok: false, error: error.message });
+    }
+  }
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length === 0) {
+    setToast('success', `已清除 ${results.length} 个 provider 的缓存`);
+  } else {
+    setToast('error', `清除完成，但 ${failed.length} 个 provider 失败：${failed.map((f) => f.provider).join(', ')}`);
+  }
+  await loadTree(state.currentDir);
+  render();
+}
+
 async function renameTreeItemFromMenu() {
   const path = state.fileActionMenu?.path;
   if (!path) {
@@ -1290,6 +1434,36 @@ async function renameTreeItemFromMenu() {
   }
 }
 
+async function copyTreeItemFromMenu() {
+  const path = state.fileActionMenu?.path;
+  if (!path) {
+    return;
+  }
+  const currentName = displayFileName(path);
+  const input = window.prompt('输入复制后的文件名', defaultCopyInput(currentName));
+  state.fileActionMenu = null;
+  if (!input) {
+    render();
+    return;
+  }
+  const newName = normalizeCopyInput(currentName, input.trim());
+  try {
+    const data = await api('/_admin/api/file', {
+      method: 'POST',
+      body: {
+        path,
+        name: newName,
+        kind: 'copy',
+      },
+    });
+    await loadTree(state.currentDir);
+    await openFile(data.path);
+    setToast('success', '文件已复制');
+  } catch (error) {
+    setToast('error', error.message || '复制失败');
+  }
+}
+
 async function deleteTreeItemFromMenu() {
   const path = state.fileActionMenu?.path;
   state.fileActionMenu = null;
@@ -1315,6 +1489,37 @@ async function deleteTreeItemFromMenu() {
   } catch (error) {
     setToast('error', error.message || '删除失败');
   }
+}
+
+function defaultCopyInput(currentName) {
+  if (currentName === '.env') {
+    return '.env-副本';
+  }
+  if (currentName.endsWith('.env')) {
+    return `${currentName.slice(0, -4)}-副本`;
+  }
+  const lastDot = currentName.lastIndexOf('.');
+  if (lastDot > 0) {
+    return `${currentName.slice(0, lastDot)}-副本`;
+  }
+  return `${currentName}-副本`;
+}
+
+function normalizeCopyInput(currentName, input) {
+  if (input.includes('.')) {
+    return input;
+  }
+  if (currentName === '.env') {
+    return input;
+  }
+  if (currentName.endsWith('.env')) {
+    return `${input}.env`;
+  }
+  const lastDot = currentName.lastIndexOf('.');
+  if (lastDot > 0) {
+    return `${input}${currentName.slice(lastDot)}`;
+  }
+  return input;
 }
 
 function normalizeRenameInput(currentName, input) {

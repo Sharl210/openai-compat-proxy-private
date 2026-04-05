@@ -709,7 +709,7 @@ func TestManager_RecentDaysTrimToSeven(t *testing.T) {
 	clock.Set(time.Date(2026, 3, 20, 10, 0, 0, 0, loc))
 	m := NewManager(tmp, loc, []string{"openai"}, clock)
 
-	for day := 0; day < 9; day++ {
+	for day := range 9 {
 		clock.Set(time.Date(2026, 3, 20+day, 10, 0, 0, 0, loc))
 		usage := Usage{InputTokens: int64(day + 1), TotalTokens: int64(day + 1)}
 		if err := m.RecordFinalUsage("req-"+time.Date(2026, 3, 20+day, 10, 0, 0, 0, loc).Format("2006-01-02"), "openai", &usage); err != nil {
@@ -780,5 +780,75 @@ func TestManager_EnabledProvidersAggregateFollowsSource(t *testing.T) {
 	}
 	if m.stats["anthropic"].Today.InputTokens != 70 {
 		t.Fatalf("anthropic Today.InputTokens = %d, want 70", m.stats["anthropic"].Today.InputTokens)
+	}
+}
+
+func TestManager_ClearProviderHistoryResetsProviderAndRebuildsAggregates(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai", "anthropic"}, clock)
+	m.SetEnabledProvidersSource(func() []string {
+		return []string{"openai", "anthropic"}
+	})
+
+	if err := m.RecordFinalUsage("req-openai", "openai", &Usage{InputTokens: 100, TotalTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-anthropic", "anthropic", &Usage{InputTokens: 50, TotalTokens: 50}); err != nil {
+		t.Fatal(err)
+	}
+	m.flushAll()
+
+	if err := m.ClearProviderHistory("openai"); err != nil {
+		t.Fatalf("ClearProviderHistory(openai) error: %v", err)
+	}
+
+	stats := m.stats["openai"]
+	if stats.HistoryTotal.TotalTokens != 0 {
+		t.Fatalf("openai HistoryTotal.TotalTokens = %d, want 0", stats.HistoryTotal.TotalTokens)
+	}
+	if stats.Today.TotalTokens != 0 {
+		t.Fatalf("openai Today.TotalTokens = %d, want 0", stats.Today.TotalTokens)
+	}
+	if len(stats.RecentDays) != 1 {
+		t.Fatalf("len(openai.RecentDays) = %d, want 1", len(stats.RecentDays))
+	}
+
+	openAIJSON, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openAIJSON == nil || openAIJSON.HistoryTotal.TotalTokens != 0 {
+		t.Fatalf("persisted openai stats = %#v, want cleared stats", openAIJSON)
+	}
+
+	allData, err := os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "全提供商总计.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(allData), "输入Tokens：150") {
+		t.Fatalf("all aggregate still contains cleared provider totals:\n%s", string(allData))
+	}
+	if !strings.Contains(string(allData), "输入Tokens：50") {
+		t.Fatalf("all aggregate missing remaining provider totals:\n%s", string(allData))
+	}
+
+	enabledData, err := os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "已启用提供商总计.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(enabledData), "输入Tokens：150") {
+		t.Fatalf("enabled aggregate still contains cleared provider totals:\n%s", string(enabledData))
+	}
+	if !strings.Contains(string(enabledData), "输入Tokens：50") {
+		t.Fatalf("enabled aggregate missing remaining provider totals:\n%s", string(enabledData))
+	}
+
+	if err := m.RecordFinalUsage("req-openai", "openai", &Usage{InputTokens: 7, TotalTokens: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.stats["openai"].Today.TotalTokens; got != 7 {
+		t.Fatalf("openai Today.TotalTokens = %d, want 7 after reusing request id post-clear", got)
 	}
 }

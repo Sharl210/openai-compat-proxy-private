@@ -28,7 +28,7 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 		store:     store,
 		CacheInfo: cacheMgr,
 	}
-	srv.admin = newAdminUI(store)
+	srv.admin = newAdminUI(store, cacheMgr)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
 	if srv.admin != nil {

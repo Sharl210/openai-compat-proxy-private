@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 )
 
@@ -281,6 +282,40 @@ func TestAdminUIReadNDJSONFileUsesJSONLanguage(t *testing.T) {
 	}
 }
 
+func TestAdminUITreeShowsNDJSONFilesInsideArchiveDirectories(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	archiveDir := filepath.Join(server.admin.rootDir(), "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR", "req-demo")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		t.Fatalf("mkdir archive dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(archiveDir, "request.ndjson"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write archive ndjson: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=OPENAI_COMPAT_DEBUG_ARCHIVE_DIR/req-demo", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected archive tree 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	items, ok := data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected tree items, got %#v", data["items"])
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.(map[string]any)["name"].(string))
+	}
+	if !slices.Contains(names, "request.ndjson") {
+		t.Fatalf("expected request.ndjson shown in archive directory, got %v", names)
+	}
+}
+
 func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
@@ -297,6 +332,78 @@ func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
 	}
 	if !strings.Contains(body, ".title-file-pill {") || !strings.Contains(body, "max-width: 10ch;") {
 		t.Fatalf("expected editor title pill css to clamp filename width to 10ch, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptIncludesCopyAction(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "file-action-copy") || !strings.Contains(body, "copyTreeItemFromMenu") {
+		t.Fatalf("expected app script to expose copy action, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptIncludesClearCacheModal(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "clear-cache-button") {
+		t.Fatalf("expected app script to include clear-cache-button, got %s", body)
+	}
+	if !strings.Contains(body, "pathBaseName(state.currentDir) === 'Cache_Info'") {
+		t.Fatalf("expected clear-cache button to detect nested Cache_Info path, got %s", body)
+	}
+	if !strings.Contains(body, "renderClearCacheModal") {
+		t.Fatalf("expected app script to include renderClearCacheModal, got %s", body)
+	}
+	if !strings.Contains(body, "openClearCacheModal") {
+		t.Fatalf("expected app script to include openClearCacheModal, got %s", body)
+	}
+	if !strings.Contains(body, "confirmClearCache") {
+		t.Fatalf("expected app script to include confirmClearCache, got %s", body)
+	}
+	if !strings.Contains(body, "closeClearCacheModal") {
+		t.Fatalf("expected app script to include closeClearCacheModal, got %s", body)
+	}
+	if !strings.Contains(body, "/_admin/api/cacheinfo/providers/clear") || !strings.Contains(body, "provider_id") {
+		t.Fatalf("expected app script to call cacheinfo clear API with provider_id, got %s", body)
+	}
+}
+
+func TestAdminUIAppCSSIncludesClearCacheModalStyles(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected css asset 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, ".clear-cache-modal") {
+		t.Fatalf("expected app css to include .clear-cache-modal styles, got %s", body)
+	}
+	if !strings.Contains(body, ".clear-cache-list") {
+		t.Fatalf("expected app css to include .clear-cache-list styles, got %s", body)
+	}
+	if !strings.Contains(body, ".clear-cache-filter-row") {
+		t.Fatalf("expected app css to include .clear-cache-filter-row styles, got %s", body)
 	}
 }
 
@@ -600,6 +707,69 @@ func TestAdminUICreateProviderMarkdownFileWithoutSuffix(t *testing.T) {
 	}
 }
 
+func TestAdminUICopyRegularFileCreatesSiblingCopy(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	source := filepath.Join(server.admin.rootDir(), "notes.txt")
+	if err := os.WriteFile(source, []byte("hello copy\n"), 0o640); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"path": "notes.txt",
+		"name": "notes-副本.txt",
+		"kind": "copy",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected copy 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	if data["path"] != "notes-副本.txt" {
+		t.Fatalf("expected copied path notes-副本.txt, got %#v", data["path"])
+	}
+	content, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "notes-副本.txt"))
+	if err != nil {
+		t.Fatalf("read copied file: %v", err)
+	}
+	if string(content) != "hello copy\n" {
+		t.Fatalf("expected copied content preserved, got %q", string(content))
+	}
+	info, err := os.Stat(filepath.Join(server.admin.rootDir(), "notes-副本.txt"))
+	if err != nil {
+		t.Fatalf("stat copied file: %v", err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("expected copied file to preserve mode 0640, got %o", info.Mode().Perm())
+	}
+}
+
+func TestAdminUICopyProviderEnvRewritesProviderID(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	source := filepath.Join(server.admin.rootDir(), "providers", "demo.env")
+	if err := os.WriteFile(source, []byte("PROVIDER_ID=demo\nUPSTREAM_BASE_URL=https://example.com/v1\n"), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"path": "providers/demo.env",
+		"name": "demo-副本.env",
+		"kind": "copy",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected provider env copy 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	content, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "providers", "demo-副本.env"))
+	if err != nil {
+		t.Fatalf("read copied provider env: %v", err)
+	}
+	if !strings.Contains(string(content), "PROVIDER_ID=demo-副本") {
+		t.Fatalf("expected copied provider env to rewrite provider id, got %s", string(content))
+	}
+}
+
 func TestAdminUIRenameProviderEnvRewritesProviderIDAndDeleteRemovesFile(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -682,6 +852,55 @@ func TestAdminUIMutatingRequestRequiresCSRFFromSession(t *testing.T) {
 	}
 }
 
+func TestAdminUIClearProviderCacheInfoHistory(t *testing.T) {
+	server := newAdminUITestServer(t)
+	loc := time.FixedZone("CST", 8*3600)
+	cacheMgr := cacheinfo.NewManager(filepath.Join(server.admin.rootDir(), "providers"), loc, []string{"openai", "anthropic"}, nil)
+	cacheMgr.SetEnabledProvidersSource(func() []string {
+		return []string{"openai", "anthropic"}
+	})
+	server.CacheInfo = cacheMgr
+	server.admin.cacheInfo = cacheMgr
+
+	if err := cacheMgr.RecordFinalUsage("req-openai", "openai", &cacheinfo.Usage{InputTokens: 100, TotalTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cacheMgr.RecordFinalUsage("req-anthropic", "anthropic", &cacheinfo.Usage{InputTokens: 50, TotalTokens: 50}); err != nil {
+		t.Fatal(err)
+	}
+	cookie, csrf := adminLogin(t, server)
+	rec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/cacheinfo/providers/clear", map[string]any{
+		"provider_id": "openai",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected clear provider cacheinfo 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	if data["provider_id"] != "openai" {
+		t.Fatalf("expected provider_id openai, got %#v", data["provider_id"])
+	}
+
+	stats, err := cacheinfo.LoadProviderStats(filepath.Join(server.admin.rootDir(), "providers"), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats == nil || stats.HistoryTotal.TotalTokens != 0 {
+		t.Fatalf("expected persisted openai stats cleared, got %#v", stats)
+	}
+
+	allData, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "providers", "Cache_Info", "全提供商总计.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(allData), "输入Tokens：150") {
+		t.Fatalf("all aggregate still includes cleared provider:\n%s", string(allData))
+	}
+	if !strings.Contains(string(allData), "输入Tokens：50") {
+		t.Fatalf("all aggregate missing remaining provider totals:\n%s", string(allData))
+	}
+}
+
 func TestAdminCommandRunnerStartDoesNotDeadlock(t *testing.T) {
 	runner := &adminCommandRunner{rootDir: t.TempDir()}
 	done := make(chan *adminJob, 1)
@@ -752,6 +971,7 @@ func newAdminUITestServer(t *testing.T) *Server {
 		"LISTEN_ADDR=:21021",
 		"PROXY_API_KEY=root-secret",
 		fmt.Sprintf("PROVIDERS_DIR=%s", providersDir),
+		fmt.Sprintf("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR=%s", filepath.Join(root, "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR")),
 		"DEFAULT_PROVIDER=openai",
 		"ENABLE_LEGACY_V1_ROUTES=true",
 	}, "\n") + "\n"
