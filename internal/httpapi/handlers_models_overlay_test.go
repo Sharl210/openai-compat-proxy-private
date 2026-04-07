@@ -70,11 +70,19 @@ func TestModelsOverlayReturnsLastWinsVisibleModels(t *testing.T) {
 
 func TestModelsOverlayIncludesRealtimeUpstreamModelsFromAllDefaultProviders(t *testing.T) {
 	minimaxUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer minimax-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"MiniMax-M2.7","object":"model","owned_by":"minimax-upstream"}]}`))
 	}))
 	defer minimaxUpstream.Close()
 	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer codex-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model","owned_by":"codex-upstream"}]}`))
 	}))
@@ -124,6 +132,145 @@ func TestModelsOverlayIncludesRealtimeUpstreamModelsFromAllDefaultProviders(t *t
 	}
 	if !containsString(ids, "MiniMax-M2.7") || !containsString(ids, "gpt-5.4") {
 		t.Fatalf("expected overlay to merge manual and realtime upstream models, got %v", ids)
+	}
+}
+
+func TestModelsOverlayUsesEachProvidersOwnUpstreamAuthorization(t *testing.T) {
+	minimaxUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer minimax-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"MiniMax-M2.7","object":"model","owned_by":"minimax-upstream"}]}`))
+	}))
+	defer minimaxUpstream.Close()
+
+	codexForUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer codex-for-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.1","object":"model","owned_by":"codex-for-upstream"}]}`))
+	}))
+	defer codexForUpstream.Close()
+
+	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer codex-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model","owned_by":"codex-upstream"}]}`))
+	}))
+	defer codexUpstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "minimax,codex-for,codex",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{
+			{ID: "minimax", Enabled: true, SupportsModels: true, UpstreamBaseURL: minimaxUpstream.URL, UpstreamAPIKey: "minimax-key"},
+			{ID: "codex-for", Enabled: true, SupportsModels: true, UpstreamBaseURL: codexForUpstream.URL, UpstreamAPIKey: "codex-for-key"},
+			{ID: "codex", Enabled: true, SupportsModels: true, UpstreamBaseURL: codexUpstream.URL, UpstreamAPIKey: "codex-key"},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected overlay /v1/models to return 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode overlay /v1/models response: %v body=%s", err, rec.Body.String())
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	for _, want := range []string{"MiniMax-M2.7", "gpt-5.1", "gpt-5.4"} {
+		if !containsString(ids, want) {
+			t.Fatalf("expected overlay to keep provider-specific upstream auth and include %q, got %v", want, ids)
+		}
+	}
+}
+
+func TestModelsOverlayOnlyShowsAuthorizedDefaultProviders(t *testing.T) {
+	privateUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer private-upstream-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"private-model","object":"model","owned_by":"private-upstream"}]}`))
+	}))
+	defer privateUpstream.Close()
+	publicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer public-upstream-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"public-model","object":"model","owned_by":"public-upstream"}]}`))
+	}))
+	defer publicUpstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "private,public",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{
+			{ID: "private", Enabled: true, SupportsModels: true, UpstreamBaseURL: privateUpstream.URL, UpstreamAPIKey: "private-upstream-key", ProxyAPIKeyOverride: "private-secret", ProxyAPIKeyOverrideSet: true},
+			{ID: "public", Enabled: true, SupportsModels: true, UpstreamBaseURL: publicUpstream.URL, UpstreamAPIKey: "public-upstream-key"},
+		},
+	})
+
+	rootReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rootReq.Header.Set("Authorization", "Bearer root-secret")
+	rootRec := httptest.NewRecorder()
+	server.ServeHTTP(rootRec, rootReq)
+	if rootRec.Code != http.StatusOK {
+		t.Fatalf("expected bare models route to stay available for root-authorized providers, got %d body=%s", rootRec.Code, rootRec.Body.String())
+	}
+	var rootPayload map[string]any
+	if err := json.Unmarshal(rootRec.Body.Bytes(), &rootPayload); err != nil {
+		t.Fatalf("decode root-authorized overlay response: %v body=%s", err, rootRec.Body.String())
+	}
+	rootData, _ := rootPayload["data"].([]any)
+	rootIDs := make([]string, 0, len(rootData))
+	for _, item := range rootData {
+		entry, _ := item.(map[string]any)
+		rootIDs = append(rootIDs, entry["id"].(string))
+	}
+	if !containsString(rootIDs, "public-model") || containsString(rootIDs, "private-model") {
+		t.Fatalf("expected root auth to expose only root-authorized default providers, got %v", rootIDs)
+	}
+
+	privateReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	privateReq.Header.Set("Authorization", "Bearer private-secret")
+	privateRec := httptest.NewRecorder()
+	server.ServeHTTP(privateRec, privateReq)
+	if privateRec.Code != http.StatusOK {
+		t.Fatalf("expected bare models route to accept private provider key, got %d body=%s", privateRec.Code, privateRec.Body.String())
+	}
+	var privatePayload map[string]any
+	if err := json.Unmarshal(privateRec.Body.Bytes(), &privatePayload); err != nil {
+		t.Fatalf("decode private-authorized overlay response: %v body=%s", err, privateRec.Body.String())
+	}
+	privateData, _ := privatePayload["data"].([]any)
+	privateIDs := make([]string, 0, len(privateData))
+	for _, item := range privateData {
+		entry, _ := item.(map[string]any)
+		privateIDs = append(privateIDs, entry["id"].(string))
+	}
+	if !containsString(privateIDs, "private-model") || containsString(privateIDs, "public-model") {
+		t.Fatalf("expected private auth to expose only private-authorized default providers, got %v", privateIDs)
 	}
 }
 
