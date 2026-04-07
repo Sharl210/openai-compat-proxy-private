@@ -34,10 +34,11 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 	if srv.admin != nil {
 		srv.admin.registerRoutes(mux)
 	}
-	mux.HandleFunc("/v1/models", allowMethods(handleModels(), http.MethodGet))
-	mux.HandleFunc("/v1/responses", allowMethods(handleResponses(), http.MethodPost))
-	mux.HandleFunc("/v1/chat/completions", allowMethods(handleChat(), http.MethodPost))
-	mux.HandleFunc("/v1/messages", allowMethods(handleAnthropicMessages(), http.MethodPost))
+	mux.HandleFunc(canonicalV1ModelsPath, allowMethods(handleModels(), http.MethodGet))
+	mux.HandleFunc(canonicalV1ResponsesPath, allowMethods(handleResponses(), http.MethodPost))
+	mux.HandleFunc(canonicalV1ResponsesCompactPath, allowMethods(handleResponsesCompact(), http.MethodPost))
+	mux.HandleFunc(canonicalV1ChatCompletionsPath, allowMethods(handleChat(), http.MethodPost))
+	mux.HandleFunc(canonicalV1MessagesPath, allowMethods(handleAnthropicMessages(), http.MethodPost))
 	srv.mux = mux
 	srv.handler = withRequestID(store, http.HandlerFunc(srv.serveHTTP))
 	return srv

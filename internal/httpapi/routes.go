@@ -23,6 +23,35 @@ const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 
+const (
+	canonicalV1ModelsPath           = "/v1/models"
+	canonicalV1ResponsesPath        = "/v1/responses"
+	canonicalV1ResponsesCompactPath = "/v1/responses/compact"
+	canonicalV1ChatCompletionsPath  = "/v1/chat/completions"
+	canonicalV1MessagesPath         = "/v1/messages"
+)
+
+var canonicalV1RoutePaths = []string{
+	canonicalV1ModelsPath,
+	canonicalV1ResponsesPath,
+	canonicalV1ResponsesCompactPath,
+	canonicalV1ChatCompletionsPath,
+	canonicalV1MessagesPath,
+}
+
+func canonicalV1Paths() []string {
+	return append([]string(nil), canonicalV1RoutePaths...)
+}
+
+func isCanonicalV1Path(path string) bool {
+	for _, candidate := range canonicalV1RoutePaths {
+		if path == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 func withCacheInfoManager(ctx context.Context, manager *cacheinfo.Manager) context.Context {
 	if manager == nil {
 		return ctx
@@ -36,7 +65,7 @@ func cacheInfoManagerFromRequest(r *http.Request) *cacheinfo.Manager {
 }
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
-	if path == "/v1/models" || path == "/v1/responses" || path == "/v1/chat/completions" || path == "/v1/messages" {
+	if isCanonicalV1Path(path) {
 		if !cfg.EnableLegacyV1Routes {
 			return routeInfo{}, errors.New("route not found")
 		}
@@ -60,7 +89,7 @@ func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 	}
 	providerID := parts[0]
 	canonicalPath := "/" + strings.Join(parts[1:], "/")
-	if canonicalPath != "/v1/models" && canonicalPath != "/v1/responses" && canonicalPath != "/v1/chat/completions" && canonicalPath != "/v1/messages" {
+	if !isCanonicalV1Path(canonicalPath) {
 		return routeInfo{}, errors.New("route not found")
 	}
 	provider, err := cfg.ProviderByID(providerID)
