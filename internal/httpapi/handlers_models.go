@@ -16,7 +16,7 @@ import (
 func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
-			if info, ok := routeInfoFromRequest(r); ok && info.Legacy && len(snapshot.DefaultProviderIDs) > 1 {
+			if info, ok := routeInfoFromRequest(r); ok && info.Legacy && (len(snapshot.DefaultProviderIDs) > 1 || snapshot.Config.EnableDefaultProviderModelTags) {
 				writeDefaultOverlayModels(w, snapshot)
 				return
 			}
@@ -112,6 +112,9 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		if id != "" {
+			if provider.HidesModel(id) {
+				continue
+			}
 			if _, exists := seenIDs[id]; !exists {
 				baseIDs = append(baseIDs, id)
 				seenIDs[id] = struct{}{}
@@ -121,6 +124,9 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	publicAliases := sortedPublicModelAliases(provider.ModelMap)
 	for _, publicModel := range publicAliases {
+		if provider.HidesModel(publicModel) {
+			continue
+		}
 		if _, exists := entriesByID[publicModel]; exists {
 			continue
 		}
@@ -134,6 +140,9 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		}
 	}
 	for _, manualModel := range provider.ManualModels {
+		if provider.HidesModel(manualModel) {
+			continue
+		}
 		if _, exists := seenIDs[manualModel]; !exists {
 			baseIDs = append(baseIDs, manualModel)
 			seenIDs[manualModel] = struct{}{}
@@ -144,6 +153,14 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		modelMapKeys := modelMapKeysFromEntries(provider.ModelMap)
 		expanded = reasoning.ExpandModelIDs(baseIDs, modelMapKeys, true)
 	}
+	filteredExpanded := make([]string, 0, len(expanded))
+	for _, id := range expanded {
+		if provider.HidesModel(id) {
+			continue
+		}
+		filteredExpanded = append(filteredExpanded, id)
+	}
+	expanded = filteredExpanded
 	entries := make([]map[string]any, 0, len(expanded))
 	for _, id := range expanded {
 		entry := cloneModelEntry(entriesByID[id])
@@ -163,27 +180,9 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 }
 
 func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool) {
-	ids := sortedPublicModelAliases(provider.ModelMap)
-	seen := make(map[string]struct{}, len(ids)+len(provider.ManualModels))
-	for _, id := range ids {
-		seen[id] = struct{}{}
-	}
-	for _, manualModel := range provider.ManualModels {
-		manualModel = strings.TrimSpace(manualModel)
-		if manualModel == "" {
-			continue
-		}
-		if _, exists := seen[manualModel]; exists {
-			continue
-		}
-		ids = append(ids, manualModel)
-		seen[manualModel] = struct{}{}
-	}
+	ids := provider.VisibleModelIDs()
 	if len(ids) == 0 {
 		return nil, false
-	}
-	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
-		ids = reasoning.ExpandModelIDs(ids, ids, true)
 	}
 	entries := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {

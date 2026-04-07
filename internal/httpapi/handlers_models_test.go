@@ -274,6 +274,35 @@ func TestModelsFallbackIncludesManualModelsWhenUpstreamNotFound(t *testing.T) {
 	}
 }
 
+func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-4o","object":"model","owned_by":"openai"},{"id":"gpt-5","object":"model","owned_by":"openai"}]}`)
+	provider := config.ProviderConfig{
+		ModelMap: []config.ModelMapEntry{
+			{Key: "public-gpt", Target: "gpt-5"},
+		},
+		ManualModels: []string{"manual-alpha", "manual-beta"},
+		HiddenModels: []string{"gpt-4*", "manual-alpha", "public-*"},
+	}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if contains(ids, "gpt-4o") || contains(ids, "manual-alpha") || contains(ids, "public-gpt") {
+		t.Fatalf("expected hidden models to be removed from rewritten models body, got %#v", ids)
+	}
+	if !contains(ids, "gpt-5") || !contains(ids, "manual-beta") {
+		t.Fatalf("expected non-hidden models to remain visible, got %#v", ids)
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
