@@ -301,6 +301,17 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 }
 
 func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, authorization string) (map[string]any, error) {
+	return c.response(ctx, req, authorization, false)
+}
+
+func (c *Client) Compact(ctx context.Context, req model.CanonicalRequest, authorization string) (map[string]any, error) {
+	if endpointType := c.endpointType(); endpointType != config.UpstreamEndpointTypeResponses {
+		return nil, fmt.Errorf("compact is only supported for responses upstream endpoint, got %q", endpointType)
+	}
+	return c.response(ctx, req, authorization, true)
+}
+
+func (c *Client) response(ctx context.Context, req model.CanonicalRequest, authorization string, compact bool) (map[string]any, error) {
 	endpointType := c.endpointType()
 	body, err := buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
 	if err != nil {
@@ -319,7 +330,7 @@ func (c *Client) Response(ctx context.Context, req model.CanonicalRequest, autho
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization)
+	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization, compact)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -458,12 +469,12 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 	return nil, lastErr
 }
 
-func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string) (map[string]any, error) {
+func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, compact bool) (map[string]any, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		payload, err := c.responseOnce(ctx, endpointType, body, authorization)
+		payload, err := c.responseOnce(ctx, endpointType, body, authorization, compact)
 		if err == nil {
 			return payload, nil
 		}
@@ -502,8 +513,8 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 	return nil, lastErr
 }
 
-func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string) (map[string]any, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
+func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string, compact bool) (map[string]any, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+responseEndpointPathForType(endpointType, compact), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -527,6 +538,14 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 		return nil, err
 	}
 	return normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle), nil
+}
+
+func responseEndpointPathForType(endpointType string, compact bool) string {
+	path := endpointPathForType(endpointType)
+	if compact && normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses {
+		return path + "/compact"
+	}
+	return path
 }
 
 func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool) (*EventStream, error) {

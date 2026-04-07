@@ -71,6 +71,163 @@ func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.
 	}
 }
 
+func TestClientCompactUsesCompactResponsesPathAndReusesResponsesBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses/compact" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer compact-key" {
+			t.Fatalf("expected Authorization header preserved, got %q", got)
+		}
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+			t.Fatalf("unmarshal request payload: %v", err)
+		}
+		if got := payload["model"]; got != "gpt-5" {
+			t.Fatalf("expected model gpt-5, got %#v", got)
+		}
+		if got := payload["store"]; got != false {
+			t.Fatalf("expected store=false to reuse responses request body, got %#v", got)
+		}
+		include, _ := payload["include"].([]any)
+		if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+			t.Fatalf("expected include passthrough, got %#v", payload["include"])
+		}
+		input, _ := payload["input"].([]any)
+		if len(input) != 2 {
+			t.Fatalf("expected 2 input items in compact payload, got %#v", payload["input"])
+		}
+		typed, _ := input[1].(map[string]any)
+		if got, _ := typed["type"].(string); got != "reasoning" {
+			t.Fatalf("expected typed reasoning input item passthrough, got %#v", typed)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_compact_1","status":"completed"}`))
+	}))
+	defer server.Close()
+
+	store := false
+	client := NewClient(server.URL)
+	payload, err := client.Compact(context.Background(), model.CanonicalRequest{
+		RequestID:       "req-compact-body",
+		Model:           "gpt-5",
+		ResponseStore:   &store,
+		ResponseInclude: []string{"reasoning.encrypted_content"},
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "hello",
+				}},
+			},
+			{
+				"type":              "reasoning",
+				"id":                "rs_123",
+				"encrypted_content": "enc_123",
+			},
+		},
+	}, "Bearer compact-key")
+	if err != nil {
+		t.Fatalf("Compact error: %v", err)
+	}
+	if got := payload["id"]; got != "resp_compact_1" {
+		t.Fatalf("expected compact response id resp_compact_1, got %#v", got)
+	}
+}
+
+func TestClientCompactRetriesAndPreservesHTTPStatusError(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses/compact" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("temporary compact upstream failure"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 1, UpstreamRetryDelay: time.Millisecond})
+	_, err := client.Compact(context.Background(), model.CanonicalRequest{RequestID: "req-compact-retry", Model: "gpt-5"}, "")
+	if err == nil {
+		t.Fatalf("expected compact upstream error")
+	}
+	httpErr, ok := err.(*HTTPStatusError)
+	if !ok {
+		t.Fatalf("expected HTTPStatusError, got %T", err)
+	}
+	if httpErr.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected final status 502, got %d", httpErr.StatusCode)
+	}
+	if httpErr.RetriesPerformed != 1 {
+		t.Fatalf("expected retries performed annotated as 1, got %d", httpErr.RetriesPerformed)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("expected compact request to retry once, got %d attempts", attempts.Load())
+	}
+}
+
+func TestClientCompactRejectsNonResponsesEndpointTypesBeforeRequest(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	_, err := client.Compact(context.Background(), model.CanonicalRequest{RequestID: "req-compact-chat", Model: "gpt-5"}, "")
+	if err == nil {
+		t.Fatalf("expected compact to reject non-responses endpoint type")
+	}
+	if !strings.Contains(err.Error(), "responses") || !strings.Contains(err.Error(), "compact") {
+		t.Fatalf("expected clear compact/responses error, got %v", err)
+	}
+	if attempts.Load() != 0 {
+		t.Fatalf("expected compact guard to fail before upstream request, got %d attempts", attempts.Load())
+	}
+
+	client = NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	_, err = client.Compact(context.Background(), model.CanonicalRequest{RequestID: "req-compact-anthropic", Model: "claude"}, "")
+	if err == nil {
+		t.Fatalf("expected compact to reject anthropic endpoint type")
+	}
+	if !strings.Contains(err.Error(), "responses") || !strings.Contains(err.Error(), "compact") {
+		t.Fatalf("expected clear compact/responses error, got %v", err)
+	}
+	if attempts.Load() != 0 {
+		t.Fatalf("expected compact guard to fail before upstream request, got %d attempts", attempts.Load())
+	}
+}
+
+func TestClientResponseKeepsResponsesPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_standard_1","status":"completed"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	payload, err := client.Response(context.Background(), model.CanonicalRequest{RequestID: "req-standard-path", Model: "gpt-5"}, "")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if got := payload["id"]; got != "resp_standard_1" {
+		t.Fatalf("expected standard response id resp_standard_1, got %#v", got)
+	}
+}
+
 func TestBuildRequestBodyOmitsCacheControlForUpstreamCompatibility(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
