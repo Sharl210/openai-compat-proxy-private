@@ -104,41 +104,43 @@ type processedResponseEvents struct {
 }
 
 type responseProjectionState struct {
-	createdSent          bool
-	createdResponseID    string
-	modelName            string
-	toolIDAliases        map[string]string
-	toolItems            map[string]*responsesToolItemState
-	toolOrder            []string
-	reasoningStarted     bool
-	reasoningClosed      bool
-	syntheticInjected    bool
-	realReasoningSeen    bool
-	syntheticSummary     *strings.Builder
-	requestID            string
-	upstreamEndpointType string
-	terminalSeen         bool
-	terminalFailure      *aggregate.TerminalFailureError
+	createdSent                bool
+	createdResponseID          string
+	modelName                  string
+	toolIDAliases              map[string]string
+	toolItems                  map[string]*responsesToolItemState
+	toolOrder                  []string
+	reasoningStarted           bool
+	reasoningClosed            bool
+	syntheticInjected          bool
+	realReasoningSeen          bool
+	compactionLifecycleStarted bool
+	syntheticSummary           *strings.Builder
+	requestID                  string
+	upstreamEndpointType       string
+	terminalSeen               bool
+	terminalFailure            *aggregate.TerminalFailureError
 }
 
 type responseEventWriterHelper struct {
-	downstreamType       string
-	upstreamEndpointType string
-	createdSent          bool
-	createdResponseID    string
-	modelName            string
-	toolIDAliases        map[string]string
-	toolItems            map[string]*responsesToolItemState
-	toolOrder            []string
-	reasoningStarted     bool
-	reasoningClosed      bool
-	syntheticInjected    bool
-	realReasoningSeen    bool
-	syntheticSummary     *strings.Builder
-	requestID            string
-	terminalSeen         bool
-	terminalFailure      *aggregate.TerminalFailureError
-	events               []processEventCommand
+	downstreamType             string
+	upstreamEndpointType       string
+	createdSent                bool
+	createdResponseID          string
+	modelName                  string
+	toolIDAliases              map[string]string
+	toolItems                  map[string]*responsesToolItemState
+	toolOrder                  []string
+	reasoningStarted           bool
+	reasoningClosed            bool
+	syntheticInjected          bool
+	realReasoningSeen          bool
+	compactionLifecycleStarted bool
+	syntheticSummary           *strings.Builder
+	requestID                  string
+	terminalSeen               bool
+	terminalFailure            *aggregate.TerminalFailureError
+	events                     []processEventCommand
 }
 
 func (h *responseEventWriterHelper) ensureToolItemState(itemID string) *responsesToolItemState {
@@ -345,6 +347,14 @@ func (h *responseEventWriterHelper) markRealReasoningSeen() {
 	h.closeSyntheticReasoning()
 }
 
+func (h *responseEventWriterHelper) beginCompactionLifecycle() {
+	if h.compactionLifecycleStarted {
+		return
+	}
+	h.compactionLifecycleStarted = true
+	h.closeSyntheticReasoning()
+}
+
 func (h *responseEventWriterHelper) shouldMergeChatReasoningIntoSynthetic() bool {
 	return h.downstreamType == "responses" &&
 		h.syntheticInjected &&
@@ -387,11 +397,15 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		h.createdSent = true
 	case "response.output_item.added", "response.output_item.done":
-		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+		itemType, _ := item["type"].(string)
+		if itemType == "reasoning" {
 			h.markRealReasoningSeen()
 			break
 		}
-		if itemType, _ := item["type"].(string); itemType == "function_call" {
+		if itemType == "compaction" && h.downstreamType == "responses" {
+			h.beginCompactionLifecycle()
+		}
+		if itemType == "function_call" {
 			itemID, _ := item["id"].(string)
 			if itemID == "" {
 				itemID, _ = item["call_id"].(string)

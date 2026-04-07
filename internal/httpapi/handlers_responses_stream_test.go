@@ -99,6 +99,74 @@ func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamPreservesCompactionItemLifecycle(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"cmp_1\",\"type\":\"compaction\",\"encrypted_content\":\"enc_payload\",\"summary\":[]}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"cmp_1\",\"type\":\"compaction\",\"encrypted_content\":\"enc_payload\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"condensed\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
+	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
+	addedEvent := `{"item":{"encrypted_content":"enc_payload","id":"cmp_1","summary":[],"type":"compaction"},"type":"response.output_item.added"}`
+	doneEvent := `{"item":{"encrypted_content":"enc_payload","id":"cmp_1","summary":[{"text":"condensed","type":"summary_text"}],"type":"compaction"},"type":"response.output_item.done"}`
+	addedIdx := strings.Index(body, addedEvent)
+	doneIdx := strings.Index(body, doneEvent)
+
+	if proxyAddedIdx == -1 || proxyDoneIdx == -1 || addedIdx == -1 || doneIdx == -1 {
+		t.Fatalf("expected compaction added/done lifecycle to be forwarded unchanged, got %s", body)
+	}
+	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < addedIdx && addedIdx < doneIdx) {
+		t.Fatalf("expected synthetic reasoning to finish before compaction lifecycle begins, got %s", body)
+	}
+	if strings.Count(body, `"encrypted_content":"enc_payload"`) != 2 {
+		t.Fatalf("expected encrypted_content to survive unchanged on both compaction events, got %s", body)
+	}
+	if strings.Contains(body, `{"item":{"encrypted_content":"enc_payload","id":"rs_proxy"`) {
+		t.Fatalf("expected compaction payload to stay off synthetic reasoning item, got %s", body)
+	}
+}
+
+func TestResponseEventWriterHelperBeginsCompactionLifecycleByClosingSyntheticReasoning(t *testing.T) {
+	h := &responseEventWriterHelper{
+		downstreamType:    "responses",
+		syntheticInjected: true,
+		reasoningStarted:  true,
+		syntheticSummary:  &strings.Builder{},
+	}
+
+	h.beginCompactionLifecycle()
+
+	if !h.compactionLifecycleStarted {
+		t.Fatal("expected compaction lifecycle state to be recorded")
+	}
+	if !h.reasoningClosed {
+		t.Fatal("expected compaction lifecycle to close synthetic reasoning first")
+	}
+	if len(h.events) != 1 {
+		t.Fatalf("expected exactly one synthetic reasoning close event, got %d", len(h.events))
+	}
+	if got := h.events[0].Event; got != "response.output_item.done" {
+		t.Fatalf("expected reasoning close event before compaction, got %q", got)
+	}
+}
+
 func TestResponsesStreamPreservesNativeFunctionCallArgumentDeltasForResponsesUpstream(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
