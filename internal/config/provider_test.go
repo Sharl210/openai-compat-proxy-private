@@ -56,6 +56,35 @@ func TestResolveModelSupportsTrailingWildcardCaptures(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"HIDDEN_MODELS=gpt-4*,manual-alpha,claude-sonnet",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if want := []string{"gpt-4*", "manual-alpha", "claude-sonnet"}; len(provider.HiddenModels) != len(want) {
+		t.Fatalf("expected hidden models %v, got %#v", want, provider.HiddenModels)
+	}
+	for i, want := range []string{"gpt-4*", "manual-alpha", "claude-sonnet"} {
+		if provider.HiddenModels[i] != want {
+			t.Fatalf("expected hidden model %q at index %d, got %#v", want, i, provider.HiddenModels)
+		}
+	}
+	if !provider.HidesModel("gpt-4o") || !provider.HidesModel("manual-alpha") || provider.HidesModel("gpt-5") {
+		t.Fatalf("expected hidden model matcher to honor wildcard and exact patterns")
+	}
+}
+
 func TestLoadProviderFileResolvesSystemPromptFilesRelativeToProviderEnv(t *testing.T) {
 	rootDir := t.TempDir()
 	promptDir := filepath.Join(rootDir, "prompts")

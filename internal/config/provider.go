@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"openai-compat-proxy/internal/reasoning"
 )
 
 type ProviderConfig struct {
@@ -30,6 +32,7 @@ type ProviderConfig struct {
 	SupportsAnthropicMessages              bool
 	ModelMap                               []ModelMapEntry
 	ManualModels                           []string
+	HiddenModels                           []string
 	EnableReasoningEffortSuffix            bool
 	ExposeReasoningSuffixModels            bool
 	MapReasoningSuffixToAnthropicThinking  bool
@@ -187,6 +190,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 		case "MANUAL_MODELS":
 			provider.ManualModels = parseCommaSeparatedList(value)
+		case "HIDDEN_MODELS":
+			provider.HiddenModels = parseCommaSeparatedList(value)
 		case "ENABLE_REASONING_EFFORT_SUFFIX":
 			provider.EnableReasoningEffortSuffix, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
@@ -649,6 +654,76 @@ func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
 		}
 	}
 	return ""
+}
+
+func (p ProviderConfig) HidesModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, pattern := range p.HiddenModels {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if matchModelWildcard(model, NewModelMapEntry(pattern, "")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p ProviderConfig) VisibleModelIDs() []string {
+	base := make([]string, 0, len(p.ModelMap)+len(p.ManualModels))
+	seen := make(map[string]struct{}, len(p.ModelMap)+len(p.ManualModels))
+	for _, entry := range p.ModelMap {
+		id := strings.TrimSpace(entry.Key)
+		if shouldHideVisibleModelAlias(id) || p.HidesModel(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		base = append(base, id)
+	}
+	for _, manualModel := range p.ManualModels {
+		id := strings.TrimSpace(manualModel)
+		if id == "" || p.HidesModel(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		base = append(base, id)
+	}
+	if !(p.ExposeReasoningSuffixModels && p.EnableReasoningEffortSuffix) {
+		return base
+	}
+	keys := make([]string, 0, len(p.ModelMap))
+	for _, entry := range p.ModelMap {
+		keys = append(keys, entry.Key)
+	}
+	expanded := reasoning.ExpandModelIDs(base, keys, true)
+	filtered := make([]string, 0, len(expanded))
+	seen = make(map[string]struct{}, len(expanded))
+	for _, id := range expanded {
+		if p.HidesModel(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		filtered = append(filtered, id)
+	}
+	return filtered
+}
+
+func shouldHideVisibleModelAlias(id string) bool {
+	id = strings.TrimSpace(id)
+	return id == "" || strings.Contains(id, "*")
 }
 
 func matchModelWildcard(model string, entry ModelMapEntry) bool {
