@@ -10,7 +10,7 @@
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| 多 provider 路由 | ✅ | 支持 `providers/*.env`、显式 `/{providerId}/v1/*` 和默认 provider 裸 `/v1/*` |
+| 多 provider 路由 | ✅ | 支持 `providers/*.env`、显式 `/{providerId}/v1/*` 和默认 provider overlay 裸 `/v1/*` |
 | 三套兼容入口 | ✅ | `POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`GET /v1/models` 全部可用 |
 | `3×3` 协议矩阵 | ✅ | 三个下游入口可分别对接 `responses / chat / anthropic` 三种上游协议类型 |
 | provider 内部统一走一种上游协议 | ✅ | `UPSTREAM_ENDPOINT_TYPE=responses/chat/anthropic`，代理层负责跨协议适配 |
@@ -62,7 +62,7 @@ LISTEN_ADDR=:21021
 PROXY_API_KEY=
 
 PROVIDERS_DIR=./providers
-DEFAULT_PROVIDER=openai
+DEFAULT_PROVIDER=openai,azure
 ENABLE_LEGACY_V1_ROUTES=true
 
 DOWNSTREAM_NON_STREAM_STRATEGY=proxy_buffer
@@ -173,6 +173,13 @@ http://127.0.0.1:21021/
 - `/v1/chat/completions`
 - `/v1/messages`
 - `/v1/models`
+
+其中 `DEFAULT_PROVIDER` 支持逗号分隔多个 provider，例如 `openai,azure`：
+
+- 越靠后的 provider 优先级越高
+- 同名模型按 overlay 规则以后面的 provider 为准
+- 裸 `/v1/models` 返回这组 overlay 后的可见模型
+- 裸 `/v1/responses`、`/v1/chat/completions`、`/v1/messages` 会按模型归属把请求转发到真正拥有该模型的上游 provider
 
 ### 管理台裸根路径
 
@@ -366,6 +373,16 @@ Claude 相关还有两个配套开关：
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
 | 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` | ❌ 修改后需重启 |
+
+### Cache_Info 聚合文件
+
+`<PROVIDERS_DIR>/Cache_Info/` 现在默认会生成三类聚合 TXT：
+
+- `全提供商总计.txt`
+- `已启用提供商总计.txt`
+- `v1默认分组统计.txt`
+
+其中 `v1默认分组统计.txt` 只汇总当前 `DEFAULT_PROVIDER` 列表里、并且仍处于启用状态的 provider。它和裸 `/v1/*` 的默认分组 overlay 语义保持一致。
 
 ### provider `.env`
 
