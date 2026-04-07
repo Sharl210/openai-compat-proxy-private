@@ -154,14 +154,7 @@ func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.R
 }
 
 func authHeaderForOverlayProviderUpstream(r *http.Request, cfg config.Config, providerID string) (string, error) {
-	if r == nil {
-		return authHeaderForUpstream(r, cfg)
-	}
-	if info, ok := routeInfoFromRequest(r); ok {
-		info.ProviderID = providerID
-		return authHeaderForUpstream(r.Clone(withRouteInfo(r.Context(), info)), cfg)
-	}
-	return authHeaderForUpstream(r, cfg)
+	return authHeaderForResolvedProviderUpstream(r, cfg, providerID)
 }
 
 func fetchProviderModelsBody(ctx context.Context, client *upstream.Client, authorization string, provider config.ProviderConfig) ([]byte, bool) {

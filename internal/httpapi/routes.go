@@ -8,6 +8,7 @@ import (
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/upstream"
 )
 
 type routeInfo struct {
@@ -149,6 +150,8 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
+			} else if resolvedID, ok := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel); ok {
+				providerID = resolvedID
 			} else if legacyModelsListEnforced(snapshot) {
 				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
 			}
@@ -173,4 +176,48 @@ func legacyModelsListEnforced(snapshot *config.RuntimeSnapshot) bool {
 func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {
 	provider, _, _, ok := providerSelectionForRequest(r, "")
 	return provider, ok
+}
+
+func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot *config.RuntimeSnapshot, model string) (string, bool) {
+	if snapshot == nil || snapshot.Config.EnableDefaultProviderModelTags || strings.TrimSpace(model) == "" {
+		return "", false
+	}
+	owner := ""
+	for _, providerID := range snapshot.DefaultProviderIDs {
+		provider, err := snapshot.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled || !provider.SupportsModels {
+			continue
+		}
+		providerCfg := providerConfigForID(snapshot, providerID)
+		authorization, err := authHeaderForOverlayProviderUpstream(r, providerCfg, providerID)
+		if err != nil {
+			continue
+		}
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+		body, ok := fetchProviderModelsBody(r.Context(), client, authorization, provider)
+		if !ok {
+			continue
+		}
+		if modelEntriesContain(decodeModelEntries(body), model) {
+			owner = providerID
+		}
+	}
+	if owner == "" {
+		return "", false
+	}
+	return owner, true
+}
+
+func modelEntriesContain(entries []map[string]any, model string) bool {
+	needle := strings.TrimSpace(model)
+	if needle == "" {
+		return false
+	}
+	for _, entry := range entries {
+		id, _ := entry["id"].(string)
+		if strings.TrimSpace(id) == needle {
+			return true
+		}
+	}
+	return false
 }

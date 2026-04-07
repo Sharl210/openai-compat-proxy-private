@@ -319,6 +319,111 @@ func TestLegacyResponsesRouteRejectsUnknownBareModelWhenTagModeEnabled(t *testin
 	}
 }
 
+func TestLegacyResponsesRouteUsesRealtimeOverlayModelOwnerForBareRequests(t *testing.T) {
+	minimaxUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"MiniMax-M2.7","object":"model"}]}`))
+		case "/responses":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_minimax","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer minimaxUpstream.Close()
+
+	var codexForHits atomic.Int32
+	codexForUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			if got := r.Header.Get("Authorization"); got != "Bearer codex-for-key" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.1","object":"model"}]}`))
+		case "/responses":
+			if got := r.Header.Get("Authorization"); got != "Bearer codex-for-key" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			codexForHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_codex_for","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer codexForUpstream.Close()
+
+	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model"}]}`))
+		case "/responses":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_codex","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer codexUpstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:                 "root-secret",
+		DefaultProvider:             "minimax,codex-for,codex",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "minimax",
+			Enabled:              true,
+			UpstreamBaseURL:      minimaxUpstream.URL,
+			UpstreamAPIKey:       "minimax-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"MiniMax-M2.7"},
+		}, {
+			ID:                   "codex-for",
+			Enabled:              true,
+			UpstreamBaseURL:      codexForUpstream.URL,
+			UpstreamAPIKey:       "codex-for-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+		}, {
+			ID:                   "codex",
+			Enabled:              true,
+			UpstreamBaseURL:      codexUpstream.URL,
+			UpstreamAPIKey:       "codex-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"gpt-5.4"},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.1","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer root-secret")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected bare route to route realtime overlay model owner, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "codex-for" {
+		t.Fatalf("expected realtime overlay owner codex-for, got %q", got)
+	}
+	if codexForHits.Load() != 1 {
+		t.Fatalf("expected codex-for upstream to handle bare realtime-overlay request, got %d hits", codexForHits.Load())
+	}
+}
+
 func TestLegacyResponsesRouteTaggedManualModelStripsPrefixBeforeUpstream(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
