@@ -360,21 +360,12 @@ func (c Config) Validate() error {
 		return ErrInvalidConfig("at least one provider must be enabled")
 	}
 	if strings.TrimSpace(c.DefaultProvider) != "" {
-		ids, err := c.DefaultProviderIDs()
+		provider, err := c.DefaultProviderConfig()
 		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			provider, err := c.ProviderByID(id)
-			if err != nil {
-				return ErrInvalidConfig(fmt.Sprintf("default provider not found: %s", id))
-			}
-			if !provider.Enabled {
-				return ErrInvalidConfig(fmt.Sprintf("default provider must be enabled: %s", id))
-			}
-		}
-		if len(ids) == 0 {
 			return ErrInvalidConfig("default provider not found")
+		}
+		if !provider.Enabled {
+			return ErrInvalidConfig("default provider must be enabled")
 		}
 	}
 	if c.EnableLegacyV1Routes && strings.TrimSpace(c.DefaultProvider) == "" {

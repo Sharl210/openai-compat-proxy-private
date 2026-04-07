@@ -783,48 +783,6 @@ func TestManager_EnabledProvidersAggregateFollowsSource(t *testing.T) {
 	}
 }
 
-func TestManager_DefaultProvidersAggregateFollowsSource(t *testing.T) {
-	tmp := t.TempDir()
-	loc := time.FixedZone("CST", 8*3600)
-	clock := newMockClock(loc)
-	m := NewManager(tmp, loc, []string{"openai", "anthropic"}, clock)
-	m.SetEnabledProvidersSource(func() []string {
-		return []string{"openai", "anthropic"}
-	})
-
-	defaults := []string{"openai"}
-	m.SetDefaultProvidersSource(func() []string {
-		return append([]string(nil), defaults...)
-	})
-
-	if err := m.RecordFinalUsage("req-openai", "openai", &Usage{InputTokens: 100, TotalTokens: 100}); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.RecordFinalUsage("req-anthropic", "anthropic", &Usage{InputTokens: 50, TotalTokens: 50}); err != nil {
-		t.Fatal(err)
-	}
-
-	m.flushAll()
-	defaultPath := expectedAggregateCacheInfoTXTPath(tmp, "v1默认分组统计.txt")
-	data, err := os.ReadFile(defaultPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "输入Tokens：150") {
-		t.Fatalf("default aggregate unexpectedly included anthropic before source update:\n%s", string(data))
-	}
-
-	defaults = []string{"anthropic", "openai"}
-	m.flushAll()
-	data, err = os.ReadFile(defaultPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "输入Tokens：150") {
-		t.Fatalf("default aggregate did not follow updated source:\n%s", string(data))
-	}
-}
-
 func TestManager_ClearProviderHistoryResetsProviderAndRebuildsAggregates(t *testing.T) {
 	tmp := t.TempDir()
 	loc := time.FixedZone("CST", 8*3600)

@@ -345,41 +345,11 @@ func (c Config) ProviderByID(id string) (ProviderConfig, error) {
 	return ProviderConfig{}, errors.New("provider not found")
 }
 
-func (c Config) DefaultProviderIDs() ([]string, error) {
-	return parseDefaultProviderIDs(c.DefaultProvider)
-}
-
 func (c Config) DefaultProviderConfig() (ProviderConfig, error) {
-	ids, err := c.DefaultProviderIDs()
-	if err != nil {
-		return ProviderConfig{}, err
-	}
-	if len(ids) > 0 {
-		return c.ProviderByID(ids[len(ids)-1])
+	if c.DefaultProvider != "" {
+		return c.ProviderByID(c.DefaultProvider)
 	}
 	return ProviderConfig{}, errors.New("default provider not found")
-}
-
-func parseDefaultProviderIDs(raw string) ([]string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil, nil
-	}
-	parts := strings.Split(raw, ",")
-	ids := make([]string, 0, len(parts))
-	seen := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		id := strings.TrimSpace(part)
-		if id == "" {
-			return nil, ErrInvalidConfig("default provider list contains empty item")
-		}
-		if _, ok := seen[id]; ok {
-			return nil, ErrInvalidConfig(fmt.Sprintf("duplicate default provider: %s", id))
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	return ids, nil
 }
 
 func parseProviderSupportsBool(value string, key string, path string) (bool, error) {
@@ -662,31 +632,32 @@ func matchModelWildcard(model string, entry ModelMapEntry) bool {
 	if !entry.HasWildcard {
 		return model == actualKey
 	}
-	parts := strings.Split(actualKey, "*")
-	pos := 0
-	if first := parts[0]; first != "" {
-		if !strings.HasPrefix(model, first) {
-			return false
-		}
-		pos = len(first)
+
+	parts := entry.KeyParts
+	if len(parts) == 0 {
+		return false
 	}
-	for i := 1; i < len(parts)-1; i++ {
-		part := parts[i]
-		if part == "" {
-			continue
-		}
-		idx := strings.Index(model[pos:], part)
+
+	if !strings.HasPrefix(model, parts[0]) {
+		return false
+	}
+
+	pos := len(parts[0])
+	for i := 1; i < len(parts); i++ {
+		idx := strings.Index(model[pos:], parts[i])
 		if idx < 0 {
 			return false
 		}
-		pos += idx + len(part)
+		pos += idx + len(parts[i])
 	}
-	last := parts[len(parts)-1]
-	if last == "" {
-		return true
+
+	lastPart := parts[len(parts)-1]
+	suffixStart := len(model) - len(lastPart)
+	if suffixStart < pos {
+		return false
 	}
-	end := strings.LastIndex(model, last)
-	return end >= pos && end+len(last) == len(model)
+
+	return true
 }
 
 func applyCaptureReplacement(model string, entry ModelMapEntry) string {
@@ -697,27 +668,18 @@ func applyCaptureReplacement(model string, entry ModelMapEntry) string {
 	if !entry.TargetHasCaptures {
 		return target
 	}
-	actualKey := entry.UnescapedKey
-	if actualKey == "" {
-		actualKey = entry.Key
-	}
-	parts := strings.Split(actualKey, "*")
+
+	parts := entry.KeyParts
 	captures := make([]string, 0, entry.CaptureCount)
 	pos := len(parts[0])
 
 	for i := 1; i < len(parts); i++ {
-		part := parts[i]
-		if part == "" {
-			captures = append(captures, model[pos:])
-			pos = len(model)
-			continue
-		}
-		idx := strings.Index(model[pos:], part)
+		idx := strings.Index(model[pos:], parts[i])
 		if idx < 0 {
 			break
 		}
 		captures = append(captures, model[pos:pos+idx])
-		pos += idx + len(part)
+		pos += idx + len(parts[i])
 	}
 
 	result := entry.UnescapedTarget
