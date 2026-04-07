@@ -10,6 +10,7 @@ const state = {
   browserFilter: 'all',
   editorPane: 'edit',
   currentDir: '',
+  providersDir: 'providers',
   treeItems: [],
   currentFile: null,
   envExpanded: {},
@@ -35,25 +36,25 @@ function getHistoryState() {
   };
 }
 
-function pushHistoryState() {
+function pushHistoryState(nextState = getHistoryState()) {
   if (state._fromHistory) return;
-  history.pushState(getHistoryState(), '');
+  history.pushState(nextState, '');
 }
 
-function replaceHistoryState() {
-  history.replaceState(getHistoryState(), '');
+function replaceHistoryState(nextState = getHistoryState()) {
+  history.replaceState(nextState, '');
 }
 
 async function navigateToBrowserAndWait(dir, sidebarOpenOverride) {
+  const previousDir = state.currentDir;
   state.view = 'browser';
   if (sidebarOpenOverride !== undefined) {
     state.sidebarOpen = sidebarOpenOverride;
   } else {
     state.sidebarOpen = false;
   }
-  const enteringSubdir = dir !== '' && dir !== state.currentDir;
   await loadTree(dir);
-  if (enteringSubdir) pushHistoryState();
+  if (dir !== previousDir) pushHistoryState();
   render();
 }
 
@@ -118,6 +119,7 @@ async function bootstrap() {
     state.actions = data.actions || [];
     state.validation = data.validation || null;
     state.status = data.status || null;
+    state.providersDir = data.providers_dir || 'providers';
     await loadTree('');
     state.view = 'browser';
     replaceHistoryState();
@@ -226,6 +228,7 @@ async function loadTree(path) {
   state.currentDir = path || '';
   const data = await api(`/_admin/api/tree?path=${encodeURIComponent(state.currentDir)}`);
   state.treeItems = data.items || [];
+  state.providersDir = data.providers_dir || state.providersDir || 'providers';
 }
 
 async function openDirectory(path) {
@@ -304,10 +307,10 @@ function attemptCloseCurrentFile() {
     if (state._pendingEditorClose) {
       const pending = state._pendingEditorClose;
       state._pendingEditorClose = null;
-      closeCurrentFile();
+      finishCloseCurrentFile();
       restoreHistoryState(pending);
     } else {
-      closeCurrentFile();
+      navigateBackFromEditor();
     }
     return;
   }
@@ -315,7 +318,7 @@ function attemptCloseCurrentFile() {
   render();
 }
 
-function closeCurrentFile() {
+function finishCloseCurrentFile() {
   state.currentFile = null;
   state.lastSaveFeedback = null;
   state.editorCloseConfirm = false;
@@ -323,6 +326,14 @@ function closeCurrentFile() {
   state.view = 'browser';
   state.sidebarOpen = false;
   render();
+}
+
+function navigateBackFromEditor() {
+  if (window.history.length > 1) {
+    history.back();
+    return;
+  }
+  finishCloseCurrentFile();
 }
 
 async function refreshStatus() {
@@ -582,12 +593,15 @@ function bindEvents() {
       const newView = button.dataset.view;
       if (state.view !== newView) {
         if (state.sidebarOpen) {
+          state.sidebarOpen = false;
           replaceHistoryState();
-        } else {
-          pushHistoryState();
         }
+        state.view = newView;
+        state.sidebarOpen = false;
+        pushHistoryState();
+        render();
+        return;
       }
-      state.view = newView;
       state.sidebarOpen = false;
       render();
     });
@@ -622,8 +636,11 @@ function bindEvents() {
   const sidebarClose = document.getElementById('sidebar-close');
   if (sidebarClose) {
     sidebarClose.addEventListener('click', () => {
+      if (state.sidebarOpen && window.history.length > 1) {
+        history.back();
+        return;
+      }
       state.sidebarOpen = false;
-      state._skipNextPopstate = true;
       render();
     });
   }
@@ -631,8 +648,11 @@ function bindEvents() {
   const sidebarBackdrop = document.getElementById('sidebar-backdrop');
   if (sidebarBackdrop) {
     sidebarBackdrop.addEventListener('click', () => {
+      if (state.sidebarOpen && window.history.length > 1) {
+        history.back();
+        return;
+      }
       state.sidebarOpen = false;
-      state._skipNextPopstate = true;
       render();
     });
   }
@@ -716,31 +736,35 @@ function bindEvents() {
   if (editorCloseSave) {
     editorCloseSave.addEventListener('click', async () => {
       state.editorCloseConfirm = false;
-      await saveCurrentFile();
-      if (!state.currentFile?.dirty) {
-        const pending = state._pendingEditorClose;
-        state._pendingEditorClose = null;
-        closeCurrentFile();
-        if (pending) {
-          restoreHistoryState(pending);
-        }
-      } else {
-        render();
+              await saveCurrentFile();
+              if (!state.currentFile?.dirty) {
+                const pending = state._pendingEditorClose;
+                state._pendingEditorClose = null;
+                finishCloseCurrentFile();
+                if (pending) {
+                  restoreHistoryState(pending);
+                } else {
+                  navigateBackFromEditor();
+                }
+              } else {
+                render();
       }
     });
   }
   const editorCloseDiscard = document.getElementById('editor-close-discard');
-  if (editorCloseDiscard) {
-    editorCloseDiscard.addEventListener('click', () => {
-      const pending = state._pendingEditorClose;
-      state._pendingEditorClose = null;
-      state.currentFile.dirty = false;
-      closeCurrentFile();
-      if (pending) {
-        restoreHistoryState(pending);
-      }
-    });
-  }
+          if (editorCloseDiscard) {
+            editorCloseDiscard.addEventListener('click', () => {
+              const pending = state._pendingEditorClose;
+              state._pendingEditorClose = null;
+              state.currentFile.dirty = false;
+              finishCloseCurrentFile();
+              if (pending) {
+                restoreHistoryState(pending);
+              } else {
+                navigateBackFromEditor();
+              }
+            });
+          }
   const editorCloseCancel = document.getElementById('editor-close-cancel');
   if (editorCloseCancel) {
     editorCloseCancel.addEventListener('click', () => {
@@ -916,10 +940,6 @@ function dashboardTemplate() {
           </div>
         </div>
         <div class="material-drawer-section material-drawer-supporting">
-          <div class="support-card compact">
-            <div class="support-kv"><span>当前目录</span><strong>${escapeHtml(state.currentDir || '/')}</strong></div>
-            <div class="support-kv"><span>当前文件</span><strong>${escapeHtml(state.currentFile?.path || '未选择')}</strong></div>
-          </div>
           <button id="logout-button" class="ghost-btn material-outlined-button logout-btn" type="button">退出登录</button>
         </div>
       </aside>
@@ -1371,11 +1391,11 @@ function canCreateEnvInCurrentDir() {
 	if (state.currentDir === '') {
 		return !(state.treeItems || []).some((item) => !item.is_dir && item.name === '.env');
 	}
-	return state.currentDir === 'providers';
+	return state.currentDir === state.providersDir;
 }
 
 function canCreateMdInCurrentDir() {
-	return state.currentDir === 'providers';
+	return state.currentDir === state.providersDir;
 }
 
 function renderTopbarTools() {
