@@ -460,7 +460,7 @@ func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
 	}
 }
 
-func TestAdminUIStylesDisableTransparentOverlayOnMobileEditors(t *testing.T) {
+func TestAdminUIStylesKeepHighlightOverlayOnMobileEditors(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
 	rec := httptest.NewRecorder()
@@ -471,14 +471,17 @@ func TestAdminUIStylesDisableTransparentOverlayOnMobileEditors(t *testing.T) {
 		t.Fatalf("expected css asset 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "@media (max-width: 768px)") {
-		t.Fatalf("expected mobile media query for editor overlay fallback, got %s", body)
+	if !strings.Contains(body, ".code-editor-textarea,") || !strings.Contains(body, ".code-editor-highlight,") || !strings.Contains(body, ".code-editor-gutter") {
+		t.Fatalf("expected editor layers to share explicit text metrics rules, got %s", body)
 	}
-	if !strings.Contains(body, ".env-highlight-textarea") || !strings.Contains(body, "color: var(--md-sys-color-on-surface)") {
-		t.Fatalf("expected mobile editor css to restore visible textarea text, got %s", body)
+	if !strings.Contains(body, "-webkit-text-size-adjust: 100%") || !strings.Contains(body, "text-size-adjust: 100%") {
+		t.Fatalf("expected editor css to disable mobile text autosizing drift, got %s", body)
 	}
-	if !strings.Contains(body, ".code-editor-highlight") || !strings.Contains(body, "display: none") {
-		t.Fatalf("expected mobile editor css to disable highlight overlay, got %s", body)
+	if !strings.Contains(body, "font-variant-ligatures: none") {
+		t.Fatalf("expected editor css to disable ligatures for consistent caret alignment, got %s", body)
+	}
+	if strings.Contains(body, ".code-editor-highlight {\n  display: none") || strings.Contains(body, ".code-editor-highlight {\n    display: none") {
+		t.Fatalf("expected mobile editor css to keep syntax highlight overlay visible, got %s", body)
 	}
 }
 

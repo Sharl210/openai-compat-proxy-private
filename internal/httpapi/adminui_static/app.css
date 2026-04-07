@@ -1082,6 +1082,16 @@ button { cursor: pointer; }
   grid-row: 1;
 }
 
+.code-editor-textarea,
+.code-editor-highlight,
+.code-editor-gutter {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  text-rendering: geometricPrecision;
+}
+
 .code-editor-textarea:focus {
   box-shadow: none;
 }
@@ -1175,22 +1185,8 @@ button { cursor: pointer; }
 
 .env-highlight-textarea {
   color: transparent;
+  -webkit-text-fill-color: transparent;
   caret-color: var(--md-sys-color-on-surface);
-}
-
-@media (max-width: 768px) {
-  .code-editor-highlight {
-    display: none;
-  }
-
-  .env-highlight-textarea,
-  .code-editor-textarea {
-    color: var(--md-sys-color-on-surface);
-    -webkit-text-fill-color: var(--md-sys-color-on-surface);
-    caret-color: var(--md-sys-color-on-surface);
-    -webkit-text-size-adjust: 100%;
-    text-size-adjust: 100%;
-  }
 }
 
 .code-editor-shell-env .code-editor-gutter {
