@@ -29,7 +29,8 @@ func NewRuntimeStore(rootEnvPath string) (*RuntimeStore, error) {
 
 func NewStaticRuntimeStore(cfg Config) *RuntimeStore {
 	store := &RuntimeStore{}
-	store.active.Store(&RuntimeSnapshot{Config: cfg, ProviderVersionByID: map[string]string{}, ProviderPathByID: map[string]string{}, PromptPathsByID: map[string][]string{}, providerMTimeByID: map[string]time.Time{}})
+	ids, owners, visible, _ := buildDefaultOverlayModelIndex(cfg)
+	store.active.Store(&RuntimeSnapshot{Config: cfg, DefaultProviderIDs: ids, DefaultModelOwners: owners, DefaultVisibleModels: visible, ProviderVersionByID: map[string]string{}, ProviderPathByID: map[string]string{}, PromptPathsByID: map[string][]string{}, providerMTimeByID: map[string]time.Time{}})
 	return store
 }
 
