@@ -10,34 +10,36 @@ import (
 )
 
 type Config struct {
-	ListenAddr                     string
-	CacheInfoTimezone              string
-	ProxyAPIKey                    string
-	UpstreamBaseURL                string
-	UpstreamAPIKey                 string
-	UpstreamEndpointType           string
-	AnthropicVersion               string
-	UpstreamUserAgent              string
-	MasqueradeTarget               string
-	InjectClaudeCodeMetadataUserID bool
-	InjectClaudeCodeSystemPrompt   bool
-	ProvidersDir                   string
-	DefaultProvider                string
-	EnableLegacyV1Routes           bool
-	DownstreamNonStreamStrategy    string
-	Providers                      []ProviderConfig
-	LogEnable                      bool
-	ConnectTimeout                 time.Duration
-	FirstByteTimeout               time.Duration
-	IdleTimeout                    time.Duration
-	TotalTimeout                   time.Duration
-	UpstreamRetryCount             int
-	UpstreamRetryDelay             time.Duration
-	UpstreamThinkingTagStyle       string
-	LogFilePath                    string
-	LogMaxRequests                 int
-	LogMaxBodySizeMB               float64
-	DebugArchiveRootDir            string
+	ListenAddr                        string
+	CacheInfoTimezone                 string
+	ProxyAPIKey                       string
+	UpstreamBaseURL                   string
+	UpstreamAPIKey                    string
+	UpstreamEndpointType              string
+	AnthropicVersion                  string
+	UpstreamUserAgent                 string
+	MasqueradeTarget                  string
+	InjectClaudeCodeMetadataUserID    bool
+	InjectClaudeCodeSystemPrompt      bool
+	ProvidersDir                      string
+	DefaultProvider                   string
+	EnableDefaultProviderModelTags    bool
+	EnableAllDefaultProviderModelTags bool
+	EnableLegacyV1Routes              bool
+	DownstreamNonStreamStrategy       string
+	Providers                         []ProviderConfig
+	LogEnable                         bool
+	ConnectTimeout                    time.Duration
+	FirstByteTimeout                  time.Duration
+	IdleTimeout                       time.Duration
+	TotalTimeout                      time.Duration
+	UpstreamRetryCount                int
+	UpstreamRetryDelay                time.Duration
+	UpstreamThinkingTagStyle          string
+	LogFilePath                       string
+	LogMaxRequests                    int
+	LogMaxBodySizeMB                  float64
+	DebugArchiveRootDir               string
 }
 
 const (
@@ -91,6 +93,12 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	}
 	if value, ok := lookup("DEFAULT_PROVIDER"); ok && value != "" {
 		cfg.DefaultProvider = value
+	}
+	if value, ok := lookup("ENABLE_DEFAULT_PROVIDER_MODEL_TAGS"); ok && value != "" {
+		cfg.EnableDefaultProviderModelTags = parseRootBool(value)
+	}
+	if value, ok := lookup("ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS"); ok && value != "" {
+		cfg.EnableAllDefaultProviderModelTags = parseRootBool(value)
 	}
 	if value, ok := lookup("ENABLE_LEGACY_V1_ROUTES"); ok && value != "" {
 		cfg.EnableLegacyV1Routes = parseRootBool(value)
@@ -174,6 +182,12 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_DEFAULT_PROVIDER_MODEL_TAGS"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS"); err != nil {
 		return err
 	}
 	if err := validateStrictBool(values, "LOG_ENABLE"); err != nil {
@@ -419,6 +433,8 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 	return c.ProxyAPIKey == other.ProxyAPIKey &&
 		c.ProvidersDir == other.ProvidersDir &&
 		c.DefaultProvider == other.DefaultProvider &&
+		c.EnableDefaultProviderModelTags == other.EnableDefaultProviderModelTags &&
+		c.EnableAllDefaultProviderModelTags == other.EnableAllDefaultProviderModelTags &&
 		c.EnableLegacyV1Routes == other.EnableLegacyV1Routes &&
 		c.DownstreamNonStreamStrategy == other.DownstreamNonStreamStrategy &&
 		c.ConnectTimeout == other.ConnectTimeout &&

@@ -39,6 +39,24 @@ func TestLoadFromEnvParsesDownstreamNonStreamStrategy(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvParsesDefaultProviderModelTagsFlag(t *testing.T) {
+	t.Setenv("ENABLE_DEFAULT_PROVIDER_MODEL_TAGS", "true")
+
+	cfg := LoadFromEnv()
+	if !cfg.EnableDefaultProviderModelTags {
+		t.Fatalf("expected ENABLE_DEFAULT_PROVIDER_MODEL_TAGS=true to enable tagged mode")
+	}
+}
+
+func TestLoadFromEnvParsesAllDefaultProviderModelTagsFlag(t *testing.T) {
+	t.Setenv("ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS", "true")
+
+	cfg := LoadFromEnv()
+	if !cfg.EnableAllDefaultProviderModelTags {
+		t.Fatalf("expected ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS=true to enable all-tag mode")
+	}
+}
+
 func TestLoadFromEnvParsesCacheInfoTimezone(t *testing.T) {
 	t.Setenv("CACHE_INFO_TIMEZONE", "UTC")
 
@@ -145,6 +163,20 @@ func TestValidateRootEnvValuesRejectsInvalidEnableLegacyV1RoutesBoolean(t *testi
 	err := ValidateRootEnvValues(map[string]string{"ENABLE_LEGACY_V1_ROUTES": "enabled"})
 	if err == nil {
 		t.Fatalf("expected invalid ENABLE_LEGACY_V1_ROUTES to fail validation")
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidDefaultProviderModelTagsBoolean(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"ENABLE_DEFAULT_PROVIDER_MODEL_TAGS": "enabled"})
+	if err == nil {
+		t.Fatalf("expected invalid ENABLE_DEFAULT_PROVIDER_MODEL_TAGS to fail validation")
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidAllDefaultProviderModelTagsBoolean(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS": "enabled"})
+	if err == nil {
+		t.Fatalf("expected invalid ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS to fail validation")
 	}
 }
 
@@ -260,7 +292,7 @@ func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
 		},
 	}
 
-	ids, owners, visible, err := buildDefaultOverlayModelIndex(cfg)
+	ids, owners, visible, taggedOwners, taggedVisible, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
@@ -273,9 +305,15 @@ func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
 	if want := []string{"shared-model", "azure-only", "azure-manual", "openai-only", "openai-manual"}; !reflect.DeepEqual(visible, want) {
 		t.Fatalf("expected visible models %v, got %v", want, visible)
 	}
+	if taggedOwners["[azure]shared-model"] != "azure" || taggedOwners["[openai]shared-model"] != "openai" {
+		t.Fatalf("expected tagged owners for overlapping model, got %#v", taggedOwners)
+	}
+	if want := []string{"[azure]shared-model", "[azure]azure-only", "[azure]azure-manual", "[openai]openai-only", "[openai]shared-model", "[openai]openai-manual"}; !reflect.DeepEqual(taggedVisible, want) {
+		t.Fatalf("expected tagged visible models %v, got %v", want, taggedVisible)
+	}
 }
 
-func TestRuntimeSnapshotResolveDefaultProviderIDForModelUsesWildcardFallback(t *testing.T) {
+func TestRuntimeSnapshotResolveDefaultProviderIDForModelRequiresVisibleModelListMembership(t *testing.T) {
 	snapshot := &RuntimeSnapshot{
 		Config: Config{
 			DefaultProvider: "openai,azure",
@@ -286,6 +324,7 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelUsesWildcardFallback(t *
 					ModelMap: []ModelMapEntry{
 						NewModelMapEntry("gpt-*", "openai-$1"),
 					},
+					ManualModels: []string{"listed-model"},
 				},
 				{
 					ID:      "azure",
@@ -297,13 +336,77 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelUsesWildcardFallback(t *
 			},
 		},
 		DefaultProviderIDs: []string{"openai", "azure"},
-		DefaultModelOwners: map[string]string{},
+		DefaultModelOwners: map[string]string{"listed-model": "openai"},
 	}
 
-	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("gpt-5"); !ok || owner != "azure" {
-		t.Fatalf("expected wildcard fallback to resolve higher-priority provider azure, got owner=%q ok=%v", owner, ok)
+	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("listed-model"); !ok || owner != "openai" {
+		t.Fatalf("expected listed model to resolve openai, got owner=%q ok=%v", owner, ok)
 	}
-	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("claude-3"); ok || owner != "" {
-		t.Fatalf("expected unknown model to miss default provider fallback, got owner=%q ok=%v", owner, ok)
+	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("gpt-5"); ok || owner != "" {
+		t.Fatalf("expected wildcard-only model outside visible list to miss default provider routing, got owner=%q ok=%v", owner, ok)
+	}
+}
+
+func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
+	cfg := Config{
+		DefaultProvider: "openai,azure",
+		Providers: []ProviderConfig{
+			{
+				ID:      "openai",
+				Enabled: true,
+				ModelMap: []ModelMapEntry{
+					NewModelMapEntry("gpt-4o", "openai-gpt-4o"),
+					NewModelMapEntry("openai-only", "openai-only-upstream"),
+				},
+				ManualModels: []string{"manual-openai"},
+				HiddenModels: []string{"gpt-4*", "manual-openai"},
+			},
+			{
+				ID:      "azure",
+				Enabled: true,
+				ModelMap: []ModelMapEntry{
+					NewModelMapEntry("gpt-4o", "azure-gpt-4o"),
+					NewModelMapEntry("azure-only", "azure-only-upstream"),
+				},
+			},
+		},
+	}
+
+	_, owners, visible, _, _, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("expected overlay model index build to succeed, got %v", err)
+	}
+	if want := []string{"gpt-4o", "azure-only", "openai-only"}; !reflect.DeepEqual(visible, want) {
+		t.Fatalf("expected hidden models removed from visible list and gpt-4o to fall through to azure, want %v got %v", want, visible)
+	}
+	if got := owners["gpt-4o"]; got != "azure" {
+		t.Fatalf("expected hidden wildcard model gpt-4o to fall through to azure, got %q", got)
+	}
+	if _, ok := owners["manual-openai"]; ok {
+		t.Fatalf("expected hidden manual model to be absent from overlay owners, got %#v", owners)
+	}
+}
+
+func TestBuildDefaultOverlayModelIndexHiddenModelsFilterReasoningSuffixVariants(t *testing.T) {
+	cfg := Config{
+		DefaultProvider: "openai",
+		Providers: []ProviderConfig{
+			{
+				ID:                          "openai",
+				Enabled:                     true,
+				ManualModels:                []string{"reason-model"},
+				EnableReasoningEffortSuffix: true,
+				ExposeReasoningSuffixModels: true,
+				HiddenModels:                []string{"reason-model-high", "reason-model-low"},
+			},
+		},
+	}
+
+	_, _, visible, _, _, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("expected overlay model index build to succeed, got %v", err)
+	}
+	if want := []string{"reason-model", "reason-model-xhigh", "reason-model-medium"}; !reflect.DeepEqual(visible, want) {
+		t.Fatalf("expected hidden suffix variants to be filtered from visible list, want %v got %v", want, visible)
 	}
 }

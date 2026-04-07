@@ -15,17 +15,19 @@ import (
 const versionTimeLayout = "2006-01-02 15:04:05.000"
 
 type RuntimeSnapshot struct {
-	Config               Config
-	RootEnvPath          string
-	RootEnvMTime         time.Time
-	RootEnvVersion       string
-	DefaultProviderIDs   []string
-	DefaultModelOwners   map[string]string
-	DefaultVisibleModels []string
-	ProviderVersionByID  map[string]string
-	ProviderPathByID     map[string]string
-	PromptPathsByID      map[string][]string
-	providerMTimeByID    map[string]time.Time
+	Config                     Config
+	RootEnvPath                string
+	RootEnvMTime               time.Time
+	RootEnvVersion             string
+	DefaultProviderIDs         []string
+	DefaultModelOwners         map[string]string
+	DefaultVisibleModels       []string
+	DefaultTaggedModelOwners   map[string]string
+	DefaultTaggedVisibleModels []string
+	ProviderVersionByID        map[string]string
+	ProviderPathByID           map[string]string
+	PromptPathsByID            map[string][]string
+	providerMTimeByID          map[string]time.Time
 }
 
 func FormatVersionTime(t time.Time) string {
@@ -106,106 +108,121 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	defaultProviderIDs, defaultModelOwners, defaultVisibleModels, err := buildDefaultOverlayModelIndex(cfg)
+	defaultProviderIDs, defaultModelOwners, defaultVisibleModels, defaultTaggedModelOwners, defaultTaggedVisibleModels, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &RuntimeSnapshot{
-		Config:               cfg,
-		RootEnvPath:          rootEnvPath,
-		RootEnvMTime:         rootEnvMTime,
-		RootEnvVersion:       FormatVersionTimeInLocation(rootEnvMTime, versionLocation),
-		DefaultProviderIDs:   defaultProviderIDs,
-		DefaultModelOwners:   defaultModelOwners,
-		DefaultVisibleModels: defaultVisibleModels,
-		ProviderVersionByID:  providerVersions,
-		ProviderPathByID:     providerPaths,
-		PromptPathsByID:      promptPaths,
-		providerMTimeByID:    providerMTimes,
+		Config:                     cfg,
+		RootEnvPath:                rootEnvPath,
+		RootEnvMTime:               rootEnvMTime,
+		RootEnvVersion:             FormatVersionTimeInLocation(rootEnvMTime, versionLocation),
+		DefaultProviderIDs:         defaultProviderIDs,
+		DefaultModelOwners:         defaultModelOwners,
+		DefaultVisibleModels:       defaultVisibleModels,
+		DefaultTaggedModelOwners:   defaultTaggedModelOwners,
+		DefaultTaggedVisibleModels: defaultTaggedVisibleModels,
+		ProviderVersionByID:        providerVersions,
+		ProviderPathByID:           providerPaths,
+		PromptPathsByID:            promptPaths,
+		providerMTimeByID:          providerMTimes,
 	}, nil
 }
 
-func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []string, error) {
+func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []string, map[string]string, []string, error) {
 	providerIDs, err := cfg.DefaultProviderIDs()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	owners := make(map[string]string)
+	taggedOwners := make(map[string]string)
 	if len(providerIDs) == 0 {
-		return nil, owners, nil, nil
+		return nil, owners, nil, taggedOwners, nil, nil
 	}
 	visibleByProvider := make(map[string][]string, len(providerIDs))
+	modelCount := make(map[string]int)
 	for _, id := range providerIDs {
 		provider, err := cfg.ProviderByID(id)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		visible := providerVisibleModelIDs(provider)
 		visibleByProvider[id] = visible
 		for _, modelID := range visible {
-			owners[modelID] = id
+			modelCount[modelID]++
+			taggedOwners[formatTaggedModelID(id, modelID)] = id
 		}
 	}
-	visible := make([]string, 0, len(owners))
-	seen := make(map[string]struct{}, len(owners))
+	visible := make([]string, 0, len(taggedOwners)+len(modelCount))
+	seen := make(map[string]struct{}, len(taggedOwners)+len(modelCount))
+	if cfg.EnableDefaultProviderModelTags {
+		for i := len(providerIDs) - 1; i >= 0; i-- {
+			id := providerIDs[i]
+			for _, modelID := range visibleByProvider[id] {
+				visibleID := modelID
+				if cfg.EnableAllDefaultProviderModelTags || modelCount[modelID] > 1 {
+					visibleID = formatTaggedModelID(id, modelID)
+				}
+				if _, ok := seen[visibleID]; ok {
+					continue
+				}
+				seen[visibleID] = struct{}{}
+				owners[visibleID] = id
+				visible = append(visible, visibleID)
+			}
+		}
+	} else {
+		for _, id := range providerIDs {
+			for _, modelID := range visibleByProvider[id] {
+				owners[modelID] = id
+			}
+		}
+		for i := len(providerIDs) - 1; i >= 0; i-- {
+			id := providerIDs[i]
+			for _, modelID := range visibleByProvider[id] {
+				if owners[modelID] != id {
+					continue
+				}
+				if _, ok := seen[modelID]; ok {
+					continue
+				}
+				seen[modelID] = struct{}{}
+				visible = append(visible, modelID)
+			}
+		}
+	}
+	taggedVisible := make([]string, 0, len(taggedOwners))
 	for i := len(providerIDs) - 1; i >= 0; i-- {
 		id := providerIDs[i]
 		for _, modelID := range visibleByProvider[id] {
-			if owners[modelID] != id {
-				continue
-			}
-			if _, ok := seen[modelID]; ok {
-				continue
-			}
-			seen[modelID] = struct{}{}
-			visible = append(visible, modelID)
+			taggedVisible = append(taggedVisible, formatTaggedModelID(id, modelID))
 		}
 	}
-	return providerIDs, owners, visible, nil
+	return providerIDs, owners, visible, taggedOwners, taggedVisible, nil
+}
+
+func formatTaggedModelID(providerID string, modelID string) string {
+	return "[" + providerID + "]" + modelID
+}
+
+func parseTaggedModelID(model string) (string, string, bool) {
+	if !strings.HasPrefix(model, "[") {
+		return "", "", false
+	}
+	end := strings.Index(model, "]")
+	if end <= 1 || end == len(model)-1 {
+		return "", "", false
+	}
+	providerID := model[1:end]
+	baseModel := model[end+1:]
+	if strings.TrimSpace(providerID) == "" || strings.TrimSpace(baseModel) == "" {
+		return "", "", false
+	}
+	return providerID, baseModel, true
 }
 
 func providerVisibleModelIDs(provider ProviderConfig) []string {
-	base := make([]string, 0, len(provider.ModelMap)+len(provider.ManualModels))
-	seen := make(map[string]struct{}, len(provider.ModelMap)+len(provider.ManualModels))
-	for _, entry := range provider.ModelMap {
-		id := strings.TrimSpace(entry.Key)
-		if shouldHideDefaultVisibleModel(id) {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		base = append(base, id)
-	}
-	for _, manualModel := range provider.ManualModels {
-		id := strings.TrimSpace(manualModel)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		base = append(base, id)
-	}
-	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
-		return expandVisibleModelIDs(base, provider.ModelMap)
-	}
-	return base
-}
-
-func expandVisibleModelIDs(base []string, entries []ModelMapEntry) []string {
-	keys := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		keys = append(keys, entry.Key)
-	}
-	return reasoning.ExpandModelIDs(base, keys, true)
-}
-
-func shouldHideDefaultVisibleModel(id string) bool {
-	id = strings.TrimSpace(id)
-	return id == "" || strings.Contains(id, "*")
+	return provider.VisibleModelIDs()
 }
 
 func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string, bool) {
@@ -215,20 +232,63 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string
 	if owner, ok := s.DefaultModelOwners[model]; ok {
 		return owner, true
 	}
-	for i := len(s.DefaultProviderIDs) - 1; i >= 0; i-- {
-		id := s.DefaultProviderIDs[i]
-		provider, err := s.Config.ProviderByID(id)
-		if err != nil {
-			continue
-		}
-		if providerResolvesModel(provider, model) {
-			return id, true
+	baseModel, _, ok := reasoning.SplitSuffix(model)
+	if !ok {
+		return "", false
+	}
+	owner, ok := s.DefaultModelOwners[baseModel]
+	if !ok {
+		return "", false
+	}
+	provider, err := s.Config.ProviderByID(owner)
+	if err != nil || !provider.EnableReasoningEffortSuffix || provider.HidesModel(model) {
+		return "", false
+	}
+	return owner, true
+}
+
+func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (string, string, bool) {
+	if s == nil || !s.Config.EnableDefaultProviderModelTags {
+		return "", "", false
+	}
+	providerID, baseModel, ok := parseTaggedModelID(model)
+	if !ok {
+		return "", "", false
+	}
+	provider, err := s.Config.ProviderByID(providerID)
+	if err != nil {
+		return "", "", false
+	}
+	if s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseModel)] != providerID {
+		baseVisibleModel, _, ok := reasoning.SplitSuffix(baseModel)
+		if !ok || !provider.EnableReasoningEffortSuffix || provider.HidesModel(baseModel) || s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseVisibleModel)] != providerID {
+			return "", "", false
 		}
 	}
-	return "", false
+	return providerID, baseModel, true
+}
+
+func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string, string, bool) {
+	if s == nil {
+		return "", model, false
+	}
+	if providerID, baseModel, ok := s.ResolveTaggedDefaultProviderIDForModel(model); ok {
+		return providerID, baseModel, true
+	}
+	if !s.Config.EnableDefaultProviderModelTags {
+		providerID, ok := s.ResolveDefaultProviderIDForModel(model)
+		return providerID, model, ok
+	}
+	if owner, ok := s.DefaultModelOwners[model]; ok {
+		return owner, model, true
+	}
+	return "", model, false
 }
 
 func providerResolvesModel(provider ProviderConfig, model string) bool {
+	if provider.HidesModel(model) {
+		return false
+	}
 	if provider.resolveModel(model, provider.EnableReasoningEffortSuffix) != "" {
 		return true
 	}
@@ -239,11 +299,20 @@ func providerResolvesModel(provider ProviderConfig, model string) bool {
 	if !ok {
 		return false
 	}
+	if provider.HidesModel(baseModel) {
+		return false
+	}
 	return provider.resolveModel(baseModel, false) != ""
 }
 
 func validateHotReloadableRootEnvValues(values map[string]string) error {
 	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_DEFAULT_PROVIDER_MODEL_TAGS"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS"); err != nil {
 		return err
 	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
