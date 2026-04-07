@@ -10,69 +10,47 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
+	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
+type preparedResponsesRequest struct {
+	canon                     model.CanonicalRequest
+	provider                  config.ProviderConfig
+	providerCfg               config.Config
+	providerID                string
+	clientModel               string
+	authorization             string
+	requestID                 string
+	clientReasoningParameters string
+	clientReasoningEffort     string
+	client                    *upstream.Client
+	usageRecorder             usageRecorderFunc
+}
+
+type initialResponsesRequest struct {
+	canon         model.CanonicalRequest
+	provider      config.ProviderConfig
+	providerCfg   config.Config
+	providerID    string
+	clientModel   string
+	resolvedModel string
+	requestID     string
+}
+
 func handleResponses() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		setNormalizationVersionHeader(w)
-		requestID := w.Header().Get("X-Request-Id")
-
-		canon, err := responsesadapter.DecodeRequest(r.Body)
-		if err != nil {
-			clearTransparencyHeaders(w)
-			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
-		}
-		clientModel := canon.Model
-		provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, canon.Model)
+		prepared, ok := prepareResponsesRequest(w, r, false)
 		if !ok {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 			return
 		}
-		if !provider.SupportsResponses {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support responses")
-			return
-		}
-		canon.Model = resolvedModel
-		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
-			setConfigVersionHeaders(w, snapshot, providerID)
-		}
-		usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType)
-		authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
-		if err != nil {
-			clearTransparencyHeaders(w)
-			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
-			return
-		}
-		if err := ensureProviderModelAllowed(r.Context(), r, provider, providerCfg, clientModel, authorization); err != nil {
-			writeModelAllowanceError(w, err)
-			return
-		}
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
-		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
-		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
-			canon.IncludeUsage = true
-		}
-		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
-			if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
-				if history := globalResponsesHistory.Load(providerID, previousResponseID); len(history) > 0 {
-					canon.Messages = append(history, canon.Messages...)
-				}
-			}
-		}
-		canon.Messages = prepareCanonicalMessages(canon.Messages)
-		applyProviderSystemPrompt(&canon, provider)
-		if ok {
-			normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
-		}
-		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningParameters, clientReasoningEffort); err != nil {
-			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
-			return
-		}
-		canon.RequestID = requestID
-		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
+		canon := prepared.canon
+		providerCfg := prepared.providerCfg
+		providerID := prepared.providerID
+		client := prepared.client
+		authorization := prepared.authorization
+		usageRecorder := prepared.usageRecorder
+
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
 			"route":         "/v1/responses",
@@ -101,6 +79,7 @@ func handleResponses() http.HandlerFunc {
 			var initialState *responsesStreamState
 			if shouldInjectSyntheticResponsesReasoning(providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle) {
 				flusher = startSSE(w)
+				var err error
 				initialState, err = startResponsesSyntheticPrelude(w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle)
 				if err != nil {
 					_ = writeResponsesTerminalFailure(w, flusher, canon.RequestID, "stream_setup_error", err.Error())
@@ -238,6 +217,183 @@ func handleResponses() http.HandlerFunc {
 			"usage_present": len(result.Usage) > 0,
 		})
 	}
+}
+
+func handleResponsesCompact() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		prepared, ok := prepareResponsesCompactRequest(w, r)
+		if !ok {
+			return
+		}
+
+		canon := prepared.canon
+		attrs := map[string]any{
+			"request_id":    canon.RequestID,
+			"route":         canonicalV1ResponsesCompactPath,
+			"auth_mode":     canon.AuthMode,
+			"model":         canon.Model,
+			"stream":        canon.Stream,
+			"include_usage": canon.IncludeUsage,
+			"message_count": len(canon.Messages),
+			"tool_count":    len(canon.Tools),
+			"has_reasoning": canon.Reasoning != nil,
+		}
+		for k, v := range canonicalLogAttrs(canon) {
+			attrs[k] = v
+		}
+		logging.Event("proxyBuiltCanonicalRequest", attrs)
+
+		ctx := r.Context()
+		var cancel context.CancelFunc
+		if prepared.providerCfg.TotalTimeout > 0 {
+			ctx, cancel = context.WithTimeout(ctx, prepared.providerCfg.TotalTimeout)
+			defer cancel()
+		}
+
+		payload, err := prepared.client.Compact(ctx, canon, prepared.authorization)
+		if err != nil {
+			if isUpstreamTimeout(err, ctx) {
+				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+				return
+			}
+			if writeUpstreamError(w, err) {
+				return
+			}
+			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := writeJSON(w, payload); err != nil {
+			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
+			return
+		}
+		if prepared.usageRecorder != nil {
+			if usage, _ := payload["usage"].(map[string]any); len(usage) > 0 {
+				prepared.usageRecorder(usage)
+			}
+		}
+	}
+}
+
+func prepareResponsesRequest(w http.ResponseWriter, r *http.Request, compact bool) (*preparedResponsesRequest, bool) {
+	initial, ok := decodeAndResolveResponsesRequest(w, r)
+	if !ok {
+		return nil, false
+	}
+	return finalizePreparedResponsesRequest(w, r, initial, compact)
+}
+
+func prepareResponsesCompactRequest(w http.ResponseWriter, r *http.Request) (*preparedResponsesRequest, bool) {
+	initial, ok := decodeAndResolveResponsesRequest(w, r)
+	if !ok {
+		return nil, false
+	}
+	if initial.canon.Stream {
+		clearTransparencyHeaders(w)
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "responses compact does not support stream=true")
+		return nil, false
+	}
+	if initial.providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
+		clearTransparencyHeaders(w)
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "responses compact requires a responses upstream endpoint")
+		return nil, false
+	}
+	return finalizePreparedResponsesRequest(w, r, initial, true)
+}
+
+func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*initialResponsesRequest, bool) {
+	setNormalizationVersionHeader(w)
+	requestID := w.Header().Get("X-Request-Id")
+
+	canon, err := responsesadapter.DecodeRequest(r.Body)
+	if err != nil {
+		clearTransparencyHeaders(w)
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return nil, false
+	}
+	clientModel := canon.Model
+	provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, canon.Model)
+	if !ok {
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
+		return nil, false
+	}
+	if !provider.SupportsResponses {
+		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support responses")
+		return nil, false
+	}
+	return &initialResponsesRequest{
+		canon:         canon,
+		provider:      provider,
+		providerCfg:   providerCfg,
+		providerID:    providerID,
+		clientModel:   clientModel,
+		resolvedModel: resolvedModel,
+		requestID:     requestID,
+	}, true
+}
+
+func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, initial *initialResponsesRequest, compact bool) (*preparedResponsesRequest, bool) {
+	if initial == nil {
+		return nil, false
+	}
+	canon := initial.canon
+	provider := initial.provider
+	providerCfg := initial.providerCfg
+	providerID := initial.providerID
+	clientModel := initial.clientModel
+	resolvedModel := initial.resolvedModel
+	requestID := initial.requestID
+	canon.Model = resolvedModel
+	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
+		setConfigVersionHeaders(w, snapshot, providerID)
+	}
+	usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType)
+	authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
+	if err != nil {
+		clearTransparencyHeaders(w)
+		errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
+		return nil, false
+	}
+	if err := ensureProviderModelAllowed(r.Context(), r, provider, providerCfg, clientModel, authorization); err != nil {
+		writeModelAllowanceError(w, err)
+		return nil, false
+	}
+	client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
+	clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
+	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
+		canon.IncludeUsage = true
+	}
+	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
+		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
+			if history := globalResponsesHistory.Load(providerID, previousResponseID); len(history) > 0 {
+				canon.Messages = append(history, canon.Messages...)
+			}
+		}
+	}
+	canon.Messages = prepareCanonicalMessages(canon.Messages)
+	applyProviderSystemPrompt(&canon, provider)
+	normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
+	if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningParameters, clientReasoningEffort); err != nil {
+		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return nil, false
+	}
+	canon.RequestID = requestID
+	canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
+	return &preparedResponsesRequest{
+		canon:                     canon,
+		provider:                  provider,
+		providerCfg:               providerCfg,
+		providerID:                providerID,
+		clientModel:               clientModel,
+		authorization:             authorization,
+		requestID:                 requestID,
+		clientReasoningParameters: clientReasoningParameters,
+		clientReasoningEffort:     clientReasoningEffort,
+		client:                    client,
+		usageRecorder:             usageRecorder,
+	}, true
 }
 
 func logNonStreamResponsesOutput(requestID string, normalized map[string]any) {
