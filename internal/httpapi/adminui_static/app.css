@@ -1082,12 +1082,6 @@ button { cursor: pointer; }
   grid-row: 1;
 }
 
-.code-editor-textarea-highlighted {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  caret-color: var(--md-sys-color-on-surface);
-}
-
 .code-editor-textarea,
 .code-editor-highlight,
 .code-editor-gutter {

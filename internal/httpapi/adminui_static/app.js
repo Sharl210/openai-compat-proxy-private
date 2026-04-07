@@ -1142,24 +1142,15 @@ function renderEditorSection() {
 }
 
 function renderTextEditor() {
-	const highlightLanguage = resolveEditorHighlightLanguage();
   return `
     <div class="text-editor-grid pane-edit">
       <section class="editor-card mode-scene">
         <div class="editor-body">
-          ${renderCodeEditorShell('text-editor', 'text-editor', '', 'text-area auto-resize source-mode no-wrap-editor code-editor-textarea', highlightLanguage)}
+		  ${renderCodeEditorShell('text-editor', 'text-editor', '', 'text-area auto-resize source-mode no-wrap-editor code-editor-textarea')}
         </div>
       </section>
     </div>
   `;
-}
-
-function resolveEditorHighlightLanguage() {
-	const language = String(state.currentFile?.language || '').trim();
-	if (language === 'markdown' || language === 'json' || language === 'go' || language === 'shell' || language === 'yaml') {
-		return language;
-	}
-	return '';
 }
 
 function renderEnvEditor() {
@@ -1179,7 +1170,7 @@ function renderEnvEditor() {
       </section>` : ''}
       ${state.editorPane === 'preview' ? `<section class="editor-card mode-scene">
         <div class="editor-body">
-          ${renderCodeEditorShell('env-source-editor', 'env-source-editor', state.currentFile.source_content || renderEnvRawPreview(), 'text-area auto-resize env-source-editor source-mode no-wrap-editor code-editor-textarea', 'env')}
+		  ${renderCodeEditorShell('env-source-editor', 'env-source-editor', state.currentFile.source_content || renderEnvRawPreview(), 'text-area auto-resize env-source-editor source-mode no-wrap-editor code-editor-textarea')}
         </div>
       </section>` : ''}
     </div>
@@ -1207,13 +1198,11 @@ function renderEnvEntry(entry, index, sourceIndex = index) {
   `;
 }
 
-function renderCodeEditorShell(id, name, value, className, highlightLanguage = '') {
-  const textareaClassName = `${className}${highlightLanguage ? ' code-editor-textarea-highlighted' : ''}`;
+function renderCodeEditorShell(id, name, value, className) {
   return `
-    <div class="code-editor-shell ${highlightLanguage ? `code-editor-shell-${escapeAttr(highlightLanguage)}` : ''}" data-editor-shell="${escapeAttr(id)}">
+	<div class="code-editor-shell" data-editor-shell="${escapeAttr(id)}">
       <div id="${escapeAttr(id)}-gutter" class="code-editor-gutter">${renderLineNumbers(value)}</div>
-      ${highlightLanguage ? `<pre id="${escapeAttr(id)}-highlight" class="code-editor-highlight" aria-hidden="true">${highlightText(value || '', highlightLanguage)}</pre>` : ''}
-      <textarea id="${escapeAttr(id)}" name="${escapeAttr(name)}" class="${escapeAttr(textareaClassName)}" data-highlight-language="${escapeAttr(highlightLanguage)}" spellcheck="false" wrap="off" style="${escapeAttr(editorZoomStyle())}">${escapeHtml(value || '')}</textarea>
+	  <textarea id="${escapeAttr(id)}" name="${escapeAttr(name)}" class="${escapeAttr(className)}" spellcheck="false" wrap="off" style="${escapeAttr(editorZoomStyle())}">${escapeHtml(value || '')}</textarea>
     </div>
   `;
 }

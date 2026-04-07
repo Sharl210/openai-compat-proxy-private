@@ -460,7 +460,7 @@ func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
 	}
 }
 
-func TestAdminUIStylesKeepHighlightOverlayOnMobileEditors(t *testing.T) {
+func TestAdminUIStylesDoNotForceTransparentTextForEditors(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
 	rec := httptest.NewRecorder()
@@ -480,15 +480,12 @@ func TestAdminUIStylesKeepHighlightOverlayOnMobileEditors(t *testing.T) {
 	if !strings.Contains(body, "font-variant-ligatures: none") {
 		t.Fatalf("expected editor css to disable ligatures for consistent caret alignment, got %s", body)
 	}
-	if strings.Contains(body, ".code-editor-highlight {\n  display: none") || strings.Contains(body, ".code-editor-highlight {\n    display: none") {
-		t.Fatalf("expected mobile editor css to keep syntax highlight overlay visible, got %s", body)
-	}
-	if !strings.Contains(body, ".code-editor-textarea-highlighted {") || !strings.Contains(body, "-webkit-text-fill-color: transparent") || !strings.Contains(body, "caret-color: var(--md-sys-color-on-surface)") {
-		t.Fatalf("expected highlighted editor textarea to keep caret while hiding duplicate text layer, got %s", body)
+	if strings.Contains(body, ".code-editor-textarea-highlighted {") || strings.Contains(body, "-webkit-text-fill-color: transparent") {
+		t.Fatalf("expected editor css not to hide textarea text when syntax highlighting is disabled, got %s", body)
 	}
 }
 
-func TestAdminUIAppScriptUsesMarkdownHighlightForMarkdownFiles(t *testing.T) {
+func TestAdminUIAppScriptDisablesSyntaxHighlightEditors(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
 	rec := httptest.NewRecorder()
@@ -499,14 +496,14 @@ func TestAdminUIAppScriptUsesMarkdownHighlightForMarkdownFiles(t *testing.T) {
 		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "resolveEditorHighlightLanguage") {
-		t.Fatalf("expected app script to resolve editor highlight language dynamically, got %s", body)
+	if strings.Contains(body, "resolveEditorHighlightLanguage") {
+		t.Fatalf("expected app script to remove dynamic syntax highlight selection, got %s", body)
 	}
-	if !strings.Contains(body, "state.currentFile?.language") || !strings.Contains(body, "language === 'markdown'") {
-		t.Fatalf("expected markdown files to use markdown highlight language, got %s", body)
+	if strings.Contains(body, "code-editor-textarea-highlighted") || strings.Contains(body, "code-editor-highlight") {
+		t.Fatalf("expected app script not to render syntax highlight overlay, got %s", body)
 	}
-	if !strings.Contains(body, "code-editor-textarea-highlighted") {
-		t.Fatalf("expected highlighted editors to add textarea transparency class, got %s", body)
+	if strings.Contains(body, "data-highlight-language") {
+		t.Fatalf("expected app script not to attach highlight language metadata, got %s", body)
 	}
 }
 
