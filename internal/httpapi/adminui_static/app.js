@@ -23,13 +23,88 @@ const state = {
   lastSaveFeedback: null,
   toast: null,
   statusRefreshInFlight: false,
+  editorCloseConfirm: false,
 };
+
+function getHistoryState() {
+  return {
+    view: state.view,
+    currentDir: state.currentDir,
+    currentFile: state.currentFile?.path || null,
+    sidebarOpen: state.sidebarOpen,
+  };
+}
+
+function pushHistoryState() {
+  if (state._fromHistory) return;
+  history.pushState(getHistoryState(), '');
+}
+
+function replaceHistoryState() {
+  history.replaceState(getHistoryState(), '');
+}
+
+async function navigateToBrowserAndWait(dir, sidebarOpenOverride) {
+  state.view = 'browser';
+  if (sidebarOpenOverride !== undefined) {
+    state.sidebarOpen = sidebarOpenOverride;
+  } else {
+    state.sidebarOpen = false;
+  }
+  const enteringSubdir = dir !== '' && dir !== state.currentDir;
+  await loadTree(dir);
+  if (enteringSubdir) pushHistoryState();
+  render();
+}
+
+function navigateToEditor(path) {
+  void openFile(path);
+}
+
+function navigateToStatus() {
+  state.view = 'status';
+  state.sidebarOpen = false;
+  render();
+}
+
+async function restoreHistoryState(saved) {
+  if (!saved) return;
+  const restoringCurrentEditor = saved.view === 'editor' && saved.currentFile === state.currentFile?.path;
+  if (state.view === 'editor' && state.currentFile?.dirty && !restoringCurrentEditor) {
+    state._pendingEditorClose = saved;
+    attemptCloseCurrentFile();
+    return;
+  }
+  state._fromHistory = true;
+  try {
+    if (saved.view === 'editor' && saved.currentFile) {
+      navigateToEditor(saved.currentFile);
+      return;
+    }
+    if (saved.view === 'browser' && saved.currentDir !== undefined) {
+      await navigateToBrowserAndWait(saved.currentDir, saved.sidebarOpen);
+      return;
+    }
+    if (saved.view === 'status') {
+      navigateToStatus();
+    }
+  } finally {
+    state._fromHistory = false;
+  }
+}
 
 const app = document.getElementById('app');
 
 init();
 
 async function init() {
+  window.addEventListener('popstate', (event) => {
+    if (state._skipNextPopstate) {
+      state._skipNextPopstate = false;
+      return;
+    }
+    restoreHistoryState(event.state);
+  });
   await bootstrap();
 }
 
@@ -45,6 +120,7 @@ async function bootstrap() {
     state.status = data.status || null;
     await loadTree('');
     state.view = 'browser';
+    replaceHistoryState();
     state.loading = false;
     render();
   } catch {
@@ -154,10 +230,7 @@ async function loadTree(path) {
 
 async function openDirectory(path) {
   try {
-    state.view = 'browser';
-    state.sidebarOpen = false;
-    await loadTree(path);
-    render();
+    await navigateToBrowserAndWait(path);
   } catch (error) {
     setToast('error', error.message || '目录读取失败');
   }
@@ -181,6 +254,7 @@ async function openFile(path) {
     state.view = 'editor';
     state.sidebarOpen = false;
     state.envExpanded = {};
+    pushHistoryState();
     render();
   } catch (error) {
     setToast('error', error.message || '文件读取失败');
@@ -225,9 +299,27 @@ async function saveCurrentFile() {
   }
 }
 
+function attemptCloseCurrentFile() {
+  if (!state.currentFile || !state.currentFile.dirty) {
+    if (state._pendingEditorClose) {
+      const pending = state._pendingEditorClose;
+      state._pendingEditorClose = null;
+      closeCurrentFile();
+      restoreHistoryState(pending);
+    } else {
+      closeCurrentFile();
+    }
+    return;
+  }
+  state.editorCloseConfirm = true;
+  render();
+}
+
 function closeCurrentFile() {
   state.currentFile = null;
   state.lastSaveFeedback = null;
+  state.editorCloseConfirm = false;
+  state._pendingEditorClose = null;
   state.view = 'browser';
   state.sidebarOpen = false;
   render();
@@ -487,7 +579,15 @@ function bindEvents() {
 
   document.querySelectorAll('[data-view]').forEach((button) => {
     button.addEventListener('click', () => {
-      state.view = button.dataset.view;
+      const newView = button.dataset.view;
+      if (state.view !== newView) {
+        if (state.sidebarOpen) {
+          replaceHistoryState();
+        } else {
+          pushHistoryState();
+        }
+      }
+      state.view = newView;
       state.sidebarOpen = false;
       render();
     });
@@ -514,6 +614,7 @@ function bindEvents() {
   if (sidebarToggle) {
     sidebarToggle.addEventListener('click', () => {
       state.sidebarOpen = !state.sidebarOpen;
+      if (state.sidebarOpen) pushHistoryState();
       render();
     });
   }
@@ -522,6 +623,7 @@ function bindEvents() {
   if (sidebarClose) {
     sidebarClose.addEventListener('click', () => {
       state.sidebarOpen = false;
+      state._skipNextPopstate = true;
       render();
     });
   }
@@ -530,6 +632,7 @@ function bindEvents() {
   if (sidebarBackdrop) {
     sidebarBackdrop.addEventListener('click', () => {
       state.sidebarOpen = false;
+      state._skipNextPopstate = true;
       render();
     });
   }
@@ -606,7 +709,44 @@ function bindEvents() {
 
   const cancelButton = document.getElementById('cancel-file-button');
   if (cancelButton) {
-    cancelButton.addEventListener('click', closeCurrentFile);
+    cancelButton.addEventListener('click', attemptCloseCurrentFile);
+  }
+
+  const editorCloseSave = document.getElementById('editor-close-save');
+  if (editorCloseSave) {
+    editorCloseSave.addEventListener('click', async () => {
+      state.editorCloseConfirm = false;
+      await saveCurrentFile();
+      if (!state.currentFile?.dirty) {
+        const pending = state._pendingEditorClose;
+        state._pendingEditorClose = null;
+        closeCurrentFile();
+        if (pending) {
+          restoreHistoryState(pending);
+        }
+      } else {
+        render();
+      }
+    });
+  }
+  const editorCloseDiscard = document.getElementById('editor-close-discard');
+  if (editorCloseDiscard) {
+    editorCloseDiscard.addEventListener('click', () => {
+      const pending = state._pendingEditorClose;
+      state._pendingEditorClose = null;
+      state.currentFile.dirty = false;
+      closeCurrentFile();
+      if (pending) {
+        restoreHistoryState(pending);
+      }
+    });
+  }
+  const editorCloseCancel = document.getElementById('editor-close-cancel');
+  if (editorCloseCancel) {
+    editorCloseCancel.addEventListener('click', () => {
+      state.editorCloseConfirm = false;
+      render();
+    });
   }
 
   const fullPathButton = document.getElementById('full-path-button');
@@ -807,6 +947,7 @@ function dashboardTemplate() {
       </div>
       ${renderFileActionMenu()}
       ${renderClearCacheModal()}
+      ${renderEditorCloseConfirmModal()}
     </div>
   `;
 }
@@ -1203,6 +1344,24 @@ function renderClearCacheModal() {
       <div class="clear-cache-actions">
         <button id="clear-cache-confirm" class="secondary-btn material-outlined-button danger-btn" type="button" ${selected.length === 0 ? 'disabled' : ''}>确认清除</button>
         <button id="clear-cache-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditorCloseConfirmModal() {
+  if (!state.editorCloseConfirm) {
+    return '';
+  }
+  return `
+    <div id="editor-close-backdrop" class="file-action-backdrop is-open"></div>
+    <div class="file-action-modal" role="dialog" aria-modal="true" aria-label="未保存确认">
+      <div class="file-action-title">${escapeHtml(displayFileName(state.currentFile?.path || ''))}</div>
+      <div class="muted" style="text-align:center;margin-bottom:16px;">当前文件有未保存的修改</div>
+      <div class="file-action-buttons" style="flex-direction:column;gap:8px;">
+        <button id="editor-close-save" class="secondary-btn material-tonal-button" type="button">保存并返回</button>
+        <button id="editor-close-discard" class="secondary-btn material-outlined-button" type="button">不保存直接返回</button>
+        <button id="editor-close-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
       </div>
     </div>
   `;
