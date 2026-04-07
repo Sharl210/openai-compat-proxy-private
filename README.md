@@ -17,6 +17,7 @@
 | 流式 / 非流式 | ✅ | 支持 SSE 转发、超时兜底、错误终态补发，也支持 `proxy_buffer` / `upstream_non_stream` |
 | 工具调用与多轮 tool result 回传 | ✅ | 三套入口都已实现；其中 `/v1/responses` 的高层语义覆盖最全面 |
 | reasoning / thinking 兼容 | ✅ | 支持请求体参数、模型 suffix、Anthropic thinking、上游 reasoning 内容回写与流式拆分 |
+| Responses compact 端点 | ✅ | `/v1/responses/compact` 非流式 Responses 专用，上游须为 `responses` 类型；普通 `/v1/responses` SSE 流现可携带 compaction items |
 | 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0` 与 `$1..$N` 占位符、`MANUAL_MODELS` |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
@@ -155,6 +156,7 @@ http://127.0.0.1:21021/
 ### 推荐：显式 provider 路由
 
 - `/{providerId}/v1/responses`
+- `/{providerId}/v1/responses/compact`
 - `/{providerId}/v1/chat/completions`
 - `/{providerId}/v1/messages`
 - `/{providerId}/v1/models`
@@ -162,6 +164,7 @@ http://127.0.0.1:21021/
 例如：
 
 - `/openai/v1/responses`
+- `/openai/v1/responses/compact`
 - `/openai/v1/chat/completions`
 - `/claude/v1/messages`
 
@@ -170,6 +173,7 @@ http://127.0.0.1:21021/
 当 `ENABLE_LEGACY_V1_ROUTES=true` 且 `DEFAULT_PROVIDER` 可用时，也支持：
 
 - `/v1/responses`
+- `/v1/responses/compact`
 - `/v1/chat/completions`
 - `/v1/messages`
 - `/v1/models`
@@ -444,8 +448,14 @@ Claude 相关还有两个配套开关：
 5. **`cache_control` 现在区分“同端点透传”和“跨协议兼容”两种语义**  
    当 `/v1/messages` 直接对接 `anthropic` 上游时，代理会把内容块里的 `cache_control` 一并继续传给上游；但跨协议转换时，它仍然只是兼容输入，不承诺把它翻译成真正的 Anthropic prompt caching 语义。
 
-6. **chat 上游的思维标签当前支持三种写法**  
+6. **chat 上游的思维标签当前支持三种写法**
    当 `UPSTREAM_THINKING_TAG_STYLE=true` 时，代理会把 `<think>`、`<thinking>`、`<reasoning>` 识别为 reasoning 内容，再按目标下游协议重写。
+
+7. **`/v1/responses/compact` 是 Responses 专用非流端点，不支持 `stream=true`**
+   仅在 provider 的 `UPSTREAM_ENDPOINT_TYPE=responses` 时可用；请求 `stream=true` 或上游不是 `responses` 类型时直接返回 `400`。成功时直接返回上游原始 JSON，不再走聚合归一逻辑。
+
+8. **普通 `/v1/responses` SSE 流现可携带 compaction items 和 opaque `encrypted_content`**
+   这些字段不会被代理层解析或丢弃，会完整透传给下游客户端。
 
 ---
 
