@@ -192,13 +192,16 @@ func (a *adminUI) handleBootstrap() http.HandlerFunc {
 		}
 		_ = session
 		writeAdminJSON(w, http.StatusOK, map[string]any{
-			"authenticated": true,
-			"csrf_token":    csrf,
-			"root_name":     filepath.Base(a.rootDir()),
-			"actions":       a.actionsPayload(),
-			"validation":    a.evaluateValidation(),
-			"status":        a.runtimeStatus(),
-			"job":           a.runner.Current(),
+			"authenticated":          true,
+			"csrf_token":             csrf,
+			"root_name":              filepath.Base(a.rootDir()),
+			"providers_dir":          a.providersDirRelative(),
+			"providers_dir_name":     filepath.Base(a.providersDir()),
+			"providers_dir_absolute": a.providersDir(),
+			"actions":                a.actionsPayload(),
+			"validation":             a.evaluateValidation(),
+			"status":                 a.runtimeStatus(),
+			"job":                    a.runner.Current(),
 		})
 	}
 }
@@ -338,8 +341,9 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			})
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]any{
-			"path":  filepath.ToSlash(rel),
-			"items": items,
+			"path":          filepath.ToSlash(rel),
+			"items":         items,
+			"providers_dir": a.providersDirRelative(),
 		})
 	}
 }
@@ -1116,6 +1120,25 @@ func (a *adminUI) providersDir() string {
 		return ""
 	}
 	return snapshot.Config.ProvidersDir
+}
+
+func (a *adminUI) providersDirRelative() string {
+	providersDir := strings.TrimSpace(a.providersDir())
+	if providersDir == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(a.rootDir(), providersDir)
+	if err != nil {
+		return filepath.ToSlash(filepath.Base(providersDir))
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." {
+		return ""
+	}
+	if strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(filepath.Base(providersDir))
+	}
+	return filepath.ToSlash(rel)
 }
 
 func validateAdminFileName(name string) (string, error) {

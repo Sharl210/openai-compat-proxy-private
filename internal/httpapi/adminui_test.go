@@ -132,6 +132,131 @@ func TestAdminUIBootstrapIncludesCurrentJob(t *testing.T) {
 	}
 }
 
+func TestAdminUIBootstrapExposesCustomProvidersDirRelativePath(t *testing.T) {
+	server := newAdminUITestServer(t)
+	customProvidersDir := filepath.Join(server.admin.rootDir(), "custom-providers")
+	if err := os.MkdirAll(customProvidersDir, 0o755); err != nil {
+		t.Fatalf("mkdir custom providers dir: %v", err)
+	}
+	providerEnv, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "providers", "openai.env"))
+	if err != nil {
+		t.Fatalf("read existing provider env: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(customProvidersDir, "openai.env"), providerEnv, 0o644); err != nil {
+		t.Fatalf("write custom provider env: %v", err)
+	}
+	rootEnv := strings.Join([]string{
+		"# 管理界面测试配置",
+		"LISTEN_ADDR=:21021",
+		"PROXY_API_KEY=root-secret",
+		fmt.Sprintf("PROVIDERS_DIR=%s", customProvidersDir),
+		fmt.Sprintf("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR=%s", filepath.Join(server.admin.rootDir(), "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR")),
+		"DEFAULT_PROVIDER=openai",
+		"ENABLE_LEGACY_V1_ROUTES=true",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), ".env"), []byte(rootEnv), 0o644); err != nil {
+		t.Fatalf("rewrite root env: %v", err)
+	}
+	if err := server.store.Refresh(); err != nil {
+		t.Fatalf("refresh runtime store: %v", err)
+	}
+	cookie, _ := adminLogin(t, server)
+
+	bootstrapReq := httptest.NewRequest(http.MethodGet, "/_admin/api/bootstrap", nil)
+	bootstrapReq.AddCookie(cookie)
+	bootstrapRec := httptest.NewRecorder()
+	server.ServeHTTP(bootstrapRec, bootstrapReq)
+
+	if bootstrapRec.Code != http.StatusOK {
+		t.Fatalf("expected bootstrap 200, got %d body=%s", bootstrapRec.Code, bootstrapRec.Body.String())
+	}
+	data := decodeAdminJSON(t, bootstrapRec.Body.Bytes())
+	if got := data["providers_dir"]; got != "custom-providers" {
+		t.Fatalf("expected providers_dir custom-providers, got %#v", got)
+	}
+	if got := data["providers_dir_name"]; got != "custom-providers" {
+		t.Fatalf("expected providers_dir_name custom-providers, got %#v", got)
+	}
+	if got := data["providers_dir_absolute"]; got != customProvidersDir {
+		t.Fatalf("expected providers_dir_absolute %q, got %#v", customProvidersDir, got)
+	}
+}
+
+func TestAdminUIAppScriptUsesDynamicProvidersDirState(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected js asset 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "state.providersDir") {
+		t.Fatalf("expected app script to reference state.providersDir, got %s", body)
+	}
+	if strings.Contains(body, "state.currentDir === 'providers'") {
+		t.Fatalf("expected app script to avoid hardcoded providers dir check, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptUsesHistoryBackForEditorReturn(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "history.back();") {
+		t.Fatalf("expected editor return flow to use history.back, got %s", body)
+	}
+	if !strings.Contains(body, "const pending = state._pendingEditorClose;") {
+		t.Fatalf("expected dirty editor close flow to preserve pending history target, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptRemovesDrawerCurrentPathSummary(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "support-card compact") || strings.Contains(body, "当前目录</span><strong>") || strings.Contains(body, "当前文件</span><strong>") {
+		t.Fatalf("expected drawer bottom current path summary to be removed, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptPushesUpdatedViewStateForDrawerNavigation(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	viewIdx := strings.Index(body, "state.view = newView;")
+	pushIdx := strings.Index(body[viewIdx:], "pushHistoryState();")
+	if pushIdx >= 0 {
+		pushIdx += viewIdx
+	}
+	if viewIdx < 0 || pushIdx < 0 || pushIdx < viewIdx {
+		t.Fatalf("expected drawer navigation to push history after applying the new view state, got %s", body)
+	}
+}
+
 func TestAdminUIFileEndpointBlocksPathTraversal(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -704,6 +829,72 @@ func TestAdminUICreateProviderMarkdownFileWithoutSuffix(t *testing.T) {
 	}
 	if payload.Path != "providers/prompt.md" {
 		t.Fatalf("expected markdown response path providers/prompt.md, got %q", payload.Path)
+	}
+}
+
+func TestAdminUICreateProviderFilesUsesCustomProvidersDir(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	customProvidersDir := filepath.Join(server.admin.rootDir(), "custom-providers")
+	if err := os.MkdirAll(customProvidersDir, 0o755); err != nil {
+		t.Fatalf("mkdir custom providers dir: %v", err)
+	}
+	providerEnv, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "providers", "openai.env"))
+	if err != nil {
+		t.Fatalf("read existing provider env: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(customProvidersDir, "openai.env"), providerEnv, 0o644); err != nil {
+		t.Fatalf("write custom provider env: %v", err)
+	}
+	providerTemplate, err := os.ReadFile(filepath.Join(server.admin.rootDir(), "providers", "openai.env.example"))
+	if err != nil {
+		t.Fatalf("read existing provider template: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(customProvidersDir, "openai.env.example"), providerTemplate, 0o644); err != nil {
+		t.Fatalf("write custom provider template: %v", err)
+	}
+	rootEnv := strings.Join([]string{
+		"# 管理界面测试配置",
+		"LISTEN_ADDR=:21021",
+		"PROXY_API_KEY=root-secret",
+		fmt.Sprintf("PROVIDERS_DIR=%s", customProvidersDir),
+		fmt.Sprintf("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR=%s", filepath.Join(server.admin.rootDir(), "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR")),
+		"DEFAULT_PROVIDER=openai",
+		"ENABLE_LEGACY_V1_ROUTES=true",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), ".env"), []byte(rootEnv), 0o644); err != nil {
+		t.Fatalf("rewrite root env: %v", err)
+	}
+	if err := server.store.Refresh(); err != nil {
+		t.Fatalf("refresh runtime store: %v", err)
+	}
+
+	cookie, csrf = adminLogin(t, server)
+	envRec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "custom-providers",
+		"name": "demo-custom",
+	}, []*http.Cookie{cookie}, csrf)
+	if envRec.Code != http.StatusOK {
+		t.Fatalf("expected custom provider env create 200, got %d body=%s", envRec.Code, envRec.Body.String())
+	}
+	envContent, err := os.ReadFile(filepath.Join(customProvidersDir, "demo-custom.env"))
+	if err != nil {
+		t.Fatalf("read custom provider env: %v", err)
+	}
+	if !strings.Contains(string(envContent), "PROVIDER_ID=demo-custom") {
+		t.Fatalf("expected custom provider env to rewrite provider id, got %s", string(envContent))
+	}
+
+	mdRec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/file", map[string]any{
+		"dir":  "custom-providers",
+		"name": "prompt-custom",
+		"kind": "md",
+	}, []*http.Cookie{cookie}, csrf)
+	if mdRec.Code != http.StatusOK {
+		t.Fatalf("expected custom provider markdown create 200, got %d body=%s", mdRec.Code, mdRec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(customProvidersDir, "prompt-custom.md")); err != nil {
+		t.Fatalf("expected custom provider markdown file to exist, err=%v", err)
 	}
 }
 
