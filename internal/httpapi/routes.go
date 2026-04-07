@@ -133,22 +133,41 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 }
 
 func providerSelectionForRequest(r *http.Request, canonicalModel string) (config.ProviderConfig, config.Config, string, bool) {
+	provider, providerCfg, providerID, _, ok := providerSelectionForModelRequest(r, canonicalModel)
+	return provider, providerCfg, providerID, ok
+}
+
+func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (config.ProviderConfig, config.Config, string, string, bool) {
 	snapshot, ok := runtimeSnapshotFromRequest(r)
 	if !ok || snapshot == nil {
-		return config.ProviderConfig{}, config.Config{}, "", false
+		return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
 	}
 	if info, ok := routeInfoFromRequest(r); ok {
 		providerID := info.ProviderID
+		resolvedModel := canonicalModel
 		if info.Legacy && canonicalModel != "" {
-			if resolvedID, ok := snapshot.ResolveDefaultProviderIDForModel(canonicalModel); ok {
+			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {
 				providerID = resolvedID
+				resolvedModel = modelForProvider
+			} else if legacyModelsListEnforced(snapshot) {
+				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
 			}
 		}
 		if provider, err := snapshot.Config.ProviderByID(providerID); err == nil {
-			return provider, providerConfigForID(snapshot, providerID), providerID, true
+			return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true
 		}
 	}
-	return config.ProviderConfig{}, config.Config{}, "", false
+	return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
+}
+
+func legacyModelsListEnforced(snapshot *config.RuntimeSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	if snapshot.Config.EnableDefaultProviderModelTags {
+		return len(snapshot.DefaultVisibleModels) > 0 || len(snapshot.DefaultTaggedVisibleModels) > 0
+	}
+	return len(snapshot.DefaultVisibleModels) > 0
 }
 
 func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {

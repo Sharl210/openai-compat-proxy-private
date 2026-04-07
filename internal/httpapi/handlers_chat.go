@@ -24,11 +24,17 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		provider, providerCfg, providerID, ok := providerSelectionForRequest(r, canon.Model)
-		if !ok || !provider.SupportsChat {
+		clientModel := canon.Model
+		provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, canon.Model)
+		if !ok {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
+			return
+		}
+		if !provider.SupportsChat {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
 			return
 		}
+		canon.Model = resolvedModel
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 			setConfigVersionHeaders(w, snapshot, providerID)
 		}
@@ -38,8 +44,11 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
+		if err := ensureProviderModelAllowed(r.Context(), r, provider, providerCfg, clientModel, authorization); err != nil {
+			writeModelAllowanceError(w, err)
+			return
+		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		clientModel := canon.Model
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolChat, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
