@@ -15,22 +15,8 @@ import (
 
 func handleChat() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		providerCfg := providerConfigForRequest(r)
-		provider, ok := providerForRequest(r)
-		if !ok || !provider.SupportsChat {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
-			return
-		}
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
-		providerID := provider.ID
-		authorization, err := authHeaderForUpstream(r, providerCfg)
-		if err != nil {
-			clearTransparencyHeaders(w)
-			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
-			return
-		}
 
 		canon, err := chatadapter.DecodeRequest(r.Body)
 		if err != nil {
@@ -38,6 +24,21 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		provider, providerCfg, providerID, ok := providerSelectionForRequest(r, canon.Model)
+		if !ok || !provider.SupportsChat {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
+			return
+		}
+		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
+			setConfigVersionHeaders(w, snapshot, providerID)
+		}
+		authorization, err := authHeaderForUpstream(r, providerCfg)
+		if err != nil {
+			clearTransparencyHeaders(w)
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
+			return
+		}
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		clientModel := canon.Model
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolChat, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)

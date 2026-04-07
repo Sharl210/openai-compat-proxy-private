@@ -88,52 +88,70 @@ func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool)
 }
 
 func providerConfigForRequest(r *http.Request) config.Config {
-	snapshot, ok := runtimeSnapshotFromRequest(r)
-	if !ok || snapshot == nil {
+	_, providerCfg, _, ok := providerSelectionForRequest(r, "")
+	if !ok {
 		return config.Config{}
-	}
-	providerCfg := snapshot.Config
-	if info, ok := routeInfoFromRequest(r); ok {
-		if provider, err := snapshot.Config.ProviderByID(info.ProviderID); err == nil {
-			providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
-			providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
-			providerCfg.UpstreamEndpointType = provider.UpstreamEndpointType
-			providerCfg.AnthropicVersion = provider.AnthropicVersion
-			providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)
-			if provider.UpstreamFirstByteTimeout > 0 {
-				providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout
-			}
-			providerCfg.UpstreamRetryCount = provider.UpstreamRetryCount
-			providerCfg.UpstreamRetryDelay = provider.UpstreamRetryDelay
-			if provider.UpstreamUserAgent != "" {
-				providerCfg.UpstreamUserAgent = provider.UpstreamUserAgent
-			}
-			if provider.MasqueradeTarget != "" {
-				providerCfg.MasqueradeTarget = provider.MasqueradeTarget
-			}
-			if provider.InjectClaudeCodeMetadataUserIDSet {
-				providerCfg.InjectClaudeCodeMetadataUserID = provider.InjectClaudeCodeMetadataUserID
-			}
-			if provider.InjectClaudeCodeSystemPromptSet {
-				providerCfg.InjectClaudeCodeSystemPrompt = provider.InjectClaudeCodeSystemPrompt
-			}
-			if provider.UpstreamThinkingTagStyle != "" {
-				providerCfg.UpstreamThinkingTagStyle = provider.UpstreamThinkingTagStyle
-			}
-		}
 	}
 	return providerCfg
 }
 
-func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {
+func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) config.Config {
+	if snapshot == nil {
+		return config.Config{}
+	}
+	providerCfg := snapshot.Config
+	provider, err := snapshot.Config.ProviderByID(providerID)
+	if err != nil {
+		return providerCfg
+	}
+	providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
+	providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
+	providerCfg.UpstreamEndpointType = provider.UpstreamEndpointType
+	providerCfg.AnthropicVersion = provider.AnthropicVersion
+	providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)
+	if provider.UpstreamFirstByteTimeout > 0 {
+		providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout
+	}
+	providerCfg.UpstreamRetryCount = provider.UpstreamRetryCount
+	providerCfg.UpstreamRetryDelay = provider.UpstreamRetryDelay
+	if provider.UpstreamUserAgent != "" {
+		providerCfg.UpstreamUserAgent = provider.UpstreamUserAgent
+	}
+	if provider.MasqueradeTarget != "" {
+		providerCfg.MasqueradeTarget = provider.MasqueradeTarget
+	}
+	if provider.InjectClaudeCodeMetadataUserIDSet {
+		providerCfg.InjectClaudeCodeMetadataUserID = provider.InjectClaudeCodeMetadataUserID
+	}
+	if provider.InjectClaudeCodeSystemPromptSet {
+		providerCfg.InjectClaudeCodeSystemPrompt = provider.InjectClaudeCodeSystemPrompt
+	}
+	if provider.UpstreamThinkingTagStyle != "" {
+		providerCfg.UpstreamThinkingTagStyle = provider.UpstreamThinkingTagStyle
+	}
+	return providerCfg
+}
+
+func providerSelectionForRequest(r *http.Request, canonicalModel string) (config.ProviderConfig, config.Config, string, bool) {
 	snapshot, ok := runtimeSnapshotFromRequest(r)
 	if !ok || snapshot == nil {
-		return config.ProviderConfig{}, false
+		return config.ProviderConfig{}, config.Config{}, "", false
 	}
 	if info, ok := routeInfoFromRequest(r); ok {
-		if provider, err := snapshot.Config.ProviderByID(info.ProviderID); err == nil {
-			return provider, true
+		providerID := info.ProviderID
+		if info.Legacy && canonicalModel != "" {
+			if resolvedID, ok := snapshot.ResolveDefaultProviderIDForModel(canonicalModel); ok {
+				providerID = resolvedID
+			}
+		}
+		if provider, err := snapshot.Config.ProviderByID(providerID); err == nil {
+			return provider, providerConfigForID(snapshot, providerID), providerID, true
 		}
 	}
-	return config.ProviderConfig{}, false
+	return config.ProviderConfig{}, config.Config{}, "", false
+}
+
+func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {
+	provider, _, _, ok := providerSelectionForRequest(r, "")
+	return provider, ok
 }

@@ -15,25 +15,11 @@ import (
 
 func handleAnthropicMessages() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		providerCfg := providerConfigForRequest(r)
 		setNormalizationVersionHeader(w)
-		provider, ok := providerForRequest(r)
-		if !ok || !provider.SupportsAnthropicMessages {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
-			return
-		}
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		requestID := w.Header().Get("X-Request-Id")
-		providerID := provider.ID
 		if strings.TrimSpace(r.Header.Get("anthropic-version")) == "" {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "missing anthropic-version header")
-			return
-		}
-		authorization, err := authHeaderForUpstream(r, providerCfg)
-		if err != nil {
-			clearTransparencyHeaders(w)
-			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 			return
 		}
 		canon, err := anthropicadapter.DecodeRequest(r.Body)
@@ -42,6 +28,21 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		provider, providerCfg, providerID, ok := providerSelectionForRequest(r, canon.Model)
+		if !ok || !provider.SupportsAnthropicMessages {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
+			return
+		}
+		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
+			setConfigVersionHeaders(w, snapshot, providerID)
+		}
+		authorization, err := authHeaderForUpstream(r, providerCfg)
+		if err != nil {
+			clearTransparencyHeaders(w)
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
+			return
+		}
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		clientModel := canon.Model
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
