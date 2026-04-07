@@ -483,6 +483,9 @@ func TestAdminUIStylesKeepHighlightOverlayOnMobileEditors(t *testing.T) {
 	if strings.Contains(body, ".code-editor-highlight {\n  display: none") || strings.Contains(body, ".code-editor-highlight {\n    display: none") {
 		t.Fatalf("expected mobile editor css to keep syntax highlight overlay visible, got %s", body)
 	}
+	if !strings.Contains(body, ".code-editor-textarea-highlighted {") || !strings.Contains(body, "-webkit-text-fill-color: transparent") || !strings.Contains(body, "caret-color: var(--md-sys-color-on-surface)") {
+		t.Fatalf("expected highlighted editor textarea to keep caret while hiding duplicate text layer, got %s", body)
+	}
 }
 
 func TestAdminUIAppScriptUsesMarkdownHighlightForMarkdownFiles(t *testing.T) {
@@ -501,6 +504,9 @@ func TestAdminUIAppScriptUsesMarkdownHighlightForMarkdownFiles(t *testing.T) {
 	}
 	if !strings.Contains(body, "state.currentFile?.language") || !strings.Contains(body, "language === 'markdown'") {
 		t.Fatalf("expected markdown files to use markdown highlight language, got %s", body)
+	}
+	if !strings.Contains(body, "code-editor-textarea-highlighted") {
+		t.Fatalf("expected highlighted editors to add textarea transparency class, got %s", body)
 	}
 }
 
