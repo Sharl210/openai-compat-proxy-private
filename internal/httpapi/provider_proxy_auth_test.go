@@ -10,7 +10,7 @@ import (
 	"openai-compat-proxy/internal/testutil"
 )
 
-func TestProviderScopedProxyAPIKeyOverrideAlsoAppliesToDefaultLegacyRoute(t *testing.T) {
+func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
@@ -34,11 +34,11 @@ func TestProviderScopedProxyAPIKeyOverrideAlsoAppliesToDefaultLegacyRoute(t *tes
 
 	legacyReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
 	legacyReq.Header.Set("Content-Type", "application/json")
-	legacyReq.Header.Set("Authorization", "Bearer provider-secret")
+	legacyReq.Header.Set("Authorization", "Bearer root-secret")
 	legacyRec := httptest.NewRecorder()
 	server.ServeHTTP(legacyRec, legacyReq)
 	if legacyRec.Code != http.StatusOK {
-		t.Fatalf("expected default legacy route to require provider override key, got %d body=%s", legacyRec.Code, legacyRec.Body.String())
+		t.Fatalf("expected default legacy route to accept root key, got %d body=%s", legacyRec.Code, legacyRec.Body.String())
 	}
 	if got := legacyRec.Header().Get("X-STATUS-CHECK-URL"); got != "" {
 		t.Fatalf("expected no X-STATUS-CHECK-URL header on legacy route, got %q", got)
@@ -79,8 +79,8 @@ func TestProviderScopedProxyAPIKeyOverrideAlsoAppliesToDefaultLegacyRoute(t *tes
 	legacyRootReq.Header.Set("Authorization", "Bearer root-secret")
 	legacyRootRec := httptest.NewRecorder()
 	server.ServeHTTP(legacyRootRec, legacyRootReq)
-	if legacyRootRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected default legacy route to reject root key when provider override set, got %d body=%s", legacyRootRec.Code, legacyRootRec.Body.String())
+	if legacyRootRec.Code != http.StatusOK {
+		t.Fatalf("expected default legacy route to accept root key when provider override set, got %d body=%s", legacyRootRec.Code, legacyRootRec.Body.String())
 	}
 
 	_ = requestID
@@ -157,7 +157,7 @@ func TestProviderScopedProxyAPIKeyOverrideEmptyDisablesAuth(t *testing.T) {
 	}
 }
 
-func TestDefaultLegacyRouteWithEmptyOverrideDisablesAuth(t *testing.T) {
+func TestDefaultLegacyRouteWithEmptyOverrideStillRequiresRootProxyKey(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
@@ -183,8 +183,8 @@ func TestDefaultLegacyRouteWithEmptyOverrideDisablesAuth(t *testing.T) {
 	unauthorizedReq.Header.Set("Content-Type", "application/json")
 	unauthorizedRec := httptest.NewRecorder()
 	server.ServeHTTP(unauthorizedRec, unauthorizedReq)
-	if unauthorizedRec.Code != http.StatusOK {
-		t.Fatalf("expected legacy default route to stay unauthenticated when override is empty, got %d body=%s", unauthorizedRec.Code, unauthorizedRec.Body.String())
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected legacy default route to reject missing root key when override is empty, got %d body=%s", unauthorizedRec.Code, unauthorizedRec.Body.String())
 	}
 
 	authorizedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
@@ -193,11 +193,11 @@ func TestDefaultLegacyRouteWithEmptyOverrideDisablesAuth(t *testing.T) {
 	authorizedRec := httptest.NewRecorder()
 	server.ServeHTTP(authorizedRec, authorizedReq)
 	if authorizedRec.Code != http.StatusOK {
-		t.Fatalf("expected legacy default route to remain accessible when override is empty, got %d body=%s", authorizedRec.Code, authorizedRec.Body.String())
+		t.Fatalf("expected legacy default route to accept root key even when override is empty, got %d body=%s", authorizedRec.Code, authorizedRec.Body.String())
 	}
 }
 
-func TestMultiDefaultLegacyRouteRequiresResolvedProvidersOwnKey(t *testing.T) {
+func TestMultiDefaultLegacyRouteKeepsRootProxyKeyPrivilege(t *testing.T) {
 	privateUpstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
@@ -237,8 +237,8 @@ func TestMultiDefaultLegacyRouteRequiresResolvedProvidersOwnKey(t *testing.T) {
 	rootReq.Header.Set("Authorization", "Bearer root-secret")
 	rootRec := httptest.NewRecorder()
 	server.ServeHTTP(rootRec, rootReq)
-	if rootRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected bare route to reject root key for private default provider, got %d body=%s", rootRec.Code, rootRec.Body.String())
+	if rootRec.Code != http.StatusOK {
+		t.Fatalf("expected bare route to keep root key privilege for private default provider, got %d body=%s", rootRec.Code, rootRec.Body.String())
 	}
 
 	privateReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"private-model","input":[{"role":"user","content":"hello"}]}`))
@@ -246,7 +246,7 @@ func TestMultiDefaultLegacyRouteRequiresResolvedProvidersOwnKey(t *testing.T) {
 	privateReq.Header.Set("Authorization", "Bearer private-secret")
 	privateRec := httptest.NewRecorder()
 	server.ServeHTTP(privateRec, privateReq)
-	if privateRec.Code != http.StatusOK {
-		t.Fatalf("expected bare route to accept resolved provider key, got %d body=%s", privateRec.Code, privateRec.Body.String())
+	if privateRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected bare route to still require root-key privilege in multi-default mode, got %d body=%s", privateRec.Code, privateRec.Body.String())
 	}
 }

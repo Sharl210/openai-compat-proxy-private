@@ -108,8 +108,13 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
-		if !shouldDeferLegacyProxyAuth(info, snapshot) {
-			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, false); err != nil {
+		if shouldUseRootLegacyProxyAuth(info, snapshot) {
+			if err := auth.ValidateProxyAuth(r, snapshot.Config.ProxyAPIKey); err != nil {
+				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
+				return
+			}
+		} else {
+			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 				return
 			}
@@ -122,7 +127,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
 }
 
-func shouldDeferLegacyProxyAuth(info routeInfo, snapshot *config.RuntimeSnapshot) bool {
+func shouldUseRootLegacyProxyAuth(info routeInfo, snapshot *config.RuntimeSnapshot) bool {
 	if !info.Legacy || snapshot == nil {
 		return false
 	}
