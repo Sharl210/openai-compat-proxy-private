@@ -17,7 +17,7 @@ func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
 			if info, ok := routeInfoFromRequest(r); ok && info.Legacy && (len(snapshot.DefaultProviderIDs) > 1 || snapshot.Config.EnableDefaultProviderModelTags) {
-				writeDefaultOverlayModels(w, snapshot)
+				writeDefaultOverlayModels(w, r, snapshot)
 				return
 			}
 		}
@@ -71,18 +71,8 @@ func handleModels() http.HandlerFunc {
 	}
 }
 
-func writeDefaultOverlayModels(w http.ResponseWriter, snapshot *config.RuntimeSnapshot) {
-	entries := make([]map[string]any, 0, len(snapshot.DefaultVisibleModels))
-	for _, modelID := range snapshot.DefaultVisibleModels {
-		entry := map[string]any{
-			"id":     modelID,
-			"object": "model",
-		}
-		if owner := snapshot.DefaultModelOwners[modelID]; owner != "" {
-			entry["owned_by"] = owner
-		}
-		entries = append(entries, entry)
-	}
+func writeDefaultOverlayModels(w http.ResponseWriter, r *http.Request, snapshot *config.RuntimeSnapshot) {
+	entries := buildDefaultOverlayModelEntries(r.Context(), r, snapshot)
 	payload := map[string]any{
 		"object": "list",
 		"data":   entries,
@@ -95,6 +85,105 @@ func writeDefaultOverlayModels(w http.ResponseWriter, snapshot *config.RuntimeSn
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(encoded)
+}
+
+func buildDefaultOverlayModelEntries(ctx context.Context, r *http.Request, snapshot *config.RuntimeSnapshot) []map[string]any {
+	if snapshot == nil {
+		return nil
+	}
+	entries, ok := buildDefaultOverlayModelEntriesFromProviders(ctx, r, snapshot)
+	if ok {
+		return entries
+	}
+	entries = make([]map[string]any, 0, len(snapshot.DefaultVisibleModels))
+	for _, modelID := range snapshot.DefaultVisibleModels {
+		entry := map[string]any{"id": modelID, "object": "model"}
+		if owner := snapshot.DefaultModelOwners[modelID]; owner != "" {
+			entry["owned_by"] = owner
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.Request, snapshot *config.RuntimeSnapshot) ([]map[string]any, bool) {
+	entriesByID := map[string]map[string]any{}
+	orderedIDs := make([]string, 0)
+	anySource := false
+	if snapshot == nil || snapshot.Config.EnableDefaultProviderModelTags {
+		return nil, false
+	}
+	for _, providerID := range snapshot.DefaultProviderIDs {
+		provider, err := snapshot.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled || !provider.SupportsModels {
+			continue
+		}
+		providerCfg := providerConfigForID(snapshot, providerID)
+		authorization, err := authHeaderForUpstream(r, providerCfg)
+		if err != nil {
+			continue
+		}
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+		body, ok := fetchProviderModelsBody(ctx, client, authorization, provider)
+		if !ok {
+			continue
+		}
+		anySource = true
+		for _, entry := range decodeModelEntries(body) {
+			id, _ := entry["id"].(string)
+			if strings.TrimSpace(id) == "" {
+				continue
+			}
+			if _, exists := entriesByID[id]; !exists {
+				orderedIDs = append(orderedIDs, id)
+			}
+			if _, hasOwner := entry["owned_by"]; !hasOwner {
+				entry["owned_by"] = providerID
+			}
+			entriesByID[id] = entry
+		}
+	}
+	if !anySource {
+		return nil, false
+	}
+	entries := make([]map[string]any, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		entries = append(entries, entriesByID[id])
+	}
+	return entries, true
+}
+
+func fetchProviderModelsBody(ctx context.Context, client *upstream.Client, authorization string, provider config.ProviderConfig) ([]byte, bool) {
+	status, body, _, err := client.Models(ctx, authorization)
+	if err == nil {
+		if status >= 200 && status < 300 {
+			return rewriteModelsBody(body, provider), true
+		}
+		if status == http.StatusNotFound {
+			if fallbackBody, ok := configuredModelsFallbackBody(provider); ok {
+				return fallbackBody, true
+			}
+		}
+		return nil, false
+	}
+	return nil, false
+}
+
+func decodeModelEntries(body []byte) []map[string]any {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	data, _ := payload["data"].([]any)
+	entries := make([]map[string]any, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		if len(entry) == 0 {
+			continue
+		}
+		entries = append(entries, cloneModelEntry(entry))
+	}
+	return entries
 }
 
 func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {

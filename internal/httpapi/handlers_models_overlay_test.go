@@ -68,6 +68,65 @@ func TestModelsOverlayReturnsLastWinsVisibleModels(t *testing.T) {
 	}
 }
 
+func TestModelsOverlayIncludesRealtimeUpstreamModelsFromAllDefaultProviders(t *testing.T) {
+	minimaxUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"MiniMax-M2.7","object":"model","owned_by":"minimax-upstream"}]}`))
+	}))
+	defer minimaxUpstream.Close()
+	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model","owned_by":"codex-upstream"}]}`))
+	}))
+	defer codexUpstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "minimax,codex",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{
+			{
+				ID:              "minimax",
+				Enabled:         true,
+				SupportsModels:  true,
+				UpstreamBaseURL: minimaxUpstream.URL,
+				UpstreamAPIKey:  "minimax-key",
+				ManualModels:    []string{"MiniMax-M2.7"},
+			},
+			{
+				ID:                          "codex",
+				Enabled:                     true,
+				SupportsModels:              true,
+				UpstreamBaseURL:             codexUpstream.URL,
+				UpstreamAPIKey:              "codex-key",
+				EnableReasoningEffortSuffix: true,
+				ExposeReasoningSuffixModels: true,
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected overlay /v1/models to return 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode overlay /v1/models response: %v body=%s", err, rec.Body.String())
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if !containsString(ids, "MiniMax-M2.7") || !containsString(ids, "gpt-5.4") {
+		t.Fatalf("expected overlay to merge manual and realtime upstream models, got %v", ids)
+	}
+}
+
 func TestModelsExplicitProviderRouteStillUsesSingleProviderFlow(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
