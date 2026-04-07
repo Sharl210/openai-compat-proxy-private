@@ -1454,7 +1454,10 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		rawUsage := usageFromEventData(evt.Data)
 		usage := anthropicUsageFromEvent(evt.Data)
 		if usage == nil {
-			usage = map[string]any{}
+			usage = map[string]any{
+				"input_tokens":  0,
+				"output_tokens": 0,
+			}
 		}
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
