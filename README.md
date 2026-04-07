@@ -181,8 +181,8 @@ http://127.0.0.1:21021/
 - 裸 `/v1/models` 返回这组 overlay 后的可见模型
 - 裸 `/v1/responses`、`/v1/chat/completions`、`/v1/messages` 会按模型归属把请求转发到真正拥有该模型的上游 provider
 - 这些 bare 请求也会严格遵循 bare `/v1/models` 的可见模型集合；不在列表中的模型会直接报错，不再走隐式 wildcard fallback
-- bare 默认分组不会再用根 `PROXY_API_KEY` 绕过某个 provider 自己的 `PROXY_API_KEY_OVERRIDE`；真正命中的 provider 仍按它自己的代理鉴权规则校验
-- bare `/v1/models` 也只会展示当前这次请求有权限访问的默认分组 provider 模型；如果某个 provider 使用了独立私有鉴权，它不会因为在 `DEFAULT_PROVIDER` 里就自动暴露给根 bare 路由
+- bare 默认分组保留根路径特权入口语义：只要根 `PROXY_API_KEY` 通过，bare `/v1/*` 就可以继续访问默认分组 overlay 后的能力，不会再按真正命中的 provider 重新套一层 `PROXY_API_KEY_OVERRIDE` 限制
+- 这也意味着 bare `/v1/models` 展示的是完整默认分组 overlay 结果；如果你需要某个 provider 严格按它自己的私有鉴权隔离，请使用显式 `/{providerId}/v1/*` 路由
 
 如果启用了 `ENABLE_DEFAULT_PROVIDER_MODEL_TAGS=true`，则默认分组会切到“标签模式”：
 
@@ -211,7 +211,7 @@ http://127.0.0.1:21021/
 补充说明：
 
 - 对显式 `/{providerId}/v1/*` 路由，代理鉴权始终按该 provider 自己的 `PROXY_API_KEY_OVERRIDE` / root `PROXY_API_KEY` 规则执行。
-- 对 bare 默认分组 `/v1/*` 路由，代理会在解析出**真正命中的 provider** 后，再按该 provider 的鉴权规则校验；不会因为你走的是根 bare 路径，就自动拥有默认分组里所有 provider 的访问权。
+- 对 bare 默认分组 `/v1/*` 路由，代理仍按根 `PROXY_API_KEY` 作为默认分组特权入口来校验；模型归属只影响真正转发到哪个上游 provider，不会把 bare 根路径变成显式 provider 路由那套私有鉴权语义。
 
 内置 Web 管理台也使用同一个 `PROXY_API_KEY` 作为登录密码，但不会把这个密码明文持久化在浏览器里；登录后会下发 HttpOnly 会话 cookie，并对写操作额外做 CSRF 校验。
 
