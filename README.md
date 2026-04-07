@@ -127,13 +127,13 @@ http://127.0.0.1:21021/
 
 管理台当前提供：
 
-- **文件浏览**：按项目根目录浏览目录，以及 `.env / *.env / *.txt / *.json / *.ndjson` 文件；`.example` 模板文件默认不直接显示在文件列表里；`.md` 文件只会在 `providers/` 顶层显示，根目录和 providers 子目录都不会直接显示；日志目录按最新修改时间优先显示
+- **文件浏览**：按项目根目录浏览目录，以及 `.env / *.env / *.txt / *.json / *.ndjson` 文件；`.example` 模板文件默认不直接显示在文件列表里；`.md` 文件只会在当前 `PROVIDERS_DIR` 顶层显示，根目录和 provider 子目录都不会直接显示；日志目录按最新修改时间优先显示
 - **文件编辑**：紧凑顶栏显示当前文件，点击文件名可查看完整路径；顶部文件名会自动截断，避免把保存按钮挤出屏幕；编辑器默认不自动换行，可横向滚动查看长内容
 - **`.env` 专用双模式编辑**：支持“条目式 / 源文式”滑动切换；条目式里字段名固定、注释只读；`LISTEN_ADDR` 为纯端口时无需手写前导冒号；移动端也支持继续缩小编辑器字号，以便同屏显示更多内容
 - **管理动作**：
   - 根目录只有在 `.env` **不存在**时才显示“新建 env”，点击后会直接按根模板创建 `.env`
-  - provider 顶层的“新建 env”默认以 `providers/openai.env.example` 作为示例模板，创建结果是新的 `*.env`
-  - provider 顶层还提供“新增 md”，输入时不用带 `.md` 后缀，管理台会自动创建空白 `.md` 文件
+  - 当前 `PROVIDERS_DIR` 顶层的“新建 env”默认以 `<PROVIDERS_DIR>/openai.env.example` 作为示例模板，创建结果是新的 `*.env`
+  - 当前 `PROVIDERS_DIR` 顶层还提供“新增 md”，输入时不用带 `.md` 后缀，管理台会自动创建空白 `.md` 文件
   - 长按文件条目可选择重命名或删除；provider `.env` 改文件名会自动同步 `PROVIDER_ID`，直接改 `PROVIDER_ID` 保存时也会自动同步文件名
 - **运行状态**：查看健康状态、结构化日志目录、当前脚本任务，并执行 `部署 / 重启 / 停止 / 卸载`；脚本任务会在页面内持续显示运行态和输出，`重启` / `部署` 会尽量自动恢复当前管理台会话
 
@@ -143,8 +143,8 @@ http://127.0.0.1:21021/
 
 - 首次进入时先确认根 `.env` 里的 `PROXY_API_KEY` 已设置，否则虽然页面能打开，但无法登录
 - 推荐优先在“文件编辑”里改配置，再去“运行状态”里做 `重启` 或 `部署`
-- 如果你只是想补一个新的 provider 配置，先到 `providers/` 顶层用“新建 env”从 `providers/openai.env.example` 复制出新文件，再填自己的 `PROVIDER_ID / UPSTREAM_*`
-- 如果你要补 provider 级说明或提示词文件，也是在 `providers/` 顶层使用“新增 md”；该入口不会出现在根目录或 providers 子目录
+- 如果你只是想补一个新的 provider 配置，先到当前 `PROVIDERS_DIR` 顶层用“新建 env”从 `<PROVIDERS_DIR>/openai.env.example` 复制出新文件，再填自己的 `PROVIDER_ID / UPSTREAM_*`
+- 如果你要补 provider 级说明或提示词文件，也是在当前 `PROVIDERS_DIR` 顶层使用“新增 md”；该入口不会出现在根目录或 provider 子目录
 - 如果你想初始化根配置，则在根目录确保 `.env` 不存在后再使用“新建 env”，这样会直接创建根 `.env`
 - 如果移动端上觉得源码字体太大，可以继续双指缩小编辑器字号；源码模式默认保留横向滚动，不会强制换行
 
@@ -180,6 +180,15 @@ http://127.0.0.1:21021/
 - 同名模型按 overlay 规则以后面的 provider 为准
 - 裸 `/v1/models` 返回这组 overlay 后的可见模型
 - 裸 `/v1/responses`、`/v1/chat/completions`、`/v1/messages` 会按模型归属把请求转发到真正拥有该模型的上游 provider
+- 这些 bare 请求也会严格遵循 bare `/v1/models` 的可见模型集合；不在列表中的模型会直接报错，不再走隐式 wildcard fallback
+
+如果启用了 `ENABLE_DEFAULT_PROVIDER_MODEL_TAGS=true`，则默认分组会切到“标签模式”：
+
+- 这时会放弃上面的 overlay 覆盖模式，不再用“后面的 provider 覆盖前面的 provider”来隐藏同名模型
+- `ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS=false`（默认）时：只有冲突/重叠模型显示成 `[providerId]model`；唯一模型仍保留原名
+- `ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS=true` 时：默认分组下所有模型都显示成 `[providerId]model`
+- 标签模式开启后，裸 `/v1/responses`、`/v1/chat/completions`、`/v1/messages` 里的带标签模型会强制路由到对应 provider，并在真正发给上游前去掉标签
+- 标签模式开启后，未带标签的冲突模型不会再回退到 overlay 顶层 provider；客户端必须显式指定标签
 
 ### 管理台裸根路径
 
@@ -290,6 +299,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `MODEL_MAP` 通配符映射
 - `$0` 与 `$1..$N` 占位符替换（按通配符捕获数量动态生效，没有写死到 `$2`）
 - `MANUAL_MODELS` 手动补模型
+- `HIDDEN_MODELS` 手动隐藏模型（支持通配符）
 - `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-low/-medium/-high/-xhigh`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix 或请求体里解析出的 effort 自动映射到 Anthropic thinking
@@ -298,9 +308,17 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 - `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名
 - `MANUAL_MODELS`：当上游不返回 `/models` 列表或列表不完整时，手动补齐可展示模型
+- `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；支持 `*` 通配符，主要用于 overlay / 标签模式下做精细屏蔽
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
 - `EXPOSE_REASONING_SUFFIX_MODELS`：让 `/models` 也把这些后缀变体展示给客户端
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把 effort 自动翻译成 `thinking` / `output_config`
+
+当前实现里，**请求准入会遵循代理实际对外返回的 `/models` 列表**：
+
+- 默认分组 bare `/v1/*` 只允许请求当前 bare `/v1/models` 里可见的模型
+- 显式 `/{providerId}/v1/*` 也只允许请求该 provider 自己 `/models` 列表里可见的模型
+- 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
+- 如果同时开启了 `EXPOSE_REASONING_SUFFIX_MODELS=true`，那么 suffix 变体是否允许请求，也严格跟随 `/models` 里的可见结果
 
 当前已验证的推理强度入口包括：
 
@@ -368,7 +386,7 @@ Claude 相关还有两个配套开关：
 
 | 字段组 | 例子 | 热加载 |
 |---|---|---|
-| 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
+| 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`ENABLE_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
 | 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
@@ -382,7 +400,7 @@ Claude 相关还有两个配套开关：
 - `已启用提供商总计.txt`
 - `v1默认分组统计.txt`
 
-其中 `v1默认分组统计.txt` 只汇总当前 `DEFAULT_PROVIDER` 列表里、并且仍处于启用状态的 provider。它和裸 `/v1/*` 的默认分组 overlay 语义保持一致。
+其中 `v1默认分组统计.txt` 只汇总当前 `DEFAULT_PROVIDER` 列表里、并且仍处于启用状态的 provider。无论默认分组当前走的是 overlay 模式还是标签模式，这个聚合文件都会按默认分组实际参与的 provider 集合统计。
 
 ### provider `.env`
 
@@ -392,7 +410,7 @@ Claude 相关还有两个配套开关：
 | Anthropic / thinking | `ANTHROPIC_VERSION`、`UPSTREAM_THINKING_TAG_STYLE` | Anthropic 上游版本与 chat 上游 thinking 标签策略 |
 | 能力开关 | `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES` | 控制公开端口是否开放 |
 | 非流 / timeout / retry | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`、`UPSTREAM_FIRST_BYTE_TIMEOUT`、`UPSTREAM_RETRY_COUNT`、`UPSTREAM_RETRY_DELAY` | provider 级运行时策略 |
-| 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS` | 注入与模型能力 |
+| 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS` | 注入与模型能力 |
 | 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
 | 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
 
