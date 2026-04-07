@@ -144,3 +144,29 @@ func TestShouldRestorePreviousConversationSkipsWhenClientAlreadySendsAssistantHi
 		t.Fatalf("expected restore to be skipped when client already sends assistant history")
 	}
 }
+
+func TestResponsesHistoryCompactionItemsDoNotProvidePreviousResponseID(t *testing.T) {
+	items := []map[string]any{
+		{"role": "user", "content": []map[string]any{{"type": "input_text", "text": "follow up"}}},
+		{"type": "compaction", "id": "cmp_123", "encrypted_content": "enc_payload"},
+	}
+
+	if got := previousResponseIDFromItems(items); got != "" {
+		t.Fatalf("expected compaction items alone not to provide previous_response_id, got %q", got)
+	}
+
+	if !shouldRestorePreviousConversation([]model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "follow up"}}}}) {
+		t.Fatalf("expected restore decision to still depend on canonical messages, not compaction item presence")
+	}
+}
+
+func TestResponsesHistoryPreviousResponseIDStillComesFromPreservedTopLevelFieldsWithCompactionItems(t *testing.T) {
+	items := []map[string]any{
+		{"type": "compaction", "id": "cmp_123", "encrypted_content": "enc_payload"},
+		{"__openai_compat_responses_top_level": map[string]any{"previous_response_id": "resp_123"}},
+	}
+
+	if got := previousResponseIDFromItems(items); got != "resp_123" {
+		t.Fatalf("expected previous_response_id to come only from preserved top-level fields, got %q", got)
+	}
+}

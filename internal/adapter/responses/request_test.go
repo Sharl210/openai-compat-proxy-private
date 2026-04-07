@@ -109,6 +109,40 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesCompactionItemsWithoutCanonicalMessages(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"compaction","id":"cmp_123","encrypted_content":"enc_payload","summary":[{"type":"summary_text","text":"condensed"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.ResponseInputItems) != 2 {
+		t.Fatalf("expected preserved user item plus preserved compaction item, got %#v", canon.ResponseInputItems)
+	}
+	if got, _ := canon.ResponseInputItems[1]["type"].(string); got != "compaction" {
+		t.Fatalf("expected compaction item to remain in ResponseInputItems, got %#v", canon.ResponseInputItems[1])
+	}
+	if got, _ := canon.ResponseInputItems[1]["encrypted_content"].(string); got != "enc_payload" {
+		t.Fatalf("expected compaction encrypted_content to remain opaque, got %#v", canon.ResponseInputItems[1])
+	}
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected compaction item not to create canonical messages, got %#v", canon.Messages)
+	}
+	if canon.Messages[0].Role != "user" {
+		t.Fatalf("expected only original user message to remain canonical, got %#v", canon.Messages)
+	}
+	if len(canon.Messages[0].ToolCalls) != 0 {
+		t.Fatalf("expected no canonical tool calls from compaction item, got %#v", canon.Messages[0])
+	}
+}
+
 func TestDecodeRequestTurnsFunctionCallOutputIntoCanonicalToolMessage(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
