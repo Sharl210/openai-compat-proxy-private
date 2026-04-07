@@ -38,7 +38,7 @@ func handleChat() http.HandlerFunc {
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 			setConfigVersionHeaders(w, snapshot, providerID)
 		}
-		authorization, err := authHeaderForUpstream(r, providerCfg)
+		authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
 		if err != nil {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
@@ -62,7 +62,7 @@ func handleChat() http.HandlerFunc {
 		}
 		canon.RequestID = requestID
 		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType)
-		canon.AuthMode = authModeForUpstream(r, providerCfg)
+		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
 			"route":         "/v1/chat/completions",

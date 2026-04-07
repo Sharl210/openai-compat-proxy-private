@@ -39,7 +39,7 @@ func handleResponses() http.HandlerFunc {
 			setConfigVersionHeaders(w, snapshot, providerID)
 		}
 		usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType)
-		authorization, err := authHeaderForUpstream(r, providerCfg)
+		authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
 		if err != nil {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
@@ -72,7 +72,7 @@ func handleResponses() http.HandlerFunc {
 			return
 		}
 		canon.RequestID = requestID
-		canon.AuthMode = authModeForUpstream(r, providerCfg)
+		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
 			"route":         "/v1/responses",

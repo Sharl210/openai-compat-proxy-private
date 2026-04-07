@@ -42,7 +42,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 			setConfigVersionHeaders(w, snapshot, providerID)
 		}
-		authorization, err := authHeaderForUpstream(r, providerCfg)
+		authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
 		if err != nil {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())

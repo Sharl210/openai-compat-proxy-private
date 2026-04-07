@@ -250,3 +250,67 @@ func TestMultiDefaultLegacyRouteKeepsRootProxyKeyPrivilege(t *testing.T) {
 		t.Fatalf("expected bare route to still require root-key privilege in multi-default mode, got %d body=%s", privateRec.Code, privateRec.Body.String())
 	}
 }
+
+func TestMultiDefaultLegacyRouteUsesResolvedProvidersOwnUpstreamAuth(t *testing.T) {
+	var minimaxHits int
+	minimaxUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer minimax-upstream-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"wrong minimax auth"}`))
+			return
+		}
+		minimaxHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_minimax","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer minimaxUpstream.Close()
+
+	var codexHits int
+	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		codexHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_codex","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer codexUpstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:                 "root-secret",
+		DefaultProvider:             "minimax,codex",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "minimax",
+			Enabled:              true,
+			UpstreamBaseURL:      minimaxUpstream.URL,
+			UpstreamAPIKey:       "minimax-upstream-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			ModelMap:             []config.ModelMapEntry{config.NewModelMapEntry("MiniMax-M2.7", "minimax-upstream-model")},
+		}, {
+			ID:                   "codex",
+			Enabled:              true,
+			UpstreamBaseURL:      codexUpstream.URL,
+			UpstreamAPIKey:       "codex-upstream-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			ModelMap:             []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.4", "gpt-5.4")},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"MiniMax-M2.7","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer root-secret")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected bare route to use resolved provider upstream auth, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "minimax" {
+		t.Fatalf("expected resolved provider minimax, got %q", got)
+	}
+	if minimaxHits != 1 || codexHits != 0 {
+		t.Fatalf("expected only minimax upstream hit, minimax=%d codex=%d", minimaxHits, codexHits)
+	}
+}

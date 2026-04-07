@@ -11,6 +11,10 @@ func authHeaderForUpstream(r *http.Request, cfg config.Config) (string, error) {
 	return auth.ResolveUpstreamAuthorization(r, effectiveUpstreamAuthConfig(r, cfg))
 }
 
+func authHeaderForResolvedProviderUpstream(r *http.Request, cfg config.Config, providerID string) (string, error) {
+	return authHeaderForUpstream(requestWithProviderRouteInfo(r, providerID), cfg)
+}
+
 func authModeForUpstream(r *http.Request, cfg config.Config) string {
 	cfg = effectiveUpstreamAuthConfig(r, cfg)
 	if r.Header.Get("X-Upstream-Authorization") != "" {
@@ -28,6 +32,10 @@ func authModeForUpstream(r *http.Request, cfg config.Config) string {
 		return "server_default_key"
 	}
 	return "missing"
+}
+
+func authModeForResolvedProviderUpstream(r *http.Request, cfg config.Config, providerID string) string {
+	return authModeForUpstream(requestWithProviderRouteInfo(r, providerID), cfg)
 }
 
 func effectiveUpstreamAuthConfig(r *http.Request, cfg config.Config) config.Config {
@@ -61,4 +69,15 @@ func statusCheckProxyKeyForRequest(r *http.Request, cfg config.Config, provider 
 	_ = cfg
 	_ = provider
 	return ""
+}
+
+func requestWithProviderRouteInfo(r *http.Request, providerID string) *http.Request {
+	if r == nil || providerID == "" {
+		return r
+	}
+	if info, ok := routeInfoFromRequest(r); ok {
+		info.ProviderID = providerID
+		return r.Clone(withRouteInfo(r.Context(), info))
+	}
+	return r
 }
