@@ -15,6 +15,12 @@ import (
 
 func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
+			if info, ok := routeInfoFromRequest(r); ok && info.Legacy && len(snapshot.DefaultProviderIDs) > 1 {
+				writeDefaultOverlayModels(w, snapshot)
+				return
+			}
+		}
 		providerCfg := providerConfigForRequest(r)
 		provider, ok := providerForRequest(r)
 		if !ok || !provider.SupportsModels {
@@ -63,6 +69,32 @@ func handleModels() http.HandlerFunc {
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
 	}
+}
+
+func writeDefaultOverlayModels(w http.ResponseWriter, snapshot *config.RuntimeSnapshot) {
+	entries := make([]map[string]any, 0, len(snapshot.DefaultVisibleModels))
+	for _, modelID := range snapshot.DefaultVisibleModels {
+		entry := map[string]any{
+			"id":     modelID,
+			"object": "model",
+		}
+		if owner := snapshot.DefaultModelOwners[modelID]; owner != "" {
+			entry["owned_by"] = owner
+		}
+		entries = append(entries, entry)
+	}
+	payload := map[string]any{
+		"object": "list",
+		"data":   entries,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		errorsx.WriteJSON(w, http.StatusInternalServerError, "internal_error", "failed to encode models response")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(encoded)
 }
 
 func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
