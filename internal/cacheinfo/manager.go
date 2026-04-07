@@ -34,6 +34,7 @@ type Manager struct {
 	location     *time.Location
 	clock        Clock
 	enabledFn    func() []string
+	defaultFn    func() []string
 
 	mu              sync.RWMutex
 	stats           map[string]*ProviderStats
@@ -114,6 +115,12 @@ func (m *Manager) SetEnabledProvidersSource(fn func() []string) {
 	defer m.mu.Unlock()
 	m.enabledFn = fn
 	m.syncEnabledProvidersLocked()
+}
+
+func (m *Manager) SetDefaultProvidersSource(fn func() []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.defaultFn = fn
 }
 
 func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) error {
@@ -380,7 +387,7 @@ func (m *Manager) persistAllLocked() {
 			log.Printf("[cacheinfo] 写入 provider %s 失败: %v", pid, err)
 		}
 	}
-	if err := writeAggregateTXTFiles(m.providersDir, m.enabledStatsSnapshotLocked(), m.clock.Now().In(m.location), m.location.String()); err != nil {
+	if err := writeAggregateTXTFiles(m.providersDir, m.enabledStatsSnapshotLocked(), m.defaultEnabledStatsSnapshotLocked(), m.clock.Now().In(m.location), m.location.String()); err != nil {
 		log.Printf("[cacheinfo] 写入聚合 TXT 失败: %v", err)
 	}
 }
@@ -390,6 +397,23 @@ func (m *Manager) enabledStatsSnapshotLocked() map[string]*ProviderStats {
 	for providerID := range m.enabledProvider {
 		if providerStats, ok := m.stats[providerID]; ok {
 			stats[providerID] = providerStats
+		}
+	}
+	return stats
+}
+
+func (m *Manager) defaultEnabledStatsSnapshotLocked() []*ProviderStats {
+	if m.defaultFn == nil {
+		return nil
+	}
+	providerIDs := m.defaultFn()
+	stats := make([]*ProviderStats, 0, len(providerIDs))
+	for _, providerID := range providerIDs {
+		if _, ok := m.enabledProvider[providerID]; !ok {
+			continue
+		}
+		if providerStats, ok := m.stats[providerID]; ok {
+			stats = append(stats, providerStats)
 		}
 	}
 	return stats

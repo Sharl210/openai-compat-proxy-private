@@ -58,6 +58,13 @@ func main() {
 				}
 				return ids
 			})
+			cacheMgr.SetDefaultProvidersSource(func() []string {
+				snapshot := store.Active()
+				if snapshot == nil {
+					return nil
+				}
+				return append([]string(nil), snapshot.DefaultProviderIDs...)
+			})
 			cacheMgr.Start(context.Background())
 			defer cacheMgr.Stop()
 		}

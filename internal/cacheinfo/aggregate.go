@@ -82,7 +82,7 @@ func statsDaysForAggregation(stats *ProviderStats) []DailyStats {
 	return days
 }
 
-func writeAggregateTXTFiles(providersDir string, enabledStats map[string]*ProviderStats, now time.Time, timezone string) error {
+func writeAggregateTXTFiles(providersDir string, enabledStats map[string]*ProviderStats, defaultStats []*ProviderStats, now time.Time, timezone string) error {
 	allStats, err := loadAllProviderStats(providersDir)
 	if err != nil {
 		return err
@@ -94,7 +94,10 @@ func writeAggregateTXTFiles(providersDir string, enabledStats map[string]*Provid
 	for _, stats := range enabledStats {
 		enabledList = append(enabledList, stats)
 	}
-	return writeAggregateTXT(providersDir, "已启用提供商总计.txt", aggregateStats(timezone, now, enabledList))
+	if err := writeAggregateTXT(providersDir, "已启用提供商总计.txt", aggregateStats(timezone, now, enabledList)); err != nil {
+		return err
+	}
+	return writeAggregateTXT(providersDir, "v1默认分组统计.txt", aggregateStats(timezone, now, defaultStats))
 }
 
 func writeAggregateTXT(providersDir, fileName string, stats ProviderStats) error {
