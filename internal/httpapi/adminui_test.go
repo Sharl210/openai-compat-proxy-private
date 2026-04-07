@@ -460,6 +460,47 @@ func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
 	}
 }
 
+func TestAdminUIStylesDisableTransparentOverlayOnMobileEditors(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected css asset 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "@media (max-width: 768px)") {
+		t.Fatalf("expected mobile media query for editor overlay fallback, got %s", body)
+	}
+	if !strings.Contains(body, ".env-highlight-textarea") || !strings.Contains(body, "color: var(--md-sys-color-on-surface)") {
+		t.Fatalf("expected mobile editor css to restore visible textarea text, got %s", body)
+	}
+	if !strings.Contains(body, ".code-editor-highlight") || !strings.Contains(body, "display: none") {
+		t.Fatalf("expected mobile editor css to disable highlight overlay, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptUsesMarkdownHighlightForMarkdownFiles(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "resolveEditorHighlightLanguage") {
+		t.Fatalf("expected app script to resolve editor highlight language dynamically, got %s", body)
+	}
+	if !strings.Contains(body, "state.currentFile?.language") || !strings.Contains(body, "language === 'markdown'") {
+		t.Fatalf("expected markdown files to use markdown highlight language, got %s", body)
+	}
+}
+
 func TestAdminUIAppScriptIncludesCopyAction(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)

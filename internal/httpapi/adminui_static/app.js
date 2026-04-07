@@ -1142,15 +1142,24 @@ function renderEditorSection() {
 }
 
 function renderTextEditor() {
+	const highlightLanguage = resolveEditorHighlightLanguage();
   return `
     <div class="text-editor-grid pane-edit">
       <section class="editor-card mode-scene">
         <div class="editor-body">
-          ${renderCodeEditorShell('text-editor', 'text-editor', '', 'text-area auto-resize source-mode no-wrap-editor code-editor-textarea')}
+          ${renderCodeEditorShell('text-editor', 'text-editor', '', 'text-area auto-resize source-mode no-wrap-editor code-editor-textarea', highlightLanguage)}
         </div>
       </section>
     </div>
   `;
+}
+
+function resolveEditorHighlightLanguage() {
+	const language = String(state.currentFile?.language || '').trim();
+	if (language === 'markdown' || language === 'json' || language === 'go' || language === 'shell' || language === 'yaml') {
+		return language;
+	}
+	return '';
 }
 
 function renderEnvEditor() {
