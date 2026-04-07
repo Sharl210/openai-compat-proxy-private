@@ -72,11 +72,7 @@ func handleModels() http.HandlerFunc {
 }
 
 func writeDefaultOverlayModels(w http.ResponseWriter, r *http.Request, snapshot *config.RuntimeSnapshot) {
-	entries, authorized := buildDefaultOverlayModelEntries(r.Context(), r, snapshot)
-	if !authorized {
-		errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
-		return
-	}
+	entries := buildDefaultOverlayModelEntries(r.Context(), r, snapshot)
 	payload := map[string]any{
 		"object": "list",
 		"data":   entries,
@@ -91,29 +87,33 @@ func writeDefaultOverlayModels(w http.ResponseWriter, r *http.Request, snapshot 
 	_, _ = w.Write(encoded)
 }
 
-func buildDefaultOverlayModelEntries(ctx context.Context, r *http.Request, snapshot *config.RuntimeSnapshot) ([]map[string]any, bool) {
+func buildDefaultOverlayModelEntries(ctx context.Context, r *http.Request, snapshot *config.RuntimeSnapshot) []map[string]any {
 	if snapshot == nil {
-		return nil, false
+		return nil
 	}
-	authorizedProviderIDs := authorizedDefaultProviderIDs(r, snapshot)
-	if len(authorizedProviderIDs) == 0 {
-		return nil, false
-	}
-	entries, ok := buildDefaultOverlayModelEntriesFromProviders(ctx, r, snapshot, authorizedProviderIDs)
+	entries, ok := buildDefaultOverlayModelEntriesFromProviders(ctx, r, snapshot)
 	if ok {
-		return entries, true
+		return entries
 	}
-	return buildStaticDefaultOverlayEntries(snapshot, authorizedProviderIDs), true
+	entries = make([]map[string]any, 0, len(snapshot.DefaultVisibleModels))
+	for _, modelID := range snapshot.DefaultVisibleModels {
+		entry := map[string]any{"id": modelID, "object": "model"}
+		if owner := snapshot.DefaultModelOwners[modelID]; owner != "" {
+			entry["owned_by"] = owner
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }
 
-func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.Request, snapshot *config.RuntimeSnapshot, providerIDs []string) ([]map[string]any, bool) {
+func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.Request, snapshot *config.RuntimeSnapshot) ([]map[string]any, bool) {
 	entriesByID := map[string]map[string]any{}
 	orderedIDs := make([]string, 0)
 	anySource := false
 	if snapshot == nil || snapshot.Config.EnableDefaultProviderModelTags {
 		return nil, false
 	}
-	for _, providerID := range providerIDs {
+	for _, providerID := range snapshot.DefaultProviderIDs {
 		provider, err := snapshot.Config.ProviderByID(providerID)
 		if err != nil || !provider.Enabled || !provider.SupportsModels {
 			continue
@@ -151,90 +151,6 @@ func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.R
 		entries = append(entries, entriesByID[id])
 	}
 	return entries, true
-}
-
-func authorizedDefaultProviderIDs(r *http.Request, snapshot *config.RuntimeSnapshot) []string {
-	if snapshot == nil {
-		return nil
-	}
-	authorized := make([]string, 0, len(snapshot.DefaultProviderIDs))
-	for _, providerID := range snapshot.DefaultProviderIDs {
-		provider, err := snapshot.Config.ProviderByID(providerID)
-		if err != nil || !provider.Enabled || !provider.SupportsModels {
-			continue
-		}
-		if requestAuthorizedForProvider(r, snapshot, provider) {
-			authorized = append(authorized, providerID)
-		}
-	}
-	return authorized
-}
-
-func buildStaticDefaultOverlayEntries(snapshot *config.RuntimeSnapshot, providerIDs []string) []map[string]any {
-	if snapshot == nil {
-		return nil
-	}
-	owners := make(map[string]string)
-	visibleByProvider := make(map[string][]string, len(providerIDs))
-	modelCount := make(map[string]int)
-	for _, providerID := range providerIDs {
-		provider, err := snapshot.Config.ProviderByID(providerID)
-		if err != nil || !provider.Enabled || !provider.SupportsModels {
-			continue
-		}
-		visible := provider.VisibleModelIDs()
-		visibleByProvider[providerID] = visible
-		for _, modelID := range visible {
-			modelCount[modelID]++
-		}
-	}
-	visible := make([]string, 0, len(modelCount))
-	seen := make(map[string]struct{}, len(modelCount))
-	if snapshot.Config.EnableDefaultProviderModelTags {
-		for i := len(providerIDs) - 1; i >= 0; i-- {
-			providerID := providerIDs[i]
-			for _, modelID := range visibleByProvider[providerID] {
-				visibleID := modelID
-				if snapshot.Config.EnableAllDefaultProviderModelTags || modelCount[modelID] > 1 {
-					visibleID = "[" + providerID + "]" + modelID
-				}
-				if _, ok := seen[visibleID]; ok {
-					continue
-				}
-				seen[visibleID] = struct{}{}
-				owners[visibleID] = providerID
-				visible = append(visible, visibleID)
-			}
-		}
-	} else {
-		for _, providerID := range providerIDs {
-			for _, modelID := range visibleByProvider[providerID] {
-				owners[modelID] = providerID
-			}
-		}
-		for i := len(providerIDs) - 1; i >= 0; i-- {
-			providerID := providerIDs[i]
-			for _, modelID := range visibleByProvider[providerID] {
-				if owners[modelID] != providerID {
-					continue
-				}
-				if _, ok := seen[modelID]; ok {
-					continue
-				}
-				seen[modelID] = struct{}{}
-				visible = append(visible, modelID)
-			}
-		}
-	}
-	entries := make([]map[string]any, 0, len(visible))
-	for _, modelID := range visible {
-		entry := map[string]any{"id": modelID, "object": "model"}
-		if owner := owners[modelID]; owner != "" {
-			entry["owned_by"] = owner
-		}
-		entries = append(entries, entry)
-	}
-	return entries
 }
 
 func authHeaderForOverlayProviderUpstream(r *http.Request, cfg config.Config, providerID string) (string, error) {
