@@ -5,6 +5,7 @@ import (
 
 	"openai-compat-proxy/internal/auth"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/errorsx"
 )
 
 func authHeaderForUpstream(r *http.Request, cfg config.Config) (string, error) {
@@ -61,4 +62,24 @@ func statusCheckProxyKeyForRequest(r *http.Request, cfg config.Config, provider 
 	_ = cfg
 	_ = provider
 	return ""
+}
+
+func ensureRequestAuthorizedForProvider(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig) bool {
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil {
+		errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
+		return false
+	}
+	if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, false); err != nil {
+		errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
+		return false
+	}
+	return true
+}
+
+func requestAuthorizedForProvider(r *http.Request, snapshot *config.RuntimeSnapshot, provider config.ProviderConfig) bool {
+	if snapshot == nil {
+		return false
+	}
+	return auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, false) == nil
 }

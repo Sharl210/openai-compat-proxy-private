@@ -108,9 +108,11 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
-		if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, info.Legacy); err != nil {
-			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
-			return
+		if !shouldDeferLegacyProxyAuth(info, snapshot) {
+			if err := auth.ValidateProxyAuthForProvider(r, snapshot.Config.ProxyAPIKey, provider, false); err != nil {
+				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
+				return
+			}
 		}
 		setConfigVersionHeaders(w, snapshot, info.ProviderID)
 		s.mux.ServeHTTP(w, r)
@@ -118,4 +120,11 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
+}
+
+func shouldDeferLegacyProxyAuth(info routeInfo, snapshot *config.RuntimeSnapshot) bool {
+	if !info.Legacy || snapshot == nil {
+		return false
+	}
+	return len(snapshot.DefaultProviderIDs) > 1
 }

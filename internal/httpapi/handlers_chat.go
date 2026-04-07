@@ -34,6 +34,10 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
 			return
 		}
+		if !ensureRequestAuthorizedForProvider(w, r, provider) {
+			clearTransparencyHeaders(w)
+			return
+		}
 		canon.Model = resolvedModel
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 			setConfigVersionHeaders(w, snapshot, providerID)
