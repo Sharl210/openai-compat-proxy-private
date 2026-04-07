@@ -44,6 +44,18 @@ func TestResolveModelAndEffortUsesMappedSuffixWhenNoRequestSuffix(t *testing.T) 
 	}
 }
 
+func TestResolveModelSupportsTrailingWildcardCaptures(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-*", "azure-$1")}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5", false)
+	if model != "azure-5" {
+		t.Fatalf("expected trailing wildcard to resolve to %q, got %q", "azure-5", model)
+	}
+	if effort != "" {
+		t.Fatalf("expected no effort override for wildcard mapping, got %q", effort)
+	}
+}
+
 func TestLoadProviderFileResolvesSystemPromptFilesRelativeToProviderEnv(t *testing.T) {
 	rootDir := t.TempDir()
 	promptDir := filepath.Join(rootDir, "prompts")

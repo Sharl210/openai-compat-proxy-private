@@ -676,6 +676,46 @@ func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidRootTimeout(t *testing
 	}
 }
 
+func TestRuntimeStoreRefreshKeepsLastGoodSnapshotOnInvalidDefaultProviderList(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	openAIEnvPath := filepath.Join(providersDir, "openai.env")
+	azureEnvPath := filepath.Join(providersDir, "azure.env")
+	initialRootMTime := time.Date(2026, 4, 7, 11, 0, 0, 0, time.UTC)
+	updatedRootMTime := time.Date(2026, 4, 7, 11, 1, 0, 0, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai,azure\n", initialRootMTime)
+	writeConfigFileWithMTime(t, openAIEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://openai.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 4, 7, 11, 0, 10, 0, time.UTC))
+	writeConfigFileWithMTime(t, azureEnvPath, "PROVIDER_ID=azure\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://azure.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 4, 7, 11, 0, 20, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai,missing\n", updatedRootMTime)
+	if err := store.Refresh(); err == nil {
+		t.Fatalf("expected Refresh to fail for invalid default provider list")
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(initialRootMTime) {
+		t.Fatalf("expected root version to remain %q, got %q", formatVersionTime(initialRootMTime), got)
+	}
+	ids, err := active.Config.DefaultProviderIDs()
+	if err != nil {
+		t.Fatalf("expected active config to keep last good default providers, got error: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "openai" || ids[1] != "azure" {
+		t.Fatalf("expected last good default providers [openai azure], got %v", ids)
+	}
+}
+
 func writeConfigFileWithMTime(t *testing.T, path string, content string, mtime time.Time) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

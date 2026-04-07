@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -168,5 +169,141 @@ func TestValidateRootEnvValuesIgnoresUnknownLegacyVariables(t *testing.T) {
 func TestDefaultFirstByteTimeoutIsTwentyMinutes(t *testing.T) {
 	if got := Default().FirstByteTimeout; got != 20*time.Minute {
 		t.Fatalf("expected default FirstByteTimeout 20m, got %v", got)
+	}
+}
+
+func TestConfigDefaultProviderIDsParsesOrderedList(t *testing.T) {
+	cfg := Config{
+		ProvidersDir:    "/tmp/providers",
+		DefaultProvider: "openai, azure",
+		Providers: []ProviderConfig{
+			{ID: "openai", Enabled: true},
+			{ID: "azure", Enabled: true},
+		},
+	}
+
+	ids, err := cfg.DefaultProviderIDs()
+	if err != nil {
+		t.Fatalf("expected DefaultProviderIDs to parse, got error: %v", err)
+	}
+	if want := []string{"openai", "azure"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("expected default provider ids %v, got %v", want, ids)
+	}
+
+	provider, err := cfg.DefaultProviderConfig()
+	if err != nil {
+		t.Fatalf("expected DefaultProviderConfig to resolve last provider, got error: %v", err)
+	}
+	if provider.ID != "azure" {
+		t.Fatalf("expected highest-priority default provider %q, got %q", "azure", provider.ID)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected config validation to accept ordered default providers, got %v", err)
+	}
+}
+
+func TestConfigDefaultProviderIDsRejectInvalidList(t *testing.T) {
+	testCases := []string{
+		"openai,,azure",
+		"openai, azure ,openai",
+	}
+
+	for _, raw := range testCases {
+		t.Run(raw, func(t *testing.T) {
+			cfg := Config{DefaultProvider: raw}
+			if _, err := cfg.DefaultProviderIDs(); err == nil {
+				t.Fatalf("expected invalid default provider list %q to fail parsing", raw)
+			}
+		})
+	}
+}
+
+func TestConfigValidateRejectsDisabledDefaultProviderInList(t *testing.T) {
+	cfg := Config{
+		ProvidersDir:         "/tmp/providers",
+		DefaultProvider:      "openai,azure",
+		EnableLegacyV1Routes: true,
+		Providers: []ProviderConfig{
+			{ID: "openai", Enabled: true},
+			{ID: "azure", Enabled: false},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected disabled provider in default provider list to fail validation")
+	}
+}
+
+func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
+	cfg := Config{
+		DefaultProvider: "openai,azure",
+		Providers: []ProviderConfig{
+			{
+				ID:      "openai",
+				Enabled: true,
+				ModelMap: []ModelMapEntry{
+					{Key: "openai-only", Target: "gpt-openai"},
+					{Key: "shared-model", Target: "gpt-shared-openai"},
+				},
+				ManualModels: []string{"openai-manual"},
+			},
+			{
+				ID:      "azure",
+				Enabled: true,
+				ModelMap: []ModelMapEntry{
+					{Key: "shared-model", Target: "gpt-shared-azure"},
+					{Key: "azure-only", Target: "gpt-azure"},
+				},
+				ManualModels: []string{"azure-manual"},
+			},
+		},
+	}
+
+	ids, owners, visible, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("expected overlay model index build to succeed, got %v", err)
+	}
+	if want := []string{"openai", "azure"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("expected default provider ids %v, got %v", want, ids)
+	}
+	if got := owners["shared-model"]; got != "azure" {
+		t.Fatalf("expected shared-model owner %q, got %q", "azure", got)
+	}
+	if want := []string{"shared-model", "azure-only", "azure-manual", "openai-only", "openai-manual"}; !reflect.DeepEqual(visible, want) {
+		t.Fatalf("expected visible models %v, got %v", want, visible)
+	}
+}
+
+func TestRuntimeSnapshotResolveDefaultProviderIDForModelUsesWildcardFallback(t *testing.T) {
+	snapshot := &RuntimeSnapshot{
+		Config: Config{
+			DefaultProvider: "openai,azure",
+			Providers: []ProviderConfig{
+				{
+					ID:      "openai",
+					Enabled: true,
+					ModelMap: []ModelMapEntry{
+						NewModelMapEntry("gpt-*", "openai-$1"),
+					},
+				},
+				{
+					ID:      "azure",
+					Enabled: true,
+					ModelMap: []ModelMapEntry{
+						NewModelMapEntry("gpt-*", "azure-$1"),
+					},
+				},
+			},
+		},
+		DefaultProviderIDs: []string{"openai", "azure"},
+		DefaultModelOwners: map[string]string{},
+	}
+
+	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("gpt-5"); !ok || owner != "azure" {
+		t.Fatalf("expected wildcard fallback to resolve higher-priority provider azure, got owner=%q ok=%v", owner, ok)
+	}
+	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("claude-3"); ok || owner != "" {
+		t.Fatalf("expected unknown model to miss default provider fallback, got owner=%q ok=%v", owner, ok)
 	}
 }

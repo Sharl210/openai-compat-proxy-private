@@ -8,19 +8,24 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"openai-compat-proxy/internal/reasoning"
 )
 
 const versionTimeLayout = "2006-01-02 15:04:05.000"
 
 type RuntimeSnapshot struct {
-	Config              Config
-	RootEnvPath         string
-	RootEnvMTime        time.Time
-	RootEnvVersion      string
-	ProviderVersionByID map[string]string
-	ProviderPathByID    map[string]string
-	PromptPathsByID     map[string][]string
-	providerMTimeByID   map[string]time.Time
+	Config               Config
+	RootEnvPath          string
+	RootEnvMTime         time.Time
+	RootEnvVersion       string
+	DefaultProviderIDs   []string
+	DefaultModelOwners   map[string]string
+	DefaultVisibleModels []string
+	ProviderVersionByID  map[string]string
+	ProviderPathByID     map[string]string
+	PromptPathsByID      map[string][]string
+	providerMTimeByID    map[string]time.Time
 }
 
 func FormatVersionTime(t time.Time) string {
@@ -101,16 +106,140 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	defaultProviderIDs, defaultModelOwners, defaultVisibleModels, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return &RuntimeSnapshot{
-		Config:              cfg,
-		RootEnvPath:         rootEnvPath,
-		RootEnvMTime:        rootEnvMTime,
-		RootEnvVersion:      FormatVersionTimeInLocation(rootEnvMTime, versionLocation),
-		ProviderVersionByID: providerVersions,
-		ProviderPathByID:    providerPaths,
-		PromptPathsByID:     promptPaths,
-		providerMTimeByID:   providerMTimes,
+		Config:               cfg,
+		RootEnvPath:          rootEnvPath,
+		RootEnvMTime:         rootEnvMTime,
+		RootEnvVersion:       FormatVersionTimeInLocation(rootEnvMTime, versionLocation),
+		DefaultProviderIDs:   defaultProviderIDs,
+		DefaultModelOwners:   defaultModelOwners,
+		DefaultVisibleModels: defaultVisibleModels,
+		ProviderVersionByID:  providerVersions,
+		ProviderPathByID:     providerPaths,
+		PromptPathsByID:      promptPaths,
+		providerMTimeByID:    providerMTimes,
 	}, nil
+}
+
+func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []string, error) {
+	providerIDs, err := cfg.DefaultProviderIDs()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	owners := make(map[string]string)
+	if len(providerIDs) == 0 {
+		return nil, owners, nil, nil
+	}
+	visibleByProvider := make(map[string][]string, len(providerIDs))
+	for _, id := range providerIDs {
+		provider, err := cfg.ProviderByID(id)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		visible := providerVisibleModelIDs(provider)
+		visibleByProvider[id] = visible
+		for _, modelID := range visible {
+			owners[modelID] = id
+		}
+	}
+	visible := make([]string, 0, len(owners))
+	seen := make(map[string]struct{}, len(owners))
+	for i := len(providerIDs) - 1; i >= 0; i-- {
+		id := providerIDs[i]
+		for _, modelID := range visibleByProvider[id] {
+			if owners[modelID] != id {
+				continue
+			}
+			if _, ok := seen[modelID]; ok {
+				continue
+			}
+			seen[modelID] = struct{}{}
+			visible = append(visible, modelID)
+		}
+	}
+	return providerIDs, owners, visible, nil
+}
+
+func providerVisibleModelIDs(provider ProviderConfig) []string {
+	base := make([]string, 0, len(provider.ModelMap)+len(provider.ManualModels))
+	seen := make(map[string]struct{}, len(provider.ModelMap)+len(provider.ManualModels))
+	for _, entry := range provider.ModelMap {
+		id := strings.TrimSpace(entry.Key)
+		if shouldHideDefaultVisibleModel(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		base = append(base, id)
+	}
+	for _, manualModel := range provider.ManualModels {
+		id := strings.TrimSpace(manualModel)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		base = append(base, id)
+	}
+	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
+		return expandVisibleModelIDs(base, provider.ModelMap)
+	}
+	return base
+}
+
+func expandVisibleModelIDs(base []string, entries []ModelMapEntry) []string {
+	keys := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		keys = append(keys, entry.Key)
+	}
+	return reasoning.ExpandModelIDs(base, keys, true)
+}
+
+func shouldHideDefaultVisibleModel(id string) bool {
+	id = strings.TrimSpace(id)
+	return id == "" || strings.Contains(id, "*")
+}
+
+func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	if owner, ok := s.DefaultModelOwners[model]; ok {
+		return owner, true
+	}
+	for i := len(s.DefaultProviderIDs) - 1; i >= 0; i-- {
+		id := s.DefaultProviderIDs[i]
+		provider, err := s.Config.ProviderByID(id)
+		if err != nil {
+			continue
+		}
+		if providerResolvesModel(provider, model) {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func providerResolvesModel(provider ProviderConfig, model string) bool {
+	if provider.resolveModel(model, provider.EnableReasoningEffortSuffix) != "" {
+		return true
+	}
+	if !provider.EnableReasoningEffortSuffix {
+		return false
+	}
+	baseModel, _, ok := splitReasoningSuffix(model)
+	if !ok {
+		return false
+	}
+	return provider.resolveModel(baseModel, false) != ""
 }
 
 func validateHotReloadableRootEnvValues(values map[string]string) error {
