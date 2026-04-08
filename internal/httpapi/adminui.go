@@ -1263,6 +1263,7 @@ func (a *adminUI) runtimeStatus() map[string]any {
 		"health_ok":            false,
 		"proxy_key_configured": a.proxyKey() != "",
 		"pid":                  "",
+		"started_at":           "",
 		"log_dir":              "",
 	}
 	if snapshot == nil {
@@ -1271,7 +1272,11 @@ func (a *adminUI) runtimeStatus() map[string]any {
 	status["listen_addr"] = snapshot.Config.ListenAddr
 	status["health_ok"] = a.checkHealth(snapshot.Config.ListenAddr)
 	status["log_dir"] = strings.TrimSpace(snapshot.Config.LogFilePath)
-	if pidBytes, err := os.ReadFile(filepath.Join(a.rootDir(), ".proxy.pid")); err == nil {
+	pidPath := filepath.Join(a.rootDir(), ".proxy.pid")
+	if info, err := os.Stat(pidPath); err == nil {
+		status["started_at"] = info.ModTime().UTC().Format(time.RFC3339)
+	}
+	if pidBytes, err := os.ReadFile(pidPath); err == nil {
 		status["pid"] = strings.TrimSpace(string(pidBytes))
 	}
 	if current := a.runner.Current(); current != nil {

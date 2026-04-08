@@ -27,6 +27,9 @@ const state = {
   editorCloseConfirm: false,
 };
 
+const statusAutoRefreshIntervalMs = 3000;
+let statusAutoRefreshTimer = 0;
+
 function getHistoryState() {
   return {
     view: state.view,
@@ -106,7 +109,36 @@ async function init() {
     }
     restoreHistoryState(event.state);
   });
+  setupStatusAutoRefresh();
   await bootstrap();
+}
+
+function setupStatusAutoRefresh() {
+  if (statusAutoRefreshTimer) {
+    return;
+  }
+  statusAutoRefreshTimer = window.setInterval(() => {
+    void autoRefreshStatusTick();
+  }, statusAutoRefreshIntervalMs);
+  document.addEventListener('visibilitychange', handleStatusAutoRefreshVisibility, { passive: true });
+}
+
+function shouldAutoRefreshStatus() {
+  return state.authenticated && state.view === 'status' && document.visibilityState === 'visible';
+}
+
+function handleStatusAutoRefreshVisibility() {
+  if (!shouldAutoRefreshStatus()) {
+    return;
+  }
+  void refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 1, silent: true });
+}
+
+async function autoRefreshStatusTick() {
+  if (!shouldAutoRefreshStatus()) {
+    return;
+  }
+  await refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 1, silent: true });
 }
 
 async function bootstrap() {
@@ -236,6 +268,15 @@ async function openDirectory(path) {
     await navigateToBrowserAndWait(path);
   } catch (error) {
     setToast('error', error.message || '目录读取失败');
+  }
+}
+
+async function refreshCurrentDirectory() {
+  try {
+    await loadTree(state.currentDir);
+    render();
+  } catch (error) {
+    setToast('error', error.message || '目录刷新失败');
   }
 }
 
@@ -667,6 +708,11 @@ function bindEvents() {
     refreshButton.addEventListener('click', () => refreshStatusWithRetry({ retryOnDisconnect: true, attempts: 20, silent: false }));
   }
 
+  const refreshTreeButton = document.getElementById('refresh-tree-button');
+  if (refreshTreeButton) {
+    refreshTreeButton.addEventListener('click', refreshCurrentDirectory);
+  }
+
   const createEnvButton = document.getElementById('create-env-button');
   if (createEnvButton) {
     createEnvButton.addEventListener('click', createEnvFromCurrentDir);
@@ -980,8 +1026,11 @@ function renderBrowserPage() {
       <section class="panel">
         <div class="panel-body">
           <div class="status-row compact-meta-row">
-            <span class="badge info material-state-chip">当前目录 ${escapeHtml(state.currentDir || '/')}</span>
-            <span class="badge info material-state-chip">项目文件 ${items.length}</span>
+            <div class="compact-meta-left">
+              <span class="badge info material-state-chip">当前目录 ${escapeHtml(state.currentDir || '/')}</span>
+              <span class="badge info material-state-chip">项目文件 ${items.length}</span>
+            </div>
+            <button id="refresh-tree-button" class="badge info material-state-chip compact-meta-button" type="button">刷新</button>
           </div>
           <div class="tree-nav">
             <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">回到根目录/</button>
@@ -1092,6 +1141,10 @@ function renderStatusSection() {
       <div class="status-card">
         <div class="status-label">当前 PID</div>
         <div class="status-value">${escapeHtml(status.pid || '暂无')}</div>
+      </div>
+      <div class="status-card">
+        <div class="status-label">服务启动时间</div>
+        <div class="status-value">${escapeHtml(formatServiceStartedAt(status.started_at))}</div>
       </div>
       <div class="status-card">
         <div class="status-label">配置预检</div>
@@ -1785,6 +1838,26 @@ function formatListenAddrDisplay(value) {
     return trimmed.slice(1);
   }
   return trimmed || '未知';
+}
+
+function formatServiceStartedAt(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '未知';
+  }
+  const started = new Date(text);
+  if (Number.isNaN(started.getTime())) {
+    return text;
+  }
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
+  const days = Math.floor(elapsedSeconds / 86400);
+  const hours = Math.floor((elapsedSeconds % 86400) / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+  const uptime = days > 0
+    ? `${days}天 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return `${formatTimestamp(started.toISOString())}（已运行 ${uptime}）`;
 }
 
 function autoSizeTextareas(root = document) {

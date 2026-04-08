@@ -641,7 +641,30 @@ button { cursor: pointer; }
 }
 
 .compact-meta-row {
-  margin-bottom: 4px;
+  margin-bottom: 12px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.compact-meta-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.compact-meta-button {
+  appearance: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.compact-meta-button:hover {
+  transform: translateY(-1px);
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: rgba(47,91,218,0.28);
 }
 
 .compact-head {

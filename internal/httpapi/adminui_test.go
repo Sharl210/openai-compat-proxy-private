@@ -182,6 +182,40 @@ func TestAdminUIBootstrapExposesCustomProvidersDirRelativePath(t *testing.T) {
 	}
 }
 
+func TestAdminUIStatusIncludesServiceStartedAtFromPIDFile(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	pidPath := filepath.Join(server.admin.rootDir(), ".proxy.pid")
+	startedAt := time.Date(2026, time.April, 8, 10, 30, 0, 0, time.UTC)
+	if err := os.WriteFile(pidPath, []byte("12345\n"), 0o644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+	if err := os.Chtimes(pidPath, startedAt, startedAt); err != nil {
+		t.Fatalf("set pid file time: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/status", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	status, ok := data["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected status object, got %#v", data["status"])
+	}
+	if got := status["started_at"]; got != startedAt.Format(time.RFC3339) {
+		t.Fatalf("expected started_at %q, got %#v", startedAt.Format(time.RFC3339), got)
+	}
+	if got := status["pid"]; got != "12345" {
+		t.Fatalf("expected pid 12345, got %#v", got)
+	}
+}
+
 func TestAdminUIAppScriptUsesDynamicProvidersDirState(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
