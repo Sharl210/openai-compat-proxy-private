@@ -441,6 +441,115 @@ func TestAdminUITreeShowsNDJSONFilesInsideArchiveDirectories(t *testing.T) {
 	}
 }
 
+func TestAdminUITreeSortsLogDirectoryByModifiedDesc(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	logDir := filepath.Join(server.admin.rootDir(), "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs dir: %v", err)
+	}
+	oldPath := filepath.Join(logDir, "req-old.txt")
+	midPath := filepath.Join(logDir, "req-mid.txt")
+	newPath := filepath.Join(logDir, "req-new.txt")
+	for _, p := range []string{oldPath, midPath, newPath} {
+		if err := os.WriteFile(p, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("write log file %s: %v", p, err)
+		}
+	}
+	base := time.Now().Add(-5 * time.Minute)
+	if err := os.Chtimes(oldPath, base, base); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+	if err := os.Chtimes(midPath, base.Add(2*time.Minute), base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("chtimes mid: %v", err)
+	}
+	if err := os.Chtimes(newPath, base.Add(4*time.Minute), base.Add(4*time.Minute)); err != nil {
+		t.Fatalf("chtimes new: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=logs", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected log tree 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	names := adminTreeItemNames(t, rec.Body.Bytes())
+	if len(names) < 3 {
+		t.Fatalf("expected >=3 log entries, got %v", names)
+	}
+	if names[0] != "req-new.txt" || names[1] != "req-mid.txt" || names[2] != "req-old.txt" {
+		t.Fatalf("expected logs sorted by latest modified first, got %v", names)
+	}
+}
+
+func TestAdminUITreeSortsArchiveRootByModifiedDesc(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	archiveRoot := filepath.Join(server.admin.rootDir(), "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR")
+	if err := os.MkdirAll(archiveRoot, 0o755); err != nil {
+		t.Fatalf("mkdir archive root: %v", err)
+	}
+	oldDir := filepath.Join(archiveRoot, "req-old")
+	midDir := filepath.Join(archiveRoot, "req-mid")
+	newDir := filepath.Join(archiveRoot, "req-new")
+	for _, p := range []string{oldDir, midDir, newDir} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("mkdir archive entry %s: %v", p, err)
+		}
+	}
+	base := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(oldDir, base, base); err != nil {
+		t.Fatalf("chtimes old dir: %v", err)
+	}
+	if err := os.Chtimes(midDir, base.Add(3*time.Minute), base.Add(3*time.Minute)); err != nil {
+		t.Fatalf("chtimes mid dir: %v", err)
+	}
+	if err := os.Chtimes(newDir, base.Add(6*time.Minute), base.Add(6*time.Minute)); err != nil {
+		t.Fatalf("chtimes new dir: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/tree?path=OPENAI_COMPAT_DEBUG_ARCHIVE_DIR", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected archive root tree 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	names := adminTreeItemNames(t, rec.Body.Bytes())
+	positions := map[string]int{}
+	for i, name := range names {
+		positions[name] = i
+	}
+	newPos, okNew := positions["req-new"]
+	midPos, okMid := positions["req-mid"]
+	oldPos, okOld := positions["req-old"]
+	if !okNew || !okMid || !okOld {
+		t.Fatalf("expected req-new/req-mid/req-old entries present, got %v", names)
+	}
+	if !(newPos < midPos && midPos < oldPos) {
+		t.Fatalf("expected archive root sorted by latest modified first for target entries, got %v", names)
+	}
+}
+
+func adminTreeItemNames(t *testing.T, payload []byte) []string {
+	t.Helper()
+	data := decodeAdminJSON(t, payload)
+	items, ok := data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected tree items, got %#v", data["items"])
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.(map[string]any)["name"].(string))
+	}
+	return names
+}
+
 func TestAdminUIStylesKeepTextEditorFullWidth(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)

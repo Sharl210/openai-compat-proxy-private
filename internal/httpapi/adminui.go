@@ -320,7 +320,7 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			})
 			modifiedAt[itemRel] = info.ModTime()
 		}
-		if a.isLogDirectory(resolved) {
+		if a.isTimeSortedDirectory(resolved) {
 			sort.Slice(items, func(i, j int) bool {
 				if items[i].IsDir != items[j].IsDir {
 					return items[i].IsDir
@@ -359,20 +359,27 @@ func (a *adminUI) isVisibleTreeFile(parentDir string, name string) bool {
 	return strings.HasSuffix(lower, ".md") && a.isProvidersDirectory(parentDir)
 }
 
-func (a *adminUI) isLogDirectory(resolved string) bool {
+func (a *adminUI) isTimeSortedDirectory(resolved string) bool {
 	snapshot := a.store.Active()
 	if snapshot == nil {
 		return false
 	}
-	logDir := strings.TrimSpace(snapshot.Config.LogFilePath)
-	if logDir == "" {
+	if a.matchesConfiguredDirectory(resolved, snapshot.Config.LogFilePath) {
+		return true
+	}
+	return a.matchesConfiguredDirectory(resolved, snapshot.Config.DebugArchiveRootDir)
+}
+
+func (a *adminUI) matchesConfiguredDirectory(resolved string, configuredDir string) bool {
+	dir := strings.TrimSpace(configuredDir)
+	if dir == "" {
 		return false
 	}
-	logDirPath := logDir
-	if !filepath.IsAbs(logDirPath) {
-		logDirPath = filepath.Join(a.rootDir(), logDirPath)
+	dirPath := dir
+	if !filepath.IsAbs(dirPath) {
+		dirPath = filepath.Join(a.rootDir(), dirPath)
 	}
-	return filepath.Clean(resolved) == filepath.Clean(logDirPath)
+	return filepath.Clean(resolved) == filepath.Clean(dirPath)
 }
 
 func (a *adminUI) handleFile() http.HandlerFunc {

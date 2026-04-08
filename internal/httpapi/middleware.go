@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -44,21 +45,40 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
 		}
 
-		logging.Event("clientToProxyRequest", map[string]any{
-			"request_id":   id,
-			"method":       r.Method,
-			"path":         r.URL.Path,
-			"content_type": r.Header.Get("Content-Type"),
-			"request_body": truncateBody(requestBody, 512),
-		})
+		shouldLog := shouldLogAPITraffic(r.URL.Path)
+		if shouldLog {
+			logging.Event("clientToProxyRequest", map[string]any{
+				"request_id":   id,
+				"method":       r.Method,
+				"path":         r.URL.Path,
+				"content_type": r.Header.Get("Content-Type"),
+				"request_body": truncateBody(requestBody, 512),
+			})
+		}
 		cw := &responseCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
-		logging.Event("proxyToClientResponse", map[string]any{
-			"request_id": id,
-			"status":     cw.status,
-			"elapsed_ms": time.Since(started).Milliseconds(),
-		})
+		if shouldLog {
+			logging.Event("proxyToClientResponse", map[string]any{
+				"request_id": id,
+				"status":     cw.status,
+				"elapsed_ms": time.Since(started).Milliseconds(),
+			})
+		}
 	})
+}
+
+func shouldLogAPITraffic(path string) bool {
+	clean := strings.TrimSpace(path)
+	if clean == "" {
+		return false
+	}
+	if clean == "/" || clean == "/favicon.ico" || clean == "/robots.txt" {
+		return false
+	}
+	if clean == "/_admin" || strings.HasPrefix(clean, "/_admin/") {
+		return false
+	}
+	return true
 }
 
 func archiveWriterForRequest(store *config.RuntimeStore, requestID string) *debugarchive.ArchiveWriter {

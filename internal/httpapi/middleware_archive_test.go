@@ -2,14 +2,17 @@ package httpapi
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/debugarchive"
+	"openai-compat-proxy/internal/logging"
 )
 
 func TestWithRequestID_WritesArchiveRequestWhenEnabled(t *testing.T) {
@@ -177,4 +180,117 @@ func TestWithRequestIDSkipsDefaultArchiveDirWithoutRootEnvPath(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(debugarchive.EnvRootDir, requestID, "request.ndjson")); err == nil {
 		t.Fatalf("expected default archive placeholder dir to stay disabled when root env path is unavailable")
 	}
+}
+
+func TestWithRequestIDSkipsWebAccessLogging(t *testing.T) {
+	logDir := initMiddlewareTestLogger(t)
+	h := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Header().Get("X-Request-Id") == "" {
+		t.Fatal("expected request id header")
+	}
+	if files := middlewareLogFiles(t, logDir); len(files) != 0 {
+		t.Fatalf("expected no log files for web access requests, got %v", files)
+	}
+}
+
+func TestWithRequestIDLogsAPIAccessRequests(t *testing.T) {
+	logDir := initMiddlewareTestLogger(t)
+	h := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	files := middlewareLogFiles(t, logDir)
+	if len(files) != 1 {
+		t.Fatalf("expected exactly one api log file, got %v", files)
+	}
+	content, err := os.ReadFile(filepath.Join(logDir, files[0]))
+	if err != nil {
+		t.Fatalf("read api log file: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, `"event":"clientToProxyRequest"`) {
+		t.Fatalf("expected clientToProxyRequest event in log, got %s", text)
+	}
+	if !strings.Contains(text, `"event":"proxyToClientResponse"`) {
+		t.Fatalf("expected proxyToClientResponse event in log, got %s", text)
+	}
+	if !strings.Contains(text, `"path":"/v1/responses"`) {
+		t.Fatalf("expected /v1/responses path in log, got %s", text)
+	}
+	if !strings.Contains(text, `"request_id":"`+requestID+`"`) {
+		t.Fatalf("expected request id %s in log, got %s", requestID, text)
+	}
+}
+
+func TestWithRequestIDLogsAliasResponsesPath(t *testing.T) {
+	logDir := initMiddlewareTestLogger(t)
+	h := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	files := middlewareLogFiles(t, logDir)
+	if len(files) != 1 {
+		t.Fatalf("expected exactly one api log file for alias path, got %v", files)
+	}
+	content, err := os.ReadFile(filepath.Join(logDir, files[0]))
+	if err != nil {
+		t.Fatalf("read api alias log file: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, `"path":"/responses"`) {
+		t.Fatalf("expected /responses path in log, got %s", text)
+	}
+	if !strings.Contains(text, `"request_id":"`+requestID+`"`) {
+		t.Fatalf("expected request id %s in alias log, got %s", requestID, text)
+	}
+}
+
+func initMiddlewareTestLogger(t *testing.T) string {
+	t.Helper()
+	logDir := t.TempDir()
+	closeFn, err := logging.Init(config.Config{LogEnable: true, LogFilePath: logDir, LogMaxRequests: 50, LogMaxBodySizeMB: 5}, io.Discard)
+	if err != nil {
+		t.Fatalf("init logger: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = closeFn()
+		_, _ = logging.Init(config.Config{LogEnable: false}, io.Discard)
+	})
+	return logDir
+}
+
+func middlewareLogFiles(t *testing.T, logDir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("read log dir: %v", err)
+	}
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+			continue
+		}
+		files = append(files, entry.Name())
+	}
+	return files
 }
