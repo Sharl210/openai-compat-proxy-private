@@ -82,3 +82,28 @@ func TestAdminUIAppScriptUsesMetaChipStyleForProjectFileRefreshButton(t *testing
 		t.Fatalf("expected app script to define refreshCurrentDirectory helper, got %s", body)
 	}
 }
+
+func TestAdminUICSSKeepsBrowserRefreshButtonPinnedTopRight(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.css", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app css 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, ".compact-meta-row") || !strings.Contains(body, "flex-wrap: nowrap;") {
+		t.Fatalf("expected compact meta row to prevent the refresh button from wrapping to a new line, got %s", body)
+	}
+	if !strings.Contains(body, "gap: 8px;") {
+		t.Fatalf("expected compact meta row spacing to be tightened to 8px, got %s", body)
+	}
+	if !strings.Contains(body, "min-width: 0;") {
+		t.Fatalf("expected compact meta left group to be shrinkable, got %s", body)
+	}
+	if !strings.Contains(body, "margin-left: auto;") || !strings.Contains(body, "align-self: flex-start;") {
+		t.Fatalf("expected refresh button to stay pinned at the top-right, got %s", body)
+	}
+}

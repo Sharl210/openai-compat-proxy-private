@@ -642,22 +642,27 @@ button { cursor: pointer; }
 
 .compact-meta-row {
   margin-bottom: 12px;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .compact-meta-left {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .compact-meta-button {
   appearance: none;
   white-space: nowrap;
   flex: 0 0 auto;
+  margin-left: auto;
+  align-self: flex-start;
 }
 
 .compact-meta-button:hover {
