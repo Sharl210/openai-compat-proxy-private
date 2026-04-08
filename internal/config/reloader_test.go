@@ -121,7 +121,7 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 	initialRootMTime := time.Date(2026, 3, 25, 10, 5, 0, 111000000, time.UTC)
 	startupOnlyMTime := time.Date(2026, 3, 25, 10, 6, 0, 222000000, time.UTC)
 
-	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_ENABLE=false\nCACHE_INFO_TIMEZONE=Asia/Shanghai\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", initialRootMTime)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nLOG_ENABLE=false\nCACHE_INFO_TIMEZONE=Asia/Shanghai\nOPENAI_COMPAT_DEBUG_ARCHIVE_DIR=archives-before\nOPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS=7\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", initialRootMTime)
 	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 25, 10, 5, 30, 0, time.UTC))
 
 	store, err := NewRuntimeStore(rootEnvPath)
@@ -129,7 +129,7 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
 
-	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nLOG_ENABLE=true\nCACHE_INFO_TIMEZONE=UTC\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", startupOnlyMTime)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nLOG_ENABLE=true\nCACHE_INFO_TIMEZONE=UTC\nOPENAI_COMPAT_DEBUG_ARCHIVE_DIR=archives-after\nOPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS=11\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nPROXY_API_KEY=before\n", startupOnlyMTime)
 	if err := store.Refresh(); err != nil {
 		t.Fatalf("expected startup-only change refresh to succeed, got %v", err)
 	}
@@ -146,6 +146,12 @@ func TestRuntimeStoreRefreshIgnoresStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 	if got := active.Config.CacheInfoTimezone; got != "Asia/Shanghai" {
 		t.Fatalf("expected cache info timezone to stay startup value, got %q", got)
+	}
+	if got := active.Config.DebugArchiveRootDir; got != "archives-before" {
+		t.Fatalf("expected debug archive root dir to stay startup value, got %q", got)
+	}
+	if got := active.Config.DebugArchiveMaxRequests; got != 7 {
+		t.Fatalf("expected debug archive max requests to stay startup value 7, got %d", got)
 	}
 	if got := active.Config.ProxyAPIKey; got != "before" {
 		t.Fatalf("expected hot root value to stay loaded, got %q", got)
@@ -529,6 +535,32 @@ func TestBuildRuntimeSnapshotUsesNewestPromptFileTimeForEffectiveProviderVersion
 
 	if got := snapshot.ProviderVersionByID["openai"]; got != formatVersionTime(promptMTime) {
 		t.Fatalf("expected provider version to use newest effective source time %q, got %q", formatVersionTime(promptMTime), got)
+	}
+}
+
+func TestBuildRuntimeSnapshotCarriesProviderResponsesToolCompatMode(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", time.Date(2026, 4, 8, 10, 0, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nRESPONSES_TOOL_COMPAT_MODE=function_only\n", time.Date(2026, 4, 8, 10, 1, 0, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	if got := responsesToolCompatModeFromField(t, provider); got != "function_only" {
+		t.Fatalf("expected provider responses tool compat mode %q, got %q", "function_only", got)
 	}
 }
 

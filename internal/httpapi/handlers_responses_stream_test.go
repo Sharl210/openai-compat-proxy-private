@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -233,6 +234,89 @@ func TestResponsesStreamDoesNotEmitSyntheticFunctionCallArgumentsDoneForResponse
 	}
 	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"weather\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
 		t.Fatalf("expected native responses upstream stream to keep final function_call output_item.done, got %s", body)
+	}
+}
+
+func TestResponsesStreamFunctionCallArgumentsStayNativeWithCompatModeEnabled(t *testing.T) {
+	var gotBody string
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer does not support flushing")
+		}
+		for _, evt := range []string{
+			"event: response.output_item.added\n" +
+				"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+			"event: response.function_call_arguments.delta\n" +
+				"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n",
+			"event: response.output_item.done\n" +
+				"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}}\n\n",
+			"event: response.completed\n" +
+				"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+		} {
+			_, _ = w.Write([]byte(evt))
+			flusher.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses)
+	cfg.Providers[0].ResponsesToolCompatMode = config.ResponsesToolCompatModeFunctionOnly
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}],
+		"tools":[
+			{"type":"custom","name":"code_exec","description":"Run code"},
+			{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}},
+			{"type":"web_search","name":"web_lookup","description":"Search the web"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/responses" {
+		t.Fatalf("expected streaming request to keep responses upstream path, got %q", gotPath)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream request body: %v body=%s", err, gotBody)
+	}
+	rawTools, _ := payload["tools"].([]any)
+	if len(rawTools) != 3 {
+		t.Fatalf("expected 3 rewritten tools in streaming request body, got %#v body=%s", payload["tools"], gotBody)
+	}
+	for idx, rawTool := range rawTools {
+		tool, _ := rawTool.(map[string]any)
+		if got, _ := tool["type"].(string); got != "function" {
+			t.Fatalf("expected compat mode to rewrite streaming request tool %d to function, got %#v body=%s", idx, tool, gotBody)
+		}
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
+		t.Fatalf("expected compat mode to keep native responses function_call_arguments.delta, got %s", body)
+	}
+	if strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
+		t.Fatalf("expected compat mode to avoid synthetic function_call_arguments.done on responses upstream, got %s", body)
+	}
+	if !strings.Contains(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected compat mode to keep final native responses function_call item done event, got %s", body)
 	}
 }
 

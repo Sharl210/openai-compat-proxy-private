@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+func responsesToolCompatModeFromField(t *testing.T, v any) string {
+	t.Helper()
+	field := reflect.ValueOf(v).FieldByName("ResponsesToolCompatMode")
+	if !field.IsValid() {
+		t.Fatal("expected ResponsesToolCompatMode field to be present")
+	}
+	if field.Kind() != reflect.String {
+		t.Fatalf("expected ResponsesToolCompatMode to be a string field, got %s", field.Kind())
+	}
+	return field.String()
+}
+
 func TestDefaultDownstreamNonStreamStrategyIsProxyBuffer(t *testing.T) {
 	if got := Default().DownstreamNonStreamStrategy; got != DownstreamNonStreamStrategyProxyBuffer {
 		t.Fatalf("expected default downstream non-stream strategy %q, got %q", DownstreamNonStreamStrategyProxyBuffer, got)
@@ -21,6 +33,18 @@ func TestDefaultCacheInfoTimezoneIsAsiaShanghai(t *testing.T) {
 func TestDefaultDebugArchiveRootDirUsesNamedDirectory(t *testing.T) {
 	if got := Default().DebugArchiveRootDir; got != "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR" {
 		t.Fatalf("expected default debug archive root dir %q, got %q", "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR", got)
+	}
+}
+
+func TestDefaultDebugArchiveMaxRequestsIsTwoHundred(t *testing.T) {
+	if got := Default().DebugArchiveMaxRequests; got != 200 {
+		t.Fatalf("expected default debug archive max requests 200, got %d", got)
+	}
+}
+
+func TestDefaultResponsesToolCompatModeIsPreserve(t *testing.T) {
+	if got := responsesToolCompatModeFromField(t, Default()); got != "preserve" {
+		t.Fatalf("expected default responses tool compat mode %q, got %q", "preserve", got)
 	}
 }
 
@@ -115,6 +139,19 @@ func TestLoadFromValuesAllowsExplicitlyDisablingDebugArchive(t *testing.T) {
 	}
 }
 
+func TestLoadFromValuesParsesDebugArchiveMaxRequestsIndependently(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"LOG_MAX_REQUESTS":                         "9",
+		"OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS": "17",
+	})
+	if got := cfg.LogMaxRequests; got != 9 {
+		t.Fatalf("expected log max requests 9, got %d", got)
+	}
+	if got := cfg.DebugArchiveMaxRequests; got != 17 {
+		t.Fatalf("expected debug archive max requests 17, got %d", got)
+	}
+}
+
 func TestValidateRootEnvValuesRejectsInvalidTimeout(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"TOTAL_TIMEOUT": "abc"})
 	if err == nil {
@@ -154,6 +191,17 @@ func TestValidateRootEnvValuesRejectsInvalidLogMaxBodySizeMB(t *testing.T) {
 			err := ValidateRootEnvValues(map[string]string{"LOG_MAX_BODY_SIZE_MB": value})
 			if err == nil {
 				t.Fatalf("expected invalid LOG_MAX_BODY_SIZE_MB=%q to fail validation", value)
+			}
+		})
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidDebugArchiveMaxRequests(t *testing.T) {
+	for _, value := range []string{"0", "-1", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{"OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS": value})
+			if err == nil {
+				t.Fatalf("expected invalid OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS=%q to fail validation", value)
 			}
 		})
 	}

@@ -39,6 +39,14 @@ var canonicalV1RoutePaths = []string{
 	canonicalV1MessagesPath,
 }
 
+var publicRouteAliases = map[string]string{
+	"/models":            canonicalV1ModelsPath,
+	"/responses":         canonicalV1ResponsesPath,
+	"/responses/compact": canonicalV1ResponsesCompactPath,
+	"/chat/completions":  canonicalV1ChatCompletionsPath,
+	"/messages":          canonicalV1MessagesPath,
+}
+
 func canonicalV1Paths() []string {
 	return append([]string(nil), canonicalV1RoutePaths...)
 }
@@ -50,6 +58,14 @@ func isCanonicalV1Path(path string) bool {
 		}
 	}
 	return false
+}
+
+func canonicalPublicRoutePath(path string) (string, bool) {
+	if isCanonicalV1Path(path) {
+		return path, true
+	}
+	canonicalPath, ok := publicRouteAliases[path]
+	return canonicalPath, ok
 }
 
 func withCacheInfoManager(ctx context.Context, manager *cacheinfo.Manager) context.Context {
@@ -65,12 +81,12 @@ func cacheInfoManagerFromRequest(r *http.Request) *cacheinfo.Manager {
 }
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
-	if isCanonicalV1Path(path) {
+	if canonicalPath, ok := canonicalPublicRoutePath(path); ok {
 		if !cfg.EnableLegacyV1Routes {
 			return routeInfo{}, errors.New("route not found")
 		}
 		if len(cfg.Providers) == 0 {
-			return routeInfo{Legacy: true, CanonicalPath: path}, nil
+			return routeInfo{Legacy: true, CanonicalPath: canonicalPath}, nil
 		}
 		provider, err := cfg.DefaultProviderConfig()
 		if err != nil {
@@ -79,17 +95,17 @@ func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
 		if !provider.Enabled {
 			return routeInfo{}, errors.New("route not found")
 		}
-		return routeInfo{ProviderID: provider.ID, Legacy: true, CanonicalPath: path}, nil
+		return routeInfo{ProviderID: provider.ID, Legacy: true, CanonicalPath: canonicalPath}, nil
 	}
 
 	trimmed := strings.Trim(path, "/")
 	parts := strings.Split(trimmed, "/")
-	if len(parts) < 3 {
+	if len(parts) < 2 {
 		return routeInfo{}, errors.New("route not found")
 	}
 	providerID := parts[0]
-	canonicalPath := "/" + strings.Join(parts[1:], "/")
-	if !isCanonicalV1Path(canonicalPath) {
+	canonicalPath, ok := canonicalPublicRoutePath("/" + strings.Join(parts[1:], "/"))
+	if !ok {
 		return routeInfo{}, errors.New("route not found")
 	}
 	provider, err := cfg.ProviderByID(providerID)
@@ -137,6 +153,7 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
 	providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
 	providerCfg.UpstreamEndpointType = provider.UpstreamEndpointType
+	providerCfg.ResponsesToolCompatMode = provider.ResponsesToolCompatMode
 	providerCfg.AnthropicVersion = provider.AnthropicVersion
 	providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)
 	if provider.UpstreamFirstByteTimeout > 0 {

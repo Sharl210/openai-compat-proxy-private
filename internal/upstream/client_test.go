@@ -386,6 +386,242 @@ func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *
 	}
 }
 
+func TestBuildRequestBodyPreservesResponsesToolTypesForFunctionOnlyTools(t *testing.T) {
+	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
+		Type:        "function",
+		Name:        "get_weather",
+		Description: "Get weather",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string"},
+			},
+			"required": []string{"city"},
+		},
+	}})
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "function",
+		"name":        "get_weather",
+		"description": "Get weather",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string"},
+			},
+			"required": []string{"city"},
+		},
+	}})
+}
+
+func TestBuildRequestBodyPreservesResponsesToolTypesForCustomOnlyTools(t *testing.T) {
+	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
+		Type:        "custom",
+		Name:        "code_exec",
+		Description: "Run code",
+	}})
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "custom",
+		"name":        "code_exec",
+		"description": "Run code",
+		"parameters":  map[string]any{},
+	}})
+}
+
+func TestBuildRequestBodyPreservesResponsesToolTypesForWebSearchOnlyTools(t *testing.T) {
+	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
+		Type:        "web_search",
+		Description: "Search the web",
+	}})
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "web_search",
+		"name":        "",
+		"description": "Search the web",
+		"parameters":  map[string]any{},
+	}})
+}
+
+func TestBuildRequestBodyPreservesResponsesToolTypesForMixedToolFamilies(t *testing.T) {
+	tools := buildResponsesToolEntries(t, []model.CanonicalTool{
+		{Type: "custom", Name: "code_exec", Description: "Run code"},
+		{Type: "function", Name: "get_weather", Description: "Get weather", Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string"},
+			},
+			"required": []string{"city"},
+		}},
+		{Type: "web_search", Description: "Search the web"},
+	})
+	assertJSONEqual(t, tools, []map[string]any{
+		{"type": "custom", "name": "code_exec", "description": "Run code", "parameters": map[string]any{}},
+		{"type": "function", "name": "get_weather", "description": "Get weather", "parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string"},
+			},
+			"required": []string{"city"},
+		}},
+		{"type": "web_search", "name": "", "description": "Search the web", "parameters": map[string]any{}},
+	})
+}
+
+func TestBuildRequestBodyRewritesResponsesToolTypesInFunctionOnlyModeForCustomOnlyTools(t *testing.T) {
+	tools := buildResponsesUpstreamToolEntriesWithCompatMode(t, []model.CanonicalTool{{
+		Type:        "custom",
+		Name:        "code_exec",
+		Description: "Run code",
+	}}, config.ResponsesToolCompatModeFunctionOnly)
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "function",
+		"name":        "code_exec",
+		"description": "Run code",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"input": map[string]any{"type": "string"},
+			},
+			"required":             []string{"input"},
+			"additionalProperties": false,
+		},
+	}})
+}
+
+func TestBuildRequestBodyRewritesResponsesToolTypesInFunctionOnlyModeForWebSearchOnlyTools(t *testing.T) {
+	tools := buildResponsesUpstreamToolEntriesWithCompatMode(t, []model.CanonicalTool{{
+		Type:        "web_search",
+		Description: "Search the web",
+	}}, config.ResponsesToolCompatModeFunctionOnly)
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "function",
+		"name":        "web_search",
+		"description": "Search the web",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []string{"query"},
+		},
+	}})
+}
+
+func TestBuildRequestBodyRewritesResponsesToolTypesInFunctionOnlyModeForMixedToolFamilies(t *testing.T) {
+	tools := buildResponsesUpstreamToolEntriesWithCompatMode(t, []model.CanonicalTool{
+		{Type: "custom", Name: "code_exec", Description: "Run code"},
+		{Type: "function", Name: "get_weather", Description: "Get weather", Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string"},
+			},
+			"required": []string{"city"},
+		}},
+		{Type: "web_search", Description: "Search the web"},
+	}, config.ResponsesToolCompatModeFunctionOnly)
+	assertJSONEqual(t, tools, []map[string]any{
+		{"type": "function", "name": "code_exec", "description": "Run code", "parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"input": map[string]any{"type": "string"},
+			},
+			"required":             []string{"input"},
+			"additionalProperties": false,
+		}},
+		{"type": "function", "name": "get_weather", "description": "Get weather", "parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string"},
+			},
+			"required": []string{"city"},
+		}},
+		{"type": "function", "name": "web_search", "description": "Search the web", "parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []string{"query"},
+		}},
+	})
+}
+
+func buildResponsesToolEntries(t *testing.T, tools []model.CanonicalTool) []map[string]any {
+	t.Helper()
+	body, err := buildRequestBody(model.CanonicalRequest{Model: "gpt-5", Tools: tools})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	rawTools, _ := payload["tools"].([]any)
+	out := make([]map[string]any, 0, len(rawTools))
+	for _, rawTool := range rawTools {
+		tool, _ := rawTool.(map[string]any)
+		out = append(out, tool)
+	}
+	return out
+}
+
+func buildResponsesUpstreamToolEntriesWithCompatMode(t *testing.T, tools []model.CanonicalTool, compatMode string) []map[string]any {
+	t.Helper()
+	var requestBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		var err error
+		requestBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_tool_compat","status":"completed"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{
+		UpstreamEndpointType:    config.UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode: compatMode,
+	})
+	_, err := client.Response(context.Background(), model.CanonicalRequest{
+		RequestID: "req-tool-compat",
+		Model:     "gpt-5",
+		Tools:     tools,
+	}, "")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	rawTools, _ := payload["tools"].([]any)
+	out := make([]map[string]any, 0, len(rawTools))
+	for _, rawTool := range rawTools {
+		tool, _ := rawTool.(map[string]any)
+		out = append(out, tool)
+	}
+	return out
+}
+
+func assertJSONEqual(t *testing.T, got any, want any) {
+	t.Helper()
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got json: %v", err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal want json: %v", err)
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("expected json %s, got %s", wantJSON, gotJSON)
+	}
+}
+
 func TestBuildRequestBodyPreservesInputFileAndStructuredToolOutput(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",

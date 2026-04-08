@@ -18,10 +18,12 @@
 | 工具调用与多轮 tool result 回传 | ✅ | 三套入口都已实现；其中 `/v1/responses` 的高层语义覆盖最全面 |
 | reasoning / thinking 兼容 | ✅ | 支持请求体参数、模型 suffix、Anthropic thinking、上游 reasoning 内容回写与流式拆分 |
 | Responses compact 端点 | ✅ | `/v1/responses/compact` 非流式 Responses 专用，上游须为 `responses` 类型；普通 `/v1/responses` SSE 流现可携带 compaction items |
+| 无 /v1 路由别名 | ✅ | `/responses`、`/chat/completions`、`/messages`、`/models`、`/responses/compact` 及其 `/{providerId}/...` 形式均可等效访问对应 `/v1/*` 入口；复用同一套 handler 与鉴权语义 |
+| responses 工具兼容模式 | ✅ | provider 级 `RESPONSES_TOOL_COMPAT_MODE=function_only` 将 `custom` / `web_search` 工具在发往 responses 上游前重写成普通 function 类型，以兼容不完整上游；代价是丢失原生 free-form / grammar 约束（custom）或原生 citations/sources 语义（web_search）；默认 `preserve` |
 | 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0` 与 `$1..$N` 占位符、`MANUAL_MODELS` |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
-| 调试归档 | ✅ | `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 写出 `request/raw/canonical/final.ndjson`，并复用 `LOG_MAX_REQUESTS` 清理旧 request_id 目录 |
+| 调试归档 | ✅ | 仅当 `LOG_ENABLE=true` 且 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 非空时写出 `request/raw/canonical/final.ndjson`；保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制（与 `LOG_MAX_REQUESTS` 解耦） |
 | 健康检查与 Linux 部署脚本 | ✅ | 自带 `healthz`、deploy / restart / stop / uninstall |
 | 内置 Web 管理台 | ✅ | 裸根路径 `/` 提供 Material 3 风格管理界面：文件浏览 / 文件编辑 / 运行状态 |
 
@@ -202,6 +204,26 @@ http://127.0.0.1:21021/
 - `/_admin/assets/*`：管理台静态资源
 - `/_admin/api/*`：管理台内部接口
 
+### 无 /v1 路由别名
+
+以下路径均可等效访问对应 `/v1/*` 入口，复用同一套 handler 与鉴权语义：
+
+- `/responses`
+- `/responses/compact`
+- `/chat/completions`
+- `/messages`
+- `/models`
+
+以及对应的显式 provider 路由形式：
+
+- `/{providerId}/responses`
+- `/{providerId}/responses/compact`
+- `/{providerId}/chat/completions`
+- `/{providerId}/messages`
+- `/{providerId}/models`
+
+这些别名是精确路径映射回 canonical `/v1/*`，不会引入额外的 handler 或重复的鉴权逻辑。
+
 ---
 
 ## 🔐 鉴权约定
@@ -303,7 +325,21 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 已开始 SSE 后出错会尽量保持下游流协议终态，而不是中途退化成 JSON 错误体
 - chat 上游的 reasoning 标签、reasoning_content、tool_calls 会在代理层统一归一后再下发
 
-### 3. 模型映射与 reasoning suffix
+### 3. responses 上游工具兼容模式
+
+每个 provider 可通过 `RESPONSES_TOOL_COMPAT_MODE` 控制 responses 上游请求体中的工具类型处理策略：
+
+- `preserve`（默认）：保留原始工具类型（`custom` / `web_search` / `function`），原样发给 responses 上游
+- `function_only`：将 `custom` 和 `web_search` 工具在发往 responses 上游前重写成普通 `function` 类型，以兼容不完全支持这些工具类型的上游
+
+**代价说明**：
+
+- `custom` 变成 `function` 后，会丢失原生 free-form / grammar 约束语义
+- `web_search` 变成 `function` 后，会丢失原生 citations / sources / agentic search 语义
+
+这个字段只在 `UPSTREAM_ENDPOINT_TYPE=responses` 时生效；`function_only` 仅影响 responses-upstream 请求体构造，不会改变 chat / anthropic 上游的请求体。
+
+### 4. 模型映射与 reasoning suffix
 
 支持：
 
@@ -338,7 +374,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 模型名 suffix：`-low / -medium / -high / -xhigh`
 - `/v1/messages` 请求体 `thinking` 直传
 
-### 4. provider 级系统提示词
+### 5. provider 级系统提示词
 
 支持：
 
@@ -347,15 +383,15 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 对应文件内容支持热加载。
 
-### 5. 调试归档与日志
+### 6. 调试归档与日志
 
-- `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS`：结构化日志
-- `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`：默认值是 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`，按 `request_id` 写出：
+- `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS`：结构化日志；其中 `LOG_ENABLE` 也是调试归档的父开关
+- `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`：默认值是 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`；只有当 `LOG_ENABLE=true` 且该字段非空时，才会按 `request_id` 写出：
   - `request.ndjson`
   - `raw.ndjson`
   - `canonical.ndjson`
   - `final.ndjson`
-  - 目录最大保留数量复用 `LOG_MAX_REQUESTS`，超过后按目录修改时间自动清理旧 request_id 目录
+  - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
 
 ---
 
@@ -401,7 +437,7 @@ Claude 相关还有两个配套开关：
 | 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
-| 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` | ❌ 修改后需重启 |
+| 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`、`OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` | ❌ 修改后需重启 |
 
 ### Cache_Info 聚合文件
 

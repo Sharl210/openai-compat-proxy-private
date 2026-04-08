@@ -767,3 +767,61 @@ func TestLoadProviderFileRejectsInvalidUpstreamEndpointType(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestLoadProviderFileUsesPreserveResponsesToolCompatModeByDefault(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if got := responsesToolCompatModeFromField(t, provider); got != "preserve" {
+		t.Fatalf("expected default responses tool compat mode %q, got %q", "preserve", got)
+	}
+}
+
+func TestLoadProviderFileParsesResponsesToolCompatMode(t *testing.T) {
+	for _, mode := range []string{"preserve", "function_only"} {
+		t.Run(mode, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nRESPONSES_TOOL_COMPAT_MODE=" + mode + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			provider, err := loadProviderFile(providerEnvPath)
+			if err != nil {
+				t.Fatalf("loadProviderFile returned error: %v", err)
+			}
+			if got := responsesToolCompatModeFromField(t, provider); got != mode {
+				t.Fatalf("expected responses tool compat mode %q, got %q", mode, got)
+			}
+		})
+	}
+}
+
+func TestLoadProviderFileRejectsUnknownResponsesToolCompatMode(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nRESPONSES_TOOL_COMPAT_MODE=invalid\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid responses tool compat mode to fail validation")
+	}
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid responses tool compat mode, got %T", err)
+	}
+	if err.Error() != "invalid RESPONSES_TOOL_COMPAT_MODE in "+providerEnvPath+": \"invalid\" (allowed: preserve, function_only)" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

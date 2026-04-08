@@ -14,7 +14,7 @@ import (
 
 func TestWithRequestID_WritesArchiveRequestWhenEnabled(t *testing.T) {
 	archiveDir := t.TempDir()
-	store := config.NewStaticRuntimeStore(config.Config{DebugArchiveRootDir: archiveDir})
+	store := config.NewStaticRuntimeStore(config.Config{LogEnable: true, DebugArchiveRootDir: archiveDir})
 	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -39,6 +39,7 @@ func TestWithRequestIDPrefersRuntimeConfigArchiveDirOverEnvironment(t *testing.T
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
+		LogEnable:            true,
 		DebugArchiveRootDir:  configDir,
 		Providers: []config.ProviderConfig{{
 			ID:                "openai",
@@ -68,11 +69,36 @@ func TestWithRequestIDPrefersRuntimeConfigArchiveDirOverEnvironment(t *testing.T
 	}
 }
 
-func TestWithRequestIDPrunesOldArchiveDirectoriesUsingLogMaxRequests(t *testing.T) {
+func TestWithRequestIDSkipsArchiveRequestWhenLogEnableIsFalse(t *testing.T) {
 	archiveDir := t.TempDir()
 	store := config.NewStaticRuntimeStore(config.Config{
-		DebugArchiveRootDir: archiveDir,
-		LogMaxRequests:      2,
+		LogEnable:               false,
+		DebugArchiveRootDir:     archiveDir,
+		DebugArchiveMaxRequests: 2,
+	})
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	path := filepath.Join(archiveDir, requestID, "request.ndjson")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected no archive request file when LOG_ENABLE=false, got err=%v", err)
+	}
+}
+
+func TestWithRequestIDPrunesOldArchiveDirectoriesUsingArchiveMaxRequests(t *testing.T) {
+	archiveDir := t.TempDir()
+	store := config.NewStaticRuntimeStore(config.Config{
+		LogEnable:               true,
+		DebugArchiveRootDir:     archiveDir,
+		LogMaxRequests:          99,
+		DebugArchiveMaxRequests: 2,
 	})
 	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -137,7 +163,7 @@ func TestWithRequestIDResolvesRelativeArchiveDirAgainstRootEnv(t *testing.T) {
 }
 
 func TestWithRequestIDSkipsDefaultArchiveDirWithoutRootEnvPath(t *testing.T) {
-	store := config.NewStaticRuntimeStore(config.Config{DebugArchiveRootDir: debugarchive.EnvRootDir})
+	store := config.NewStaticRuntimeStore(config.Config{LogEnable: true, DebugArchiveRootDir: debugarchive.EnvRootDir})
 	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

@@ -16,6 +16,7 @@ type Config struct {
 	UpstreamBaseURL                   string
 	UpstreamAPIKey                    string
 	UpstreamEndpointType              string
+	ResponsesToolCompatMode           string
 	AnthropicVersion                  string
 	UpstreamUserAgent                 string
 	MasqueradeTarget                  string
@@ -40,6 +41,7 @@ type Config struct {
 	LogMaxRequests                    int
 	LogMaxBodySizeMB                  float64
 	DebugArchiveRootDir               string
+	DebugArchiveMaxRequests           int
 }
 
 const (
@@ -57,12 +59,14 @@ func Default() Config {
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode:     ResponsesToolCompatModePreserve,
 		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 "logs",
 		LogMaxRequests:              200,
 		LogMaxBodySizeMB:            5.0,
 		DebugArchiveRootDir:         "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR",
+		DebugArchiveMaxRequests:     200,
 	}
 }
 
@@ -126,6 +130,11 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	}
 	if value, ok := lookup("OPENAI_COMPAT_DEBUG_ARCHIVE_DIR"); ok {
 		cfg.DebugArchiveRootDir = value
+	}
+	if value, ok := lookup("OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS"); ok && value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			cfg.DebugArchiveMaxRequests = parsed
+		}
 	}
 	if value, ok := lookup("CONNECT_TIMEOUT"); ok && value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
@@ -197,6 +206,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateMinInt(values, "LOG_MAX_REQUESTS", 1); err != nil {
+		return err
+	}
+	if err := validateMinInt(values, "OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS", 1); err != nil {
 		return err
 	}
 	if err := validateMinFloat(values, "LOG_MAX_BODY_SIZE_MB", 0); err != nil {
@@ -427,6 +439,7 @@ func (c *Config) applyStartupOnlyFrom(previous Config) {
 	c.LogMaxRequests = previous.LogMaxRequests
 	c.LogMaxBodySizeMB = previous.LogMaxBodySizeMB
 	c.DebugArchiveRootDir = previous.DebugArchiveRootDir
+	c.DebugArchiveMaxRequests = previous.DebugArchiveMaxRequests
 }
 
 func (c Config) hotReloadableRootEquals(other Config) bool {

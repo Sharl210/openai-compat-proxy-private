@@ -27,6 +27,7 @@ type Client struct {
 	retryCount                     int
 	retryDelay                     time.Duration
 	upstreamEndpointType           string
+	responsesToolCompatMode        string
 	anthropicVersion               string
 	upstreamUserAgent              string
 	masqueradeTarget               string
@@ -73,6 +74,25 @@ var sseScannerMaxTokenSize = 8 * 1024 * 1024
 
 const preservedResponsesTopLevelFieldsKey = "__openai_compat_responses_top_level"
 
+const defaultResponsesWebSearchToolDescription = "Compatibility fallback for web search query input."
+
+var responsesFallbackFunctionToolSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"input": map[string]any{"type": "string"},
+	},
+	"required":             []string{"input"},
+	"additionalProperties": false,
+}
+
+var responsesWebSearchFunctionToolSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"query": map[string]any{"type": "string"},
+	},
+	"required": []string{"query"},
+}
+
 type HTTPStatusError struct {
 	StatusCode       int
 	ContentType      string
@@ -97,6 +117,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		retryCount:                     cfg.UpstreamRetryCount,
 		retryDelay:                     cfg.UpstreamRetryDelay,
 		upstreamEndpointType:           normalizeEndpointType(cfg.UpstreamEndpointType),
+		responsesToolCompatMode:        normalizeResponsesToolCompatMode(cfg.ResponsesToolCompatMode),
 		anthropicVersion:               strings.TrimSpace(cfg.AnthropicVersion),
 		upstreamUserAgent:              strings.TrimSpace(cfg.UpstreamUserAgent),
 		masqueradeTarget:               cfg.MasqueradeTarget,
@@ -169,9 +190,20 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
+func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointType string, stream bool) ([]byte, error) {
+	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses {
+		req.Stream = stream
+		return buildResponsesRequestBody(req, c.responsesToolCompatMode)
+	}
+	if stream {
+		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+	}
+	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+}
+
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
 	endpointType := c.endpointType()
-	body, err := buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +303,7 @@ func (c *Client) OpenEventStreamLazy(ctx context.Context, req model.CanonicalReq
 
 func (c *Client) openPreparedEventStream(ctx context.Context, req model.CanonicalRequest, authorization string, primeFirstEvent bool) (*EventStream, error) {
 	endpointType := c.endpointType()
-	body, err := buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +345,7 @@ func (c *Client) Compact(ctx context.Context, req model.CanonicalRequest, author
 
 func (c *Client) response(ctx context.Context, req model.CanonicalRequest, authorization string, compact bool) (map[string]any, error) {
 	endpointType := c.endpointType()
-	body, err := buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+	body, err := c.buildUpstreamRequestBody(req, endpointType, false)
 	if err != nil {
 		return nil, err
 	}
@@ -744,6 +776,10 @@ func formatRetrySeconds(delay time.Duration) string {
 }
 
 func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
+	return buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+}
+
+func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([]byte, error) {
 	payload := map[string]any{
 		"model":  req.Model,
 		"stream": req.Stream,
@@ -846,17 +882,7 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		payload["input"] = input
 	}
 	if len(req.Tools) > 0 {
-		var tools []map[string]any
-		for _, tool := range req.Tools {
-			entry := map[string]any{
-				"type":        tool.Type,
-				"name":        tool.Name,
-				"description": tool.Description,
-				"parameters":  normalizeJSONSchema(tool.Parameters),
-			}
-			tools = append(tools, entry)
-		}
-		payload["tools"] = tools
+		payload["tools"] = buildResponsesUpstreamToolPayloads(req.Tools, compatMode)
 	}
 	if req.ToolChoice.Raw != nil {
 		if value, ok := req.ToolChoice.Raw["value"]; ok {
@@ -888,6 +914,66 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func buildResponsesUpstreamToolPayloads(tools []model.CanonicalTool, compatMode string) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, buildResponsesUpstreamToolPayload(tool, compatMode))
+	}
+	return out
+}
+
+func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode string) map[string]any {
+	if normalizeResponsesToolCompatMode(compatMode) != config.ResponsesToolCompatModeFunctionOnly || strings.TrimSpace(tool.Type) == "function" {
+		return map[string]any{
+			"type":        tool.Type,
+			"name":        tool.Name,
+			"description": tool.Description,
+			"parameters":  normalizeJSONSchema(tool.Parameters),
+		}
+	}
+
+	entry := map[string]any{
+		"type":        "function",
+		"name":        tool.Name,
+		"description": tool.Description,
+	}
+	trimmedType := strings.TrimSpace(tool.Type)
+	switch trimmedType {
+	case "custom":
+		entry["parameters"] = normalizeResponsesCustomToolParameters(tool.Parameters)
+	case "web_search":
+		if strings.TrimSpace(tool.Name) == "" {
+			entry["name"] = "web_search"
+		}
+		if strings.TrimSpace(tool.Description) == "" {
+			entry["description"] = defaultResponsesWebSearchToolDescription
+		}
+		entry["parameters"] = cloneJSONValue(responsesWebSearchFunctionToolSchema)
+	default:
+		entry["parameters"] = cloneJSONValue(responsesFallbackFunctionToolSchema)
+	}
+	return entry
+}
+
+func normalizeResponsesCustomToolParameters(parameters any) any {
+	normalized := normalizeJSONSchema(parameters)
+	if schema, ok := normalized.(map[string]any); ok && len(schema) > 0 {
+		return schema
+	}
+	return cloneJSONValue(responsesFallbackFunctionToolSchema)
+}
+
+func normalizeResponsesToolCompatMode(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return config.ResponsesToolCompatModePreserve
+	}
+	if strings.EqualFold(trimmed, config.ResponsesToolCompatModeFunctionOnly) {
+		return config.ResponsesToolCompatModeFunctionOnly
+	}
+	return config.ResponsesToolCompatModePreserve
 }
 
 func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[string]any {

@@ -229,6 +229,231 @@ func TestResponsesRouteDoesNotForwardStoreIncludeToAnthropicUpstream(t *testing.
 	}
 }
 
+func TestResponsesRouteUsesResponsesUpstreamEndpointTypeForToolCompatibilityBaseline(t *testing.T) {
+	var gotBody string
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses upstream"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello","tools":[{"type":"custom","name":"code_exec","description":"Run code"},{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}},{"type":"web_search","name":"web_lookup","description":"Search the web"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/responses" {
+		t.Fatalf("expected responses upstream path, got %q", gotPath)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools in responses upstream payload, got %#v body=%s", payload["tools"], gotBody)
+	}
+	customTool, _ := tools[0].(map[string]any)
+	if got, _ := customTool["type"].(string); got != "custom" {
+		t.Fatalf("expected custom tool type preserved on responses upstream, got %#v body=%s", customTool, gotBody)
+	}
+	functionTool, _ := tools[1].(map[string]any)
+	if got, _ := functionTool["type"].(string); got != "function" {
+		t.Fatalf("expected function tool type preserved on responses upstream, got %#v body=%s", functionTool, gotBody)
+	}
+	webSearchTool, _ := tools[2].(map[string]any)
+	if got, _ := webSearchTool["type"].(string); got != "web_search" {
+		t.Fatalf("expected web_search tool type preserved on responses upstream, got %#v body=%s", webSearchTool, gotBody)
+	}
+}
+
+func TestResponsesRouteCompatibilityModeUsesSelectedUpstreamEndpointType(t *testing.T) {
+	requestBody := `{"model":"gpt-5","input":"hello","tools":[{"type":"custom","name":"code_exec","description":"Run code"},{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}},{"type":"web_search","name":"web_lookup","description":"Search the web"}]}`
+
+	decodePayload := func(t *testing.T, body string) map[string]any {
+		t.Helper()
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatalf("unmarshal upstream payload: %v body=%s", err, body)
+		}
+		return payload
+	}
+	toolEntries := func(t *testing.T, payload map[string]any) []map[string]any {
+		t.Helper()
+		rawTools, _ := payload["tools"].([]any)
+		if len(rawTools) != 3 {
+			t.Fatalf("expected 3 tools in upstream payload, got %#v", payload["tools"])
+		}
+		tools := make([]map[string]any, 0, len(rawTools))
+		for _, rawTool := range rawTools {
+			tool, _ := rawTool.(map[string]any)
+			if tool == nil {
+				t.Fatalf("expected tool entry to be object, got %#v", rawTool)
+			}
+			tools = append(tools, tool)
+		}
+		return tools
+	}
+	assertFallbackStringSchema := func(t *testing.T, raw any, field string) {
+		t.Helper()
+		schema, _ := raw.(map[string]any)
+		if schema == nil {
+			t.Fatalf("expected schema object, got %#v", raw)
+		}
+		if got, _ := schema["type"].(string); got != "object" {
+			t.Fatalf("expected fallback schema type object, got %#v", schema)
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		fieldSchema, _ := properties[field].(map[string]any)
+		if got, _ := fieldSchema["type"].(string); got != "string" {
+			t.Fatalf("expected fallback string schema for %q, got %#v", field, schema)
+		}
+	}
+	assertEmptySchema := func(t *testing.T, raw any, context string) {
+		t.Helper()
+		schema, _ := raw.(map[string]any)
+		if schema == nil {
+			t.Fatalf("expected %s schema object, got %#v", context, raw)
+		}
+		if len(schema) != 0 {
+			t.Fatalf("expected %s schema to remain empty without responses compat fallback, got %#v", context, schema)
+		}
+	}
+
+	t.Run("responses upstream rewrites non-function tools", func(t *testing.T) {
+		var gotBody string
+		var gotPath string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			bodyBytes, _ := io.ReadAll(r.Body)
+			gotBody = string(bodyBytes)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_compat","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses upstream"}]}]}`))
+		}))
+		defer upstream.Close()
+
+		server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, ResponsesToolCompatMode: config.ResponsesToolCompatModeFunctionOnly, SupportsResponses: true, SupportsChat: true}}})
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		if gotPath != "/responses" {
+			t.Fatalf("expected responses upstream path, got %q", gotPath)
+		}
+		tools := toolEntries(t, decodePayload(t, gotBody))
+		customTool := tools[0]
+		if got, _ := customTool["type"].(string); got != "function" {
+			t.Fatalf("expected compat mode to rewrite custom tool on responses upstream, got %#v", customTool)
+		}
+		assertFallbackStringSchema(t, customTool["parameters"], "input")
+		functionTool := tools[1]
+		if got, _ := functionTool["type"].(string); got != "function" {
+			t.Fatalf("expected native function tool to stay function on responses upstream, got %#v", functionTool)
+		}
+		assertFallbackStringSchema(t, functionTool["parameters"], "city")
+		webSearchTool := tools[2]
+		if got, _ := webSearchTool["type"].(string); got != "function" {
+			t.Fatalf("expected compat mode to rewrite web_search tool on responses upstream, got %#v", webSearchTool)
+		}
+		if got, _ := webSearchTool["name"].(string); got != "web_lookup" {
+			t.Fatalf("expected responses compat rewrite to preserve explicit web_search name, got %#v", webSearchTool)
+		}
+		assertFallbackStringSchema(t, webSearchTool["parameters"], "query")
+	})
+
+	t.Run("chat upstream ignores responses compat mode", func(t *testing.T) {
+		var gotBody string
+		var gotPath string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			bodyBytes, _ := io.ReadAll(r.Body)
+			gotBody = string(bodyBytes)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello from chat upstream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
+		}))
+		defer upstream.Close()
+
+		server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeChat, ResponsesToolCompatMode: config.ResponsesToolCompatModeFunctionOnly, SupportsResponses: true, SupportsChat: true}}})
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		if gotPath != "/chat/completions" {
+			t.Fatalf("expected chat upstream path, got %q", gotPath)
+		}
+		tools := toolEntries(t, decodePayload(t, gotBody))
+		customTool := tools[0]
+		if got, _ := customTool["type"].(string); got != "function" {
+			t.Fatalf("expected chat upstream tools to keep their own function wrapper, got %#v", customTool)
+		}
+		customFunction, _ := customTool["function"].(map[string]any)
+		assertEmptySchema(t, customFunction["parameters"], "chat custom tool")
+		webSearchTool := tools[2]
+		webSearchFunction, _ := webSearchTool["function"].(map[string]any)
+		if got, _ := webSearchFunction["name"].(string); got != "web_lookup" {
+			t.Fatalf("expected chat upstream builder to preserve original tool name, got %#v", webSearchFunction)
+		}
+		assertEmptySchema(t, webSearchFunction["parameters"], "chat web_search tool")
+	})
+
+	t.Run("anthropic upstream ignores responses compat mode", func(t *testing.T) {
+		var gotBody string
+		var gotPath string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			bodyBytes, _ := io.ReadAll(r.Body)
+			gotBody = string(bodyBytes)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic upstream"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+		}))
+		defer upstream.Close()
+
+		server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, ResponsesToolCompatMode: config.ResponsesToolCompatModeFunctionOnly, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		server.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		if gotPath != "/messages" {
+			t.Fatalf("expected anthropic upstream path, got %q", gotPath)
+		}
+		tools := toolEntries(t, decodePayload(t, gotBody))
+		customTool := tools[0]
+		if got, _ := customTool["name"].(string); got != "code_exec" {
+			t.Fatalf("expected anthropic upstream tool name preserved, got %#v", customTool)
+		}
+		assertEmptySchema(t, customTool["input_schema"], "anthropic custom tool")
+		webSearchTool := tools[2]
+		if got, _ := webSearchTool["name"].(string); got != "web_lookup" {
+			t.Fatalf("expected anthropic upstream builder to preserve original web_search name, got %#v", webSearchTool)
+		}
+		assertEmptySchema(t, webSearchTool["input_schema"], "anthropic web_search tool")
+	})
+}
+
 func TestChatRoutePreservesUnhandledTopLevelFieldsAcrossChatUpstream(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -20,6 +20,7 @@ type ProviderConfig struct {
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
 	UpstreamEndpointType                   string
+	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
 	UpstreamUserAgent                      string
 	InjectClaudeCodeMetadataUserID         bool
@@ -63,13 +64,15 @@ type ModelMapEntry struct {
 }
 
 const (
-	SystemPromptPositionPrepend   = "prepend"
-	SystemPromptPositionAppend    = "append"
-	DefaultUpstreamRetryCount     = 5
-	DefaultUpstreamRetryDelay     = 5 * time.Second
-	UpstreamEndpointTypeResponses = "responses"
-	UpstreamEndpointTypeChat      = "chat"
-	UpstreamEndpointTypeAnthropic = "anthropic"
+	SystemPromptPositionPrepend         = "prepend"
+	SystemPromptPositionAppend          = "append"
+	DefaultUpstreamRetryCount           = 5
+	DefaultUpstreamRetryDelay           = 5 * time.Second
+	UpstreamEndpointTypeResponses       = "responses"
+	UpstreamEndpointTypeChat            = "chat"
+	UpstreamEndpointTypeAnthropic       = "anthropic"
+	ResponsesToolCompatModePreserve     = "preserve"
+	ResponsesToolCompatModeFunctionOnly = "function_only"
 )
 
 const (
@@ -129,9 +132,10 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	defer file.Close()
 
 	provider := ProviderConfig{
-		UpstreamRetryCount:   DefaultUpstreamRetryCount,
-		UpstreamRetryDelay:   DefaultUpstreamRetryDelay,
-		UpstreamEndpointType: UpstreamEndpointTypeResponses,
+		UpstreamRetryCount:      DefaultUpstreamRetryCount,
+		UpstreamRetryDelay:      DefaultUpstreamRetryDelay,
+		UpstreamEndpointType:    UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode: ResponsesToolCompatModePreserve,
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -163,6 +167,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_ENDPOINT_TYPE in %s: %q", path, value))
 			}
 			provider.UpstreamEndpointType = normalized
+		case "RESPONSES_TOOL_COMPAT_MODE":
+			normalized, err := normalizeResponsesToolCompatMode(value)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid RESPONSES_TOOL_COMPAT_MODE in %s: %q (allowed: preserve, function_only)", path, value))
+			}
+			provider.ResponsesToolCompatMode = normalized
 		case "SUPPORTS_CHAT":
 			provider.SupportsChat, err = parseProviderSupportsBool(value, key, path)
 			if err != nil {
@@ -425,6 +435,21 @@ func normalizeUpstreamEndpointType(value string) (string, error) {
 		return UpstreamEndpointTypeAnthropic, nil
 	default:
 		return "", ErrInvalidConfig(fmt.Sprintf("invalid upstream endpoint type: %q", value))
+	}
+}
+
+func normalizeResponsesToolCompatMode(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ResponsesToolCompatModePreserve, nil
+	}
+	switch strings.ToLower(trimmed) {
+	case ResponsesToolCompatModePreserve:
+		return ResponsesToolCompatModePreserve, nil
+	case ResponsesToolCompatModeFunctionOnly:
+		return ResponsesToolCompatModeFunctionOnly, nil
+	default:
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid responses tool compat mode: %q", value))
 	}
 }
 
