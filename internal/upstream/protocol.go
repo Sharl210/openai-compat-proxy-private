@@ -204,10 +204,10 @@ func normalizeResponsePayload(endpointType string, payload map[string]any, think
 	}
 }
 
-func eventBatchReaderForType(endpointType string, thinkingTagStyle string, originalToolIDs map[int]string, requestID string) func(*bufio.Scanner) ([]Event, error) {
+func eventBatchReaderForType(endpointType string, thinkingTagStyle string, originalToolIDs map[int]string, requestID string, allowEOFCompletion bool) func(*bufio.Scanner) ([]Event, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return newChatEventBatchReader(thinkingTagStyle, originalToolIDs, requestID)
+		return newChatEventBatchReader(thinkingTagStyle, originalToolIDs, requestID, allowEOFCompletion)
 	case config.UpstreamEndpointTypeAnthropic:
 		return newAnthropicEventBatchReader(originalToolIDs)
 	default:
@@ -309,7 +309,7 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 	return nil, nil
 }
 
-func newChatEventBatchReader(thinkingTagStyle string, originalToolIDs map[int]string, requestID string) func(*bufio.Scanner) ([]Event, error) {
+func newChatEventBatchReader(thinkingTagStyle string, originalToolIDs map[int]string, requestID string, allowEOFCompletion bool) func(*bufio.Scanner) ([]Event, error) {
 	state := &chatNormalizationState{
 		toolIDsByIndex:   map[int]string{},
 		toolSent:         map[string]bool{},
@@ -326,6 +326,11 @@ func newChatEventBatchReader(thinkingTagStyle string, originalToolIDs map[int]st
 				return nil, err
 			}
 			if frame == nil {
+				if allowEOFCompletion {
+					if events := finalizeChatTerminalEventsOnEOF(state); len(events) > 0 {
+						return events, nil
+					}
+				}
 				return nil, nil
 			}
 			events, done, err := normalizeChatFrame(frame, state)
@@ -341,6 +346,16 @@ func newChatEventBatchReader(thinkingTagStyle string, originalToolIDs map[int]st
 			return events, nil
 		}
 	}
+}
+
+func finalizeChatTerminalEventsOnEOF(state *chatNormalizationState) []Event {
+	if state == nil || state.completed || !state.createdSent {
+		return nil
+	}
+	if state.pendingFinish == "" {
+		return nil
+	}
+	return finalizeChatTerminalEvents(state)
 }
 
 func finalizeChatTerminalEvents(state *chatNormalizationState) []Event {

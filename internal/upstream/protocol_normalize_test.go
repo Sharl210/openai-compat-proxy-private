@@ -215,7 +215,7 @@ func TestChatEventBatchReaderDoesNotFinalizeOnEOFWithoutTerminalEvent(t *testing
 	}, "\n")
 
 	scanner := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "req-test")
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "req-test", false)
 
 	var allEvents []Event
 	for {
@@ -236,6 +236,48 @@ func TestChatEventBatchReaderDoesNotFinalizeOnEOFWithoutTerminalEvent(t *testing
 		if evt.Event == "response.completed" {
 			t.Fatalf("expected EOF without raw terminal event to avoid response.completed, got %#v", allEvents)
 		}
+	}
+}
+
+func TestChatEventBatchReaderFinalizesOnEOFWhenAllowedAndFinishReasonSeen(t *testing.T) {
+	rawSSE := strings.Join([]string{
+		"event: chat",
+		`data: {"id":"chat-123","choices":[{"delta":{"content":"hello"}}]}`,
+		"",
+		"event: chat",
+		`data: {"id":"chat-123","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		"",
+	}, "\n")
+
+	scanner := bufio.NewScanner(strings.NewReader(rawSSE))
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "req-test", true)
+
+	var allEvents []Event
+	for {
+		events, err := readNext(scanner)
+		if err != nil {
+			t.Fatalf("readNext error: %v", err)
+		}
+		if len(events) == 0 {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	if len(allEvents) < 3 {
+		t.Fatalf("expected created + text + completed events, got %#v", allEvents)
+	}
+	completed := allEvents[len(allEvents)-1]
+	if completed.Event != "response.completed" {
+		t.Fatalf("expected EOF completion when allowed, got %#v", allEvents)
+	}
+	response, _ := completed.Data["response"].(map[string]any)
+	if got := response["finish_reason"]; got != "stop" {
+		t.Fatalf("expected finish_reason stop, got %#v", completed)
+	}
+	usage, _ := response["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(3) {
+		t.Fatalf("expected usage to survive EOF completion, got %#v", completed)
 	}
 }
 
@@ -616,7 +658,7 @@ data: [DONE]
 `
 
 	reader := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "")
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "", false)
 
 	var allEvents []Event
 	for {
