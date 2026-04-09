@@ -1552,6 +1552,44 @@ func TestBuildChatRequestBodyMapsAnthropicThinkingToChatReasoning(t *testing.T) 
 	}
 }
 
+func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testing.T) {
+	body, err := buildChatRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		PreservedTopLevelFields: map[string]any{
+			"output_config":        map[string]any{"format": map[string]any{"type": "json_schema"}},
+			"previous_response_id": "resp_123",
+			"parallel_tool_calls":  true,
+			"truncation":           "auto",
+			"text":                 map[string]any{"format": map[string]any{"type": "text"}},
+			"response_format":      map[string]any{"type": "json_object"},
+			"custom_passthrough":   "keep-me",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildChatRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	for _, key := range []string{"output_config", "previous_response_id", "truncation", "text"} {
+		if _, exists := payload[key]; exists {
+			t.Fatalf("expected chat upstream payload to drop responses-only field %q, got %#v", key, payload)
+		}
+	}
+	if got, _ := payload["parallel_tool_calls"].(bool); !got {
+		t.Fatalf("expected chat upstream payload to preserve chat-native parallel_tool_calls, got %#v", payload)
+	}
+	responseFormat, _ := payload["response_format"].(map[string]any)
+	if got, _ := responseFormat["type"].(string); got != "json_object" {
+		t.Fatalf("expected chat upstream payload to preserve response_format, got %#v", payload)
+	}
+	if got := payload["custom_passthrough"]; got != "keep-me" {
+		t.Fatalf("expected chat upstream payload to keep non-responses passthrough field, got %#v", payload)
+	}
+}
+
 func TestPreviewRequestObservabilityForResponses(t *testing.T) {
 	preview, err := PreviewRequestObservability(model.CanonicalRequest{
 		Model:     "gpt-5-mini",
@@ -1686,6 +1724,38 @@ func TestBuildAnthropicRequestBodyInjectsClaudeMetadataUserID(t *testing.T) {
 	userID, _ := metadata["user_id"].(string)
 	if !strings.HasPrefix(userID, "user_") || !strings.Contains(userID, "_account__session_") {
 		t.Fatalf("expected claude metadata.user_id injection, got %#v", payload)
+	}
+}
+
+func TestBuildAnthropicRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		PreservedTopLevelFields: map[string]any{
+			"output_config":        map[string]any{"format": map[string]any{"type": "json_schema"}},
+			"previous_response_id": "resp_123",
+			"parallel_tool_calls":  true,
+			"truncation":           "auto",
+			"text":                 map[string]any{"format": map[string]any{"type": "text"}},
+			"response_format":      map[string]any{"type": "json_object"},
+			"custom_passthrough":   "keep-me",
+		},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	for _, key := range []string{"output_config", "previous_response_id", "parallel_tool_calls", "truncation", "text", "response_format"} {
+		if _, exists := payload[key]; exists {
+			t.Fatalf("expected anthropic upstream payload to drop responses-only field %q, got %#v", key, payload)
+		}
+	}
+	if got := payload["custom_passthrough"]; got != "keep-me" {
+		t.Fatalf("expected anthropic upstream payload to keep non-responses passthrough field, got %#v", payload)
 	}
 }
 

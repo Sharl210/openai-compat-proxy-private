@@ -154,6 +154,40 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 	}
 }
 
+func filteredPreservedTopLevelFieldsForEndpoint(fields map[string]any, endpointType string) map[string]any {
+	if len(fields) == 0 {
+		return nil
+	}
+	normalizedEndpointType := normalizeEndpointType(endpointType)
+	if normalizedEndpointType == config.UpstreamEndpointTypeResponses {
+		return fields
+	}
+	filtered := map[string]any{}
+	for key, value := range fields {
+		if isResponsesOnlyTopLevelField(key, normalizedEndpointType) {
+			continue
+		}
+		filtered[key] = value
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
+func isResponsesOnlyTopLevelField(key string, endpointType string) bool {
+	switch key {
+	case "output_config", "previous_response_id", "store", "include", "truncation", "text":
+		return true
+	case "parallel_tool_calls":
+		return endpointType == config.UpstreamEndpointTypeAnthropic
+	case "response_format":
+		return endpointType == config.UpstreamEndpointTypeAnthropic
+	default:
+		return false
+	}
+}
+
 func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
 	req.Stream = true
 	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
@@ -847,7 +881,7 @@ func normalizeChatMessageContent(raw any) []any {
 
 func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	payload := map[string]any{"model": req.Model, "stream": req.Stream}
-	for key, value := range req.PreservedTopLevelFields {
+	for key, value := range filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeChat) {
 		payload[key] = cloneJSONValue(value)
 	}
 	if req.IncludeUsage {
@@ -998,7 +1032,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		return nil, err
 	}
 	payload := map[string]any{"model": req.Model, "stream": req.Stream}
-	for key, value := range req.PreservedTopLevelFields {
+	for key, value := range filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeAnthropic) {
 		payload[key] = cloneJSONValue(value)
 	}
 	if req.MaxOutputTokens != nil {
