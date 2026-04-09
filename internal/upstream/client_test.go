@@ -386,6 +386,82 @@ func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *
 	}
 }
 
+func TestBuildRequestBodyMapsAnthropicOutputConfigToResponsesText(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		PreservedTopLevelFields: map[string]any{
+			"output_config": map[string]any{
+				"format": map[string]any{
+					"type":   "json_schema",
+					"schema": map[string]any{"type": "object"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["output_config"]; exists {
+		t.Fatalf("expected responses upstream payload to map output_config away, got %#v", payload)
+	}
+	text, _ := payload["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if got, _ := format["type"].(string); got != "json_schema" {
+		t.Fatalf("expected output_config to become text.format json_schema, got %#v", payload)
+	}
+	schema, _ := format["schema"].(map[string]any)
+	if got, _ := schema["type"].(string); got != "object" {
+		t.Fatalf("expected schema to survive output_config mapping, got %#v", payload)
+	}
+}
+
+func TestBuildRequestBodyMapsChatResponseFormatToResponsesText(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		PreservedTopLevelFields: map[string]any{
+			"response_format": map[string]any{
+				"type": "json_schema",
+				"json_schema": map[string]any{
+					"name":   "session_title",
+					"strict": true,
+					"schema": map[string]any{"type": "object"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["response_format"]; exists {
+		t.Fatalf("expected responses upstream payload to map response_format away, got %#v", payload)
+	}
+	text, _ := payload["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if got, _ := format["type"].(string); got != "json_schema" {
+		t.Fatalf("expected response_format to become text.format json_schema, got %#v", payload)
+	}
+	if got, _ := format["name"].(string); got != "session_title" {
+		t.Fatalf("expected response_format json_schema.name to survive mapping, got %#v", payload)
+	}
+	if got, _ := format["strict"].(bool); !got {
+		t.Fatalf("expected response_format json_schema.strict to survive mapping, got %#v", payload)
+	}
+	schema, _ := format["schema"].(map[string]any)
+	if got, _ := schema["type"].(string); got != "object" {
+		t.Fatalf("expected response_format json_schema.schema to survive mapping, got %#v", payload)
+	}
+}
+
 func TestBuildRequestBodyPreservesResponsesToolTypesForFunctionOnlyTools(t *testing.T) {
 	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
 		Type:        "function",

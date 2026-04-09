@@ -784,13 +784,9 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		"model":  req.Model,
 		"stream": req.Stream,
 	}
-	for key, value := range req.PreservedTopLevelFields {
-		payload[key] = cloneJSONValue(value)
-	}
+	mergeResponsesPreservedTopLevelFields(payload, req.PreservedTopLevelFields)
 	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
-	for key, value := range preservedTopLevelFields {
-		payload[key] = cloneJSONValue(value)
-	}
+	mergeResponsesPreservedTopLevelFields(payload, preservedTopLevelFields)
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
 	}
@@ -914,6 +910,64 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func mergeResponsesPreservedTopLevelFields(payload map[string]any, fields map[string]any) {
+	if len(fields) == 0 {
+		return
+	}
+	for key, value := range fields {
+		switch key {
+		case "output_config":
+			if _, exists := payload["text"]; !exists {
+				if mapped := normalizeResponsesTextPayloadFromOutputConfig(value); mapped != nil {
+					payload["text"] = mapped
+				}
+			}
+		case "response_format":
+			if _, exists := payload["text"]; !exists {
+				if mapped := normalizeResponsesTextPayloadFromResponseFormat(value); mapped != nil {
+					payload["text"] = mapped
+				}
+			}
+		default:
+			payload[key] = cloneJSONValue(value)
+		}
+	}
+}
+
+func normalizeResponsesTextPayloadFromOutputConfig(value any) map[string]any {
+	outputConfig, _ := cloneJSONValue(value).(map[string]any)
+	if len(outputConfig) == 0 {
+		return nil
+	}
+	format, _ := outputConfig["format"].(map[string]any)
+	if len(format) == 0 {
+		return nil
+	}
+	return map[string]any{"format": format}
+}
+
+func normalizeResponsesTextPayloadFromResponseFormat(value any) map[string]any {
+	responseFormat, _ := cloneJSONValue(value).(map[string]any)
+	if len(responseFormat) == 0 {
+		return nil
+	}
+	if existing, _ := responseFormat["format"].(map[string]any); len(existing) > 0 {
+		return map[string]any{"format": existing}
+	}
+	formatType := stringValue(responseFormat["type"])
+	if formatType == "" {
+		return nil
+	}
+	format := map[string]any{"type": formatType}
+	if formatType == "json_schema" {
+		jsonSchema, _ := responseFormat["json_schema"].(map[string]any)
+		for key, value := range jsonSchema {
+			format[key] = value
+		}
+	}
+	return map[string]any{"format": format}
 }
 
 func buildResponsesUpstreamToolPayloads(tools []model.CanonicalTool, compatMode string) []map[string]any {
