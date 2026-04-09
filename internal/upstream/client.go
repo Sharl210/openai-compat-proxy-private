@@ -803,7 +803,18 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		payload["store"] = *req.ResponseStore
 	}
 	if len(req.ResponseInclude) > 0 {
-		payload["include"] = append([]string(nil), req.ResponseInclude...)
+		include := append([]string(nil), req.ResponseInclude...)
+		if len(include) > 0 {
+			payload["include"] = include
+		}
+	}
+	if req.Stream {
+		include := responsesStreamSafeInclude(payload["include"])
+		if len(include) == 0 {
+			delete(payload, "include")
+		} else {
+			payload["include"] = include
+		}
 	}
 	if req.IncludeUsage {
 		includeList, _ := payload["include"].([]string)
@@ -910,6 +921,30 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func responsesStreamSafeInclude(value any) []string {
+	var raw []string
+	switch typed := value.(type) {
+	case []string:
+		raw = append(raw, typed...)
+	case []any:
+		for _, item := range typed {
+			text, _ := item.(string)
+			if text == "" {
+				continue
+			}
+			raw = append(raw, text)
+		}
+	}
+	filtered := raw[:0]
+	for _, v := range raw {
+		if v == "usage" {
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	return filtered
 }
 
 func mergeResponsesPreservedTopLevelFields(payload map[string]any, fields map[string]any) {

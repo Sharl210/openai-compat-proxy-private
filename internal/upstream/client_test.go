@@ -481,6 +481,46 @@ func TestBuildRequestBodyOmitsUsageIncludeForResponsesStreaming(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBodyOmitsIncludeForResponsesStreamingEvenWhenResponseIncludeIsPreset(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:           "gpt-5",
+		Stream:          true,
+		ResponseInclude: []string{"usage"},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["include"]; exists {
+		t.Fatalf("expected streaming responses request to strip include even when preset, got %#v", payload)
+	}
+}
+
+func TestBuildRequestBodyOmitsIncludeForResponsesStreamingEvenWhenPreservedTopLevelIncludeIsPreset(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:  "gpt-5",
+		Stream: true,
+		PreservedTopLevelFields: map[string]any{
+			"include": []any{"usage"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["include"]; exists {
+		t.Fatalf("expected streaming responses request to strip preserved include, got %#v", payload)
+	}
+}
+
 func TestBuildRequestBodyOmitsReasoningForDisabledAnthropicThinking(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
