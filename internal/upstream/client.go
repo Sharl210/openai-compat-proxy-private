@@ -221,7 +221,8 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, true)
+	allowEOFCompletion := normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeChat && !req.Stream
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, true, allowEOFCompletion)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -325,7 +326,7 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, primeFirstEvent)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, primeFirstEvent, false)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -449,7 +450,7 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 }
 
 func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, nil, true)
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, nil, true, false)
 	if err != nil {
 		return err
 	}
@@ -457,12 +458,12 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, primeFirstEvent bool) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs, requestID, primeFirstEvent)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs, requestID, primeFirstEvent, allowEOFCompletion)
 		if err == nil {
 			return stream, nil
 		}
@@ -580,7 +581,7 @@ func responseEndpointPathForType(endpointType string, compact bool) string {
 	return path
 }
 
-func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool) (*EventStream, error) {
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -598,7 +599,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return nil, err
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, originalToolIDs, requestID), archive: debugarchive.ArchiveWriterFromContext(ctx)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, originalToolIDs, requestID, allowEOFCompletion), archive: debugarchive.ArchiveWriterFromContext(ctx)}
 	if primeFirstEvent {
 		if err := stream.prime(); err != nil {
 			_ = stream.Close()

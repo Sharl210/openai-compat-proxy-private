@@ -1288,6 +1288,36 @@ func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrame
 	}
 }
 
+func TestStreamUsesChatEndpointAllowsEOFCompletionForBufferedNonStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5", Stream: false}, "Bearer test-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if len(events) < 3 {
+		t.Fatalf("expected created + delta + completed events, got %#v", events)
+	}
+	completed := events[len(events)-1]
+	if completed.Event != "response.completed" {
+		t.Fatalf("expected EOF completion for buffered non-stream path, got %#v", events)
+	}
+	response, _ := completed.Data["response"].(map[string]any)
+	if got := response["finish_reason"]; got != "stop" {
+		t.Fatalf("expected finish_reason stop, got %#v", completed)
+	}
+	usage, _ := response["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(3) {
+		t.Fatalf("expected usage.input_tokens 3, got %#v events=%#v", got, events)
+	}
+}
+
 func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) {
 	var gotPath string
 	var gotAPIKey string
