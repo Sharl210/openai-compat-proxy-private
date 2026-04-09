@@ -462,6 +462,45 @@ func TestBuildRequestBodyMapsChatResponseFormatToResponsesText(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBodyOmitsUsageIncludeForResponsesStreaming(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:        "gpt-5",
+		Stream:       true,
+		IncludeUsage: true,
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["include"]; exists {
+		t.Fatalf("expected streaming responses request to avoid include usage passthrough, got %#v", payload)
+	}
+}
+
+func TestBuildRequestBodyOmitsReasoningForDisabledAnthropicThinking(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{
+			"thinking": map[string]any{"type": "disabled"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["reasoning"]; exists {
+		t.Fatalf("expected disabled anthropic thinking to be omitted for responses upstream, got %#v", payload)
+	}
+}
+
 func TestBuildRequestBodyPreservesResponsesToolTypesForFunctionOnlyTools(t *testing.T) {
 	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
 		Type:        "function",

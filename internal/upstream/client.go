@@ -814,7 +814,7 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 				break
 			}
 		}
-		if !hasUsage {
+		if !hasUsage && !req.Stream {
 			payload["include"] = append(includeList, "usage")
 		}
 	}
@@ -1038,6 +1038,9 @@ func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[st
 		return nil
 	}
 	raw := cloneMap(reasoning.Raw)
+	if anthropicThinkingDisabled(raw) {
+		return nil
+	}
 	if inferred := inferReasoningEffortFromAnthropicRaw(raw); inferred != "" {
 		return map[string]any{
 			"effort":  inferred,
@@ -1048,6 +1051,14 @@ func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[st
 		raw["summary"] = reasoningSummaryOrAuto(raw, reasoning.Summary)
 	}
 	return raw
+}
+
+func anthropicThinkingDisabled(raw map[string]any) bool {
+	thinking, _ := raw["thinking"].(map[string]any)
+	if len(thinking) == 0 {
+		return false
+	}
+	return stringValue(thinking["type"]) == "disabled"
 }
 
 func InferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
