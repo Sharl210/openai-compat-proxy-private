@@ -768,6 +768,47 @@ func TestLoadProviderFileRejectsInvalidUpstreamEndpointType(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesOpenAIServiceTier(t *testing.T) {
+	for _, tier := range []string{OpenAIServiceTierAuto, OpenAIServiceTierDefault, OpenAIServiceTierFlex, OpenAIServiceTierPriority} {
+		t.Run(tier, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nOPENAI_SERVICE_TIER=" + tier + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			provider, err := loadProviderFile(providerEnvPath)
+			if err != nil {
+				t.Fatalf("loadProviderFile returned error: %v", err)
+			}
+			if provider.OpenAIServiceTier != tier {
+				t.Fatalf("expected openai service tier %q, got %q", tier, provider.OpenAIServiceTier)
+			}
+		})
+	}
+}
+
+func TestLoadProviderFileRejectsUnknownOpenAIServiceTier(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nOPENAI_SERVICE_TIER=fast\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid openai service tier to fail validation")
+	}
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid openai service tier, got %T", err)
+	}
+	if err.Error() != "invalid OPENAI_SERVICE_TIER in "+providerEnvPath+": \"fast\" (allowed: auto, default, flex, priority)" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestLoadProviderFileUsesPreserveResponsesToolCompatModeByDefault(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

@@ -19,6 +19,7 @@ type ProviderConfig struct {
 	Enabled                                bool
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
+	OpenAIServiceTier                      string
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
@@ -71,6 +72,10 @@ const (
 	UpstreamEndpointTypeResponses       = "responses"
 	UpstreamEndpointTypeChat            = "chat"
 	UpstreamEndpointTypeAnthropic       = "anthropic"
+	OpenAIServiceTierAuto               = "auto"
+	OpenAIServiceTierDefault            = "default"
+	OpenAIServiceTierFlex               = "flex"
+	OpenAIServiceTierPriority           = "priority"
 	ResponsesToolCompatModePreserve     = "preserve"
 	ResponsesToolCompatModeFunctionOnly = "function_only"
 )
@@ -167,6 +172,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_ENDPOINT_TYPE in %s: %q", path, value))
 			}
 			provider.UpstreamEndpointType = normalized
+		case "OPENAI_SERVICE_TIER":
+			normalized, err := normalizeOpenAIServiceTier(value)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid OPENAI_SERVICE_TIER in %s: %q (allowed: auto, default, flex, priority)", path, value))
+			}
+			provider.OpenAIServiceTier = normalized
 		case "RESPONSES_TOOL_COMPAT_MODE":
 			normalized, err := normalizeResponsesToolCompatMode(value)
 			if err != nil {
@@ -450,6 +461,25 @@ func normalizeResponsesToolCompatMode(value string) (string, error) {
 		return ResponsesToolCompatModeFunctionOnly, nil
 	default:
 		return "", ErrInvalidConfig(fmt.Sprintf("invalid responses tool compat mode: %q", value))
+	}
+}
+
+func normalizeOpenAIServiceTier(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	switch strings.ToLower(trimmed) {
+	case OpenAIServiceTierAuto:
+		return OpenAIServiceTierAuto, nil
+	case OpenAIServiceTierDefault:
+		return OpenAIServiceTierDefault, nil
+	case OpenAIServiceTierFlex:
+		return OpenAIServiceTierFlex, nil
+	case OpenAIServiceTierPriority:
+		return OpenAIServiceTierPriority, nil
+	default:
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid openai service tier: %q", value))
 	}
 }
 

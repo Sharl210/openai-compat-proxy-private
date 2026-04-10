@@ -812,6 +812,48 @@ func TestAdminUISaveEnvReportsRestartValidationErrorsButUIStaysAlive(t *testing.
 	}
 }
 
+func TestAdminUISaveProviderEnvReportsInvalidOpenAIServiceTier(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	rec := adminJSONRequest(t, server, http.MethodPut, "/_admin/api/file", map[string]any{
+		"path": "providers/openai.env",
+		"mode": "text",
+		"content": strings.Join([]string{
+			"PROVIDER_ID=openai",
+			"PROVIDER_ENABLED=true",
+			"UPSTREAM_BASE_URL=https://example.com/v1",
+			"UPSTREAM_API_KEY=upstream-secret",
+			"UPSTREAM_ENDPOINT_TYPE=responses",
+			"OPENAI_SERVICE_TIER=fast",
+			"SUPPORTS_RESPONSES=true",
+			"SUPPORTS_CHAT=true",
+			"SUPPORTS_MODELS=true",
+			"SUPPORTS_ANTHROPIC_MESSAGES=true",
+		}, "\n") + "\n",
+	}, []*http.Cookie{cookie}, csrf)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected save 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	validation := data["validation"].(map[string]any)
+	if validation["restart_ok"] != false {
+		t.Fatalf("expected restart validation failure, got %#v", validation)
+	}
+	restartError, _ := validation["restart_error"].(string)
+	if !strings.Contains(restartError, "invalid OPENAI_SERVICE_TIER") {
+		t.Fatalf("expected restart error to mention OPENAI_SERVICE_TIER, got %#v", validation)
+	}
+
+	bootstrapReq := httptest.NewRequest(http.MethodGet, "/_admin/api/bootstrap", nil)
+	bootstrapReq.AddCookie(cookie)
+	bootstrapRec := httptest.NewRecorder()
+	server.ServeHTTP(bootstrapRec, bootstrapReq)
+	if bootstrapRec.Code != http.StatusOK {
+		t.Fatalf("expected UI to remain available after invalid provider env save, got %d body=%s", bootstrapRec.Code, bootstrapRec.Body.String())
+	}
+}
+
 func TestAdminUIScriptActionUsesWhitelistRunner(t *testing.T) {
 	server := newAdminUITestServer(t)
 	stub := &stubAdminRunner{}
