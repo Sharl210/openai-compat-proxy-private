@@ -43,6 +43,7 @@ func (e *TerminalFailureError) Error() string {
 type Collector struct {
 	responseID              string
 	text                    strings.Builder
+	hasTextDelta            bool
 	toolCalls               map[string]*ToolCall
 	order                   []string
 	reasoning               map[string]any
@@ -70,6 +71,7 @@ func (c *Collector) Accept(evt upstream.Event) {
 	case "response.output_text.delta":
 		if delta, _ := evt.Data["delta"].(string); delta != "" {
 			c.text.WriteString(delta)
+			c.hasTextDelta = true
 		}
 	case "response.function_call_arguments.delta":
 		itemID, _ := evt.Data["item_id"].(string)
@@ -123,8 +125,10 @@ func (c *Collector) Accept(evt upstream.Event) {
 						continue
 					}
 					if partType == "output_text" {
-						if text, _ := part["text"].(string); text != "" {
-							c.text.WriteString(text)
+						if !c.hasTextDelta {
+							if text, _ := part["text"].(string); text != "" {
+								c.text.WriteString(text)
+							}
 						}
 						continue
 					}

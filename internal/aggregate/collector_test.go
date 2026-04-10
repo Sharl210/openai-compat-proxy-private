@@ -48,6 +48,53 @@ func TestCollectorFillsTextFromOutputItemDoneMessageOutputText(t *testing.T) {
 	}
 }
 
+func TestCollectorDoesNotDuplicateTextWhenDeltaAndDoneContainSameOutputText(t *testing.T) {
+	c := NewCollector()
+
+	c.Accept(upstream.Event{
+		Event: "response.created",
+		Data: map[string]any{
+			"response": map[string]any{"id": "resp_123"},
+		},
+	})
+
+	c.Accept(upstream.Event{
+		Event: "response.output_text.delta",
+		Data:  map[string]any{"delta": "hello"},
+	})
+
+	c.Accept(upstream.Event{
+		Event: "response.output_item.done",
+		Data: map[string]any{
+			"item": map[string]any{
+				"id":   "msg_1",
+				"type": "message",
+				"content": []any{
+					map[string]any{
+						"type": "output_text",
+						"text": "hello",
+					},
+				},
+			},
+		},
+	})
+
+	c.Accept(upstream.Event{
+		Event: "response.completed",
+		Data: map[string]any{
+			"response": map[string]any{"finish_reason": "end_turn"},
+		},
+	})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if result.Text != "hello" {
+		t.Fatalf("expected Result.Text to be 'hello', got %q", result.Text)
+	}
+}
+
 func TestCollectorFillsRefusalFromOutputItemDoneMessageRefusal(t *testing.T) {
 	c := NewCollector()
 
