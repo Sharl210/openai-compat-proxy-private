@@ -522,7 +522,96 @@ send_timeout 1200s;
 
 ---
 
-## ✅ 常用验证命令
+## 🔬 缓存测试（对照复测流程）
+
+### 概述
+
+当用户说"缓存测试"时，执行以下对照复测流程。该流程不是内置命令、slash command、脚本别名或 skill，而是写在文档中的人类可阅读规范。
+
+### 核心约束
+
+| 约束项 | 要求 |
+|---|---|
+| 代理组 | 经过代理层的完整请求路径 |
+| 直连上游对照组 | 同一 canonical scenario 直接发往上游，不走代理；作为基线（100%） |
+| 会话轮数 | 5 轮 |
+| 首轮输入 | >10K 字符 |
+| 后续每轮输入 | >5K 字符 |
+| 工具调用 | 包含工具定义与工具结果 |
+| 上下文累积 | 每轮共享同一长前缀并累积上下文 |
+
+当前 harness 用 `input_chars` 校验长前缀规模，`usage.input_tokens`、raw vendor metrics 和 normalized cache ratio 只作为结果观测，不反过来替代输入阈值 gate。
+
+### Turn 1 与 Turn 2+ 的区分
+
+- **Turn 1**：单独展示原始指标与 OpenAI 风格归一化值，**不进入** preservation/loss 主结论
+- **Turn 2+**：使用 `proxy_preservation = proxy_ratio / direct_ratio` 与 `proxy_loss = 1 - proxy_preservation` 计算损失率
+
+### OpenAI 风格归一化口径
+
+```
+normalized_input_tokens = uncached_input + cache_read_input + cache_creation_input
+normalized_cached_tokens = cache_read_input
+normalized_cache_ratio = normalized_cached_tokens / normalized_input_tokens
+proxy_preservation = proxy_ratio / direct_ratio
+proxy_loss = 1 - proxy_preservation
+```
+
+### 对照组与配对规则
+
+- 代理组与直连组必须完全同构：同一 round、同一 turn、同一模型、同一工具、同一参数、同一输入结构
+- 直连组按 upstream family 运行原生 endpoint（responses/chat/messages），并与同 upstream family 的代理组配对
+- 每轮独立重跑，不复用上轮结果
+
+### 结果产物
+
+| 产物 | 说明 |
+|---|---|
+| 原始指标表 | 各 upstream 家族的 raw vendor metrics |
+| 直连基线表 | Direct baseline cache ratio |
+| 代理保留率/损失率表 | `proxy_preservation` 与 `proxy_loss`，基于 direct baseline 计算 |
+| deferred 问题摘要 | 发现但不在本轮修复的问题清单 |
+
+实际 live 输出固定分成四段：`## Raw Vendor Metrics`、`## Direct Baseline`、`## Proxy Preservation / Loss`、`## Deferred Issues`。其中前两段会同时保留 `turn1` 与 `turn2+` 证据，`Proxy Preservation / Loss` 只汇总 `turn2+`。
+
+### 损失率展示规则
+
+- 当 `direct_ratio` 约等于 0 时，`preservation` 与 `loss` 标记为 `N/A`
+- 不在不同 upstream family 之间横向比较原始缓存率
+- `cache_creation_tokens` 不记作缓存读取命中率
+
+### deferred 问题处理
+
+- 发现的问题明确记录为 `deferred`
+- 不在本流程中修复生产代码
+- 后续计划任务会处理这些问题
+
+### 执行入口
+
+详细测试代码与完整实验执行，见 `internal/httpapi/live_cache_matrix_test.go` 中的 live test harness。
+
+实际复跑命令：
+
+```bash
+LIVE_CACHE_MATRIX_ENABLED=1 \
+LIVE_CACHE_BASE_URL=http://127.0.0.1:21021 \
+LIVE_CACHE_API_KEY=your-proxy-key \
+LIVE_CACHE_PROVIDER_MATRIX_JSON='[
+  {"label":"responses","provider_id":"provider-responses","model":"model-a","direct_base_url":"https://responses.example/v1","direct_api_key":"..."},
+  {"label":"chat","provider_id":"provider-chat","model":"model-b","direct_base_url":"https://chat.example/v1","direct_api_key":"..."},
+  {"label":"anthropic","provider_id":"provider-anthropic","model":"model-c","direct_base_url":"https://anthropic.example","direct_api_key":"..."}
+]' \
+go test -run TestLiveCacheMatrix -timeout 40m -v ./internal/httpapi
+```
+
+说明：
+
+- `LIVE_CACHE_PROVIDER_MATRIX_JSON` 必须至少包含 `responses`、`chat`、`anthropic` 三个 `label`，且每项都要提供 `provider_id`、`model`、`direct_base_url`、`direct_api_key`
+- 未设置 `LIVE_CACHE_MATRIX_ENABLED=1` 时，`TestLiveCacheMatrix` 会直接 skip
+- 已开启 live 模式但缺少 `LIVE_CACHE_BASE_URL`、`LIVE_CACHE_API_KEY` 或 `LIVE_CACHE_PROVIDER_MATRIX_JSON` 时，测试会立即失败并提示缺失字段
+- `LIVE_CACHE_REQUEST_TIMEOUT` 是 **每个 live 请求自己的 scoped timeout**；单个 combo 卡死时，harness 会按该值快速报错，并在错误输出里保留 `round / execution_path / downstream / upstream / route / turn / stage` 归因，而不是一直等到外层 `go test -timeout` 才整体 panic
+
+---
 
 ```bash
 go test -count=1 ./...
