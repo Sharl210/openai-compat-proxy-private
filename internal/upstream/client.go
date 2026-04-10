@@ -896,7 +896,7 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		if value, ok := req.ToolChoice.Raw["value"]; ok {
 			payload["tool_choice"] = value
 		} else {
-			payload["tool_choice"] = cloneMap(req.ToolChoice.Raw)
+			payload["tool_choice"] = normalizeResponsesToolChoice(req.ToolChoice.Raw)
 		}
 	} else if req.ToolChoice.Mode != "" {
 		payload["tool_choice"] = req.ToolChoice.Mode
@@ -922,6 +922,17 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func normalizeResponsesToolChoice(raw map[string]any) map[string]any {
+	choice := cloneMap(raw)
+	if choice == nil {
+		return nil
+	}
+	if kind, _ := choice["type"].(string); kind == "tool" {
+		choice["type"] = "function"
+	}
+	return choice
 }
 
 func responsesStreamSafeInclude(value any) []string {

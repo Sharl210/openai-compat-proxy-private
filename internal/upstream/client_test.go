@@ -326,7 +326,7 @@ func TestBuildRequestBodyPreservesResponsesMetadataAndTypedInputItems(t *testing
 	}
 }
 
-func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *testing.T) {
+func TestBuildRequestBodyPreservesSamplingStopImageDetailAndStructuredToolChoiceObject(t *testing.T) {
 	temperature := 0.2
 	topP := 0.7
 	maxTokens := 321
@@ -371,7 +371,7 @@ func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *
 		t.Fatalf("expected stop END, got %#v", payload["stop"])
 	}
 	toolChoice, _ := payload["tool_choice"].(map[string]any)
-	if toolChoice["name"] != "get_weather" || toolChoice["type"] != "tool" {
+	if toolChoice["name"] != "get_weather" || toolChoice["type"] != "function" {
 		t.Fatalf("expected structured tool_choice object, got %#v", payload["tool_choice"])
 	}
 	input, _ := payload["input"].([]any)
@@ -383,6 +383,34 @@ func TestBuildRequestBodyPreservesSamplingStopImageDetailAndToolChoiceObject(t *
 	}
 	if got := image["detail"]; got != "high" {
 		t.Fatalf("expected image detail high preserved, got %#v", image)
+	}
+}
+
+func TestBuildRequestBodyMapsAnthropicToolChoiceToResponsesFunctionChoice(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		ToolChoice: model.CanonicalToolChoice{Mode: "tool", Raw: map[string]any{
+			"type": "tool",
+			"name": "lookup_project_facts",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	toolChoice, _ := payload["tool_choice"].(map[string]any)
+	if toolChoice == nil {
+		t.Fatalf("expected structured tool_choice object, got %#v", payload["tool_choice"])
+	}
+	if got, _ := toolChoice["type"].(string); got != "function" {
+		t.Fatalf("expected responses tool_choice.type=function, got %#v", payload["tool_choice"])
+	}
+	if got, _ := toolChoice["name"].(string); got != "lookup_project_facts" {
+		t.Fatalf("expected responses tool_choice.name preserved, got %#v", payload["tool_choice"])
 	}
 }
 
