@@ -127,3 +127,42 @@ func TestDecodeRequestAcceptsInputAudioContentPart(t *testing.T) {
 		t.Fatalf("expected audio format preserved, got %#v", canon.Messages[0].Parts[0])
 	}
 }
+
+func TestDecodeRequestMapsServiceTierAliasToServiceTierSnakeCase(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"serviceTier":"priority",
+		"messages":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if got, _ := canon.PreservedTopLevelFields["service_tier"].(string); got != "priority" {
+		t.Fatalf("expected service_tier mapped from serviceTier alias, got %#v", canon.PreservedTopLevelFields)
+	}
+	if _, exists := canon.PreservedTopLevelFields["serviceTier"]; exists {
+		t.Fatalf("expected serviceTier alias to be removed, got %#v", canon.PreservedTopLevelFields)
+	}
+}
+
+func TestDecodeRequestServiceTierSnakeCaseTakesPrecedenceOverAlias(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"service_tier":"flex",
+		"serviceTier":"priority",
+		"messages":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if got, _ := canon.PreservedTopLevelFields["service_tier"].(string); got != "flex" {
+		t.Fatalf("expected explicit service_tier to win over alias, got %#v", canon.PreservedTopLevelFields)
+	}
+	if _, exists := canon.PreservedTopLevelFields["serviceTier"]; exists {
+		t.Fatalf("expected serviceTier alias to be removed, got %#v", canon.PreservedTopLevelFields)
+	}
+}

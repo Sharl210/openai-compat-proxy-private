@@ -214,6 +214,13 @@ func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {
 		if _, ok := known[key]; ok {
 			continue
 		}
+		if key == "serviceTier" {
+			if _, exists := raw["service_tier"]; exists {
+				continue
+			}
+			fields["service_tier"] = value
+			continue
+		}
 		fields[key] = value
 	}
 	if len(fields) == 0 {
