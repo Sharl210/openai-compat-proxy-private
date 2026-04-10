@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/syntaxrepair"
 )
 
 type request struct {
@@ -144,7 +146,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 				ID:        tc.ID,
 				Type:      tc.Type,
 				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
+				Arguments: sanitizeToolArguments(tc.Function.Arguments),
 			})
 		}
 
@@ -158,6 +160,28 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	return canon, nil
+}
+
+func sanitizeToolArguments(arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		return arguments
+	}
+	if normalized, ok := syntaxrepair.RepairJSON(trimmed); ok {
+		return normalized
+	}
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] != '{' && trimmed[i] != '[' {
+			continue
+		}
+		if normalized, ok := syntaxrepair.RepairJSON(trimmed[i:]); ok {
+			return normalized
+		}
+	}
+	if json.Valid([]byte(trimmed)) {
+		return arguments
+	}
+	return arguments
 }
 
 func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {

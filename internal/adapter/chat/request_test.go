@@ -26,6 +26,27 @@ func TestDecodeRequestAcceptsAssistantNullContentWithToolCalls(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestSanitizesAssistantToolCallArguments(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"messages":[
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup_project_facts","arguments":"请使用 {\"project\":\"atlas\",\"focus\":\"cache\"}"}}]},
+			{"role":"tool","tool_call_id":"call_1","content":"{\"cache_state\":\"warm\"}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 2 || len(canon.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected assistant tool call preserved, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].ToolCalls[0].Arguments; got != `{"project":"atlas","focus":"cache"}` {
+		t.Fatalf("expected sanitized tool arguments, got %q", got)
+	}
+}
+
 func TestDecodeRequestAcceptsStopAsSingleString(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
