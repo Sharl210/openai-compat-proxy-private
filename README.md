@@ -257,8 +257,8 @@ http://127.0.0.1:21021/
 
 代理会在**鉴权成功**的正常请求里额外返回一组透明度响应头，用来帮助客户端确认：
 
-- 客户端实际把什么模型 / 推理强度发给了代理
-- 代理最终把什么模型 / 推理参数发给了上游
+- 客户端实际把什么模型 / 推理强度 / 服务层级发给了代理
+- 代理最终把什么模型 / 推理参数 / 服务层级发给了上游
 
 当前默认返回：
 
@@ -267,9 +267,11 @@ http://127.0.0.1:21021/
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
 | `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
+| `X-Client-To-Proxy-Service-Tier` | 客户端发给代理的原始服务层级；没有传时为空字符串 | `priority` |
 | `X-Client-To-Proxy-Reasoning-Parameters` | 客户端 → 代理这段链路里，代理按本地优先级（如 suffix 优先于请求体）处理后得到的客户端侧推理参数组；不同下游端口会保持各自协议视角 | `{"thinking":{"type":"enabled","budget_tokens":2048}}` |
 | `X-Client-To-Proxy-Reasoning-Effort` | 客户端这一侧最终体现出来的推理强度摘要，便于快速看出 `low/medium/high/xhigh` | `high` |
 | `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
+| `X-Proxy-To-Upstream-Service-Tier` | 代理最终实际发给上游的服务层级；如果 provider 配置覆写了该值，这里会显示覆写后的结果；没有值时为空字符串 | `priority` |
 | `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
 | `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
@@ -281,6 +283,7 @@ http://127.0.0.1:21021/
 - 这组透明度响应头**不需要额外配置变量**，默认直接返回。
 - `X-Client-To-Proxy-*` 关注的是**客户端 → 代理**这段链路。
 - `X-Proxy-To-Upstream-*` 关注的是**代理 → 上游**这段链路。
+- 服务层级响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置服务层级”。
 - `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
 - `X-Client-To-Proxy-Reasoning-Effort` 是客户端侧的**摘要值**；如果同一请求里模型 suffix 和请求体参数同时存在，代理会按本地优先级先决出最终强度，再把这个摘要值写进来。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
@@ -338,6 +341,19 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `web_search` 变成 `function` 后，会丢失原生 citations / sources / agentic search 语义
 
 这个字段只在 `UPSTREAM_ENDPOINT_TYPE=responses` 时生效；`function_only` 仅影响 responses-upstream 请求体构造，不会改变 chat / anthropic 上游的请求体。
+
+### 3.5 OpenAI 协议服务层级覆写
+
+每个 provider 现在还可以通过 `OPENAI_SERVICE_TIER` 控制发往 OpenAI 协议上游的服务层级：
+
+- 留空：代理不自动携带服务层级，沿用下游请求里的 `service_tier` / `serviceTier`
+- `auto` / `default` / `flex` / `priority`：忽略下游传入值，统一使用 provider 配置发往 OpenAI `responses` 或 `chat` 上游
+
+补充说明：
+
+- 这个字段仅在 `UPSTREAM_ENDPOINT_TYPE=responses` 或 `chat` 时生效
+- `Fast` 模式对应的就是 `priority`
+- 写成非法值时，provider 配置会直接校验失败，不会静默回退
 
 ### 4. 模型映射与 reasoning suffix
 
@@ -459,6 +475,7 @@ Claude 相关还有两个配套开关：
 | 非流 / timeout / retry | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`、`UPSTREAM_FIRST_BYTE_TIMEOUT`、`UPSTREAM_RETRY_COUNT`、`UPSTREAM_RETRY_DELAY` | provider 级运行时策略 |
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS` | 注入与模型能力 |
 | 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
+| OpenAI 服务层级 | `OPENAI_SERVICE_TIER` | 仅 OpenAI `responses/chat` 上游生效；留空时沿用下游传参，非空时强制覆写 |
 | 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
 
 补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；而 provider 级 Claude 注入开关留空则表示继承根配置。
