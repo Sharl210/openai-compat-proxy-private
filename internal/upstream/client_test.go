@@ -490,6 +490,53 @@ func TestBuildRequestBodyMapsChatResponseFormatToResponsesText(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBodyMapsServiceTierAliasToServiceTierSnakeCase(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		PreservedTopLevelFields: map[string]any{
+			"serviceTier": "priority",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["service_tier"].(string); got != "priority" {
+		t.Fatalf("expected service_tier to map from serviceTier, got %#v", payload["service_tier"])
+	}
+	if _, exists := payload["serviceTier"]; exists {
+		t.Fatalf("expected serviceTier alias to be removed from responses upstream payload, got %#v", payload)
+	}
+}
+
+func TestBuildRequestBodyServiceTierSnakeCaseTakesPrecedenceOverAlias(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		PreservedTopLevelFields: map[string]any{
+			"serviceTier":  "priority",
+			"service_tier": "flex",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["service_tier"].(string); got != "flex" {
+		t.Fatalf("expected explicit service_tier to win over serviceTier alias, got %#v", payload["service_tier"])
+	}
+	if _, exists := payload["serviceTier"]; exists {
+		t.Fatalf("expected serviceTier alias to be removed from responses upstream payload, got %#v", payload)
+	}
+}
+
 func TestBuildRequestBodyOmitsUsageIncludeForResponsesStreaming(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model:        "gpt-5",

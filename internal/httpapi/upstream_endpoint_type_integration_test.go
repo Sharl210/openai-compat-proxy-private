@@ -487,6 +487,38 @@ func TestChatRoutePreservesUnhandledTopLevelFieldsAcrossChatUpstream(t *testing.
 	}
 }
 
+func TestChatRouteMapsServiceTierAliasForResponsesUpstream(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","serviceTier":"priority","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["service_tier"].(string); got != "priority" {
+		t.Fatalf("expected service_tier mapped from serviceTier alias, got %#v body=%s", payload["service_tier"], gotBody)
+	}
+	if _, exists := payload["serviceTier"]; exists {
+		t.Fatalf("expected serviceTier alias to be removed from upstream payload, got %#v body=%s", payload, gotBody)
+	}
+}
+
 func TestAnthropicRoutePreservesUnhandledTopLevelFieldsAcrossAnthropicUpstream(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

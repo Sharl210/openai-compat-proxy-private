@@ -965,6 +965,13 @@ func mergeResponsesPreservedTopLevelFields(payload map[string]any, fields map[st
 	}
 	for key, value := range fields {
 		switch key {
+		case "serviceTier":
+			if _, exists := fields["service_tier"]; exists {
+				continue
+			}
+			if _, exists := payload["service_tier"]; !exists {
+				payload["service_tier"] = cloneJSONValue(value)
+			}
 		case "output_config":
 			if _, exists := payload["text"]; !exists {
 				if mapped := normalizeResponsesTextPayloadFromOutputConfig(value); mapped != nil {
