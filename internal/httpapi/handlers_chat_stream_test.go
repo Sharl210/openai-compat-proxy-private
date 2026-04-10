@@ -229,6 +229,45 @@ func TestChatStreamBuffersToolArgumentsUntilMetadataArrives(t *testing.T) {
 	}
 }
 
+func TestChatStreamUnexpectedEOFFlushesPendingToolArgumentsBeforeError(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"tool_calls":[{"function":{"arguments":"{\"city\":\"Shanghai\"}","name":"get_weather"},"id":"call_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected pending tool arguments flushed before EOF error, got %s", body)
+	}
+	if !strings.Contains(body, `"delta":{"error":{"health_flag":"upstreamStreamBroken","message":"unexpected EOF"}}`) {
+		t.Fatalf("expected EOF to remain a protocol error after flushing tool arguments, got %s", body)
+	}
+}
+
 func TestChatStreamDoesNotKeepToolCallsFinishReasonAfterLaterText(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
