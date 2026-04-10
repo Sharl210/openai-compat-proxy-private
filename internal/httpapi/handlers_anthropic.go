@@ -53,6 +53,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
@@ -61,7 +62,8 @@ func handleAnthropicMessages() http.HandlerFunc {
 		}
 		applyProviderSystemPrompt(&canon, provider)
 		normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
-		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningParameters, clientReasoningEffort); err != nil {
+		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}

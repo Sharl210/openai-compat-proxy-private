@@ -360,6 +360,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		return nil, false
 	}
 	client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+	clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 	clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
@@ -375,7 +376,8 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	canon.Messages = prepareCanonicalMessages(canon.Messages)
 	applyProviderSystemPrompt(&canon, provider)
 	normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
-	if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientReasoningParameters, clientReasoningEffort); err != nil {
+	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+	if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return nil, false
 	}

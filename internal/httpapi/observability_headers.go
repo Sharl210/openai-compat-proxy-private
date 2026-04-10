@@ -12,10 +12,12 @@ import (
 
 const (
 	headerClientToProxyModel                 = "X-Client-To-Proxy-Model"
+	headerClientToProxyServiceTier           = "X-Client-To-Proxy-Service-Tier"
 	headerClientToProxyReasoningParameters   = "X-Client-To-Proxy-Reasoning-Parameters"
 	headerClientToProxyReasoningEffort       = "X-Client-To-Proxy-Reasoning-Effort"
 	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
+	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
 	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
 )
 
@@ -137,7 +139,55 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	}
 }
 
-func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientReasoningParameters string, clientReasoningEffort string) error {
+func serviceTierFromTopLevelFields(fields map[string]any) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	if value, ok := fields["service_tier"]; ok {
+		if text, ok := value.(string); ok {
+			return strings.TrimSpace(text)
+		}
+	}
+	if value, ok := fields["serviceTier"]; ok {
+		if text, ok := value.(string); ok {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
+}
+
+func applyProviderOpenAIServiceTierOverride(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) {
+	if canon == nil {
+		return
+	}
+	if strings.TrimSpace(provider.OpenAIServiceTier) == "" {
+		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeChat {
+			return
+		}
+		if canon.PreservedTopLevelFields == nil {
+			return
+		}
+		if _, exists := canon.PreservedTopLevelFields["service_tier"]; exists {
+			delete(canon.PreservedTopLevelFields, "serviceTier")
+			return
+		}
+		if alias, exists := canon.PreservedTopLevelFields["serviceTier"]; exists {
+			delete(canon.PreservedTopLevelFields, "serviceTier")
+			canon.PreservedTopLevelFields["service_tier"] = alias
+		}
+		return
+	}
+	if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeChat {
+		return
+	}
+	if canon.PreservedTopLevelFields == nil {
+		canon.PreservedTopLevelFields = map[string]any{}
+	}
+	delete(canon.PreservedTopLevelFields, "serviceTier")
+	canon.PreservedTopLevelFields["service_tier"] = provider.OpenAIServiceTier
+}
+
+func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
 	preview, err := upstream.PreviewRequestObservability(canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
 	if err != nil {
 		return err
@@ -145,6 +195,7 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg confi
 	if value := strings.TrimSpace(clientModel); value != "" {
 		w.Header().Set(headerClientToProxyModel, value)
 	}
+	w.Header().Set(headerClientToProxyServiceTier, strings.TrimSpace(clientServiceTier))
 	if value := strings.TrimSpace(clientReasoningParameters); value != "" {
 		w.Header().Set(headerClientToProxyReasoningParameters, value)
 	}
@@ -154,6 +205,7 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg confi
 	if value := strings.TrimSpace(preview.UpstreamModel); value != "" {
 		w.Header().Set(headerProxyToUpstreamModel, value)
 	}
+	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if value := strings.TrimSpace(preview.ReasoningParameters); value != "" {
 		w.Header().Set(headerProxyToUpstreamReasoningParameters, value)
 	}
@@ -168,9 +220,11 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		"X-Provider-Version",
 		"X-SYSTEM-PROMPT-ATTACH",
 		headerClientToProxyModel,
+		headerClientToProxyServiceTier,
 		headerClientToProxyReasoningParameters,
 		headerClientToProxyReasoningEffort,
 		headerProxyToUpstreamModel,
+		headerProxyToUpstreamServiceTier,
 		headerProxyToUpstreamReasoningParameters,
 	} {
 		w.Header().Del(header)
