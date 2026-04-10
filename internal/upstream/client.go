@@ -38,6 +38,7 @@ type Client struct {
 
 type RequestObservabilityPreview struct {
 	UpstreamModel       string
+	UpstreamServiceTier string
 	ReasoningParameters string
 }
 
@@ -409,6 +410,11 @@ func requestObservabilityPreviewFromBody(body []byte) (RequestObservabilityPrevi
 	preview := RequestObservabilityPreview{}
 	if modelName, _ := payload["model"].(string); modelName != "" {
 		preview.UpstreamModel = modelName
+	}
+	if serviceTier := strings.TrimSpace(stringValue(payload["service_tier"])); serviceTier != "" {
+		preview.UpstreamServiceTier = serviceTier
+	} else if serviceTier := strings.TrimSpace(stringValue(payload["serviceTier"])); serviceTier != "" {
+		preview.UpstreamServiceTier = serviceTier
 	}
 	reasoningPayload := map[string]any{}
 	for _, key := range []string{"reasoning", "reasoning_effort", "thinking", "output_config"} {

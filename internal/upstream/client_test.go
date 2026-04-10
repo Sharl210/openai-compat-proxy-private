@@ -1776,14 +1776,18 @@ func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testin
 
 func TestPreviewRequestObservabilityForResponses(t *testing.T) {
 	preview, err := PreviewRequestObservability(model.CanonicalRequest{
-		Model:     "gpt-5-mini",
-		Reasoning: &model.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
+		Model:                   "gpt-5-mini",
+		PreservedTopLevelFields: map[string]any{"service_tier": "priority"},
+		Reasoning:               &model.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
 	}, config.UpstreamEndpointTypeResponses, "", false, false)
 	if err != nil {
 		t.Fatalf("PreviewRequestObservability error: %v", err)
 	}
 	if preview.UpstreamModel != "gpt-5-mini" {
 		t.Fatalf("expected upstream model gpt-5-mini, got %#v", preview)
+	}
+	if preview.UpstreamServiceTier != "priority" {
+		t.Fatalf("expected upstream service tier priority, got %#v", preview)
 	}
 	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
 }
@@ -1798,6 +1802,9 @@ func TestPreviewRequestObservabilityForChat(t *testing.T) {
 	}
 	if preview.UpstreamModel != "gpt-5-mini" {
 		t.Fatalf("expected upstream model gpt-5-mini, got %#v", preview)
+	}
+	if preview.UpstreamServiceTier != "" {
+		t.Fatalf("expected empty upstream service tier, got %#v", preview)
 	}
 	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
 }
@@ -1814,7 +1821,23 @@ func TestPreviewRequestObservabilityForAnthropic(t *testing.T) {
 	if preview.UpstreamModel != "claude-sonnet-4-5" {
 		t.Fatalf("expected upstream model claude-sonnet-4-5, got %#v", preview)
 	}
+	if preview.UpstreamServiceTier != "" {
+		t.Fatalf("expected empty upstream service tier, got %#v", preview)
+	}
 	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}})
+}
+
+func TestPreviewRequestObservabilityReadsServiceTierAlias(t *testing.T) {
+	preview, err := PreviewRequestObservability(model.CanonicalRequest{
+		Model:                   "gpt-5-mini",
+		PreservedTopLevelFields: map[string]any{"serviceTier": "flex"},
+	}, config.UpstreamEndpointTypeResponses, "", false, false)
+	if err != nil {
+		t.Fatalf("PreviewRequestObservability error: %v", err)
+	}
+	if preview.UpstreamServiceTier != "flex" {
+		t.Fatalf("expected upstream service tier flex from alias, got %#v", preview)
+	}
 }
 
 func TestPreviewRequestObservabilityForAdaptiveAnthropicThinkingIncludesOutputConfig(t *testing.T) {
