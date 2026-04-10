@@ -916,6 +916,91 @@ func TestRunLiveCacheChatScenarioDirectRetriesStructuredToolChoiceWhenRequiredDo
 	}
 }
 
+func TestRunLiveCacheChatScenarioDirectRetriesStructuredToolChoiceMoreThanOnce(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if requestCount == 1 {
+			if got, _ := payload["tool_choice"].(string); got != "required" {
+				t.Fatalf("expected first direct chat request to use tool_choice=required, got %#v", payload["tool_choice"])
+			}
+		} else {
+			toolChoice, _ := payload["tool_choice"].(map[string]any)
+			if toolChoice == nil {
+				t.Fatalf("expected structured tool_choice on retry %d, got %#v", requestCount, payload["tool_choice"])
+			}
+			if got, _ := toolChoice["type"].(string); got != "function" {
+				t.Fatalf("expected retry tool_choice.type=function on retry %d, got %#v", requestCount, payload["tool_choice"])
+			}
+		}
+		if requestCount < 3 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "我先直接回答，不走工具。",
+					},
+				}},
+				"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]any{
+					"role": "assistant",
+					"tool_calls": []map[string]any{{
+						"id":   "call-1",
+						"type": "function",
+						"function": map[string]any{
+							"name":      "lookup_project_facts",
+							"arguments": `{"project":"atlas","focus":"cache"}`,
+						},
+					}},
+				},
+			}},
+			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13},
+		})
+	}))
+	defer server.Close()
+
+	cfg := liveCacheRuntimeConfig{Timeout: 5 * time.Second}
+	spec := liveCacheProviderSpec{Label: config.UpstreamEndpointTypeChat, ProviderID: "chat", Model: "MiniMax-M2.7", DirectBaseURL: server.URL, DirectAPIKey: "direct-key"}
+	binding := liveCacheScenarioBinding{
+		ExecutionPath:   liveCacheExecutionPathDirect,
+		CanonicalDigest: "canon-chat-retry-twice",
+		Scenario: liveCacheScenarioSpec{
+			Round:    1,
+			Upstream: config.UpstreamEndpointTypeChat,
+			ToolName: "lookup_project_facts",
+			Turns: []liveCacheScenarioTurn{{
+				Number:         1,
+				InputText:      strings.Repeat("a", liveCacheTurnOneMinInputChars),
+				MinInputChars:  liveCacheTurnOneMinInputChars,
+				ExpectToolCall: true,
+			}},
+		},
+	}
+
+	observations, err := runLiveCacheChatScenario(server.Client(), cfg, "chat", spec, binding)
+	if err != nil {
+		t.Fatalf("runLiveCacheChatScenario returned error: %v", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected retry path to issue three requests, got %d", requestCount)
+	}
+	if len(observations) != 1 {
+		t.Fatalf("expected one observation, got %d", len(observations))
+	}
+	if !observations[0].HasToolCall {
+		t.Fatalf("expected repeated retry path to capture tool call, got %#v", observations[0])
+	}
+}
+
 func TestRunLiveCacheChatScenarioDirectSanitizesAssistantToolArgumentsBeforeFollowUp(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2245,25 +2330,24 @@ func runLiveCacheChatScenario(client *http.Client, cfg liveCacheRuntimeConfig, d
 }
 
 func requestLiveCacheChatTurnOne(client *http.Client, cfg liveCacheRuntimeConfig, spec liveCacheProviderSpec, binding liveCacheScenarioBinding, scenario liveCacheScenarioSpec, payload map[string]any) (map[string]any, []byte, error) {
-	body, err := sendLiveCacheJSONRequest(client, cfg, spec, binding, "chat/completions", payload, nil)
-	if err != nil {
-		return payload, nil, err
+	currentPayload := cloneLiveCacheMap(payload)
+	for attempt := 0; attempt < 3; attempt++ {
+		body, err := sendLiveCacheJSONRequest(client, cfg, spec, binding, "chat/completions", currentPayload, nil)
+		if err != nil {
+			return currentPayload, nil, err
+		}
+		if !shouldRetryLiveCacheDirectChatTurnOne(binding, spec, body) || attempt == 2 {
+			return currentPayload, body, nil
+		}
+		currentPayload = cloneLiveCacheMap(currentPayload)
+		currentPayload["tool_choice"] = map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": scenario.ToolName,
+			},
+		}
 	}
-	if !shouldRetryLiveCacheDirectChatTurnOne(binding, spec, body) {
-		return payload, body, nil
-	}
-	retryPayload := cloneLiveCacheMap(payload)
-	retryPayload["tool_choice"] = map[string]any{
-		"type": "function",
-		"function": map[string]any{
-			"name": scenario.ToolName,
-		},
-	}
-	retryBody, err := sendLiveCacheJSONRequest(client, cfg, spec, binding, "chat/completions", retryPayload, nil)
-	if err != nil {
-		return retryPayload, nil, err
-	}
-	return retryPayload, retryBody, nil
+	return currentPayload, nil, fmt.Errorf("chat turn1 exhausted retry budget without tool call")
 }
 
 func shouldRetryLiveCacheDirectChatTurnOne(binding liveCacheScenarioBinding, spec liveCacheProviderSpec, body []byte) bool {
