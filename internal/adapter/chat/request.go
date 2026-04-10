@@ -167,14 +167,14 @@ func sanitizeToolArguments(arguments string) string {
 	if trimmed == "" {
 		return arguments
 	}
-	if normalized, ok := syntaxrepair.RepairJSON(trimmed); ok {
+	if normalized, ok := normalizeToolArgumentsJSON(trimmed); ok {
 		return normalized
 	}
 	for i := 0; i < len(trimmed); i++ {
 		if trimmed[i] != '{' && trimmed[i] != '[' {
 			continue
 		}
-		if normalized, ok := syntaxrepair.RepairJSON(trimmed[i:]); ok {
+		if normalized, ok := normalizeToolArgumentsJSON(trimmed[i:]); ok {
 			return normalized
 		}
 	}
@@ -182,6 +182,23 @@ func sanitizeToolArguments(arguments string) string {
 		return arguments
 	}
 	return arguments
+}
+
+func normalizeToolArgumentsJSON(raw string) (string, bool) {
+	if normalized, ok := syntaxrepair.RepairJSON(raw); ok {
+		return normalized, true
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", false
+	}
+	normalized, err := json.Marshal(value)
+	if err != nil {
+		return "", false
+	}
+	return string(normalized), true
 }
 
 func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {

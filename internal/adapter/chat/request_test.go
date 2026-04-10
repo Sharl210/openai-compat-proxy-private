@@ -47,6 +47,27 @@ func TestDecodeRequestSanitizesAssistantToolCallArguments(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestSanitizesAssistantToolCallArgumentsWithTrailingGarbage(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"messages":[
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup_project_facts","arguments":"{\"focus\": \"cache\", \"project\": \"atlas\"}\"}"}}]},
+			{"role":"tool","tool_call_id":"call_1","content":"{\"cache_state\":\"warm\"}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 2 || len(canon.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected assistant tool call preserved, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].ToolCalls[0].Arguments; got != `{"focus":"cache","project":"atlas"}` {
+		t.Fatalf("expected trailing garbage to be stripped from tool arguments, got %q", got)
+	}
+}
+
 func TestDecodeRequestAcceptsStopAsSingleString(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
