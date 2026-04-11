@@ -744,12 +744,95 @@ func TestAnthropicUpstreamUsagePreservedInResponsesNonStream(t *testing.T) {
 		t.Fatalf("expected usage field, got body=%s", rec.Body.String())
 	}
 
-	// Anthropic uses input_tokens / output_tokens naming
-	if got, _ := usage["input_tokens"].(float64); got != 200 {
-		t.Fatalf("expected input_tokens=200 from anthropic, got %v body=%s", got, rec.Body.String())
+	// Canonical usage should normalize anthropic diff input into OpenAI-style total input.
+	if got, _ := usage["input_tokens"].(float64); got != 350 {
+		t.Fatalf("expected normalized input_tokens=350 from anthropic upstream, got %v body=%s", got, rec.Body.String())
 	}
 	if got, _ := usage["output_tokens"].(float64); got != 100 {
 		t.Fatalf("expected output_tokens=100 from anthropic, got %v body=%s", got, rec.Body.String())
+	}
+	inputDetails, _ := usage["input_tokens_details"].(map[string]any)
+	if got, _ := inputDetails["cached_tokens"].(float64); got != 100 {
+		t.Fatalf("expected cached_tokens=100 from anthropic upstream, got %v body=%s", got, rec.Body.String())
+	}
+	if got, _ := inputDetails["cache_creation_tokens"].(float64); got != 50 {
+		t.Fatalf("expected cache_creation_tokens=50 from anthropic upstream, got %v body=%s", got, rec.Body.String())
+	}
+}
+
+func TestChatUpstreamUsageConvertsToAnthropicDiffInputInMessagesNonStream(t *testing.T) {
+	chatResponse := `{
+		"id": "chatcmpl_123",
+		"object": "chat.completion",
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"content": "hello"
+			},
+			"finish_reason": "stop"
+		}],
+		"usage": {
+			"prompt_tokens": 100,
+			"completion_tokens": 50,
+			"total_tokens": 150,
+			"prompt_tokens_details": {"cached_tokens": 30, "cache_creation_tokens": 20}
+		}
+	}`
+	upstream := newChatFormatUpstream(t, chatResponse)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeChat,
+			SupportsResponses:         true,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model": "claude-sonnet-4-5",
+		"max_tokens": 128,
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	usage, _ := resp["usage"].(map[string]any)
+	if usage == nil {
+		t.Fatalf("expected usage field, got body=%s", rec.Body.String())
+	}
+	if got, _ := usage["input_tokens"].(float64); got != 50 {
+		t.Fatalf("expected anthropic diff input_tokens=50, got %v body=%s", got, rec.Body.String())
+	}
+	if got, _ := usage["cache_read_input_tokens"].(float64); got != 30 {
+		t.Fatalf("expected cache_read_input_tokens=30, got %v body=%s", got, rec.Body.String())
+	}
+	if got, _ := usage["cache_creation_input_tokens"].(float64); got != 20 {
+		t.Fatalf("expected cache_creation_input_tokens=20, got %v body=%s", got, rec.Body.String())
+	}
+	if got, _ := usage["output_tokens"].(float64); got != 50 {
+		t.Fatalf("expected output_tokens=50, got %v body=%s", got, rec.Body.String())
 	}
 }
 

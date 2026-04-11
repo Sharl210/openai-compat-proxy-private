@@ -2056,8 +2056,8 @@ func TestStreamUsesAnthropicEndpointPrefersFinalUsageOverMessageStartZeroes(t *t
 	// Usage is now wrapped inside response object (unified format)
 	response, _ := completed.Data["response"].(map[string]any)
 	usage, _ := response["usage"].(map[string]any)
-	if got := usage["input_tokens"]; got != float64(12) {
-		t.Fatalf("expected final anthropic usage.input_tokens 12, got %#v events=%#v", got, events)
+	if got := usage["input_tokens"]; got != float64(17) {
+		t.Fatalf("expected final anthropic usage.input_tokens 17, got %#v events=%#v", got, events)
 	}
 	if got := usage["output_tokens"]; got != float64(7) {
 		t.Fatalf("expected final anthropic usage.output_tokens 7, got %#v events=%#v", got, events)

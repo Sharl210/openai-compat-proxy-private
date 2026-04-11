@@ -358,10 +358,10 @@ func TestParity_UsageFields(t *testing.T) {
 		t.Errorf("[chat] prompt_tokens_details.cached_tokens = %#v, want 50", chatDetails["cached_tokens"])
 	}
 
-	// Anthropic: usage.input_tokens = input_tokens
+	// Anthropic: input_tokens 应该是总输入扣掉缓存读写后的差值
 	anthropicUsage := anthropicResp["usage"].(map[string]any)
-	if anthropicUsage["input_tokens"] != 100 {
-		t.Errorf("[anthropic] input_tokens = %#v, want 100", anthropicUsage["input_tokens"])
+	if anthropicUsage["input_tokens"] != float64(25) {
+		t.Errorf("[anthropic] input_tokens = %#v, want 25", anthropicUsage["input_tokens"])
 	}
 	if anthropicUsage["output_tokens"] != 20 {
 		t.Errorf("[anthropic] output_tokens = %#v, want 20", anthropicUsage["output_tokens"])
