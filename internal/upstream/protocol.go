@@ -845,14 +845,17 @@ func normalizeAnthropicUsage(raw any) map[string]any {
 	result := map[string]any{}
 	input := numberValue(usage["input_tokens"])
 	output := numberValue(usage["output_tokens"])
-	if input != 0 {
-		result["input_tokens"] = input
+	cached := numberValue(usage["cache_read_input_tokens"])
+	created := numberValue(usage["cache_creation_input_tokens"])
+	totalInput := input + cached + created
+	if totalInput != 0 {
+		result["input_tokens"] = totalInput
 	}
 	if output != 0 {
 		result["output_tokens"] = output
 	}
-	if input != 0 || output != 0 {
-		result["total_tokens"] = input + output
+	if totalInput != 0 || output != 0 {
+		result["total_tokens"] = totalInput + output
 	}
 	details := map[string]any{}
 	if cached := usage["cache_read_input_tokens"]; cached != nil {

@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestNormalizeAnthropicUsageConvertsDiffInputToCanonicalTotals(t *testing.T) {
+	usage := normalizeAnthropicUsage(map[string]any{
+		"input_tokens":                20,
+		"output_tokens":               5,
+		"cache_read_input_tokens":     6,
+		"cache_creation_input_tokens": 4,
+	})
+	if got := usage["input_tokens"]; got != float64(30) {
+		t.Fatalf("expected canonical total input_tokens 30, got %#v", got)
+	}
+	if got := usage["total_tokens"]; got != float64(35) {
+		t.Fatalf("expected canonical total_tokens 35, got %#v", got)
+	}
+	details, _ := usage["input_tokens_details"].(map[string]any)
+	if got := details["cached_tokens"]; got != 6 {
+		t.Fatalf("expected cached_tokens 6, got %#v", got)
+	}
+	if got := details["cache_creation_tokens"]; got != 4 {
+		t.Fatalf("expected cache_creation_tokens 4, got %#v", got)
+	}
+}
+
 func TestNormalizeAnthropicFrame_TextOnly(t *testing.T) {
 	frames := []struct {
 		event string
