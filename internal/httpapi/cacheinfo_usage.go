@@ -73,7 +73,7 @@ func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*
 	if !hasValues {
 		return nil, false
 	}
-	if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+	if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic && anthropicUsageNeedsTotalNormalization(usage) {
 		parsed.InputTokens += parsed.CachedTokens + parsed.CacheCreationTokens
 	}
 	if parsed.TotalTokens == 0 {
@@ -81,10 +81,26 @@ func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*
 		if sum > 0 {
 			parsed.TotalTokens = sum
 		}
-	} else if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+	} else if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic && anthropicUsageNeedsTotalNormalization(usage) {
 		parsed.TotalTokens = parsed.InputTokens + parsed.OutputTokens
 	}
 	return parsed, true
+}
+
+func anthropicUsageNeedsTotalNormalization(usage map[string]any) bool {
+	if len(usage) == 0 {
+		return false
+	}
+	hasTopLevelAnthropicCache := usage["cache_read_input_tokens"] != nil || usage["cache_creation_input_tokens"] != nil
+	if !hasTopLevelAnthropicCache {
+		return false
+	}
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if details["cached_tokens"] != nil || details["cache_creation_tokens"] != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func cachedTokensFromUsage(usage map[string]any) (int64, bool) {

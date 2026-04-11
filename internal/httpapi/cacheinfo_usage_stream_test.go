@@ -309,3 +309,24 @@ func TestCacheInfoUsageRecorderNormalizesAnthropicUsagePerRequest(t *testing.T) 
 		t.Fatalf("expected anthropic cached and cache-creation tokens preserved, got %#v", stats.Today)
 	}
 }
+
+func TestCacheInfoUsageFromMapKeepsCanonicalAnthropicTotalsStable(t *testing.T) {
+	parsed, ok := cacheInfoUsageFromMap(map[string]any{
+		"input_tokens":  30,
+		"output_tokens": 5,
+		"total_tokens":  35,
+		"input_tokens_details": map[string]any{
+			"cached_tokens":         6,
+			"cache_creation_tokens": 4,
+		},
+	}, config.UpstreamEndpointTypeAnthropic)
+	if !ok {
+		t.Fatalf("expected canonical anthropic usage shape to parse")
+	}
+	if parsed.InputTokens != 30 || parsed.OutputTokens != 5 || parsed.TotalTokens != 35 {
+		t.Fatalf("expected canonical anthropic totals to remain stable, got %#v", parsed)
+	}
+	if parsed.CachedTokens != 6 || parsed.CacheCreationTokens != 4 {
+		t.Fatalf("expected anthropic cache fields preserved, got %#v", parsed)
+	}
+}
