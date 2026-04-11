@@ -86,7 +86,22 @@ func reasoningContentValue(reasoning map[string]any) string {
 func mapUsage(usage map[string]any) map[string]any {
 	out := map[string]any{}
 	if input, ok := usage["input_tokens"]; ok {
-		out["input_tokens"] = input
+		anthropicInput := input
+		if total, ok := usageNumberAsFloat(input); ok {
+			cachedTotal := 0.0
+			if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+				if cached, ok := usageNumberAsFloat(details["cached_tokens"]); ok {
+					cachedTotal += cached
+				}
+				if created, ok := usageNumberAsFloat(details["cache_creation_tokens"]); ok {
+					cachedTotal += created
+				}
+			}
+			if diff := total - cachedTotal; diff >= 0 {
+				anthropicInput = diff
+			}
+		}
+		out["input_tokens"] = anthropicInput
 	}
 	if output, ok := usage["output_tokens"]; ok {
 		out["output_tokens"] = output

@@ -4,25 +4,25 @@ import "testing"
 
 import "openai-compat-proxy/internal/aggregate"
 
-func TestMapUsageIncludesCacheCreationAndReadTokens(t *testing.T) {
+func TestMapUsageConvertsCanonicalTotalInputToAnthropicDiffInput(t *testing.T) {
 	usage := map[string]any{
-		"input_tokens":  66000,
+		"input_tokens":  100,
 		"output_tokens": 12,
 		"input_tokens_details": map[string]any{
-			"cached_tokens":         33000,
-			"cache_creation_tokens": 33000,
+			"cached_tokens":         30,
+			"cache_creation_tokens": 20,
 		},
 	}
 
 	mapped := mapUsage(usage)
-	if got := mapped["input_tokens"]; got != 66000 {
-		t.Fatalf("expected raw input_tokens 66000, got %#v", got)
+	if got := mapped["input_tokens"]; got != float64(50) {
+		t.Fatalf("expected anthropic diff input_tokens 50, got %#v", got)
 	}
-	if got := mapped["cache_read_input_tokens"]; got != 33000 {
-		t.Fatalf("expected cache_read_input_tokens 33000, got %#v", got)
+	if got := mapped["cache_read_input_tokens"]; got != 30 {
+		t.Fatalf("expected cache_read_input_tokens 30, got %#v", got)
 	}
-	if got := mapped["cache_creation_input_tokens"]; got != 33000 {
-		t.Fatalf("expected cache_creation_input_tokens 33000, got %#v", got)
+	if got := mapped["cache_creation_input_tokens"]; got != 20 {
+		t.Fatalf("expected cache_creation_input_tokens 20, got %#v", got)
 	}
 }
 
