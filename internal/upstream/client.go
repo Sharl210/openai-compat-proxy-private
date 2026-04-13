@@ -1153,6 +1153,9 @@ func inferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
 	if effort := anthropicOutputEffortToReasoningEffort(thinking); effort != "" {
 		return effort
 	}
+	if stringValue(thinking["type"]) == "adaptive" {
+		return "medium"
+	}
 	budget := intFromAny(thinking["budget_tokens"])
 	if budget <= 0 {
 		return ""

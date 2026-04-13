@@ -1736,6 +1736,53 @@ func TestBuildChatRequestBodyMapsAnthropicThinkingToChatReasoning(t *testing.T) 
 	}
 }
 
+func TestBuildRequestBodyMapsAnthropicAdaptiveThinkingToResponsesReasoning(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "adaptive"}}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "medium" {
+		t.Fatalf("expected anthropic adaptive thinking to map to medium effort, got %#v", payload)
+	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("expected summary auto, got %#v", payload)
+	}
+}
+
+func TestBuildChatRequestBodyMapsAnthropicAdaptiveThinkingToChatReasoning(t *testing.T) {
+	body, err := buildChatRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "adaptive"}}},
+	})
+	if err != nil {
+		t.Fatalf("buildChatRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "medium" {
+		t.Fatalf("expected anthropic adaptive thinking to map to medium effort, got %#v", payload)
+	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("expected summary auto, got %#v", payload)
+	}
+	if _, exists := payload["reasoning_effort"]; exists {
+		t.Fatalf("expected mapped chat payload to use reasoning object instead of reasoning_effort, got %#v", payload)
+	}
+}
+
 func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testing.T) {
 	body, err := buildChatRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
