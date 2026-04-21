@@ -93,7 +93,7 @@ func TestLegacyMessagesRouteChoosesProviderByExactModelOwner(t *testing.T) {
 	}
 }
 
-func TestLegacyMessagesRouteRejectsContextManagementForResponsesUpstream(t *testing.T) {
+func TestLegacyMessagesRouteDropsContextManagementForResponsesUpstream(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -107,9 +107,11 @@ func TestLegacyMessagesRouteRejectsContextManagementForResponsesUpstream(t *test
 
 	server.ServeHTTP(rec, req)
 
-	assertErrorResponse(t, rec, http.StatusBadRequest, "invalid_request", "context_management requires an anthropic messages upstream endpoint")
-	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit when context_management targets unsupported upstream, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if alpha.Hits() != 1 || beta.Hits() != 0 {
+		t.Fatalf("expected only alpha upstream hit after dropping context_management, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
 	}
 }
 
