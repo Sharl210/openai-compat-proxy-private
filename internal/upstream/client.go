@@ -806,7 +806,7 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		"model":  req.Model,
 		"stream": req.Stream,
 	}
-	mergeResponsesPreservedTopLevelFields(payload, req.PreservedTopLevelFields)
+	mergeResponsesPreservedTopLevelFields(payload, filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeResponses))
 	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
 	mergeResponsesPreservedTopLevelFields(payload, preservedTopLevelFields)
 	if req.Temperature != nil {

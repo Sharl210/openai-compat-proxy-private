@@ -1471,17 +1471,20 @@ func TestResponseUsesAnthropicEndpointAddsContextManagementBetaHeader(t *testing
 	}
 }
 
-func TestBuildResponsesRequestBodyRejectsContextManagement(t *testing.T) {
-	_, err := buildResponsesRequestBody(model.CanonicalRequest{
+func TestBuildResponsesRequestBodyDropsContextManagement(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
 		Model:                   "gpt-5",
 		PreservedTopLevelFields: map[string]any{"context_management": map[string]any{"edits": []any{map[string]any{"type": "clear_thinking_20251015"}}}},
 	}, config.ResponsesToolCompatModePreserve)
-	if err == nil {
-		t.Fatalf("expected context_management to be rejected for responses upstream")
+	if err != nil {
+		t.Fatalf("expected context_management to be dropped for responses upstream, got %v", err)
 	}
-	var validationErr *RequestValidationError
-	if !errors.As(err, &validationErr) {
-		t.Fatalf("expected RequestValidationError, got %T", err)
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["context_management"]; exists {
+		t.Fatalf("expected responses upstream payload to drop context_management, got %#v", payload)
 	}
 }
 

@@ -199,9 +199,6 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 }
 
 func validateRequestForEndpoint(req model.CanonicalRequest, endpointType string) error {
-	if _, ok := req.PreservedTopLevelFields["context_management"]; ok && normalizeEndpointType(endpointType) != config.UpstreamEndpointTypeAnthropic {
-		return &RequestValidationError{Message: "context_management requires an anthropic messages upstream endpoint"}
-	}
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
 		_, err := anthropicBetaHeaderForRequest(req)
 		return err
@@ -251,11 +248,24 @@ func filteredPreservedTopLevelFieldsForEndpoint(fields map[string]any, endpointT
 	}
 	normalizedEndpointType := normalizeEndpointType(endpointType)
 	if normalizedEndpointType == config.UpstreamEndpointTypeResponses {
-		return fields
+		if !isAnthropicOnlyTopLevelField("context_management", normalizedEndpointType) {
+			return fields
+		}
+		filtered := map[string]any{}
+		for key, value := range fields {
+			if isAnthropicOnlyTopLevelField(key, normalizedEndpointType) {
+				continue
+			}
+			filtered[key] = value
+		}
+		if len(filtered) == 0 {
+			return nil
+		}
+		return filtered
 	}
 	filtered := map[string]any{}
 	for key, value := range fields {
-		if isResponsesOnlyTopLevelField(key, normalizedEndpointType) {
+		if isResponsesOnlyTopLevelField(key, normalizedEndpointType) || isAnthropicOnlyTopLevelField(key, normalizedEndpointType) {
 			continue
 		}
 		filtered[key] = value
@@ -264,6 +274,15 @@ func filteredPreservedTopLevelFieldsForEndpoint(fields map[string]any, endpointT
 		return nil
 	}
 	return filtered
+}
+
+func isAnthropicOnlyTopLevelField(key string, endpointType string) bool {
+	switch key {
+	case "context_management":
+		return endpointType != config.UpstreamEndpointTypeAnthropic
+	default:
+		return false
+	}
 }
 
 func isResponsesOnlyTopLevelField(key string, endpointType string) bool {
