@@ -27,6 +27,15 @@ func writeUpstreamError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+func writeRequestValidationError(w http.ResponseWriter, err error) bool {
+	var validationErr *upstream.RequestValidationError
+	if !errors.As(err, &validationErr) {
+		return false
+	}
+	errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", validationErr.Error())
+	return true
+}
+
 func detectRawErrorContentType(body []byte) string {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {

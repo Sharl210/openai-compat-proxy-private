@@ -59,6 +59,9 @@ func handleChat() http.HandlerFunc {
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		}
 		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+			if writeRequestValidationError(w, err) {
+				return
+			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
@@ -91,6 +94,9 @@ func handleChat() http.HandlerFunc {
 		if canon.Stream {
 			stream, err := client.OpenEventStreamLazy(ctx, canon, authorization)
 			if err != nil {
+				if writeRequestValidationError(w, err) {
+					return
+				}
 				if isUpstreamTimeout(err, ctx) {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
@@ -121,6 +127,9 @@ func handleChat() http.HandlerFunc {
 		if providerCfg.DownstreamNonStreamStrategy == config.DownstreamNonStreamStrategyUpstreamNonStream {
 			payload, err := client.Response(ctx, canon, authorization)
 			if err != nil {
+				if writeRequestValidationError(w, err) {
+					return
+				}
 				if isUpstreamTimeout(err, ctx) {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
@@ -153,6 +162,9 @@ func handleChat() http.HandlerFunc {
 
 		events, err := client.Stream(ctx, canon, authorization)
 		if err != nil {
+			if writeRequestValidationError(w, err) {
+				return
+			}
 			if isUpstreamTimeout(err, ctx) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return

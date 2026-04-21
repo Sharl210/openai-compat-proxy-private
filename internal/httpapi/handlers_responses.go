@@ -378,6 +378,9 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
 	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 	if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if writeRequestValidationError(w, err) {
+			return nil, false
+		}
 		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return nil, false
 	}
