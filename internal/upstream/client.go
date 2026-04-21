@@ -208,6 +208,10 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	if err != nil {
 		return nil, err
 	}
+	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
+	if err != nil {
+		return nil, err
+	}
 	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
@@ -223,7 +227,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
 	allowEOFCompletion := normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeChat && !req.Stream
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, true, allowEOFCompletion)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, originalToolIDs, true, allowEOFCompletion)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -309,6 +313,10 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 	if err != nil {
 		return nil, err
 	}
+	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
+	if err != nil {
+		return nil, err
+	}
 	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
@@ -327,7 +335,7 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, originalToolIDs, primeFirstEvent, false)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, originalToolIDs, primeFirstEvent, false)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -351,6 +359,10 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 	if err != nil {
 		return nil, err
 	}
+	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
+	if err != nil {
+		return nil, err
+	}
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"model":         req.Model,
@@ -364,7 +376,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization, compact)
+	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, compact)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -456,7 +468,7 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 }
 
 func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, nil, true, false)
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, "", nil, true, false)
 	if err != nil {
 		return err
 	}
@@ -464,12 +476,12 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, originalToolIDs map[int]string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, endpointType, body, authorization, originalToolIDs, requestID, primeFirstEvent, allowEOFCompletion)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization, anthropicBeta, originalToolIDs, requestID, primeFirstEvent, allowEOFCompletion)
 		if err == nil {
 			return stream, nil
 		}
@@ -508,12 +520,12 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 	return nil, lastErr
 }
 
-func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, compact bool) (map[string]any, error) {
+func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, compact bool) (map[string]any, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		payload, err := c.responseOnce(ctx, endpointType, body, authorization, compact)
+		payload, err := c.responseOnce(ctx, endpointType, body, authorization, anthropicBeta, compact)
 		if err == nil {
 			return payload, nil
 		}
@@ -552,12 +564,12 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 	return nil, lastErr
 }
 
-func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string, compact bool) (map[string]any, error) {
+func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, compact bool) (map[string]any, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+responseEndpointPathForType(endpointType, compact), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, c.upstreamUserAgent, c.masqueradeTarget)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -587,12 +599,12 @@ func responseEndpointPathForType(endpointType string, compact bool) string {
 	return path
 }
 
-func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, c.upstreamUserAgent, c.masqueradeTarget)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -787,6 +799,9 @@ func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
 }
 
 func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([]byte, error) {
+	if err := validateRequestForEndpoint(req, config.UpstreamEndpointTypeResponses); err != nil {
+		return nil, err
+	}
 	payload := map[string]any{
 		"model":  req.Model,
 		"stream": req.Stream,

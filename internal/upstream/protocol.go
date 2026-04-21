@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"openai-compat-proxy/internal/config"
@@ -35,7 +36,21 @@ const (
 	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
 	// 示例：codex_cli_rs/0.117.0 (Linux 6.1; x86_64) iTerm.app
 	codexUserAgent = "codex_cli_rs/0.117.0 (Linux 6.1; x86_64) iTerm.app"
+
+	anthropicBetaCompact20260112           = "compact-2026-01-12"
+	anthropicBetaContextManagement20250627 = "context-management-2025-06-27"
 )
+
+type RequestValidationError struct {
+	Message string
+}
+
+func (e *RequestValidationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
 
 func (c *Client) endpointType() string {
 	if c == nil {
@@ -66,7 +81,7 @@ func endpointPathForType(endpointType string) string {
 	}
 }
 
-func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string, userAgent string, masqueradeTarget string) {
+func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string, anthropicBeta string, userAgent string, masqueradeTarget string) {
 	if httpReq == nil {
 		return
 	}
@@ -106,6 +121,9 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 			version = "2023-06-01"
 		}
 		httpReq.Header.Set("anthropic-version", version)
+		if beta := mergeAnthropicBetaHeaders(httpReq.Header.Get("anthropic-beta"), anthropicBeta); beta != "" {
+			httpReq.Header.Set("anthropic-beta", beta)
+		}
 		if apiKey := upstreamAPIKeyFromAuthorization(authorization); apiKey != "" {
 			httpReq.Header.Set("x-api-key", apiKey)
 		}
@@ -114,6 +132,29 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 	if authorization != "" {
 		httpReq.Header.Set("Authorization", authorization)
 	}
+}
+
+func mergeAnthropicBetaHeaders(values ...string) string {
+	seen := map[string]struct{}{}
+	merged := make([]string, 0)
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if _, ok := seen[part]; ok {
+				continue
+			}
+			seen[part] = struct{}{}
+			merged = append(merged, part)
+		}
+	}
+	if len(merged) == 0 {
+		return ""
+	}
+	sort.Strings(merged)
+	return strings.Join(merged, ",")
 }
 
 func upstreamAPIKeyFromAuthorization(authorization string) string {
@@ -144,6 +185,9 @@ func extractOriginalToolIDs(req model.CanonicalRequest) map[int]string {
 }
 
 func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
+	if err := validateRequestForEndpoint(req, endpointType); err != nil {
+		return nil, err
+	}
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
 		return buildChatRequestBody(req)
@@ -152,6 +196,53 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 	default:
 		return buildRequestBody(req)
 	}
+}
+
+func validateRequestForEndpoint(req model.CanonicalRequest, endpointType string) error {
+	if _, ok := req.PreservedTopLevelFields["context_management"]; ok && normalizeEndpointType(endpointType) != config.UpstreamEndpointTypeAnthropic {
+		return &RequestValidationError{Message: "context_management requires an anthropic messages upstream endpoint"}
+	}
+	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
+		_, err := anthropicBetaHeaderForRequest(req)
+		return err
+	}
+	return nil
+}
+
+func anthropicBetaHeaderForRequest(req model.CanonicalRequest) (string, error) {
+	raw, ok := req.PreservedTopLevelFields["context_management"]
+	if !ok {
+		return "", nil
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return "", &RequestValidationError{Message: "context_management must be an object"}
+	}
+	editsRaw, ok := obj["edits"]
+	if !ok {
+		return "", &RequestValidationError{Message: "context_management.edits is required"}
+	}
+	edits, ok := editsRaw.([]any)
+	if !ok || len(edits) == 0 {
+		return "", &RequestValidationError{Message: "context_management.edits must be a non-empty array"}
+	}
+	betaHeaders := make([]string, 0, len(edits))
+	for _, rawEdit := range edits {
+		edit, ok := rawEdit.(map[string]any)
+		if !ok {
+			return "", &RequestValidationError{Message: "context_management.edits entries must be objects"}
+		}
+		editType, _ := edit["type"].(string)
+		switch strings.TrimSpace(editType) {
+		case "compact_20260112":
+			betaHeaders = append(betaHeaders, anthropicBetaCompact20260112)
+		case "clear_tool_uses_20250919", "clear_thinking_20251015":
+			betaHeaders = append(betaHeaders, anthropicBetaContextManagement20250627)
+		default:
+			return "", &RequestValidationError{Message: fmt.Sprintf("unsupported context_management edit type: %s", editType)}
+		}
+	}
+	return mergeAnthropicBetaHeaders(betaHeaders...), nil
 }
 
 func filteredPreservedTopLevelFieldsForEndpoint(fields map[string]any, endpointType string) map[string]any {
@@ -898,6 +989,9 @@ func normalizeChatMessageContent(raw any) []any {
 }
 
 func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
+	if err := validateRequestForEndpoint(req, config.UpstreamEndpointTypeChat); err != nil {
+		return nil, err
+	}
 	payload := map[string]any{"model": req.Model, "stream": req.Stream}
 	for key, value := range filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeChat) {
 		payload[key] = cloneJSONValue(value)

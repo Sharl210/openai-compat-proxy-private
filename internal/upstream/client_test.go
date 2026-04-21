@@ -1397,10 +1397,12 @@ func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) 
 	var gotPath string
 	var gotAPIKey string
 	var gotVersion string
+	var gotBeta string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAPIKey = r.Header.Get("x-api-key")
 		gotVersion = r.Header.Get("anthropic-version")
+		gotBeta = r.Header.Get("anthropic-beta")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
 	}))
@@ -1419,6 +1421,9 @@ func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) 
 	}
 	if gotVersion != "2023-06-01" {
 		t.Fatalf("expected anthropic-version header, got %q", gotVersion)
+	}
+	if gotBeta != "" {
+		t.Fatalf("expected no anthropic-beta header by default, got %q", gotBeta)
 	}
 	output, _ := payload["output"].([]any)
 	if len(output) != 1 {
@@ -1439,6 +1444,44 @@ func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) 
 	}
 	if got := usage["output_tokens"]; got != float64(2) {
 		t.Fatalf("expected output_tokens 2, got %#v", got)
+	}
+}
+
+func TestResponseUsesAnthropicEndpointAddsContextManagementBetaHeader(t *testing.T) {
+	var gotBeta string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	_, err := client.Response(context.Background(), model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		PreservedTopLevelFields: map[string]any{"context_management": map[string]any{"edits": []any{map[string]any{"type": "clear_thinking_20251015"}, map[string]any{"type": "compact_20260112"}}}},
+		Messages: []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}},
+	}, "Bearer anthropic-key")
+	if err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+	if gotBeta != "compact-2026-01-12,context-management-2025-06-27" {
+		t.Fatalf("expected anthropic-beta headers for context_management, got %q", gotBeta)
+	}
+}
+
+func TestBuildResponsesRequestBodyRejectsContextManagement(t *testing.T) {
+	_, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model:                   "gpt-5",
+		PreservedTopLevelFields: map[string]any{"context_management": map[string]any{"edits": []any{map[string]any{"type": "clear_thinking_20251015"}}}},
+	}, config.ResponsesToolCompatModePreserve)
+	if err == nil {
+		t.Fatalf("expected context_management to be rejected for responses upstream")
+	}
+	var validationErr *RequestValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("expected RequestValidationError, got %T", err)
 	}
 }
 
