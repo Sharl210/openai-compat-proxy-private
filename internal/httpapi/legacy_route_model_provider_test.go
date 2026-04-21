@@ -93,6 +93,26 @@ func TestLegacyMessagesRouteChoosesProviderByExactModelOwner(t *testing.T) {
 	}
 }
 
+func TestLegacyMessagesRouteRejectsContextManagementForResponsesUpstream(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	server := NewServer(testLegacyModelRoutingConfig(alpha.URL, beta.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"alpha-message","max_tokens":64,"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	assertErrorResponse(t, rec, http.StatusBadRequest, "invalid_request", "context_management requires an anthropic messages upstream endpoint")
+	if alpha.Hits() != 0 || beta.Hits() != 0 {
+		t.Fatalf("expected no upstream hit when context_management targets unsupported upstream, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
 func TestExplicitChatRouteKeepsExplicitProviderEvenWhenAnotherDefaultOwnsModel(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
