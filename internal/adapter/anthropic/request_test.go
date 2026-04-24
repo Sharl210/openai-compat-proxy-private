@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestDecodeRequestIgnoresThinkingBlocksInFollowUpMessages(t *testing.T) {
+func TestDecodeRequestPreservesThinkingBlocksInFollowUpMessages(t *testing.T) {
 	req := `{
 		"model":"claude-sonnet-4-5",
 		"max_tokens":1024,
@@ -32,6 +32,15 @@ func TestDecodeRequestIgnoresThinkingBlocksInFollowUpMessages(t *testing.T) {
 	if len(canon.Messages) != 2 {
 		t.Fatalf("expected 2 canonical messages, got %#v", canon.Messages)
 	}
+	if len(canon.Messages[0].ReasoningBlocks) != 1 {
+		t.Fatalf("expected assistant thinking block preserved, got %#v", canon.Messages[0])
+	}
+	if got, _ := canon.Messages[0].ReasoningBlocks[0]["signature"].(string); got != "sig_123" {
+		t.Fatalf("expected assistant thinking signature preserved, got %#v", canon.Messages[0].ReasoningBlocks)
+	}
+	if got, _ := canon.Messages[0].ReasoningBlocks[0]["thinking"].(string); got != "internal reasoning" {
+		t.Fatalf("expected assistant thinking text preserved, got %#v", canon.Messages[0].ReasoningBlocks)
+	}
 	if got := canon.Messages[0].Parts[0].Text; got != "我刚刚在发呆。" {
 		t.Fatalf("expected assistant text part to survive thinking block, got %#v", canon.Messages[0].Parts)
 	}
@@ -40,7 +49,7 @@ func TestDecodeRequestIgnoresThinkingBlocksInFollowUpMessages(t *testing.T) {
 	}
 }
 
-func TestDecodeRequestIgnoresRedactedThinkingBlocksInFollowUpMessages(t *testing.T) {
+func TestDecodeRequestPreservesRedactedThinkingBlocksInFollowUpMessages(t *testing.T) {
 	req := `{
 		"model":"claude-sonnet-4-5",
 		"max_tokens":1024,
@@ -65,6 +74,12 @@ func TestDecodeRequestIgnoresRedactedThinkingBlocksInFollowUpMessages(t *testing
 	}
 	if len(canon.Messages) != 2 {
 		t.Fatalf("expected 2 canonical messages, got %#v", canon.Messages)
+	}
+	if len(canon.Messages[0].ReasoningBlocks) != 1 {
+		t.Fatalf("expected assistant redacted thinking block preserved, got %#v", canon.Messages[0])
+	}
+	if got, _ := canon.Messages[0].ReasoningBlocks[0]["data"].(string); got != "enc_123" {
+		t.Fatalf("expected redacted thinking payload preserved, got %#v", canon.Messages[0].ReasoningBlocks)
 	}
 	if got := canon.Messages[0].Parts[0].Text; got != "先这样。" {
 		t.Fatalf("expected assistant text part to survive redacted thinking block, got %#v", canon.Messages[0].Parts)

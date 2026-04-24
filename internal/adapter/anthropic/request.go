@@ -79,6 +79,10 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
+		reasoningBlocks, err := decodeReasoningBlocks(msg.Content)
+		if err != nil {
+			return model.CanonicalRequest{}, err
+		}
 		toolCalls, toolResults, err := decodeToolTransitions(msg.Role, msg.Content)
 		if err != nil {
 			return model.CanonicalRequest{}, err
@@ -87,9 +91,10 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			canon.Messages = append(canon.Messages, toolResults...)
 			toolResults = nil
 		}
-		if len(parts) > 0 {
-			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls})
+		if len(parts) > 0 || len(toolCalls) > 0 || len(reasoningBlocks) > 0 {
+			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ReasoningBlocks: reasoningBlocks})
 			toolCalls = nil
+			reasoningBlocks = nil
 		}
 		if len(toolResults) > 0 {
 			canon.Messages = append(canon.Messages, toolResults...)
@@ -174,6 +179,36 @@ func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
 		}
 	}
 	return out, nil
+}
+
+func decodeReasoningBlocks(raw json.RawMessage) ([]map[string]any, error) {
+	var parts []map[string]any
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, nil
+	}
+	blocks := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		typeName, _ := part["type"].(string)
+		switch typeName {
+		case "thinking", "redacted_thinking":
+			blocks = append(blocks, cloneAnyMap(part))
+		}
+	}
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	return blocks, nil
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func decodeAnthropicImagePart(raw json.RawMessage) (model.CanonicalContentPart, error) {

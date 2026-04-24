@@ -27,6 +27,7 @@ type CanonicalMessage struct {
 	ToolCalls        []CanonicalToolCall
 	ToolCallID       string
 	ReasoningContent string
+	ReasoningBlocks  []map[string]any
 }
 
 type CanonicalToolCall struct {
