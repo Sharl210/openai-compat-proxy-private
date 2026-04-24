@@ -41,6 +41,9 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 		if len(msg.ToolCalls) > 0 {
 			clone.ToolCalls = append([]model.CanonicalToolCall(nil), msg.ToolCalls...)
 		}
+		if len(msg.ReasoningBlocks) > 0 {
+			clone.ReasoningBlocks = cloneReasoningBlocks(msg.ReasoningBlocks)
+		}
 		cloned = append(cloned, clone)
 	}
 	return cloned
@@ -129,14 +132,36 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 	for _, call := range result.ToolCalls {
 		toolCalls = append(toolCalls, model.CanonicalToolCall{ID: call.ID, Type: "function", Name: call.Name, Arguments: call.Arguments})
 	}
-	if len(parts) == 0 && len(toolCalls) == 0 {
+	reasoningBlocks := cloneReasoningBlocks(result.ReasoningBlocks)
+	if len(parts) == 0 && len(toolCalls) == 0 && len(reasoningBlocks) == 0 {
 		return nil
 	}
-	msg := model.CanonicalMessage{Role: "assistant", Parts: parts, ToolCalls: toolCalls}
+	msg := model.CanonicalMessage{Role: "assistant", Parts: parts, ToolCalls: toolCalls, ReasoningBlocks: reasoningBlocks}
 	if summary, _ := result.Reasoning["summary"].(string); summary != "" {
 		msg.ReasoningContent = summary
 	}
 	return []model.CanonicalMessage{msg}
+}
+
+func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		copied := make(map[string]any, len(block))
+		for k, v := range block {
+			copied[k] = v
+		}
+		cloned = append(cloned, copied)
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
 }
 
 func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
