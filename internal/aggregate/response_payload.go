@@ -26,6 +26,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 	}
 	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
 		result.Reasoning = cloneMap(reasoning)
+		result.ReasoningBlocks = cloneReasoningBlocks(reasoningBlocksFromMap(reasoning))
 	}
 	if len(result.Usage) > 0 {
 		if result.Reasoning == nil {
@@ -77,6 +78,9 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 				if existing := stringValue(result.Reasoning["summary"]); existing == "" {
 					result.Reasoning["summary"] = summary
 				}
+			}
+			if blocks := reasoningBlocksFromMap(item); len(blocks) > 0 {
+				result.ReasoningBlocks = append(result.ReasoningBlocks, cloneReasoningBlocks(blocks)...)
 			}
 		case "function_call":
 			call := ToolCall{}
@@ -152,10 +156,12 @@ func PayloadToSyntheticCanonicalEvents(payload map[string]any) []upstream.Event 
 	}
 
 	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
+		blocks := cloneReasoningBlocks(reasoningBlocksFromMap(reasoning))
 		events = append(events, upstream.Event{
 			Event: "response.reasoning.delta",
 			Data: map[string]any{
 				"summary":       reasoning["summary"],
+				"blocks":        blocks,
 				"provider_meta": syntheticMeta,
 			},
 		})

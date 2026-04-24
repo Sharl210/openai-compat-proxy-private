@@ -389,6 +389,28 @@ func TestPayloadToSyntheticCanonicalEvents_Reasoning(t *testing.T) {
 	}
 }
 
+func TestCollectorAppendsReasoningBlocksAcrossDeltas(t *testing.T) {
+	c := NewCollector()
+	c.Accept(upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_blocks"}}})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "alpha", "blocks": []any{map[string]any{"type": "thinking", "thinking": "alpha", "signature": "sig_1"}}}})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "beta", "blocks": []any{map[string]any{"type": "thinking", "thinking": "beta", "signature": "sig_2"}}}})
+	c.Accept(upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"finish_reason": "end_turn"}}})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if len(result.ReasoningBlocks) != 2 {
+		t.Fatalf("expected 2 reasoning blocks preserved across deltas, got %#v", result.ReasoningBlocks)
+	}
+	if got, _ := result.ReasoningBlocks[0]["signature"].(string); got != "sig_1" {
+		t.Fatalf("expected first reasoning block signature preserved, got %#v", result.ReasoningBlocks)
+	}
+	if got, _ := result.ReasoningBlocks[1]["signature"].(string); got != "sig_2" {
+		t.Fatalf("expected second reasoning block signature preserved, got %#v", result.ReasoningBlocks)
+	}
+}
+
 // TestPayloadToSyntheticCanonicalEvents_SyntheticFlag verifies that synthetic events
 // carry ProviderMeta["synthetic"]=true so they can be distinguished from real upstream events.
 func TestPayloadToSyntheticCanonicalEvents_SyntheticFlag(t *testing.T) {

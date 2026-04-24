@@ -22,6 +22,7 @@ type Result struct {
 	FinishReason            string
 	ToolCalls               []ToolCall
 	Reasoning               map[string]any
+	ReasoningBlocks         []map[string]any
 	Usage                   map[string]any
 	ResponseOutputItems     []map[string]any
 	ResponseMessageContent  []map[string]any
@@ -199,6 +200,25 @@ func (c *Collector) Accept(evt upstream.Event) {
 		c.completed = true
 	case "response.reasoning.delta":
 		for k, v := range evt.Data {
+			if k == "blocks" {
+				rawBlocks, _ := v.([]any)
+				if len(rawBlocks) == 0 {
+					continue
+				}
+				existing, _ := c.reasoning[k].([]any)
+				merged := append([]any(nil), existing...)
+				for _, rawBlock := range rawBlocks {
+					block, _ := rawBlock.(map[string]any)
+					if len(block) == 0 {
+						continue
+					}
+					merged = append(merged, cloneOutputItem(block))
+				}
+				if len(merged) > 0 {
+					c.reasoning[k] = merged
+				}
+				continue
+			}
 			if text, ok := v.(string); ok && shouldAppendReasoningKey(k) {
 				c.reasoning[k] = stringValue(c.reasoning[k]) + text
 				continue
@@ -229,6 +249,7 @@ func (c *Collector) Result() (Result, error) {
 	}
 	if len(c.reasoning) > 0 {
 		result.Reasoning = c.reasoning
+		result.ReasoningBlocks = cloneReasoningBlocks(reasoningBlocksFromMap(c.reasoning))
 		if usage, _ := c.reasoning["usage"].(map[string]any); len(usage) > 0 {
 			result.Usage = usage
 		}
@@ -286,6 +307,45 @@ func reasoningSummaryFromItem(item map[string]any) string {
 		}
 	}
 	return builder.String()
+}
+
+func reasoningBlocksFromMap(reasoning map[string]any) []map[string]any {
+	if len(reasoning) == 0 {
+		return nil
+	}
+	rawBlocks, _ := reasoning["blocks"].([]any)
+	if len(rawBlocks) == 0 {
+		return nil
+	}
+	blocks := make([]map[string]any, 0, len(rawBlocks))
+	for _, rawBlock := range rawBlocks {
+		block, _ := rawBlock.(map[string]any)
+		if len(block) == 0 {
+			continue
+		}
+		blocks = append(blocks, cloneOutputItem(block))
+	}
+	if len(blocks) == 0 {
+		return nil
+	}
+	return blocks
+}
+
+func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		cloned = append(cloned, cloneOutputItem(block))
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
 }
 
 func usageFromEventData(data map[string]any) map[string]any {
