@@ -203,6 +203,52 @@ func TestNormalizeAnthropicFrame_Thinking(t *testing.T) {
 	}
 }
 
+func TestNormalizeAnthropicFrame_PreservesSignatureDelta(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`message_start`, `{"message":{"id":"msg_123","type":"message","role":"assistant"}}`},
+		{`content_block_start`, `{"index":0,"content_block":{"type":"thinking","thinking":"","signature":"sig_123"}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"thinking_delta","thinking":"thinking..."}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"signature_delta","signature":"sig_456"}}`},
+		{`message_delta`, `{"usage":{"input_tokens":10,"output_tokens":5},"delta":{"stop_reason":"end_turn"}}`},
+		{`message_stop`, `{}`},
+	}
+
+	state := &anthropicNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		usage:          map[string]any{},
+	}
+
+	var allEvents []Event
+	for _, f := range frames {
+		frame := &sseFrame{Event: f.event, Data: f.data}
+		events, done, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	foundSignature := false
+	for _, evt := range allEvents {
+		blocks, _ := evt.Data["blocks"].([]any)
+		for _, rawBlock := range blocks {
+			block, _ := rawBlock.(map[string]any)
+			if got, _ := block["signature"].(string); got == "sig_123sig_456" {
+				foundSignature = true
+			}
+		}
+	}
+	if !foundSignature {
+		t.Fatalf("expected normalized events to preserve concatenated signature delta, got %#v", allEvents)
+	}
+}
+
 func TestNormalizeAnthropicFrame_Error(t *testing.T) {
 	frame := &sseFrame{Event: "error", Data: `{"error":{"type":"invalid_request","message":"bad request"}}`}
 	state := &anthropicNormalizationState{}

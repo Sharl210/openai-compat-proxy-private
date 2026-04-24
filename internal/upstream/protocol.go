@@ -696,6 +696,7 @@ type anthropicNormalizationState struct {
 	pendingFinish   string
 	responseID      string
 	originalToolIDs map[int]string
+	reasoningBlocks map[int]map[string]any
 	provider        string
 }
 
@@ -735,6 +736,12 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 				encoded, _ := json.Marshal(input)
 				events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": string(encoded)}})
 			}
+		} else if blockType == "thinking" || blockType == "redacted_thinking" {
+			if state.reasoningBlocks == nil {
+				state.reasoningBlocks = map[int]map[string]any{}
+			}
+			state.reasoningBlocks[index] = cloneMap(block)
+			events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{cloneMap(block)}}})
 		}
 	case "content_block_delta":
 		index := int(numberValue(payload["index"]))
@@ -746,7 +753,25 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 			}
 		case "thinking_delta":
 			if text := stringValue(delta["thinking"]); text != "" {
-				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": text}})
+				if block := state.reasoningBlocks[index]; block != nil {
+					key := "thinking"
+					if stringValue(block["type"]) == "redacted_thinking" {
+						key = "text"
+					}
+					block[key] = stringValue(block[key]) + text
+				}
+				var blocks []any
+				if block := state.reasoningBlocks[index]; block != nil {
+					blocks = []any{cloneMap(block)}
+				}
+				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": text, "blocks": blocks}})
+			}
+		case "signature_delta":
+			if signature := stringValue(delta["signature"]); signature != "" {
+				if block := state.reasoningBlocks[index]; block != nil {
+					block["signature"] = stringValue(block["signature"]) + signature
+					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{cloneMap(block)}}})
+				}
 			}
 		case "input_json_delta":
 			if partial := stringValue(delta["partial_json"]); partial != "" {
@@ -880,6 +905,8 @@ func normalizeAnthropicPayload(payload map[string]any) map[string]any {
 	contentBlocks, _ := payload["content"].([]any)
 	output := make([]any, 0, len(contentBlocks)+1)
 	messageContent := make([]any, 0, len(contentBlocks))
+	reasoningBlocks := make([]any, 0, len(contentBlocks))
+	var reasoningSummary strings.Builder
 	for i, rawBlock := range contentBlocks {
 		block, _ := rawBlock.(map[string]any)
 		if block == nil {
@@ -889,12 +916,13 @@ func normalizeAnthropicPayload(payload map[string]any) map[string]any {
 		case "text":
 			messageContent = append(messageContent, map[string]any{"type": "output_text", "text": stringValue(block["text"])})
 		case "thinking", "redacted_thinking":
+			reasoningBlocks = append(reasoningBlocks, cloneMap(block))
 			text := stringValue(block["thinking"])
 			if text == "" {
 				text = stringValue(block["text"])
 			}
 			if text != "" {
-				result["reasoning"] = map[string]any{"summary": text}
+				reasoningSummary.WriteString(text)
 			}
 		case "tool_use":
 			callID := stringValue(block["id"])
@@ -918,6 +946,16 @@ func normalizeAnthropicPayload(payload map[string]any) map[string]any {
 	}
 	if stopReason := stringValue(payload["stop_reason"]); stopReason != "" {
 		result["stop_reason"] = stopReason
+	}
+	if reasoningSummary.Len() > 0 || len(reasoningBlocks) > 0 {
+		reasoning := map[string]any{}
+		if reasoningSummary.Len() > 0 {
+			reasoning["summary"] = reasoningSummary.String()
+		}
+		if len(reasoningBlocks) > 0 {
+			reasoning["blocks"] = reasoningBlocks
+		}
+		result["reasoning"] = reasoning
 	}
 	result["output"] = output
 	return result
@@ -1084,8 +1122,12 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 		} else if len(msg.ToolCalls) == 0 {
 			entry["content"] = ""
 		}
-		if msg.ReasoningContent != "" {
-			entry["reasoning_content"] = msg.ReasoningContent
+		reasoningContent := msg.ReasoningContent
+		if reasoningContent == "" {
+			reasoningContent = reasoningContentFromBlocks(msg.ReasoningBlocks)
+		}
+		if reasoningContent != "" {
+			entry["reasoning_content"] = reasoningContent
 		}
 		if len(msg.ToolCalls) > 0 {
 			toolCalls := make([]any, 0, len(msg.ToolCalls))
@@ -1249,7 +1291,9 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		}
 		pendingToolResults = appendPendingToolResults(pendingToolResults)
 		content := buildAnthropicContentParts(msg.Parts)
-		if msg.Role == "assistant" && msg.ReasoningContent != "" {
+		if msg.Role == "assistant" && len(msg.ReasoningBlocks) > 0 {
+			content = append(cloneAnySliceOfMaps(msg.ReasoningBlocks), content...)
+		} else if msg.Role == "assistant" && msg.ReasoningContent != "" {
 			content = append([]any{map[string]any{"type": "thinking", "thinking": msg.ReasoningContent}}, content...)
 		}
 		for _, call := range msg.ToolCalls {
@@ -1266,6 +1310,56 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 	}
 	pendingToolResults = appendPendingToolResults(pendingToolResults)
 	return messages
+}
+
+func reasoningContentFromBlocks(blocks []map[string]any) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, block := range blocks {
+		typeName, _ := block["type"].(string)
+		if typeName == "redacted_thinking" {
+			continue
+		}
+		text := stringValue(block["thinking"])
+		if text == "" {
+			text = stringValue(block["text"])
+		}
+		if text != "" {
+			builder.WriteString(text)
+		}
+	}
+	return builder.String()
+}
+
+func cloneAnySliceOfMaps(blocks []map[string]any) []any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		out = append(out, cloneMap(block))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func firstReasoningBlock(data map[string]any) map[string]any {
+	rawBlocks, _ := data["blocks"].([]any)
+	for _, rawBlock := range rawBlocks {
+		block, _ := rawBlock.(map[string]any)
+		if len(block) == 0 {
+			continue
+		}
+		return block
+	}
+	return nil
 }
 
 func buildAnthropicSystemPrompt(req model.CanonicalRequest) string {

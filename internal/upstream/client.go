@@ -1228,14 +1228,21 @@ func intFromAny(value any) int {
 }
 
 func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
-	if msg.Role != "assistant" || msg.ReasoningContent == "" {
+	if msg.Role != "assistant" {
+		return nil
+	}
+	reasoningContent := msg.ReasoningContent
+	if reasoningContent == "" {
+		reasoningContent = reasoningContentFromBlocks(msg.ReasoningBlocks)
+	}
+	if reasoningContent == "" {
 		return nil
 	}
 	return map[string]any{
 		"type": "reasoning",
 		"summary": []map[string]any{{
 			"type": "summary_text",
-			"text": msg.ReasoningContent,
+			"text": reasoningContent,
 		}},
 	}
 }
