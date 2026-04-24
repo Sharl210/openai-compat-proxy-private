@@ -244,6 +244,50 @@ func TestMessagesStreamReopensThinkingBlockAcrossReasoningPhases(t *testing.T) {
 	}
 }
 
+func TestMessagesStreamUsesOriginalSignatureFromReasoningBlocks(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"alpha\",\"blocks\":[{\"type\":\"thinking\",\"thinking\":\"alpha\",\"signature\":\"sig_real\"}]}\n\n",
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `"type":"signature_delta"`) || !strings.Contains(body, `"signature":"sig_real"`) {
+		t.Fatalf("expected anthropic stream to forward original signature_delta, got %s", body)
+	}
+	if strings.Contains(body, `"signature":"proxy_signature"`) {
+		t.Fatalf("expected anthropic stream to avoid proxy_signature when original signature exists, got %s", body)
+	}
+}
+
 func TestMessagesStreamClosesToolBlockBeforeLaterTextAndForwardsArgumentDeltas(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +

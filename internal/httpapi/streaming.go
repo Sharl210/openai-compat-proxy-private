@@ -31,30 +31,32 @@ func syntheticReasoningPrelude() string {
 type usageRecorderFunc func(map[string]any)
 
 type anthropicStreamState struct {
-	messageStarted   bool
-	messageID        string
-	modelName        string
-	textStarted      bool
-	textIndex        int
-	textStopped      bool
-	thinkingStarted  bool
-	thinkingStopped  bool
-	signatureSent    bool
-	thinkingIndex    int
-	toolStarted      bool
-	toolIndex        int
-	toolStopped      bool
-	stopReason       string
-	nextIndex        int
-	realThinkingSeen bool
-	planningSent     bool
-	toolStatusSent   bool
-	toolItemID       string
-	toolDeltaSent    bool
-	pendingToolArgs  map[string]string
-	toolMeta         map[string]map[string]string
-	terminalSeen     bool
-	terminalFailure  *aggregate.TerminalFailureError
+	messageStarted    bool
+	messageID         string
+	modelName         string
+	textStarted       bool
+	textIndex         int
+	textStopped       bool
+	thinkingStarted   bool
+	thinkingStopped   bool
+	signatureSent     bool
+	thinkingIndex     int
+	thinkingType      string
+	thinkingSignature string
+	toolStarted       bool
+	toolIndex         int
+	toolStopped       bool
+	stopReason        string
+	nextIndex         int
+	realThinkingSeen  bool
+	planningSent      bool
+	toolStatusSent    bool
+	toolItemID        string
+	toolDeltaSent     bool
+	pendingToolArgs   map[string]string
+	toolMeta          map[string]map[string]string
+	terminalSeen      bool
+	terminalFailure   *aggregate.TerminalFailureError
 }
 
 type responsesStreamState struct {
@@ -451,7 +453,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 						h.syntheticSummary.WriteString("\n")
 					}
 				}
-				h.addEvent("response.reasoning_summary_text.delta", map[string]any{"delta": summary})
+				converted := map[string]any{"delta": summary}
+				if blocks, ok := evt.Data["blocks"]; ok {
+					converted["blocks"] = blocks
+				}
+				h.addEvent("response.reasoning_summary_text.delta", converted)
 			}
 			result.skipWrite = true
 			break
@@ -460,7 +466,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
 		if evt.Event == "response.reasoning.delta" {
 			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
-				h.addEvent("response.reasoning_summary_text.delta", map[string]any{"delta": summary})
+				converted := map[string]any{"delta": summary}
+				if blocks, ok := evt.Data["blocks"]; ok {
+					converted["blocks"] = blocks
+				}
+				h.addEvent("response.reasoning_summary_text.delta", converted)
 			}
 			result.skipWrite = true
 		}
@@ -1179,12 +1189,13 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	state.messageStarted = true
 	state.thinkingStarted = true
 	state.thinkingIndex = state.nextIndex
+	state.thinkingType = "thinking"
 	state.nextIndex++
 	if err := writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
 		"type":  "content_block_start",
 		"index": state.thinkingIndex,
 		"content_block": map[string]any{
-			"type":     "thinking",
+			"type":     state.thinkingType,
 			"thinking": "",
 		},
 	}); err != nil {
@@ -1253,13 +1264,16 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		state.thinkingStarted = true
 		state.thinkingStopped = false
 		state.signatureSent = false
+		if state.thinkingType == "" {
+			state.thinkingType = "thinking"
+		}
 		state.thinkingIndex = state.nextIndex
 		state.nextIndex++
 		return writeAnthropicSSEEvent(w, flusher, "content_block_start", map[string]any{
 			"type":  "content_block_start",
 			"index": state.thinkingIndex,
 			"content_block": map[string]any{
-				"type":     "thinking",
+				"type":     state.thinkingType,
 				"thinking": "",
 			},
 		})
@@ -1269,10 +1283,14 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return nil
 		}
 		if !state.signatureSent {
+			signature := state.thinkingSignature
+			if signature == "" {
+				signature = "proxy_signature"
+			}
 			if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": state.thinkingIndex,
-				"delta": map[string]any{"type": "signature_delta", "signature": "proxy_signature"},
+				"delta": map[string]any{"type": "signature_delta", "signature": signature},
 			}); err != nil {
 				return err
 			}
@@ -1282,6 +1300,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return err
 		}
 		state.thinkingStopped = true
+		state.thinkingType = ""
+		state.thinkingSignature = ""
 		return nil
 	}
 	startToolBlock := func(item map[string]any) error {
@@ -1412,6 +1432,14 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			"delta": map[string]any{"type": "text_delta", "text": delta},
 		})
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
+		if block := firstReasoningBlock(evt.Data); len(block) > 0 {
+			if blockType, _ := block["type"].(string); blockType != "" {
+				state.thinkingType = blockType
+			}
+			if signature, _ := block["signature"].(string); signature != "" {
+				state.thinkingSignature = signature
+			}
+		}
 		if delta := reasoningContentValue(evt.Data); delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -1665,6 +1693,18 @@ func anthropicUsageFromEvent(data map[string]any) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func firstReasoningBlock(data map[string]any) map[string]any {
+	rawBlocks, _ := data["blocks"].([]any)
+	for _, rawBlock := range rawBlocks {
+		block, _ := rawBlock.(map[string]any)
+		if len(block) == 0 {
+			continue
+		}
+		return block
+	}
+	return nil
 }
 
 func anthropicStreamStopReason(current string, data map[string]any) string {

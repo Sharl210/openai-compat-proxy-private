@@ -73,6 +73,26 @@ func TestBuildResponseIncludesThinkingBlockBeforeText(t *testing.T) {
 	}
 }
 
+func TestBuildResponsePrefersOriginalReasoningBlocks(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Text: "最终答案",
+		Reasoning: map[string]any{"summary": "先想一下"},
+		ReasoningBlocks: []map[string]any{{
+			"type":      "thinking",
+			"thinking":  "先想一下",
+			"signature": "sig_123",
+		}},
+	}, "req_789", "claude-sonnet-4-5")
+
+	content, _ := resp["content"].([]map[string]any)
+	if len(content) != 2 {
+		t.Fatalf("expected preserved thinking block and text block, got %#v", resp)
+	}
+	if got, _ := content[0]["signature"].(string); got != "sig_123" {
+		t.Fatalf("expected original thinking signature preserved, got %#v", content[0])
+	}
+}
+
 func TestBuildResponsePreservesExplicitStopReason(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{FinishReason: "max_tokens"}, "req_456", "claude-sonnet-4-5")
 	if got, _ := resp["stop_reason"].(string); got != "max_tokens" {

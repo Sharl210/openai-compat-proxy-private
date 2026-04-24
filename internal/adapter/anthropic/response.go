@@ -9,7 +9,9 @@ import (
 
 func BuildResponse(result aggregate.Result, requestID string, modelName string) map[string]any {
 	content := make([]map[string]any, 0, len(result.ToolCalls)+1)
-	if thinking := reasoningContentValue(result.Reasoning); thinking != "" {
+	if len(result.ReasoningBlocks) > 0 {
+		content = append(content, cloneReasoningBlocks(result.ReasoningBlocks)...)
+	} else if thinking := reasoningContentValue(result.Reasoning); thinking != "" {
 		content = append(content, map[string]any{
 			"type":     "thinking",
 			"thinking": thinking,
@@ -145,4 +147,25 @@ func parseArguments(arguments string) any {
 		return map[string]any{"raw": arguments}
 	}
 	return decoded
+}
+
+func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		copied := make(map[string]any, len(block))
+		for k, v := range block {
+			copied[k] = v
+		}
+		cloned = append(cloned, copied)
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
 }
