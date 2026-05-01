@@ -15,6 +15,9 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 	if responseID, _ := payload["id"].(string); responseID != "" {
 		result.ResponseID = responseID
 	}
+	if serviceTier, _ := payload["service_tier"].(string); serviceTier != "" {
+		result.ServiceTier = serviceTier
+	}
 	// finish_reason takes priority; stop_reason is a fallback
 	if finishReason, _ := payload["finish_reason"].(string); finishReason != "" {
 		result.FinishReason = finishReason

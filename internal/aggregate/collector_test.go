@@ -95,6 +95,28 @@ func TestCollectorDoesNotDuplicateTextWhenDeltaAndDoneContainSameOutputText(t *t
 	}
 }
 
+func TestCollectorPreservesServiceTierFromCompletedResponse(t *testing.T) {
+	c := NewCollector()
+
+	c.Accept(upstream.Event{
+		Event: "response.completed",
+		Data: map[string]any{
+			"response": map[string]any{
+				"finish_reason": "stop",
+				"service_tier":  "default",
+			},
+		},
+	})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if result.ServiceTier != "default" {
+		t.Fatalf("expected service tier default, got %q", result.ServiceTier)
+	}
+}
+
 func TestCollectorFillsRefusalFromOutputItemDoneMessageRefusal(t *testing.T) {
 	c := NewCollector()
 

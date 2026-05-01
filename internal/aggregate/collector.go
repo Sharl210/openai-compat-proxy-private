@@ -17,6 +17,7 @@ type ToolCall struct {
 
 type Result struct {
 	ResponseID              string
+	ServiceTier             string
 	Text                    string
 	Refusal                 string
 	FinishReason            string
@@ -48,6 +49,7 @@ type Collector struct {
 	toolCalls               map[string]*ToolCall
 	order                   []string
 	reasoning               map[string]any
+	serviceTier             string
 	responseMessageContent  []map[string]any
 	outputItems             []map[string]any
 	unsupportedContentTypes []string
@@ -67,6 +69,9 @@ func (c *Collector) Accept(evt upstream.Event) {
 		if response, _ := evt.Data["response"].(map[string]any); response != nil {
 			if responseID, _ := response["id"].(string); responseID != "" {
 				c.responseID = responseID
+			}
+			if serviceTier, _ := response["service_tier"].(string); serviceTier != "" {
+				c.serviceTier = serviceTier
 			}
 		}
 	case "response.output_text.delta":
@@ -176,6 +181,12 @@ func (c *Collector) Accept(evt upstream.Event) {
 			if fr, _ := response["finish_reason"].(string); fr != "" {
 				c.finishReason = fr
 			}
+			if serviceTier, _ := response["service_tier"].(string); serviceTier != "" {
+				c.serviceTier = serviceTier
+			}
+		}
+		if serviceTier, _ := evt.Data["service_tier"].(string); serviceTier != "" {
+			c.serviceTier = serviceTier
 		}
 		if fr, _ := evt.Data["finish_reason"].(string); fr != "" && c.finishReason == "" {
 			c.finishReason = fr
@@ -237,6 +248,7 @@ func (c *Collector) Result() (Result, error) {
 	}
 	result := Result{}
 	result.ResponseID = c.responseID
+	result.ServiceTier = c.serviceTier
 	result.Text = c.text.String()
 	result.Refusal = c.refusal
 	result.FinishReason = c.finishReason

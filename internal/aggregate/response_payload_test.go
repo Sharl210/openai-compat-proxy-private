@@ -54,6 +54,28 @@ func TestResultFromResponsePayloadCopiesUsageIntoReasoning(t *testing.T) {
 	}
 }
 
+func TestResultFromResponsePayloadPreservesServiceTier(t *testing.T) {
+	payload := map[string]any{
+		"service_tier": "default",
+		"output": []any{
+			map[string]any{
+				"type": "message",
+				"content": []any{
+					map[string]any{"type": "output_text", "text": "ok"},
+				},
+			},
+		},
+	}
+
+	result, err := ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload returned error: %v", err)
+	}
+	if result.ServiceTier != "default" {
+		t.Fatalf("expected service tier default, got %q", result.ServiceTier)
+	}
+}
+
 func TestResultFromResponsePayloadRepairsMalformedToolArguments(t *testing.T) {
 	payload := map[string]any{
 		"output": []any{
