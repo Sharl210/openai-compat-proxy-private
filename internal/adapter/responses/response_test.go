@@ -117,6 +117,13 @@ func TestResponsesIncompleteDetails(t *testing.T) {
 	}
 }
 
+func TestBuildResponsePreservesServiceTier(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{ServiceTier: "default"})
+	if got, _ := resp["service_tier"].(string); got != "default" {
+		t.Fatalf("expected service_tier default, got %#v", resp["service_tier"])
+	}
+}
+
 func TestBuildResponseWithMixedContent(t *testing.T) {
 	result := aggregate.Result{
 		ResponseOutputItems: []map[string]any{

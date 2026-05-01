@@ -58,6 +58,13 @@ func TestBuildResponsePreservesExplicitFinishReason(t *testing.T) {
 	}
 }
 
+func TestBuildResponsePreservesServiceTier(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{ServiceTier: "default"})
+	if got, _ := resp["service_tier"].(string); got != "default" {
+		t.Fatalf("expected service_tier default, got %#v", resp["service_tier"])
+	}
+}
+
 func TestBuildResponsePromotesCachedTokenUsageFields(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{Usage: map[string]any{
 		"input_tokens":  12,

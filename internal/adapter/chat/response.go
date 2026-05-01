@@ -37,7 +37,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 	}
 	finishReason := chatFinishReason(result)
 
-	return map[string]any{
+	response := map[string]any{
 		"object": "chat.completion",
 		"choices": []map[string]any{{
 			"index":         0,
@@ -46,6 +46,10 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		}},
 		"usage": chatUsage(result.Usage),
 	}
+	if result.ServiceTier != "" {
+		response["service_tier"] = result.ServiceTier
+	}
+	return response
 }
 
 func chatFinishReason(result aggregate.Result) string {

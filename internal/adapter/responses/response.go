@@ -43,7 +43,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		}
 	}
 
-	return map[string]any{
+	response := map[string]any{
 		"id":                 buildResponseID(result),
 		"object":             "response",
 		"status":             responsesStatus(result),
@@ -52,6 +52,10 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		"usage":              cloneMap(result.Usage),
 		"incomplete_details": responsesIncompleteDetails(result),
 	}
+	if result.ServiceTier != "" {
+		response["service_tier"] = result.ServiceTier
+	}
+	return response
 }
 
 func responsesStatus(result aggregate.Result) string {
