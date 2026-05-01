@@ -537,6 +537,28 @@ func TestBuildRequestBodyServiceTierSnakeCaseTakesPrecedenceOverAlias(t *testing
 	}
 }
 
+func TestNormalizeChatPayloadPreservesServiceTier(t *testing.T) {
+	payload := normalizeChatPayload(map[string]any{
+		"id":           "chatcmpl_123",
+		"object":       "chat.completion",
+		"service_tier": "default",
+		"choices": []any{
+			map[string]any{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "hello",
+				},
+				"finish_reason": "stop",
+			},
+		},
+	}, config.UpstreamThinkingTagStyleOff)
+
+	if got, _ := payload["service_tier"].(string); got != "default" {
+		t.Fatalf("expected service_tier default, got %#v", payload["service_tier"])
+	}
+}
+
 func TestBuildRequestBodyOmitsUsageIncludeForResponsesStreaming(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model:        "gpt-5",

@@ -819,6 +819,9 @@ func normalizeChatPayload(payload map[string]any, thinkingTagStyle string) map[s
 		responseID = "resp_proxy"
 	}
 	result := map[string]any{"id": responseID, "object": "response", "status": "completed"}
+	if serviceTier := stringValue(payload["service_tier"]); serviceTier != "" {
+		result["service_tier"] = serviceTier
+	}
 	usage := normalizeChatUsage(payload)
 	if len(usage) > 0 {
 		result["usage"] = usage
