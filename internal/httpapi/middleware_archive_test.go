@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -262,6 +263,72 @@ func TestWithRequestIDLogsAliasResponsesPath(t *testing.T) {
 	}
 	if !strings.Contains(text, `"request_id":"`+requestID+`"`) {
 		t.Fatalf("expected request id %s in alias log, got %s", requestID, text)
+	}
+}
+
+func TestWithRequestIDWritesFinalSnapshotForJSONResponse(t *testing.T) {
+	archiveDir := t.TempDir()
+	store := config.NewStaticRuntimeStore(config.Config{LogEnable: true, DebugArchiveRootDir: archiveDir})
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"message":"done"}`))
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	path := filepath.Join(archiveDir, requestID, "final.ndjson")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected final snapshot at %s: %v", path, err)
+	}
+	var snapshot debugarchive.FinalSnapshot
+	if err := json.Unmarshal(bytes.TrimSpace(data), &snapshot); err != nil {
+		t.Fatalf("decode final snapshot: %v content=%s", err, string(data))
+	}
+	if snapshot.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", snapshot.StatusCode)
+	}
+	if got, _ := snapshot.Response["message"].(string); got != "done" {
+		t.Fatalf("expected final response body to be archived, got %#v", snapshot.Response)
+	}
+}
+
+func TestWithRequestIDWritesFinalSnapshotForErrorResponse(t *testing.T) {
+	archiveDir := t.TempDir()
+	store := config.NewStaticRuntimeStore(config.Config{LogEnable: true, DebugArchiveRootDir: archiveDir})
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"code":"upstream_error","message":"boom"}}`))
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	path := filepath.Join(archiveDir, requestID, "final.ndjson")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected final snapshot at %s: %v", path, err)
+	}
+	var snapshot debugarchive.FinalSnapshot
+	if err := json.Unmarshal(bytes.TrimSpace(data), &snapshot); err != nil {
+		t.Fatalf("decode final snapshot: %v content=%s", err, string(data))
+	}
+	if snapshot.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", snapshot.StatusCode)
+	}
+	errorObj, _ := snapshot.Error["error"].(map[string]any)
+	if got, _ := errorObj["message"].(string); got != "boom" {
+		t.Fatalf("expected final error body to be archived, got %#v", snapshot.Error)
 	}
 }
 

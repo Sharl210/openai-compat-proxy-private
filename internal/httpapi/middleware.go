@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,6 +58,20 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		}
 		cw := &responseCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
+		if archiveWriter != nil {
+			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status}
+			if body := bytes.TrimSpace(cw.body.Bytes()); len(body) > 0 {
+				var payload map[string]any
+				if err := json.Unmarshal(body, &payload); err == nil {
+					if cw.status >= http.StatusBadRequest {
+						snapshot.Error = payload
+					} else {
+						snapshot.Response = payload
+					}
+				}
+			}
+			_ = archiveWriter.WriteFinalSnapshot(snapshot)
+		}
 		if shouldLog {
 			logging.Event("proxyToClientResponse", map[string]any{
 				"request_id": id,
