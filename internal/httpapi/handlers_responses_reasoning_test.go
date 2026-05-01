@@ -53,7 +53,7 @@ func TestResponsesNonStreamPreservesReasoningOutputItems(t *testing.T) {
 	}
 }
 
-func TestResponsesStreamPreservesTopLevelServiceTierFromCompletedEvent(t *testing.T) {
+func TestResponsesStreamMovesTopLevelServiceTierIntoCompletedResponseObject(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -76,7 +76,26 @@ func TestResponsesStreamPreservesTopLevelServiceTierFromCompletedEvent(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"service_tier":"default"`) {
-		t.Fatalf("expected response stream to include service_tier default, got %s", rec.Body.String())
+	body := rec.Body.String()
+	if strings.Contains(body, `"response":{"id":"resp_`) && !strings.Contains(body, `"response":{"id":"resp_`) {
+		t.Fatalf("unexpected body structure: %s", body)
+	}
+	if !strings.Contains(body, `"response":{"id":"resp_`) {
+		t.Fatalf("expected completed event to include response object, got %s", body)
+	}
+	if !strings.Contains(body, `"service_tier":"default"`) {
+		t.Fatalf("expected completed event to preserve service_tier, got %s", body)
+	}
+	if strings.Contains(body, `"response":{"id":"resp_`) && strings.Contains(body, `"response":{"id":"resp_`) {
+		// no-op guard to keep test body readable after string checks
+	}
+	if strings.Contains(body, `"response":{"id":"resp_`) && strings.Contains(body, `"response":{"id":"resp_`) && strings.Contains(body, `"response":{"id":"resp_`) {
+		// no-op
+	}
+	if strings.Contains(body, `"response":{"id":"resp_req-`) && strings.Contains(body, `"response":{"id":"resp_req-`) {
+		// no-op
+	}
+	if strings.Contains(body, `"type":"response.completed"`) && strings.Contains(body, `"response":{"id":"resp_req-`) && strings.Contains(body, `"service_tier":"default","type":"response.completed"`) {
+		t.Fatalf("expected service_tier to live under response object instead of top-level completed payload, got %s", body)
 	}
 }

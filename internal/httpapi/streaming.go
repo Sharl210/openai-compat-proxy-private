@@ -516,6 +516,12 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		} else if h.modelName != "" {
 			response["model"] = h.modelName
 		}
+		if serviceTier, _ := evt.Data["service_tier"].(string); serviceTier != "" {
+			if _, ok := response["service_tier"]; !ok {
+				response["service_tier"] = serviceTier
+			}
+			delete(evt.Data, "service_tier")
+		}
 		if usage, _ := evt.Data["usage"].(map[string]any); len(usage) > 0 {
 			if _, ok := response["usage"]; !ok {
 				response["usage"] = cloneMap(usage)
