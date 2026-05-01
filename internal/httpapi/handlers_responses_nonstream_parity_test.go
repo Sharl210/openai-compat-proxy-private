@@ -134,6 +134,39 @@ func TestResponsesUpstreamNonStreamRejectsEmptyUpstreamPayload(t *testing.T) {
 	}
 }
 
+func TestResponsesUpstreamNonStreamPreservesUpstreamServiceTier(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","service_tier":"default","output":[{"id":"msg_123","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithStrategy(upstream.URL, config.DownstreamNonStreamStrategyUpstreamNonStream))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	if got, _ := payload["service_tier"].(string); got != "default" {
+		t.Fatalf("expected service_tier default, got %#v body=%s", payload["service_tier"], rec.Body.String())
+	}
+}
+
 func performResponsesNonStreamRequest(t *testing.T, upstreamURL string, strategy string) map[string]any {
 	t.Helper()
 

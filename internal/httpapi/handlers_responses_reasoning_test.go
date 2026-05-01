@@ -52,3 +52,31 @@ func TestResponsesNonStreamPreservesReasoningOutputItems(t *testing.T) {
 		t.Fatalf("expected encrypted_content to be preserved, got %#v", item)
 	}
 }
+
+func TestResponsesStreamPreservesTopLevelServiceTierFromCompletedEvent(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"service_tier\":\"default\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"service_tier":"default"`) {
+		t.Fatalf("expected response stream to include service_tier default, got %s", rec.Body.String())
+	}
+}
