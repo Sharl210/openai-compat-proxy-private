@@ -525,7 +525,7 @@ func TestChatRouteProviderServiceTierOverrideWinsForResponsesUpstream(t *testing
 		bodyBytes, _ := io.ReadAll(r.Body)
 		gotBody = string(bodyBytes)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","service_tier":"default","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
 	}))
 	defer upstream.Close()
 
@@ -551,6 +551,55 @@ func TestChatRouteProviderServiceTierOverrideWinsForResponsesUpstream(t *testing
 	}
 	if got := rec.Header().Get(headerProxyToUpstreamServiceTier); got != "priority" {
 		t.Fatalf("expected upstream service tier header priority, got %q", got)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal downstream response: %v body=%s", err, rec.Body.String())
+	}
+	if got, _ := response["service_tier"].(string); got != "default" {
+		t.Fatalf("expected downstream service_tier default from upstream response, got %#v body=%s", response["service_tier"], rec.Body.String())
+	}
+}
+
+func TestResponsesRouteProviderServiceTierOverrideWinsForResponsesUpstream(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","status":"completed","service_tier":"default","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true, OpenAIServiceTier: config.OpenAIServiceTierPriority}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","serviceTier":"flex","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["service_tier"].(string); got != "priority" {
+		t.Fatalf("expected provider override service_tier priority, got %#v body=%s", payload["service_tier"], gotBody)
+	}
+	if got := rec.Header().Get(headerClientToProxyServiceTier); got != "flex" {
+		t.Fatalf("expected client service tier header flex, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamServiceTier); got != "priority" {
+		t.Fatalf("expected upstream service tier header priority, got %q", got)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal downstream response: %v body=%s", err, rec.Body.String())
+	}
+	if got, _ := response["service_tier"].(string); got != "default" {
+		t.Fatalf("expected downstream service_tier default from upstream response, got %#v body=%s", response["service_tier"], rec.Body.String())
 	}
 }
 
