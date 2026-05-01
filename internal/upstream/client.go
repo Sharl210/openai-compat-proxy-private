@@ -1059,7 +1059,7 @@ func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode stri
 			"type":        tool.Type,
 			"name":        tool.Name,
 			"description": tool.Description,
-			"parameters":  normalizeJSONSchema(tool.Parameters),
+			"parameters":  normalizeFunctionToolJSONSchema(tool),
 		}
 	}
 
@@ -1447,6 +1447,20 @@ func normalizeJSONSchema(value any) any {
 	default:
 		return value
 	}
+}
+
+func normalizeFunctionToolJSONSchema(tool model.CanonicalTool) any {
+	if strings.TrimSpace(tool.Type) != "function" {
+		return normalizeJSONSchema(tool.Parameters)
+	}
+	schema, ok := normalizeJSONSchema(tool.Parameters).(map[string]any)
+	if !ok || len(schema) == 0 {
+		return map[string]any{"type": "object"}
+	}
+	if _, ok := schema["type"]; !ok {
+		schema["type"] = "object"
+	}
+	return schema
 }
 
 func hashBytes(body []byte) string {

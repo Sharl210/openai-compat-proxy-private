@@ -1083,7 +1083,7 @@ func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
 		for _, tool := range req.Tools {
-			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": tool.Name, "description": tool.Description, "parameters": normalizeJSONSchema(tool.Parameters)}})
+			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": tool.Name, "description": tool.Description, "parameters": normalizeFunctionToolJSONSchema(tool)}})
 		}
 		payload["tools"] = tools
 	}
@@ -1235,7 +1235,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
 		for _, tool := range req.Tools {
-			tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": normalizeJSONSchema(tool.Parameters)})
+			tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": normalizeFunctionToolJSONSchema(tool)})
 		}
 		payload["tools"] = tools
 	}

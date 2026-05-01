@@ -643,6 +643,20 @@ func TestBuildRequestBodyPreservesResponsesToolTypesForFunctionOnlyTools(t *test
 	}})
 }
 
+func TestBuildRequestBodyUsesObjectSchemaForFunctionToolWithoutParameters(t *testing.T) {
+	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
+		Type:        "function",
+		Name:        "get_current_time",
+		Description: "Get current time",
+	}})
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "function",
+		"name":        "get_current_time",
+		"description": "Get current time",
+		"parameters":  map[string]any{"type": "object"},
+	}})
+}
+
 func TestBuildRequestBodyPreservesResponsesToolTypesForCustomOnlyTools(t *testing.T) {
 	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
 		Type:        "custom",
@@ -1458,10 +1472,10 @@ func TestResponseUsesAnthropicEndpointAddsContextManagementBetaHeader(t *testing
 
 	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
 	_, err := client.Response(context.Background(), model.CanonicalRequest{
-		Model:           "claude-sonnet-4-5",
-		MaxOutputTokens: intPtrForClientTest(128),
+		Model:                   "claude-sonnet-4-5",
+		MaxOutputTokens:         intPtrForClientTest(128),
 		PreservedTopLevelFields: map[string]any{"context_management": map[string]any{"edits": []any{map[string]any{"type": "clear_thinking_20251015"}, map[string]any{"type": "compact_20260112"}}}},
-		Messages: []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}},
+		Messages:                []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}},
 	}, "Bearer anthropic-key")
 	if err != nil {
 		t.Fatalf("Response error: %v", err)
@@ -1518,6 +1532,51 @@ func TestBuildChatRequestBodyPreservesFileContentPart(t *testing.T) {
 	if got := fileRaw["file_id"]; got != "file_123" {
 		t.Fatalf("expected file_id preserved, got %#v", part)
 	}
+}
+
+func TestBuildChatRequestBodyUsesObjectSchemaForFunctionToolWithoutParameters(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "deepseek-v4-pro",
+		Tools: []model.CanonicalTool{{
+			Type:        "function",
+			Name:        "get_current_time",
+			Description: "Get current time",
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	tools, _ := payload["tools"].([]any)
+	tool, _ := tools[0].(map[string]any)
+	function, _ := tool["function"].(map[string]any)
+	assertJSONEqual(t, function["parameters"], map[string]any{"type": "object"})
+}
+
+func TestBuildAnthropicRequestBodyUsesObjectSchemaForFunctionToolWithoutParameters(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "deepseek-v4-pro",
+		Tools: []model.CanonicalTool{{
+			Type:        "function",
+			Name:        "get_current_time",
+			Description: "Get current time",
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	tools, _ := payload["tools"].([]any)
+	tool, _ := tools[0].(map[string]any)
+	assertJSONEqual(t, tool["input_schema"], map[string]any{"type": "object"})
 }
 
 func TestBuildChatRequestBodyPreservesInputAudioContentPart(t *testing.T) {
