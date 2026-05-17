@@ -33,7 +33,7 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 			r.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		}
 
-		archiveWriter := archiveWriterForRequest(store, id)
+		archiveWriter := archiveWriterForRequest(store, id, r.URL.Path)
 		if archiveWriter != nil {
 			_ = archiveWriter.WriteRequest(map[string]any{
 				"request_id":   id,
@@ -93,11 +93,45 @@ func shouldLogAPITraffic(path string) bool {
 	if clean == "/_admin" || strings.HasPrefix(clean, "/_admin/") {
 		return false
 	}
+	if clean == canonicalV1ImagesGenerationsPath || clean == canonicalV1ImagesEditsPath || clean == canonicalV1ImagesVariationsPath {
+		return false
+	}
+	if clean == canonicalV1EmbeddingsPath {
+		return false
+	}
+	if clean == canonicalV1RerankPath {
+		return false
+	}
+	if clean == "/images/generations" || clean == "/images/edits" || clean == "/images/variations" {
+		return false
+	}
+	if clean == "/embeddings" {
+		return false
+	}
+	if clean == "/rerank" {
+		return false
+	}
+	if strings.HasPrefix(clean, "/") && strings.Contains(clean, "/images/") {
+		return false
+	}
+	if strings.HasPrefix(clean, "/") && strings.HasSuffix(clean, "/embeddings") {
+		return false
+	}
+	if strings.HasPrefix(clean, "/") && strings.HasSuffix(clean, "/rerank") {
+		return false
+	}
 	return true
 }
 
-func archiveWriterForRequest(store *config.RuntimeStore, requestID string) *debugarchive.ArchiveWriter {
+func shouldArchiveAPITraffic(path string) bool {
+	return shouldLogAPITraffic(path)
+}
+
+func archiveWriterForRequest(store *config.RuntimeStore, requestID string, path string) *debugarchive.ArchiveWriter {
 	if requestID == "" {
+		return nil
+	}
+	if !shouldArchiveAPITraffic(path) {
 		return nil
 	}
 	if store != nil {
