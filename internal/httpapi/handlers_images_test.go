@@ -802,6 +802,81 @@ func TestImagesGenerationsConvertsUpstreamURLToB64JSONWhenRequested(t *testing.T
 	}
 }
 
+func TestImagesGenerationsDefaultsToB64JSONWhenResponseFormatOmitted(t *testing.T) {
+	imageArtifactRootDirOverride = t.TempDir()
+	t.Cleanup(func() { imageArtifactRootDirOverride = "" })
+
+	imageBytes := []byte("fake-png-binary")
+	downloadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(imageBytes)
+	}))
+	defer downloadServer.Close()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1713833628,"data":[{"url":"` + downloadServer.URL + `/image.png"}]}`))
+	}))
+	defer upstream.Close()
+
+	proxy := httptest.NewServer(NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "image",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "image",
+			Enabled:         true,
+			UpstreamBaseURL: upstream.URL,
+			UpstreamAPIKey:  "provider-upstream-key",
+			ManualModels:    []string{"gpt-image-2"},
+		}},
+	}))
+	defer proxy.Close()
+
+	reqBody := `{"model":"gpt-image-2","prompt":"otter"}`
+	req, err := http.NewRequest(http.MethodPost, proxy.URL+"/v1/images/generations", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer root-secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", resp.StatusCode, string(body))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v body=%s", err, string(body))
+	}
+	data, _ := payload["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("expected one data item, got %#v", payload)
+	}
+	item, _ := data[0].(map[string]any)
+	if got := item["url"]; got != nil {
+		t.Fatalf("expected url removed after default conversion, got %#v", got)
+	}
+	b64, _ := item["b64_json"].(string)
+	if b64 == "" {
+		t.Fatalf("expected b64_json after default conversion, got %#v", item)
+	}
+	if want := base64.StdEncoding.EncodeToString(imageBytes); b64 != want {
+		t.Fatalf("expected b64_json %q, got %q", want, b64)
+	}
+	entries, err := os.ReadDir(imageArtifactRootDirOverride)
+	if err != nil {
+		t.Fatalf("read artifact dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no persisted artifact files for default url->b64 conversion, got %v", entries)
+	}
+}
+
 func TestImagesGenerationsConvertsUpstreamB64JSONToPublicURLWhenRequested(t *testing.T) {
 	imageArtifactRootDirOverride = t.TempDir()
 	t.Cleanup(func() { imageArtifactRootDirOverride = "" })

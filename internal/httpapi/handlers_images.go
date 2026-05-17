@@ -369,7 +369,7 @@ func multipartBoundary(contentType string) string {
 func rewriteImageResponseForRequestedFormat(r *http.Request, requestedFormat string, payload []byte, contentType string) ([]byte, string, error) {
 	requestedFormat = strings.TrimSpace(requestedFormat)
 	if requestedFormat == "" {
-		return payload, contentType, nil
+		requestedFormat = "b64_json"
 	}
 	var body map[string]any
 	if err := json.Unmarshal(payload, &body); err != nil {
