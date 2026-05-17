@@ -15,6 +15,7 @@ import (
 
 func handleModels() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		refreshDefaultProviderOverlayCacheFromRequest(r)
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
 			if info, ok := routeInfoFromRequest(r); ok && info.Legacy && (len(snapshot.DefaultProviderIDs) > 1 || snapshot.Config.EnableDefaultProviderModelTags) {
 				writeDefaultOverlayModels(w, r, snapshot)
@@ -233,7 +234,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		}
 	}
 	for _, manualModel := range provider.ManualModels {
-		if provider.HidesModel(manualModel) {
+		if strings.TrimSpace(manualModel) == "" {
 			continue
 		}
 		if _, exists := seenIDs[manualModel]; !exists {

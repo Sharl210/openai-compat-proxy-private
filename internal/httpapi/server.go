@@ -28,9 +28,15 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 		store:     store,
 		CacheInfo: cacheMgr,
 	}
+	if imageArtifactRootDirOverride != "" {
+		ensureImageArtifactsReadyForRoot(imageArtifactRootDirOverride)
+	} else if snapshot := store.Active(); snapshot != nil {
+		ensureImageArtifactsReadyForRoot(imageArtifactRootDirFromSnapshot(snapshot))
+	}
 	srv.admin = newAdminUI(store, cacheMgr)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
+	mux.HandleFunc("/_images/", allowMethods(handleImageArtifact(), http.MethodGet))
 	if srv.admin != nil {
 		srv.admin.registerRoutes(mux)
 	}
@@ -88,6 +94,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mux.ServeHTTP(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/_images/") {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
 	if s.admin != nil && s.admin.matchesPath(r.URL.Path) {
 		s.admin.applyHeaders(w)
 		s.mux.ServeHTTP(w, r)
@@ -112,6 +122,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.CacheInfo != nil {
 			ctx = withCacheInfoManager(ctx, s.CacheInfo)
 		}
+		ctx = withRuntimeStore(ctx, s.store)
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
 		if shouldUseRootLegacyProxyAuth(info, snapshot) {

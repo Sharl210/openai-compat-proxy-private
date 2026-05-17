@@ -31,6 +31,12 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 	if requestedModel == "" {
 		return nil
 	}
+	if shouldBypassUsageRecorderForRequest(r) {
+		return nil
+	}
+	if bypassProviderModelAllowanceForRequest(r) {
+		return nil
+	}
 	info, ok := routeInfoFromRequest(r)
 	if !ok {
 		return nil
@@ -54,6 +60,23 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		}
 	}
 	return &modelAllowanceError{status: http.StatusBadRequest, code: "invalid_model", message: "requested model is not in models list"}
+}
+
+func bypassProviderModelAllowanceForRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	path := strings.TrimSpace(r.URL.Path)
+	switch path {
+	case canonicalV1ImagesGenerationsPath,
+		canonicalV1ImagesEditsPath,
+		canonicalV1ImagesVariationsPath,
+		canonicalV1EmbeddingsPath,
+		canonicalV1RerankPath:
+		return true
+	default:
+		return false
+	}
 }
 
 func explicitModelsListEnforced(provider config.ProviderConfig) bool {

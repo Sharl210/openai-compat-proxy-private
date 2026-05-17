@@ -5,11 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/upstream"
 )
+
+var defaultOverlayRefreshInterval = 24 * time.Hour
 
 type routeInfo struct {
 	ProviderID    string
@@ -22,6 +25,7 @@ type routeContextKey string
 const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
+const runtimeStoreKey routeContextKey = "runtime-store"
 
 const (
 	canonicalV1ModelsPath           = "/v1/models"
@@ -138,6 +142,13 @@ func withRuntimeSnapshot(ctx context.Context, snapshot *config.RuntimeSnapshot) 
 	return context.WithValue(ctx, runtimeSnapshotKey, snapshot)
 }
 
+func withRuntimeStore(ctx context.Context, store *config.RuntimeStore) context.Context {
+	if store == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, runtimeStoreKey, store)
+}
+
 func routeInfoFromRequest(r *http.Request) (routeInfo, bool) {
 	info, ok := r.Context().Value(routeInfoKey).(routeInfo)
 	return info, ok
@@ -146,6 +157,11 @@ func routeInfoFromRequest(r *http.Request) (routeInfo, bool) {
 func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool) {
 	snapshot, ok := r.Context().Value(runtimeSnapshotKey).(*config.RuntimeSnapshot)
 	return snapshot, ok
+}
+
+func runtimeStoreFromRequest(r *http.Request) *config.RuntimeStore {
+	store, _ := r.Context().Value(runtimeStoreKey).(*config.RuntimeStore)
+	return store
 }
 
 func providerConfigForRequest(r *http.Request) config.Config {
@@ -208,11 +224,23 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		providerID := info.ProviderID
 		resolvedModel := canonicalModel
 		if info.Legacy && canonicalModel != "" {
+			refreshDefaultProviderOverlayCacheFromRequest(r)
+			snapshot, _ = runtimeSnapshotFromRequest(r)
 			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
 			} else if resolvedID, ok := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel); ok {
 				providerID = resolvedID
+				refreshDefaultProviderOverlayCacheFromRequest(r)
+				snapshot, _ = runtimeSnapshotFromRequest(r)
+				if refreshedID, refreshedModel, refreshedOK := snapshot.ResolveDefaultProviderSelection(canonicalModel); refreshedOK {
+					providerID = refreshedID
+					resolvedModel = refreshedModel
+				}
+			} else if shouldBypassUsageRecorderForRequest(r) {
+				if len(snapshot.DefaultProviderIDs) > 0 {
+					providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
+				}
 			} else if legacyModelsListEnforced(snapshot) {
 				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
 			}
@@ -222,6 +250,126 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		}
 	}
 	return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
+}
+
+func refreshDefaultProviderOverlayCacheFromRequest(r *http.Request) {
+	if r == nil {
+		return
+	}
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil {
+		return
+	}
+	store := runtimeStoreFromRequest(r)
+	if store == nil {
+		return
+	}
+	if err := refreshDefaultProviderOverlayCache(store, time.Now()); err != nil {
+		return
+	}
+	if latest := store.Active(); latest != nil {
+		*r = *r.Clone(withRuntimeSnapshot(r.Context(), latest))
+	}
+}
+
+func refreshDefaultProviderOverlayCache(store *config.RuntimeStore, now time.Time) error {
+	if store == nil {
+		return nil
+	}
+	snapshot := store.Active()
+	if snapshot == nil {
+		return nil
+	}
+	if !shouldRefreshDefaultOverlayCache(snapshot, now) {
+		return nil
+	}
+	entries, owners, taggedOwners, taggedVisible, err := fetchLatestDefaultOverlay(snapshot)
+	if err != nil {
+		return err
+	}
+	store.UpdateDefaultOverlayIndex(owners, entries, taggedOwners, taggedVisible)
+	return nil
+}
+
+func shouldRefreshDefaultOverlayCache(snapshot *config.RuntimeSnapshot, now time.Time) bool {
+	if snapshot == nil {
+		return false
+	}
+	if len(snapshot.DefaultProviderIDs) <= 1 && !snapshot.Config.EnableDefaultProviderModelTags {
+		return false
+	}
+	if now.Sub(snapshot.RootEnvMTime) >= defaultOverlayRefreshInterval {
+		return true
+	}
+	return false
+}
+
+func fetchLatestDefaultOverlay(snapshot *config.RuntimeSnapshot) ([]string, map[string]string, map[string]string, []string, error) {
+	if snapshot == nil {
+		return nil, nil, nil, nil, nil
+	}
+	owners := make(map[string]string)
+	taggedOwners := make(map[string]string)
+	visibleByProvider := make(map[string][]string, len(snapshot.DefaultProviderIDs))
+	modelCount := make(map[string]int)
+	for _, id := range snapshot.DefaultProviderIDs {
+		provider, err := snapshot.Config.ProviderByID(id)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		visible := provider.VisibleModelIDs()
+		visibleByProvider[id] = visible
+		for _, modelID := range visible {
+			modelCount[modelID]++
+			taggedOwners[taggedModelID(id, modelID)] = id
+		}
+	}
+	visible := make([]string, 0, len(modelCount))
+	seen := make(map[string]struct{}, len(modelCount))
+	if snapshot.Config.EnableDefaultProviderModelTags {
+		for i := len(snapshot.DefaultProviderIDs) - 1; i >= 0; i-- {
+			id := snapshot.DefaultProviderIDs[i]
+			for _, modelID := range visibleByProvider[id] {
+				visibleID := modelID
+				if snapshot.Config.EnableAllDefaultProviderModelTags || modelCount[modelID] > 1 {
+					visibleID = taggedModelID(id, modelID)
+				}
+				if _, ok := seen[visibleID]; ok {
+					continue
+				}
+				seen[visibleID] = struct{}{}
+				owners[visibleID] = id
+				visible = append(visible, visibleID)
+			}
+		}
+	} else {
+		for _, id := range snapshot.DefaultProviderIDs {
+			for _, modelID := range visibleByProvider[id] {
+				owners[modelID] = id
+			}
+		}
+		for i := len(snapshot.DefaultProviderIDs) - 1; i >= 0; i-- {
+			id := snapshot.DefaultProviderIDs[i]
+			for _, modelID := range visibleByProvider[id] {
+				if owners[modelID] != id {
+					continue
+				}
+				if _, ok := seen[modelID]; ok {
+					continue
+				}
+				seen[modelID] = struct{}{}
+				visible = append(visible, modelID)
+			}
+		}
+	}
+	taggedVisible := make([]string, 0, len(taggedOwners))
+	for i := len(snapshot.DefaultProviderIDs) - 1; i >= 0; i-- {
+		id := snapshot.DefaultProviderIDs[i]
+		for _, modelID := range visibleByProvider[id] {
+			taggedVisible = append(taggedVisible, taggedModelID(id, modelID))
+		}
+	}
+	return visible, owners, taggedOwners, taggedVisible, nil
 }
 
 func legacyModelsListEnforced(snapshot *config.RuntimeSnapshot) bool {
@@ -281,4 +429,8 @@ func modelEntriesContain(entries []map[string]any, model string) bool {
 		}
 	}
 	return false
+}
+
+func taggedModelID(providerID string, modelID string) string {
+	return "[" + providerID + "]" + modelID
 }

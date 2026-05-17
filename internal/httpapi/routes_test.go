@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 )
@@ -238,4 +239,36 @@ func TestProviderConfigForRequestCarriesProviderResponsesToolCompatMode(t *testi
 	if providerCfg.ResponsesToolCompatMode != config.ResponsesToolCompatModeFunctionOnly {
 		t.Fatalf("expected provider responses tool compat mode %q, got %q", config.ResponsesToolCompatModeFunctionOnly, providerCfg.ResponsesToolCompatMode)
 	}
+}
+
+func TestLegacyImageRouteRefreshesDefaultProviderSelectionAfterModelChange(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "p1,p2",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:           "p1",
+			Enabled:      true,
+			SupportsModels: true,
+			ManualModels: []string{"model-a"},
+		}, {
+			ID:           "p2",
+			Enabled:      true,
+			SupportsModels: true,
+			ManualModels: []string{"model-b"},
+		}},
+	})
+	server := NewServerWithStore(store, nil)
+	store.Active().Config.Providers[0].ManualModels = []string{"model-a", "model-new"}
+	refreshDefaultProviderOverlayCache(store, time.Now())
+
+	req := httptest.NewRequest("POST", "/v1/images/generations", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "p2", Legacy: true, CanonicalPath: canonicalV1ImagesGenerationsPath}), store.Active()))
+	provider, _, providerID, resolvedModel, ok := providerSelectionForModelRequest(req, "model-new")
+	if !ok {
+		t.Fatalf("expected refreshed provider selection to succeed")
+	}
+	if providerID != "p1" || provider.ID != "p1" || resolvedModel != "model-new" {
+		t.Fatalf("expected refreshed owner p1 for model-new, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
+	}
+	_ = server
 }

@@ -15,6 +15,9 @@ func cacheInfoUsageRecorder(r *http.Request, requestID, providerID, upstreamEndp
 	if manager == nil {
 		return nil
 	}
+	if bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r) {
+		return nil
+	}
 	requestID = strings.TrimSpace(requestID)
 	providerID = strings.TrimSpace(providerID)
 	if requestID == "" || providerID == "" {
@@ -29,6 +32,31 @@ func cacheInfoUsageRecorder(r *http.Request, requestID, providerID, upstreamEndp
 			return
 		}
 		_ = manager.RecordFinalUsage(requestID, providerID, parsed)
+	}
+}
+
+func shouldBypassUsageRecorderForRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	path := strings.TrimSpace(r.URL.Path)
+	switch path {
+	case canonicalV1ImagesGenerationsPath,
+		canonicalV1ImagesEditsPath,
+		canonicalV1ImagesVariationsPath,
+		canonicalV1EmbeddingsPath,
+		canonicalV1RerankPath,
+		"/images/generations",
+		"/images/edits",
+		"/images/variations",
+		"/embeddings",
+		"/rerank":
+		return true
+	default:
+		if strings.Contains(path, "/images/") || strings.HasSuffix(path, "/embeddings") || strings.HasSuffix(path, "/rerank") {
+			return true
+		}
+		return false
 	}
 }
 

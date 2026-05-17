@@ -716,6 +716,24 @@ func (p ProviderConfig) HidesModel(model string) bool {
 	if model == "" {
 		return false
 	}
+	for _, manualModel := range p.ManualModels {
+		manualModel = strings.TrimSpace(manualModel)
+		if manualModel == "" {
+			continue
+		}
+		if manualModel == model {
+			return false
+		}
+		if baseModel, _, ok := reasoning.SplitSuffix(model); ok && baseModel == manualModel {
+			for _, pattern := range p.HiddenModels {
+				pattern = strings.TrimSpace(pattern)
+				if pattern == model {
+					return true
+				}
+			}
+			return false
+		}
+	}
 	for _, pattern := range p.HiddenModels {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
@@ -744,7 +762,7 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 	}
 	for _, manualModel := range p.ManualModels {
 		id := strings.TrimSpace(manualModel)
-		if id == "" || p.HidesModel(id) {
+		if id == "" {
 			continue
 		}
 		if _, ok := seen[id]; ok {

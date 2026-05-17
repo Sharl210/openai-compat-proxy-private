@@ -55,7 +55,7 @@ func Default() Config {
 		CacheInfoTimezone:           "Asia/Shanghai",
 		LogEnable:                   true,
 		ConnectTimeout:              30 * time.Second,
-		FirstByteTimeout:            20 * time.Minute,
+		FirstByteTimeout:            30 * time.Minute,
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,

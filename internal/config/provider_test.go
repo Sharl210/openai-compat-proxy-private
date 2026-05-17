@@ -85,6 +85,20 @@ func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
 	}
 }
 
+func TestManualModelsOverrideHiddenModels(t *testing.T) {
+	provider := ProviderConfig{
+		ManualModels: []string{"manual-alpha"},
+		HiddenModels: []string{"*"},
+	}
+	if provider.HidesModel("manual-alpha") {
+		t.Fatalf("expected manual model to stay visible even when hidden wildcard matches")
+	}
+	visible := provider.VisibleModelIDs()
+	if len(visible) != 1 || visible[0] != "manual-alpha" {
+		t.Fatalf("expected manual model to remain visible, got %#v", visible)
+	}
+}
+
 func TestLoadProviderFileResolvesSystemPromptFilesRelativeToProviderEnv(t *testing.T) {
 	rootDir := t.TempDir()
 	promptDir := filepath.Join(rootDir, "prompts")

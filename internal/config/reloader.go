@@ -80,6 +80,35 @@ func (s *RuntimeStore) Refresh() error {
 	return nil
 }
 
+func (s *RuntimeStore) UpdateDefaultOverlayIndex(defaultModelOwners map[string]string, defaultVisibleModels []string, defaultTaggedModelOwners map[string]string, defaultTaggedVisibleModels []string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.active.Load()
+	if current == nil {
+		return
+	}
+	clone := *current
+	clone.DefaultModelOwners = cloneStringMap(defaultModelOwners)
+	clone.DefaultVisibleModels = append([]string(nil), defaultVisibleModels...)
+	clone.DefaultTaggedModelOwners = cloneStringMap(defaultTaggedModelOwners)
+	clone.DefaultTaggedVisibleModels = append([]string(nil), defaultTaggedVisibleModels...)
+	s.active.Store(&clone)
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return map[string]string{}
+	}
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 func (s *RuntimeStore) StartPolling(ctx context.Context, interval time.Duration) {
 	if s == nil || interval <= 0 {
 		return

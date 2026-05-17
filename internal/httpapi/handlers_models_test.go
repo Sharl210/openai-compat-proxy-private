@@ -295,11 +295,34 @@ func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
 		entry, _ := item.(map[string]any)
 		ids = append(ids, entry["id"].(string))
 	}
-	if contains(ids, "gpt-4o") || contains(ids, "manual-alpha") || contains(ids, "public-gpt") {
+	if contains(ids, "gpt-4o") || contains(ids, "public-gpt") {
 		t.Fatalf("expected hidden models to be removed from rewritten models body, got %#v", ids)
 	}
-	if !contains(ids, "gpt-5") || !contains(ids, "manual-beta") {
+	if !contains(ids, "gpt-5") || !contains(ids, "manual-alpha") || !contains(ids, "manual-beta") {
 		t.Fatalf("expected non-hidden models to remain visible, got %#v", ids)
+	}
+}
+
+func TestRewriteModelsBodyKeepsManualModelsEvenWhenHiddenWildcardMatches(t *testing.T) {
+	body := []byte(`{"object":"list","data":[]}`)
+	provider := config.ProviderConfig{
+		ManualModels: []string{"manual-alpha"},
+		HiddenModels: []string{"*"},
+	}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if len(ids) != 1 || ids[0] != "manual-alpha" {
+		t.Fatalf("expected manual model to remain visible, got %#v", ids)
 	}
 }
 

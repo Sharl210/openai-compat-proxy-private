@@ -246,9 +246,9 @@ func TestValidateRootEnvValuesIgnoresUnknownLegacyVariables(t *testing.T) {
 	}
 }
 
-func TestDefaultFirstByteTimeoutIsTwentyMinutes(t *testing.T) {
-	if got := Default().FirstByteTimeout; got != 20*time.Minute {
-		t.Fatalf("expected default FirstByteTimeout 20m, got %v", got)
+func TestDefaultFirstByteTimeoutIsThirtyMinutes(t *testing.T) {
+	if got := Default().FirstByteTimeout; got != 30*time.Minute {
+		t.Fatalf("expected default FirstByteTimeout 30m, got %v", got)
 	}
 }
 
@@ -424,14 +424,17 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
-	if want := []string{"gpt-4o", "azure-only", "openai-only"}; !reflect.DeepEqual(visible, want) {
-		t.Fatalf("expected hidden models removed from visible list and gpt-4o to fall through to azure, want %v got %v", want, visible)
+	if len(visible) != 4 || !containsString(visible, "gpt-4o") || !containsString(visible, "azure-only") || !containsString(visible, "openai-only") || !containsString(visible, "manual-openai") {
+		t.Fatalf("expected hidden models removed while manual model stays visible, got %v", visible)
 	}
 	if got := owners["gpt-4o"]; got != "azure" {
 		t.Fatalf("expected hidden wildcard model gpt-4o to fall through to azure, got %q", got)
 	}
-	if _, ok := owners["manual-openai"]; ok {
-		t.Fatalf("expected hidden manual model to be absent from overlay owners, got %#v", owners)
+	if got := owners["manual-openai"]; got != "openai" {
+		t.Fatalf("expected manual model to override hidden rules and stay owned by openai, got %#v", owners)
+	}
+	if !reflect.DeepEqual(visible[2], "manual-openai") && !containsString(visible, "manual-openai") {
+		t.Fatalf("expected manual model to remain visible even when hidden models mention it, got %#v", visible)
 	}
 }
 
@@ -455,6 +458,15 @@ func TestBuildDefaultOverlayModelIndexHiddenModelsFilterReasoningSuffixVariants(
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
 	if want := []string{"reason-model", "reason-model-xhigh", "reason-model-medium"}; !reflect.DeepEqual(visible, want) {
-		t.Fatalf("expected hidden suffix variants to be filtered from visible list, want %v got %v", want, visible)
+		t.Fatalf("expected explicitly hidden suffix variants to stay hidden while the manual model hierarchy remains visible, want %v got %v", want, visible)
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
