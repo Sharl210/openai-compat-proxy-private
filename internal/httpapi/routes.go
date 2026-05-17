@@ -29,6 +29,11 @@ const (
 	canonicalV1ResponsesCompactPath = "/v1/responses/compact"
 	canonicalV1ChatCompletionsPath  = "/v1/chat/completions"
 	canonicalV1MessagesPath         = "/v1/messages"
+	canonicalV1ImagesGenerationsPath = "/v1/images/generations"
+	canonicalV1ImagesEditsPath       = "/v1/images/edits"
+	canonicalV1ImagesVariationsPath  = "/v1/images/variations"
+	canonicalV1EmbeddingsPath        = "/v1/embeddings"
+	canonicalV1RerankPath            = "/v1/rerank"
 )
 
 var canonicalV1RoutePaths = []string{
@@ -37,6 +42,11 @@ var canonicalV1RoutePaths = []string{
 	canonicalV1ResponsesCompactPath,
 	canonicalV1ChatCompletionsPath,
 	canonicalV1MessagesPath,
+	canonicalV1ImagesGenerationsPath,
+	canonicalV1ImagesEditsPath,
+	canonicalV1ImagesVariationsPath,
+	canonicalV1EmbeddingsPath,
+	canonicalV1RerankPath,
 }
 
 var publicRouteAliases = map[string]string{
@@ -45,6 +55,11 @@ var publicRouteAliases = map[string]string{
 	"/responses/compact": canonicalV1ResponsesCompactPath,
 	"/chat/completions":  canonicalV1ChatCompletionsPath,
 	"/messages":          canonicalV1MessagesPath,
+	"/images/generations": canonicalV1ImagesGenerationsPath,
+	"/images/edits":       canonicalV1ImagesEditsPath,
+	"/images/variations":  canonicalV1ImagesVariationsPath,
+	"/embeddings":         canonicalV1EmbeddingsPath,
+	"/rerank":             canonicalV1RerankPath,
 }
 
 func canonicalV1Paths() []string {

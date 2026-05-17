@@ -156,3 +156,148 @@ func TestModelsRejectsPostWithMethodNotAllowed(t *testing.T) {
 		t.Fatalf("expected Allow=%q, got %q", http.MethodGet, got)
 	}
 }
+
+func TestImagesGenerationsRejectsGetWithMethodNotAllowed(t *testing.T) {
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:      "openai",
+			Enabled: true,
+		}},
+	})
+
+	for _, path := range []string{"/v1/images/generations", "/openai/v1/images/generations"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer root-secret")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 405 for GET %s, got %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != http.MethodPost {
+				t.Fatalf("expected Allow=%q, got %q", http.MethodPost, got)
+			}
+		})
+	}
+}
+
+func TestImagesEditsRejectsGetWithMethodNotAllowed(t *testing.T) {
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:      "openai",
+			Enabled: true,
+		}},
+	})
+
+	for _, path := range []string{"/v1/images/edits", "/openai/v1/images/edits"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer root-secret")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 405 for GET %s, got %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != http.MethodPost {
+				t.Fatalf("expected Allow=%q, got %q", http.MethodPost, got)
+			}
+		})
+	}
+}
+
+func TestImagesVariationsRejectsGetWithMethodNotAllowed(t *testing.T) {
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:      "openai",
+			Enabled: true,
+		}},
+	})
+
+	for _, path := range []string{"/v1/images/variations", "/openai/v1/images/variations"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer root-secret")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 405 for GET %s, got %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != http.MethodPost {
+				t.Fatalf("expected Allow=%q, got %q", http.MethodPost, got)
+			}
+		})
+	}
+}
+
+func TestEmbeddingsRejectsGetWithMethodNotAllowed(t *testing.T) {
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:      "openai",
+			Enabled: true,
+		}},
+	})
+
+	for _, path := range []string{"/v1/embeddings", "/openai/v1/embeddings"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer root-secret")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 405 for GET %s, got %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != http.MethodPost {
+				t.Fatalf("expected Allow=%q, got %q", http.MethodPost, got)
+			}
+		})
+	}
+}
+
+func TestRerankRejectsGetWithMethodNotAllowed(t *testing.T) {
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:      "openai",
+			Enabled: true,
+		}},
+	})
+
+	for _, path := range []string{"/v1/rerank", "/openai/v1/rerank"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer root-secret")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected 405 for GET %s, got %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != http.MethodPost {
+				t.Fatalf("expected Allow=%q, got %q", http.MethodPost, got)
+			}
+		})
+	}
+}

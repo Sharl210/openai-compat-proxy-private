@@ -39,6 +39,11 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager)
 	mux.HandleFunc(canonicalV1ResponsesCompactPath, allowMethods(handleResponsesCompact(), http.MethodPost))
 	mux.HandleFunc(canonicalV1ChatCompletionsPath, allowMethods(handleChat(), http.MethodPost))
 	mux.HandleFunc(canonicalV1MessagesPath, allowMethods(handleAnthropicMessages(), http.MethodPost))
+	mux.HandleFunc(canonicalV1ImagesGenerationsPath, allowMethods(handleImageGeneration(), http.MethodPost))
+	mux.HandleFunc(canonicalV1ImagesEditsPath, allowMethods(handleImageEdit(), http.MethodPost))
+	mux.HandleFunc(canonicalV1ImagesVariationsPath, allowMethods(handleImageVariation(), http.MethodPost))
+	mux.HandleFunc(canonicalV1EmbeddingsPath, allowMethods(handleEmbeddings(), http.MethodPost))
+	mux.HandleFunc(canonicalV1RerankPath, allowMethods(handleRerank(), http.MethodPost))
 	srv.mux = mux
 	srv.handler = withRequestID(store, http.HandlerFunc(srv.serveHTTP))
 	return srv

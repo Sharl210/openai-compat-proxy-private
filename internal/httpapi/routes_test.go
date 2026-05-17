@@ -15,6 +15,11 @@ func TestCanonicalV1PathsMatchSupportedPublicRoutes(t *testing.T) {
 		canonicalV1ResponsesCompactPath,
 		canonicalV1ChatCompletionsPath,
 		canonicalV1MessagesPath,
+		canonicalV1ImagesGenerationsPath,
+		canonicalV1ImagesEditsPath,
+		canonicalV1ImagesVariationsPath,
+		canonicalV1EmbeddingsPath,
+		canonicalV1RerankPath,
 	}
 	if got := canonicalV1Paths(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected canonical v1 paths %v, got %v", want, got)
@@ -94,11 +99,21 @@ func TestRouteAliasesResolveToCanonicalV1Paths(t *testing.T) {
 		{name: "bare compact alias", path: "/responses/compact", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1ResponsesCompactPath},
 		{name: "bare chat alias", path: "/chat/completions", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1ChatCompletionsPath},
 		{name: "bare messages alias", path: "/messages", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1MessagesPath},
+		{name: "bare images generations alias", path: "/images/generations", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1ImagesGenerationsPath},
+		{name: "bare images edits alias", path: "/images/edits", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1ImagesEditsPath},
+		{name: "bare images variations alias", path: "/images/variations", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1ImagesVariationsPath},
+		{name: "bare embeddings alias", path: "/embeddings", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1EmbeddingsPath},
+		{name: "bare rerank alias", path: "/rerank", wantProvider: "openai", wantLegacy: true, wantPath: canonicalV1RerankPath},
 		{name: "provider models alias", path: "/openai/models", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ModelsPath},
 		{name: "provider responses alias", path: "/openai/responses", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ResponsesPath},
 		{name: "provider compact alias", path: "/openai/responses/compact", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ResponsesCompactPath},
 		{name: "provider chat alias", path: "/openai/chat/completions", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ChatCompletionsPath},
 		{name: "provider messages alias", path: "/openai/messages", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1MessagesPath},
+		{name: "provider images generations alias", path: "/openai/images/generations", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ImagesGenerationsPath},
+		{name: "provider images edits alias", path: "/openai/images/edits", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ImagesEditsPath},
+		{name: "provider images variations alias", path: "/openai/images/variations", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1ImagesVariationsPath},
+		{name: "provider embeddings alias", path: "/openai/embeddings", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1EmbeddingsPath},
+		{name: "provider rerank alias", path: "/openai/rerank", wantProvider: "openai", wantLegacy: false, wantPath: canonicalV1RerankPath},
 	}
 
 	for _, tc := range tests {
@@ -130,7 +145,7 @@ func TestRouteAliasesRespectLegacyToggle(t *testing.T) {
 		}},
 	}
 
-	for _, path := range []string{"/models", "/responses", "/responses/compact", "/chat/completions", "/messages"} {
+	for _, path := range []string{"/models", "/responses", "/responses/compact", "/chat/completions", "/messages", "/images/generations", "/images/edits", "/images/variations", "/embeddings", "/rerank"} {
 		t.Run(path, func(t *testing.T) {
 			if _, err := resolveRouteInfo(path, cfg); err == nil {
 				t.Fatalf("expected %q to be rejected when legacy v1 routes are disabled", path)
