@@ -12,6 +12,7 @@
 |---|---|---|
 | 多 provider 路由 | ✅ | 支持 `providers/*.env`、显式 `/{providerId}/v1/*` 和默认 provider overlay 裸 `/v1/*` |
 | 三套兼容入口 | ✅ | `POST /v1/responses`、`POST /v1/chat/completions`、`POST /v1/messages`、`GET /v1/models` 全部可用 |
+| OpenAI Images / Embeddings / Rerank 透传端口 | ✅ | 默认导出 `POST /v1/images/generations`、`/v1/images/edits`、`/v1/images/variations`、`/v1/embeddings`、`/v1/rerank`，按 provider 选择与模型映射透传到上游 |
 | `3×3` 协议矩阵 | ✅ | 三个下游入口可分别对接 `responses / chat / anthropic` 三种上游协议类型 |
 | provider 内部统一走一种上游协议 | ✅ | `UPSTREAM_ENDPOINT_TYPE=responses/chat/anthropic`，代理层负责跨协议适配 |
 | 流式 / 非流式 | ✅ | 支持 SSE 转发、超时兜底、错误终态补发，也支持 `proxy_buffer` / `upstream_non_stream` |
@@ -33,7 +34,7 @@
 
 ```mermaid
 flowchart LR
-    A[客户端] --> B[/responses\n/chat/completions\n/messages\n/models]
+    A[客户端] --> B[/responses\n/chat/completions\n/messages\n/models\n/images/*\n/embeddings\n/rerank]
     B --> C{按路由选 provider}
     C --> D[provider A\nresponses/chat/anthropic]
     C --> E[provider B\nresponses/chat/anthropic]
@@ -162,6 +163,11 @@ http://127.0.0.1:21021/
 - `/{providerId}/v1/chat/completions`
 - `/{providerId}/v1/messages`
 - `/{providerId}/v1/models`
+- `/{providerId}/v1/images/generations`
+- `/{providerId}/v1/images/edits`
+- `/{providerId}/v1/images/variations`
+- `/{providerId}/v1/embeddings`
+- `/{providerId}/v1/rerank`
 
 例如：
 
@@ -169,6 +175,9 @@ http://127.0.0.1:21021/
 - `/openai/v1/responses/compact`
 - `/openai/v1/chat/completions`
 - `/claude/v1/messages`
+- `/openai/v1/images/generations`
+- `/openai/v1/embeddings`
+- `/openai/v1/rerank`
 
 ### 兼容：默认 provider 裸路由
 
@@ -179,6 +188,11 @@ http://127.0.0.1:21021/
 - `/v1/chat/completions`
 - `/v1/messages`
 - `/v1/models`
+- `/v1/images/generations`
+- `/v1/images/edits`
+- `/v1/images/variations`
+- `/v1/embeddings`
+- `/v1/rerank`
 
 其中 `DEFAULT_PROVIDER` 支持逗号分隔多个 provider，例如 `openai,azure`：
 
@@ -213,6 +227,11 @@ http://127.0.0.1:21021/
 - `/chat/completions`
 - `/messages`
 - `/models`
+- `/images/generations`
+- `/images/edits`
+- `/images/variations`
+- `/embeddings`
+- `/rerank`
 
 以及对应的显式 provider 路由形式：
 
@@ -221,6 +240,11 @@ http://127.0.0.1:21021/
 - `/{providerId}/chat/completions`
 - `/{providerId}/messages`
 - `/{providerId}/models`
+- `/{providerId}/images/generations`
+- `/{providerId}/images/edits`
+- `/{providerId}/images/variations`
+- `/{providerId}/embeddings`
+- `/{providerId}/rerank`
 
 这些别名是精确路径映射回 canonical `/v1/*`，不会引入额外的 handler 或重复的鉴权逻辑。
 
@@ -408,6 +432,40 @@ UPSTREAM_ENDPOINT_TYPE=responses
   - `canonical.ndjson`
   - `final.ndjson`
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
+- 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**
+
+### 7. OpenAI Images / Embeddings / Rerank 虚拟透传端口
+
+这三类端口与 `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES` 这组 capability 开关**无关**：
+
+- 代理层默认会对所有 provider 导出这些端口
+- 即使上游站点本身不支持，代理层也仍然保留端口；客户端强行请求时，直接把请求透传给上游，由上游自己返回 `404` / `400` / `501` 等错误，代理原样透传
+- 代理不会为这三类端口做协议兼容折中，也不会把它们翻译成 Responses / Chat / Messages 语义
+
+当前默认导出的 OpenAI 风格透传端口包括：
+
+- Images：
+  - `POST /v1/images/generations`
+  - `POST /v1/images/edits`
+  - `POST /v1/images/variations`
+- Embeddings：
+  - `POST /v1/embeddings`
+- Rerank：
+  - `POST /v1/rerank`
+
+这些端口都会继续复用代理现有的：
+
+- provider 选择逻辑（bare 默认分组 / 显式 `/{providerId}` 路由）
+- `MODEL_MAP` / `MANUAL_MODELS` / `HIDDEN_MODELS` 约束
+- 模型可见性与准入检查
+- 上游鉴权透传与 provider 默认 key 回退
+- timeout / retry / masquerade 行为
+
+透传细节：
+
+- `/v1/images/generations`、`/v1/embeddings`、`/v1/rerank`：按 JSON 原样透传，请求发往上游 `/images/generations`、`/embeddings`、`/rerank`
+- `/v1/images/edits`、`/v1/images/variations`：按 multipart/form-data 原样透传，请求发往上游 `/images/edits`、`/images/variations`
+- 代理仅在真正转发前改写请求里的 `model` 字段，使其符合当前 provider 的 `MODEL_MAP` 结果；其它字段保持原样
 
 ---
 
