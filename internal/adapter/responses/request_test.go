@@ -221,6 +221,37 @@ func TestDecodeRequestPreservesAssistantStructuredMessagesAsOutputText(t *testin
 	}
 }
 
+func TestDecodeRequestExtractsInstructionInputMessages(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"instructions":"existing instructions",
+		"input":[
+			{"type":"message","role":"system","content":[{"type":"input_text","text":"system one"}]},
+			{"role":"developer","content":[{"type":"text","text":"developer two"}]},
+			{"role":"system","content":"system three"},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if canon.Instructions != "system one\n\ndeveloper two\n\nsystem three\n\nexisting instructions" {
+		t.Fatalf("expected instruction input messages prepended to instructions, got %q", canon.Instructions)
+	}
+	if len(canon.ResponseInputItems) != 1 {
+		t.Fatalf("expected only user item preserved in ResponseInputItems, got %#v", canon.ResponseInputItems)
+	}
+	if got, _ := canon.ResponseInputItems[0]["role"].(string); got != "user" {
+		t.Fatalf("expected user input item to remain, got %#v", canon.ResponseInputItems[0])
+	}
+	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
+		t.Fatalf("expected only user canonical message to remain, got %#v", canon.Messages)
+	}
+}
+
 func TestDecodeRequestAcceptsResponsesInputFileContent(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

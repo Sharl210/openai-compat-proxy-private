@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"openai-compat-proxy/internal/model"
 )
@@ -151,6 +152,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
 	}
 
+	var inputInstructions []string
 	for _, rawItem := range req.Input {
 		if len(rawItem) == 0 {
 			continue
@@ -160,11 +162,21 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			return model.CanonicalRequest{}, err
 		}
 		if len(preserved) > 0 {
+			if instructionText := extractInstructionTextFromInputItem(preserved); instructionText != "" {
+				inputInstructions = append(inputInstructions, instructionText)
+				continue
+			}
 			canon.ResponseInputItems = append(canon.ResponseInputItems, preserved)
 		}
 		if ok {
+			if isInstructionRole(msg.Role) {
+				continue
+			}
 			canon.Messages = append(canon.Messages, msg)
 		}
+	}
+	if len(inputInstructions) > 0 {
+		canon.Instructions = mergeResponsesInstructions(strings.Join(inputInstructions, "\n\n"), canon.Instructions)
 	}
 
 	return canon, nil
@@ -280,6 +292,66 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID}, true, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, nil
+}
+
+func extractInstructionTextFromInputItem(item map[string]any) string {
+	role, _ := item["role"].(string)
+	if !isInstructionRole(role) {
+		return ""
+	}
+	return strings.TrimSpace(extractTextFromResponsesContent(item["content"]))
+}
+
+func extractTextFromResponsesContent(content any) string {
+	switch typed := content.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case []map[string]any:
+		return joinResponsesTextParts(typed)
+	case []any:
+		parts := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			parts = append(parts, mapped)
+		}
+		return joinResponsesTextParts(parts)
+	default:
+		return ""
+	}
+}
+
+func joinResponsesTextParts(parts []map[string]any) string {
+	var builder strings.Builder
+	for _, part := range parts {
+		partType, _ := part["type"].(string)
+		switch partType {
+		case "input_text", "output_text", "text", "":
+			text, _ := part["text"].(string)
+			builder.WriteString(text)
+		}
+	}
+	return builder.String()
+}
+
+func isInstructionRole(role string) bool {
+	return role == "system" || role == "developer"
+}
+
+func mergeResponsesInstructions(prepend string, existing string) string {
+	prepend = strings.TrimSpace(prepend)
+	existing = strings.TrimSpace(existing)
+	if prepend == "" {
+		return existing
+	}
+	if existing == "" {
+		return prepend
+	}
+	return prepend + "\n\n" + existing
 }
 
 func decodeFunctionCallOutput(rawMap map[string]any) (model.CanonicalMessage, bool, error) {

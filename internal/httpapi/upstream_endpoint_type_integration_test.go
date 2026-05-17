@@ -1931,7 +1931,7 @@ func TestResponsesRouteHoistsInstructionsAndDeveloperIntoAnthropicSystem(t *test
 	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
 		t.Fatalf("unmarshal upstream payload: %v body=%s", err, gotBody)
 	}
-	if got, _ := payload["system"].(string); got != "provider system\n\nresponse instructions\n\nresponse developer" {
+	if got, _ := payload["system"].(string); got != "provider system\n\nresponse developer\n\nresponse instructions" {
 		t.Fatalf("expected anthropic system to include instructions + developer + provider prompt, got %#v body=%s", payload["system"], gotBody)
 	}
 	messages, _ := payload["messages"].([]any)
