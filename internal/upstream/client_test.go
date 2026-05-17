@@ -665,7 +665,7 @@ func TestBuildRequestBodyPreservesResponsesToolTypesForFunctionOnlyTools(t *test
 	}})
 }
 
-func TestBuildRequestBodyUsesObjectSchemaForFunctionToolWithoutParameters(t *testing.T) {
+func TestBuildRequestBodyUsesEmptySchemaForFunctionToolWithoutParameters(t *testing.T) {
 	tools := buildResponsesToolEntries(t, []model.CanonicalTool{{
 		Type:        "function",
 		Name:        "get_current_time",
@@ -675,7 +675,22 @@ func TestBuildRequestBodyUsesObjectSchemaForFunctionToolWithoutParameters(t *tes
 		"type":        "function",
 		"name":        "get_current_time",
 		"description": "Get current time",
-		"parameters":  map[string]any{"type": "object"},
+		"parameters":  map[string]any{},
+	}})
+}
+
+func TestBuildRequestBodyUsesEmptySchemaForBareObjectFunctionToolInFunctionOnlyMode(t *testing.T) {
+	tools := buildResponsesUpstreamToolEntriesWithCompatMode(t, []model.CanonicalTool{{
+		Type:        "function",
+		Name:        "get_current_time",
+		Description: "Get current time",
+		Parameters:  map[string]any{"type": "object"},
+	}}, config.ResponsesToolCompatModeFunctionOnly)
+	assertJSONEqual(t, tools, []map[string]any{{
+		"type":        "function",
+		"name":        "get_current_time",
+		"description": "Get current time",
+		"parameters":  map[string]any{},
 	}})
 }
 
@@ -1521,6 +1536,55 @@ func TestBuildResponsesRequestBodyDropsContextManagement(t *testing.T) {
 	}
 	if _, exists := payload["context_management"]; exists {
 		t.Fatalf("expected responses upstream payload to drop context_management, got %#v", payload)
+	}
+}
+
+func TestBuildResponsesRequestBodyOmitsInstructionInputMessages(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model:        "gpt-5",
+		Instructions: "system one\n\ndeveloper two",
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "system",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "system one",
+				}},
+			},
+			{
+				"role": "developer",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "developer two",
+				}},
+			},
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "hello",
+				}},
+			},
+		},
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["instructions"].(string); got != "system one\n\ndeveloper two" {
+		t.Fatalf("expected instructions preserved, got %#v", payload)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected only user input item upstream, got %#v", payload["input"])
+	}
+	item, _ := input[0].(map[string]any)
+	if got, _ := item["role"].(string); got != "user" {
+		t.Fatalf("expected user role to remain, got %#v", item)
 	}
 }
 

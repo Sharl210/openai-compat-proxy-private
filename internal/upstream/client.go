@@ -128,6 +128,36 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 	}
 }
 
+func PassThrough(ctx context.Context, cfg config.Config, authorization string, method string, path string, contentType string, body []byte) (int, string, []byte, error) {
+	client := NewClient(cfg.UpstreamBaseURL, cfg)
+	httpReq, err := http.NewRequestWithContext(ctx, method, client.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, "", nil, err
+	}
+	applyUpstreamHeaders(httpReq, config.UpstreamEndpointTypeResponses, authorization, client.anthropicVersion, "", client.upstreamUserAgent, client.masqueradeTarget)
+	if contentType != "" {
+		httpReq.Header.Set("Content-Type", contentType)
+	}
+	resp, err := client.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, "", nil, err
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return 0, "", nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, "", nil, &HTTPStatusError{
+			StatusCode:  resp.StatusCode,
+			ContentType: resp.Header.Get("Content-Type"),
+			BodyBytes:   bodyBytes,
+			Body:        strings.TrimSpace(string(bodyBytes)),
+		}
+	}
+	return resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes, nil
+}
+
 func newHTTPClient(cfg config.Config) *http.Client {
 	return &http.Client{Transport: newTransport(cfg)}
 }
@@ -857,9 +887,14 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 	if len(responseInputItems) > 0 {
 		input := make([]map[string]any, 0, len(responseInputItems))
 		for _, item := range responseInputItems {
+			if isResponsesInstructionInputItem(item) {
+				continue
+			}
 			input = append(input, cloneMap(item))
 		}
-		payload["input"] = input
+		if len(input) > 0 {
+			payload["input"] = input
+		}
 	} else if len(req.Messages) > 0 {
 		var input []map[string]any
 		for _, msg := range req.Messages {
@@ -943,6 +978,11 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func isResponsesInstructionInputItem(item map[string]any) bool {
+	role, _ := item["role"].(string)
+	return role == "system" || role == "developer"
 }
 
 func normalizeResponsesToolChoice(raw map[string]any) map[string]any {
@@ -1055,11 +1095,12 @@ func buildResponsesUpstreamToolPayloads(tools []model.CanonicalTool, compatMode 
 
 func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode string) map[string]any {
 	if normalizeResponsesToolCompatMode(compatMode) != config.ResponsesToolCompatModeFunctionOnly || strings.TrimSpace(tool.Type) == "function" {
+		parameters := normalizeResponsesFunctionToolParameters(tool)
 		return map[string]any{
 			"type":        tool.Type,
 			"name":        tool.Name,
 			"description": tool.Description,
-			"parameters":  normalizeFunctionToolJSONSchema(tool),
+			"parameters":  parameters,
 		}
 	}
 
@@ -1084,6 +1125,18 @@ func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode stri
 		entry["parameters"] = cloneJSONValue(responsesFallbackFunctionToolSchema)
 	}
 	return entry
+}
+
+func normalizeResponsesFunctionToolParameters(tool model.CanonicalTool) any {
+	parameters := normalizeFunctionToolJSONSchema(tool)
+	schema, ok := parameters.(map[string]any)
+	if !ok {
+		return parameters
+	}
+	if len(schema) == 1 && stringValue(schema["type"]) == "object" {
+		return map[string]any{}
+	}
+	return schema
 }
 
 func normalizeResponsesCustomToolParameters(parameters any) any {
