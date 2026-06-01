@@ -202,8 +202,8 @@ func shouldDropToolMessageFromHistory(msg model.CanonicalMessage) bool {
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
 		return false
 	}
-	_, hasError := payload["error"]
-	return hasError
+	errorValue, hasError := payload["error"]
+	return hasError && errorValue != nil
 }
 
 func toolMessageText(msg model.CanonicalMessage) string {

@@ -1106,6 +1106,49 @@ func TestResponsesRouteMapsExplicitReasoningEffortToAnthropicThinkingWhenEnabled
 	}
 }
 
+func TestAnthropicRouteForwardsSuccessfulToolResultWithNullErrorToResponsesUpstream(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsAnthropicMessages: true, SupportsResponses: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5","max_tokens":128,"messages":[{"role":"user","content":[{"type":"text","text":"open apk"}]},{"role":"assistant","content":[{"type":"text","text":"I will open it."},{"type":"tool_use","id":"call_1","name":"mcp__mt_apk_open","input":{"path":"mt://current-apk"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"{\"ok\":true,\"data\":{\"workspaceId\":\"c9m8dlnh\"},\"error\":null}"}]}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	input, _ := payload["input"].([]any)
+	var sawFunctionCall, sawFunctionOutput bool
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		switch item["type"] {
+		case "function_call":
+			if item["call_id"] == "call_1" && item["name"] == "mcp__mt_apk_open" {
+				sawFunctionCall = true
+			}
+		case "function_call_output":
+			if item["call_id"] == "call_1" && strings.Contains(stringValue(item["output"]), `"error":null`) {
+				sawFunctionOutput = true
+			}
+		}
+	}
+	if !sawFunctionCall || !sawFunctionOutput {
+		t.Fatalf("expected function_call and function_call_output in responses upstream input, got %s", gotBody)
+	}
+}
+
 func TestAnthropicRouteMapsThinkingConfigToResponsesReasoningWhenUpstreamIsResponses(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -71,6 +71,205 @@ func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.
 	}
 }
 
+func TestClientStreamEvents_WritesResponsesFunctionCallFieldsToCanonicalArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.output_item.added\n"))
+		_, _ = w.Write([]byte("data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n"))
+		_, _ = w.Write([]byte("event: response.function_call_arguments.delta\n"))
+		_, _ = w.Write([]byte("data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"q\\\":\"}\n\n"))
+		_, _ = w.Write([]byte("event: response.function_call_arguments.done\n"))
+		_, _ = w.Write([]byte("data: {\"item_id\":\"fc_1\",\"arguments\":\"{\\\"q\\\":\\\"apk\\\"}\"}\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_1\"}}\n\n"))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	writer := debugarchive.NewArchiveWriter(root, "req-archive-tool-fields")
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL)
+	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: "req-archive-tool-fields", Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err != nil {
+		t.Fatalf("StreamEvents error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+
+	canonicalBytes, err := os.ReadFile(filepath.Join(root, "req-archive-tool-fields", "canonical.ndjson"))
+	if err != nil {
+		t.Fatalf("read canonical archive: %v", err)
+	}
+	var sawAdded, sawDelta, sawDone bool
+	for _, line := range bytes.Split(bytes.TrimSpace(canonicalBytes), []byte("\n")) {
+		var event model.CanonicalEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("unmarshal canonical event: %v", err)
+		}
+		switch event.Type {
+		case "response.output_item.added":
+			sawAdded = true
+			if event.ItemID != "fc_1" || event.CallID != "call_1" || event.ToolName != "lookup" {
+				t.Fatalf("expected function call metadata in added event, got %#v", event)
+			}
+		case "response.function_call_arguments.delta":
+			sawDelta = true
+			if event.ItemID != "fc_1" || event.ToolArgsDelta != `{"q":` {
+				t.Fatalf("expected function call arguments delta, got %#v", event)
+			}
+		case "response.function_call_arguments.done":
+			sawDone = true
+			if event.ItemID != "fc_1" || event.ToolArgsDelta != `{"q":"apk"}` {
+				t.Fatalf("expected completed function call arguments, got %#v", event)
+			}
+		}
+	}
+	if !sawAdded || !sawDelta || !sawDone {
+		t.Fatalf("expected added, delta and done canonical events, got added=%t delta=%t done=%t", sawAdded, sawDelta, sawDone)
+	}
+}
+
+func TestClientStreamEvents_WritesChatToolCallFieldsToCanonicalArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"q\\\":\\\"apk\\\"}\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3},\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	events := readCanonicalArchiveEventsFromStream(t, server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat}, "req-archive-chat-tool-fields")
+	assertCanonicalArchiveToolFields(t, events, "call_1", "call_1", "lookup", `{"q":"apk"}`)
+}
+
+func TestClientStreamEvents_WritesAnthropicToolUseFieldsToCanonicalArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n"))
+		_, _ = w.Write([]byte("data: {\"message\":{\"id\":\"msg_1\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"lookup\",\"input\":{}}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"apk\\\"}\"}}\n\n"))
+		_, _ = w.Write([]byte("event: message_delta\n"))
+		_, _ = w.Write([]byte("data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":2},\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n"))
+		_, _ = w.Write([]byte("event: message_stop\n"))
+		_, _ = w.Write([]byte("data: {}\n\n"))
+	}))
+	defer server.Close()
+
+	events := readCanonicalArchiveEventsFromStream(t, server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic}, "req-archive-anthropic-tool-fields")
+	assertCanonicalArchiveToolFields(t, events, "toolu_1", "toolu_1", "lookup", `{"q":"apk"}`)
+}
+
+func TestClientStreamEvents_WritesSemanticFieldsToCanonicalArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.output_text.delta\n"))
+		_, _ = w.Write([]byte("data: {\"delta\":\"hello\"}\n\n"))
+		_, _ = w.Write([]byte("event: response.reasoning.delta\n"))
+		_, _ = w.Write([]byte("data: {\"summary\":\"thinking\"}\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"finish_reason\":\"stop\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"))
+	}))
+	defer server.Close()
+
+	events := readCanonicalArchiveEventsFromStream(t, server.URL, config.Config{}, "req-archive-semantic-fields")
+	var sawText, sawReasoning, sawCompletion bool
+	for _, event := range events {
+		switch event.Type {
+		case "response.output_text.delta":
+			sawText = true
+			if event.TextDelta != "hello" {
+				t.Fatalf("expected text delta hello, got %#v", event)
+			}
+		case "response.reasoning.delta":
+			sawReasoning = true
+			if event.ReasoningDelta != "thinking" {
+				t.Fatalf("expected reasoning delta thinking, got %#v", event)
+			}
+		case "response.completed":
+			sawCompletion = true
+			if event.FinishReason != "stop" {
+				t.Fatalf("expected finish reason stop, got %#v", event)
+			}
+			if got := event.UsageDelta["input_tokens"]; got != float64(1) {
+				t.Fatalf("expected usage input_tokens 1, got %#v event=%#v", got, event)
+			}
+		}
+	}
+	if !sawText || !sawReasoning || !sawCompletion {
+		t.Fatalf("expected text, reasoning and completion events, got %#v", events)
+	}
+}
+
+func TestClientStreamEvents_WritesErrorFieldsToCanonicalArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.incomplete\n"))
+		_, _ = w.Write([]byte("data: {\"health_flag\":\"upstream_error\",\"message\":\"bad tool call\"}\n\n"))
+	}))
+	defer server.Close()
+
+	events := readCanonicalArchiveEventsFromStream(t, server.URL, config.Config{}, "req-archive-error-fields")
+	if len(events) != 1 {
+		t.Fatalf("expected one canonical event, got %#v", events)
+	}
+	if events[0].Error["health_flag"] != "upstream_error" || events[0].Error["message"] != "bad tool call" {
+		t.Fatalf("expected error fields, got %#v", events[0])
+	}
+}
+
+func readCanonicalArchiveEventsFromStream(t *testing.T, upstreamURL string, cfg config.Config, requestID string) []model.CanonicalEvent {
+	t.Helper()
+	root := t.TempDir()
+	writer := debugarchive.NewArchiveWriter(root, requestID)
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(upstreamURL, cfg)
+	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: requestID, Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err != nil {
+		t.Fatalf("StreamEvents error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	canonicalBytes, err := os.ReadFile(filepath.Join(root, requestID, "canonical.ndjson"))
+	if err != nil {
+		t.Fatalf("read canonical archive: %v", err)
+	}
+	var events []model.CanonicalEvent
+	for _, line := range bytes.Split(bytes.TrimSpace(canonicalBytes), []byte("\n")) {
+		var event model.CanonicalEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("unmarshal canonical event: %v", err)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func assertCanonicalArchiveToolFields(t *testing.T, events []model.CanonicalEvent, itemID string, callID string, name string, arguments string) {
+	t.Helper()
+	var sawItem, sawArgs bool
+	for _, event := range events {
+		switch event.Type {
+		case "response.output_item.added", "response.output_item.done":
+			if event.ItemID == itemID && event.CallID == callID && event.ToolName == name {
+				sawItem = true
+			}
+		case "response.function_call_arguments.delta", "response.function_call_arguments.done":
+			if event.ItemID == itemID && event.ToolArgsDelta == arguments {
+				sawArgs = true
+			}
+		}
+	}
+	if !sawItem || !sawArgs {
+		t.Fatalf("expected canonical archive tool metadata and arguments, got item=%t args=%t events=%#v", sawItem, sawArgs, events)
+	}
+}
+
 func TestClientCompactUsesCompactResponsesPathAndReusesResponsesBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses/compact" {

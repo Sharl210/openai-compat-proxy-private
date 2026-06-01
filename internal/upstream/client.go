@@ -713,7 +713,69 @@ func (s *EventStream) recordEvent(evt Event) {
 		RawPayload:   evt.Raw,
 		ProviderMeta: cloneMap(anyMap(evt.Data["provider_meta"])),
 	}
+	populateCanonicalArchiveEvent(&canonical, evt)
 	_ = s.archive.WriteCanonicalEvent(canonical)
+}
+
+func populateCanonicalArchiveEvent(canonical *model.CanonicalEvent, evt Event) {
+	if canonical == nil {
+		return
+	}
+	switch evt.Event {
+	case "response.output_text.delta":
+		canonical.TextDelta = stringValue(evt.Data["delta"])
+	case "response.reasoning.delta":
+		canonical.ReasoningDelta = stringValue(evt.Data["summary"])
+	case "response.output_item.added", "response.output_item.done":
+		item := anyMap(evt.Data["item"])
+		if stringValue(item["type"]) != "function_call" {
+			return
+		}
+		canonical.ItemID = stringValue(item["id"])
+		canonical.CallID = stringValue(item["call_id"])
+		canonical.ToolName = stringValue(item["name"])
+		canonical.ToolArgsDelta = stringValue(item["arguments"])
+	case "response.function_call_arguments.delta":
+		canonical.ItemID = stringValue(evt.Data["item_id"])
+		canonical.ToolArgsDelta = stringValue(evt.Data["delta"])
+	case "response.function_call_arguments.done":
+		canonical.ItemID = stringValue(evt.Data["item_id"])
+		canonical.ToolArgsDelta = stringValue(evt.Data["arguments"])
+	case "response.completed", "response.done":
+		response := anyMap(evt.Data["response"])
+		canonical.FinishReason = firstNonEmptyString(stringValue(response["finish_reason"]), stringValue(evt.Data["finish_reason"]), stringValue(evt.Data["stop_reason"]))
+		if usage := anyMap(response["usage"]); len(usage) > 0 {
+			canonical.UsageDelta = cloneMap(usage)
+		} else if usage := anyMap(evt.Data["usage"]); len(usage) > 0 {
+			canonical.UsageDelta = cloneMap(usage)
+		}
+	case "response.incomplete":
+		archiveError := map[string]any{}
+		if healthFlag := stringValue(evt.Data["health_flag"]); healthFlag != "" {
+			archiveError["health_flag"] = healthFlag
+		}
+		if message := stringValue(evt.Data["message"]); message != "" {
+			archiveError["message"] = message
+		}
+		if len(archiveError) > 0 {
+			canonical.Error = archiveError
+		}
+	case "response.error":
+		if errMap := anyMap(evt.Data["error"]); len(errMap) > 0 {
+			canonical.Error = cloneMap(errMap)
+		} else if len(evt.Data) > 0 {
+			canonical.Error = cloneMap(evt.Data)
+		}
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func readHTTPStatusError(resp *http.Response) *HTTPStatusError {

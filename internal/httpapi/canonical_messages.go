@@ -90,13 +90,22 @@ func immediateToolResultIDs(messages []model.CanonicalMessage) map[string]struct
 		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 || i+1 >= len(messages) {
 			continue
 		}
-		next := messages[i+1]
-		if next.Role != "tool" || shouldDropToolMessageFromHistory(next) {
-			continue
-		}
+		toolCallIDs := map[string]struct{}{}
 		for _, call := range msg.ToolCalls {
-			if call.ID != "" && call.ID == next.ToolCallID {
-				matched[call.ID] = struct{}{}
+			if call.ID != "" {
+				toolCallIDs[call.ID] = struct{}{}
+			}
+		}
+		for j := i + 1; j < len(messages); j++ {
+			next := messages[j]
+			if next.Role != "tool" {
+				break
+			}
+			if shouldDropToolMessageFromHistory(next) {
+				continue
+			}
+			if _, ok := toolCallIDs[next.ToolCallID]; ok {
+				matched[next.ToolCallID] = struct{}{}
 			}
 		}
 	}
@@ -153,7 +162,7 @@ func shouldDropEmptyAssistantMessage(msg model.CanonicalMessage) bool {
 }
 
 func shouldDropAssistantToolCallMessage(msg model.CanonicalMessage, dropped map[string]struct{}) bool {
-	if msg.Role != "assistant" || len(msg.ToolCalls) == 0 || len(dropped) == 0 {
+	if msg.Role != "assistant" || len(msg.ToolCalls) == 0 || len(dropped) == 0 || len(msg.Parts) > 0 || msg.ReasoningContent != "" || len(msg.ReasoningBlocks) > 0 {
 		return false
 	}
 	for _, call := range msg.ToolCalls {
