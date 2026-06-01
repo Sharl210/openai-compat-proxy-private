@@ -78,3 +78,53 @@ func TestPrepareCanonicalMessagesKeepsAssistantTextWhileDroppingErroredToolCallP
 		t.Fatalf("expected plain assistant text preserved without tool_call, got %#v", prepared)
 	}
 }
+
+func TestPrepareCanonicalMessagesDropsAssistantToolCallsWithoutFollowingResult(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "search"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"weather"}`}}},
+		{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续回答"}}},
+	}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 2 {
+		t.Fatalf("expected orphan assistant tool_call removed, got %#v", prepared)
+	}
+	for _, msg := range prepared {
+		if len(msg.ToolCalls) > 0 {
+			t.Fatalf("expected no orphan tool_calls after prepare, got %#v", prepared)
+		}
+	}
+}
+
+func TestPrepareCanonicalMessagesKeepsAssistantToolCallsWithFollowingResult(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "search"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"weather"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+	}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 3 {
+		t.Fatalf("expected paired assistant tool_call and tool result kept, got %#v", prepared)
+	}
+	if len(prepared[1].ToolCalls) != 1 || prepared[2].Role != "tool" {
+		t.Fatalf("expected valid tool_call/result pair preserved, got %#v", prepared)
+	}
+}
+
+func TestPrepareCanonicalMessagesDropsAssistantToolCallsWhenResultIsNotImmediate(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "search"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"weather"}`}}},
+		{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "中间消息"}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+	}
+
+	prepared := prepareCanonicalMessages(messages)
+	for _, msg := range prepared {
+		if len(msg.ToolCalls) > 0 || msg.Role == "tool" {
+			t.Fatalf("expected non-immediate tool_call/result pair removed, got %#v", prepared)
+		}
+	}
+}

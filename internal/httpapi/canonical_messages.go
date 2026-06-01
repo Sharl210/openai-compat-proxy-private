@@ -7,6 +7,8 @@ func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.Canonic
 		return messages
 	}
 	droppedToolCallIDs := map[string]struct{}{}
+	immediateToolCallIDs := immediateToolResultIDs(messages)
+	unmatchedToolResultIDs := unmatchedToolResultIDs(messages, immediateToolCallIDs)
 	for _, msg := range messages {
 		if shouldDropToolMessageFromHistory(msg) && msg.ToolCallID != "" {
 			droppedToolCallIDs[msg.ToolCallID] = struct{}{}
@@ -17,7 +19,16 @@ func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.Canonic
 		if shouldDropToolMessageFromHistory(msg) {
 			continue
 		}
+		if msg.Role == "tool" {
+			if _, ok := unmatchedToolResultIDs[msg.ToolCallID]; ok {
+				continue
+			}
+		}
 		if shouldDropAssistantToolCallMessage(msg, droppedToolCallIDs) {
+			continue
+		}
+		msg = pruneUnmatchedAssistantToolCalls(msg, immediateToolCallIDs)
+		if shouldDropEmptyAssistantMessage(msg) {
 			continue
 		}
 		filtered = append(filtered, msg)
@@ -33,6 +44,74 @@ func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.Canonic
 		result = append(result, msg)
 	}
 	return result
+}
+
+func immediateToolResultIDs(messages []model.CanonicalMessage) map[string]struct{} {
+	matched := map[string]struct{}{}
+	for i, msg := range messages {
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 || i+1 >= len(messages) {
+			continue
+		}
+		next := messages[i+1]
+		if next.Role != "tool" || shouldDropToolMessageFromHistory(next) {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.ID != "" && call.ID == next.ToolCallID {
+				matched[call.ID] = struct{}{}
+			}
+		}
+	}
+	return matched
+}
+
+func unmatchedToolResultIDs(messages []model.CanonicalMessage, matched map[string]struct{}) map[string]struct{} {
+	assistantToolCallIDs := map[string]struct{}{}
+	for _, msg := range messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.ID != "" {
+				assistantToolCallIDs[call.ID] = struct{}{}
+			}
+		}
+	}
+	unmatched := map[string]struct{}{}
+	for _, msg := range messages {
+		if msg.Role != "tool" || msg.ToolCallID == "" || shouldDropToolMessageFromHistory(msg) {
+			continue
+		}
+		if _, hasAssistantCall := assistantToolCallIDs[msg.ToolCallID]; !hasAssistantCall {
+			continue
+		}
+		if _, ok := matched[msg.ToolCallID]; !ok {
+			unmatched[msg.ToolCallID] = struct{}{}
+		}
+	}
+	return unmatched
+}
+
+func pruneUnmatchedAssistantToolCalls(msg model.CanonicalMessage, matched map[string]struct{}) model.CanonicalMessage {
+	if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+		return msg
+	}
+	kept := make([]model.CanonicalToolCall, 0, len(msg.ToolCalls))
+	for _, call := range msg.ToolCalls {
+		if call.ID == "" {
+			kept = append(kept, call)
+			continue
+		}
+		if _, ok := matched[call.ID]; ok {
+			kept = append(kept, call)
+		}
+	}
+	msg.ToolCalls = kept
+	return msg
+}
+
+func shouldDropEmptyAssistantMessage(msg model.CanonicalMessage) bool {
+	return msg.Role == "assistant" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && msg.ReasoningContent == "" && len(msg.ReasoningBlocks) == 0
 }
 
 func shouldDropAssistantToolCallMessage(msg model.CanonicalMessage, dropped map[string]struct{}) bool {
