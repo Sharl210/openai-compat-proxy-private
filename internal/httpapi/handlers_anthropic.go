@@ -57,6 +57,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
+		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeAnthropic {
+			stripAnthropicCacheControl(&canon)
+		}
 		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeResponses {
 			delete(canon.PreservedTopLevelFields, "metadata")
 		}

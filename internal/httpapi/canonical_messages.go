@@ -2,6 +2,44 @@ package httpapi
 
 import "openai-compat-proxy/internal/model"
 
+func stripAnthropicCacheControl(req *model.CanonicalRequest) {
+	if req == nil {
+		return
+	}
+	deleteNestedKey(req.PreservedTopLevelFields, "cache_control")
+	if req.Reasoning != nil {
+		deleteNestedKey(req.Reasoning.Raw, "cache_control")
+	}
+	for toolIndex := range req.Tools {
+		deleteNestedKey(req.Tools[toolIndex].Raw, "cache_control")
+		deleteNestedKey(req.Tools[toolIndex].Parameters, "cache_control")
+	}
+	for msgIndex := range req.Messages {
+		deleteNestedKey(req.Messages[msgIndex].ReasoningBlocks, "cache_control")
+		for partIndex := range req.Messages[msgIndex].Parts {
+			deleteNestedKey(req.Messages[msgIndex].Parts[partIndex].Raw, "cache_control")
+		}
+	}
+}
+
+func deleteNestedKey(value any, key string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		delete(typed, key)
+		for _, child := range typed {
+			deleteNestedKey(child, key)
+		}
+	case []any:
+		for _, child := range typed {
+			deleteNestedKey(child, key)
+		}
+	case []map[string]any:
+		for _, child := range typed {
+			deleteNestedKey(child, key)
+		}
+	}
+}
+
 func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
 	if len(messages) == 0 {
 		return messages

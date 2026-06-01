@@ -278,7 +278,7 @@ func filteredPreservedTopLevelFieldsForEndpoint(fields map[string]any, endpointT
 
 func isAnthropicOnlyTopLevelField(key string, endpointType string) bool {
 	switch key {
-	case "context_management":
+	case "context_management", "cache_control":
 		return endpointType != config.UpstreamEndpointTypeAnthropic
 	default:
 		return false
