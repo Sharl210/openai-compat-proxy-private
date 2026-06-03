@@ -1573,6 +1573,36 @@ func TestStreamUsesChatEndpointAndNormalizesEvents(t *testing.T) {
 	}
 }
 
+func TestStreamUsesChatEndpointNormalizesJSONResponseAsEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("expected chat endpoint path, got %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_json","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello from json"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "gpt-5", Stream: true}, "Bearer test-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if len(events) < 3 {
+		t.Fatalf("expected created + text + completed events, got %#v", events)
+	}
+	if events[0].Event != "response.created" || events[1].Event != "response.output_text.delta" || events[len(events)-1].Event != "response.completed" {
+		t.Fatalf("expected normalized JSON response events, got %#v", events)
+	}
+	if got := events[1].Data["delta"]; got != "hello from json" {
+		t.Fatalf("expected text delta from JSON response, got %#v", got)
+	}
+	response, _ := events[len(events)-1].Data["response"].(map[string]any)
+	if got := response["finish_reason"]; got != "stop" {
+		t.Fatalf("expected finish_reason stop, got %#v", events[len(events)-1])
+	}
+}
+
 func TestStreamUsesChatEndpointCarriesUsageWhenFinishAndUsageAreSplitAcrossFrames(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1694,6 +1724,36 @@ func TestResponseUsesAnthropicEndpointHeadersAndNormalizesPayload(t *testing.T) 
 	}
 	if got := usage["output_tokens"]; got != float64(2) {
 		t.Fatalf("expected output_tokens 2, got %#v", got)
+	}
+}
+
+func TestStreamUsesAnthropicEndpointNormalizesJSONResponseAsEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages" {
+			t.Fatalf("expected anthropic endpoint path, got %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_json","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic json"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	events, err := client.Stream(context.Background(), model.CanonicalRequest{Model: "claude-sonnet-4-5", Stream: true, MaxOutputTokens: intPtrForClientTest(128)}, "Bearer anthropic-key")
+	if err != nil {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if len(events) < 3 {
+		t.Fatalf("expected created + text + completed events, got %#v", events)
+	}
+	if events[0].Event != "response.created" || events[1].Event != "response.output_text.delta" || events[len(events)-1].Event != "response.completed" {
+		t.Fatalf("expected normalized JSON response events, got %#v", events)
+	}
+	if got := events[1].Data["delta"]; got != "hello from anthropic json" {
+		t.Fatalf("expected text delta from JSON response, got %#v", got)
+	}
+	response, _ := events[len(events)-1].Data["response"].(map[string]any)
+	if got := response["finish_reason"]; got != "end_turn" {
+		t.Fatalf("expected finish_reason end_turn, got %#v", events[len(events)-1])
 	}
 }
 

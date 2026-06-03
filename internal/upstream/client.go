@@ -646,6 +646,14 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		_ = resp.Body.Close()
 		return nil, err
 	}
+	if !isEventStreamContentType(resp.Header.Get("Content-Type")) {
+		events, err := c.syntheticEventsFromJSONResponse(resp, endpointType)
+		if err != nil {
+			_ = resp.Body.Close()
+			return nil, err
+		}
+		return &EventStream{resp: resp, pendingEvents: events, archive: debugarchive.ArchiveWriterFromContext(ctx)}, nil
+	}
 
 	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, originalToolIDs, requestID, allowEOFCompletion), archive: debugarchive.ArchiveWriterFromContext(ctx)}
 	if primeFirstEvent {
@@ -655,6 +663,98 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		}
 	}
 	return stream, nil
+}
+
+func isEventStreamContentType(contentType string) bool {
+	return strings.Contains(strings.ToLower(contentType), "text/event-stream")
+}
+
+func (c *Client) syntheticEventsFromJSONResponse(resp *http.Response, endpointType string) ([]Event, error) {
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		return nil, err
+	}
+	normalized := normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle)
+	return payloadToSyntheticStreamEvents(normalized), nil
+}
+
+func payloadToSyntheticStreamEvents(payload map[string]any) []Event {
+	if len(payload) == 0 {
+		return nil
+	}
+	var events []Event
+	syntheticMeta := map[string]any{"synthetic": true}
+	responseID := stringValue(payload["id"])
+	if responseID != "" {
+		response := map[string]any{"id": responseID, "object": "response"}
+		if serviceTier := stringValue(payload["service_tier"]); serviceTier != "" {
+			response["service_tier"] = serviceTier
+		}
+		events = append(events, Event{Event: "response.created", Data: map[string]any{"response": response, "provider_meta": syntheticMeta}})
+	}
+	output, _ := payload["output"].([]any)
+	for _, rawItem := range output {
+		item, _ := rawItem.(map[string]any)
+		if item == nil {
+			continue
+		}
+		emitMessageContentStreamEvents(&events, item, syntheticMeta)
+		itemCopy := cloneMap(item)
+		events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": itemCopy, "provider_meta": syntheticMeta}})
+	}
+	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
+		data := map[string]any{"provider_meta": syntheticMeta}
+		if summary := stringValue(reasoning["summary"]); summary != "" {
+			data["summary"] = summary
+		}
+		events = append(events, Event{Event: "response.reasoning.delta", Data: data})
+	}
+	completed := map[string]any{"provider_meta": syntheticMeta}
+	response := map[string]any{}
+	if finishReason := firstNonEmptyString(stringValue(payload["finish_reason"]), stringValue(payload["stop_reason"])); finishReason != "" {
+		response["finish_reason"] = finishReason
+		completed["finish_reason"] = finishReason
+	}
+	if serviceTier := stringValue(payload["service_tier"]); serviceTier != "" {
+		response["service_tier"] = serviceTier
+		completed["service_tier"] = serviceTier
+	}
+	if usage := anyMap(payload["usage"]); len(usage) > 0 {
+		response["usage"] = cloneMap(usage)
+		completed["usage"] = cloneMap(usage)
+	}
+	if len(response) > 0 {
+		completed["response"] = response
+	}
+	events = append(events, Event{Event: "response.completed", Data: completed})
+	return events
+}
+
+func emitMessageContentStreamEvents(events *[]Event, item map[string]any, syntheticMeta map[string]any) {
+	if stringValue(item["type"]) != "message" {
+		return
+	}
+	content, _ := item["content"].([]any)
+	for _, rawPart := range content {
+		part, _ := rawPart.(map[string]any)
+		if part == nil {
+			continue
+		}
+		switch stringValue(part["type"]) {
+		case "output_text":
+			if text := stringValue(part["text"]); text != "" {
+				*events = append(*events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": text, "provider_meta": syntheticMeta}})
+			}
+		case "refusal":
+			if refusal := stringValue(part["refusal"]); refusal != "" {
+				*events = append(*events, Event{Event: "response.refusal.delta", Data: map[string]any{"delta": refusal, "provider_meta": syntheticMeta}})
+			}
+		}
+	}
 }
 
 func (s *EventStream) Consume(onEvent func(Event) error) error {
@@ -668,6 +768,9 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 		if err := onEvent(evt); err != nil {
 			return err
 		}
+	}
+	if s.scanner == nil {
+		return nil
 	}
 	return consumeSSEScannerWithReader(s.scanner, s.readNext, func(evt Event) error {
 		s.recordEvent(evt)
