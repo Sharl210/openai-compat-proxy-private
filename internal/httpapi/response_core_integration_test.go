@@ -557,6 +557,62 @@ func TestChatUpstreamReasoningPreservedInResponsesNonStream(t *testing.T) {
 	}
 }
 
+func TestChatStreamingUpstreamWithoutReasoningGetsProxyPlaceholderInResponsesNonStream(t *testing.T) {
+	upstream := newChatStreamingUpstream(t, []string{
+		"event: chat\n" +
+			`data: {"id":"chat-plain","choices":[{"delta":{"content":"final answer"}}]}` + "\n\n",
+		"event: chat\n" +
+			`data: {"id":"chat-plain","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"choices":[{"finish_reason":"stop"}]}` + "\n\n",
+		"data: [DONE]\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyProxyBuffer,
+		Providers: []config.ProviderConfig{{
+			ID:                       "openai",
+			Enabled:                  true,
+			UpstreamBaseURL:          upstream.URL,
+			UpstreamAPIKey:           "test-key",
+			UpstreamEndpointType:     config.UpstreamEndpointTypeChat,
+			UpstreamThinkingTagStyle: config.UpstreamThinkingTagStyleOff,
+			SupportsResponses:        true,
+			SupportsChat:             true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":false,
+		"input":"hello"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	reasoning, _ := resp["reasoning"].(map[string]any)
+	summary, _ := reasoning["summary"].(string)
+	if !strings.Contains(summary, "**推理中**") || !strings.Contains(summary, "代理层占位") {
+		t.Fatalf("expected proxy placeholder reasoning summary, got %#v body=%s", reasoning, rec.Body.String())
+	}
+	if strings.Contains(summary, "final answer") {
+		t.Fatalf("expected final text to stay out of reasoning summary, got %q", summary)
+	}
+	if !strings.Contains(rec.Body.String(), "final answer") {
+		t.Fatalf("expected final answer text in response body, got %s", rec.Body.String())
+	}
+}
+
 func TestAnthropicUpstreamThinkingPreservedInResponsesNonStream(t *testing.T) {
 	// Anthropic upstream returns thinking block
 	anthropicResponse := `{
