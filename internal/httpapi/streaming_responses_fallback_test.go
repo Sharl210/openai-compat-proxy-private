@@ -203,6 +203,42 @@ func TestResponsesStreamSkipsSyntheticReasoningWhenChatThinkTagsArePassedThrough
 	}
 }
 
+func TestResponsesStreamInjectsSyntheticReasoningForChatWithoutReasoningWhenThinkTagsAreOff(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-plain\",\"choices\":[{\"delta\":{\"content\":\"final answer\"}}]}\n\n")
+		_, _ = fmt.Fprint(w, "event: chat\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chat-plain\",\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2},\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleOff))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	placeholderIdx := strings.Index(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`)
+	textIdx := strings.Index(body, `{"delta":"final answer","type":"response.output_text.delta"}`)
+	if placeholderIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected synthetic reasoning placeholder and final text, got %s", body)
+	}
+	if placeholderIdx > textIdx {
+		t.Fatalf("expected synthetic reasoning placeholder before final text, got %s", body)
+	}
+}
+
 func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

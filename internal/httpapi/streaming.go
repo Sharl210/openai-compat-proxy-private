@@ -810,6 +810,25 @@ func shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagSt
 	return thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy
 }
 
+func shouldInjectSyntheticResponsesReasoningBeforeText(upstreamEndpointType string, state *responsesStreamState, evt upstream.Event) bool {
+	if normalizeHTTPAPIUpstreamEndpointType(upstreamEndpointType) != config.UpstreamEndpointTypeChat {
+		return false
+	}
+	if state == nil || state.syntheticInjected || state.realReasoningSeen || state.textStarted {
+		return false
+	}
+	delta := stringValue(evt.Data["delta"])
+	if containsRawThinkingTag(delta) {
+		return false
+	}
+	return strings.TrimSpace(delta) != ""
+}
+
+func containsRawThinkingTag(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "<think") || strings.Contains(lower, "</think>") || strings.Contains(lower, "<thinking") || strings.Contains(lower, "</thinking>") || strings.Contains(lower, "<reasoning") || strings.Contains(lower, "</reasoning>")
+}
+
 func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
 	return normalizeHTTPAPIUpstreamEndpointType(upstreamEndpointType) == config.UpstreamEndpointTypeChat
 }
@@ -842,6 +861,11 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
 			collector.Accept(evt)
+			if evt.Event == "response.output_text.delta" && shouldInjectSyntheticResponsesReasoningBeforeText(upstreamEndpointType, state, evt) {
+				if err := writeSyntheticResponsesReasoningWithState(w, flusher, state, syntheticReasoningPrelude()); err != nil {
+					return err
+				}
+			}
 			if evt.Event == "response.output_text.delta" {
 				state.textStarted = true
 			}
