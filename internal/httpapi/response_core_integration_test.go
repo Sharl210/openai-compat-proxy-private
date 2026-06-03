@@ -429,6 +429,67 @@ func TestAnthropicUpstreamToolArgsPreservedInResponsesNonStream(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamingUpstreamEmptyToolArgsPreservedInResponsesNonStream(t *testing.T) {
+	upstream := newAnthropicStreamingUpstream(t, []string{
+		"event: message_start\n" +
+			`data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}` + "\n\n",
+		"event: content_block_start\n" +
+			`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tooluse_1","name":"get_current_time","input":{}}}` + "\n\n",
+		"event: message_delta\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":14}}` + "\n\n",
+		"event: message_stop\n" +
+			`data: {"type":"message_stop"}` + "\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "anthropic",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyProxyBuffer,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"claude-sonnet-4-6",
+		"stream":false,
+		"input":[{"role":"user","content":"Use the get_current_time tool."}],
+		"tools":[{"type":"function","name":"get_current_time","description":"Get the current date and time.","parameters":null}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	output, _ := resp["output"].([]any)
+	if len(output) == 0 {
+		t.Fatalf("expected output items, got body=%s", rec.Body.String())
+	}
+	call, _ := output[0].(map[string]any)
+	if call["type"] != "function_call" || call["name"] != "get_current_time" {
+		t.Fatalf("expected get_current_time function call, got %#v body=%s", call, rec.Body.String())
+	}
+	arguments, ok := call["arguments"].(string)
+	if !ok || arguments != "{}" {
+		t.Fatalf("expected empty tool input to be exposed as arguments {}, got %#v body=%s", call["arguments"], rec.Body.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Reasoning / thinking extraction boundary tests
 // ---------------------------------------------------------------------------

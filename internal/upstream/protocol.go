@@ -732,7 +732,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 			}
 			state.toolIDsByIndex[index] = itemID
 			events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": stringValue(block["name"])}}})
-			if input, _ := block["input"].(map[string]any); len(input) > 0 {
+			if input, ok := block["input"].(map[string]any); ok {
 				encoded, _ := json.Marshal(input)
 				events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": string(encoded)}})
 			}

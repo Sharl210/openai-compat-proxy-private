@@ -345,6 +345,21 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 	}
 }
 
+func TestResponsesStreamEmitsEmptyFunctionCallArgumentsForClients(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "tooluse_1", "type": "function_call", "call_id": "tooluse_1", "name": "get_current_time"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "tooluse_1", "delta": `{}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	if !strings.Contains(body, `{"item":{"arguments":"{}","call_id":"tooluse_1","id":"tooluse_1","name":"get_current_time","type":"function_call"},"type":"response.output_item.done"}`) {
+		t.Fatalf("expected final function call item to contain empty arguments object, got %s", body)
+	}
+	if !strings.Contains(body, `{"arguments":"{}","item_id":"tooluse_1","type":"response.function_call_arguments.done"}`) {
+		t.Fatalf("expected function_call_arguments.done with empty object arguments, got %s", body)
+	}
+}
+
 func TestResponsesStreamAccumulatesMultipleFunctionCallArgumentDeltasBeforeDone(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
