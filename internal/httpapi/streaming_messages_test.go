@@ -64,6 +64,55 @@ func TestMessagesStreamClosesThinkingBeforeTextAndEmitsSignature(t *testing.T) {
 	}
 }
 
+func TestMessagesStreamFromAnthropicJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
+	anthropicResponse := `{
+		"id": "msg_json",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-sonnet-4-5",
+		"content": [{"type": "text", "text": "final answer"}],
+		"stop_reason": "end_turn",
+		"usage": {"input_tokens": 1, "output_tokens": 1}
+	}`
+	upstream := newAnthropicFormatUpstream(t, anthropicResponse)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"thinking":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
+		t.Fatalf("expected anthropic placeholder thinking, got %s", body)
+	}
+	if !strings.Contains(body, `"text":"final answer"`) {
+		t.Fatalf("expected final answer text, got %s", body)
+	}
+	if !strings.Contains(body, `event: message_stop`) {
+		t.Fatalf("expected message_stop, got %s", body)
+	}
+}
+
 func TestMessagesStreamUsesRequestIdentityInMessageStart(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +

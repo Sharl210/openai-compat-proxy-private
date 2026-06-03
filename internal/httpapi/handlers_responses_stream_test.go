@@ -53,6 +53,81 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
+	chatResponse := `{
+		"id": "chatcmpl_json",
+		"object": "chat.completion",
+		"choices": [{
+			"index": 0,
+			"message": {"role": "assistant", "content": "final answer"},
+			"finish_reason": "stop"
+		}],
+		"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+	}`
+	upstream := newChatFormatUpstream(t, chatResponse)
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleOff))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	placeholderIdx := strings.Index(body, `**推理中**`)
+	textIdx := strings.Index(body, `"delta":"final answer"`)
+	completedIdx := strings.Index(body, `event: response.completed`)
+	if placeholderIdx == -1 || !strings.Contains(body, `代理层占位`) || textIdx == -1 || !strings.Contains(body, `"type":"response.output_text.delta"`) || completedIdx == -1 {
+		t.Fatalf("expected placeholder, final text and completed event, got %s", body)
+	}
+	if strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected completed stream without incomplete event, got %s", body)
+	}
+	if !(placeholderIdx < textIdx && textIdx < completedIdx) {
+		t.Fatalf("expected placeholder before final text before completed, got %s", body)
+	}
+}
+
+func TestResponsesStreamFromResponsesJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_json","object":"response","status":"completed","output":[{"id":"msg_json","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"final answer"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	placeholderIdx := strings.Index(body, `**推理中**`)
+	textIdx := strings.Index(body, `"delta":"final answer"`)
+	completedIdx := strings.Index(body, `event: response.completed`)
+	if placeholderIdx == -1 || !strings.Contains(body, `代理层占位`) || textIdx == -1 || !strings.Contains(body, `"type":"response.output_text.delta"`) || completedIdx == -1 {
+		t.Fatalf("expected placeholder, final text and completed event, got %s", body)
+	}
+	if strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected completed stream without incomplete event, got %s", body)
+	}
+	if !(placeholderIdx < textIdx && textIdx < completedIdx) {
+		t.Fatalf("expected placeholder before final text before completed, got %s", body)
+	}
+}
+
 func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +

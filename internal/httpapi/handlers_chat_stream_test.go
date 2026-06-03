@@ -70,6 +70,54 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	}
 }
 
+func TestChatStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
+	chatResponse := `{
+		"id": "chatcmpl_json",
+		"object": "chat.completion",
+		"choices": [{
+			"index": 0,
+			"message": {"role": "assistant", "content": "final answer"},
+			"finish_reason": "stop"
+		}],
+		"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+	}`
+	upstream := newChatFormatUpstream(t, chatResponse)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsChat:         true,
+			SupportsResponses:    true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
+		t.Fatalf("expected chat placeholder reasoning, got %s", body)
+	}
+	if !strings.Contains(body, `"content":"final answer"`) {
+		t.Fatalf("expected final answer content, got %s", body)
+	}
+	if !strings.Contains(body, `data: [DONE]`) {
+		t.Fatalf("expected chat stream done marker, got %s", body)
+	}
+}
+
 func TestChatStreamChunksCarryIDAndModel(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
