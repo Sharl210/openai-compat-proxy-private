@@ -98,14 +98,17 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	if got, _ := canon.ResponseInputItems[2]["call_id"].(string); got != "call_123" {
 		t.Fatalf("expected function_call_output call_id to be preserved, got %#v", canon.ResponseInputItems[2])
 	}
-	if len(canon.Messages) != 2 {
-		t.Fatalf("expected canonical user message plus tool result message, got %#v", canon.Messages)
+	if len(canon.Messages) != 3 {
+		t.Fatalf("expected canonical user, reasoning, and tool result messages, got %#v", canon.Messages)
 	}
 	if canon.Messages[0].Role != "user" {
 		t.Fatalf("expected first canonical message to remain user, got %#v", canon.Messages)
 	}
-	if canon.Messages[1].Role != "tool" || canon.Messages[1].ToolCallID != "call_123" {
-		t.Fatalf("expected function_call_output to also become canonical tool message, got %#v", canon.Messages[1])
+	if canon.Messages[1].Role != "assistant" || len(canon.Messages[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected reasoning input item to also become canonical assistant reasoning, got %#v", canon.Messages[1])
+	}
+	if canon.Messages[2].Role != "tool" || canon.Messages[2].ToolCallID != "call_123" {
+		t.Fatalf("expected function_call_output to also become canonical tool message, got %#v", canon.Messages[2])
 	}
 }
 

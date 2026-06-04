@@ -188,6 +188,9 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 		return nil, model.CanonicalMessage{}, false, err
 	}
 	itemType, _ := rawMap["type"].(string)
+	if itemType == "reasoning" {
+		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, nil
+	}
 	if itemType == "function_call_output" {
 		msg, ok, err := decodeFunctionCallOutput(rawMap)
 		if err != nil {
