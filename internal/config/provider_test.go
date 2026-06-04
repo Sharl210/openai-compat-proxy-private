@@ -586,8 +586,28 @@ func TestLoadProviderFileTreatsBlankUpstreamMaxOutputTokensAsUnset(t *testing.T)
 	}
 }
 
+func TestLoadProviderFileParsesMinusOneUpstreamMaxOutputTokensAsOmit(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=-1\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamMaxOutputTokens != -1 {
+		t.Fatalf("expected upstream max output tokens -1, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if !provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected force upstream max output tokens to be true")
+	}
+}
+
 func TestLoadProviderFileRejectsInvalidUpstreamMaxOutputTokens(t *testing.T) {
-	for _, value := range []string{"0", "-1", "bad"} {
+	for _, value := range []string{"0", "-2", "bad"} {
 		t.Run(value, func(t *testing.T) {
 			rootDir := t.TempDir()
 			providerEnvPath := filepath.Join(rootDir, "openai.env")

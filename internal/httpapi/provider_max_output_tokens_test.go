@@ -14,7 +14,7 @@ import (
 func TestProviderMaxOutputTokensFillsMissingClientLimitForAnthropicUpstream(t *testing.T) {
 	for _, tc := range providerMaxOutputTokensRouteCases(0) {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+			payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
 				path:                    tc.path,
 				body:                    tc.body,
 				anthropicVersion:        tc.anthropicVersion,
@@ -24,6 +24,9 @@ func TestProviderMaxOutputTokensFillsMissingClientLimitForAnthropicUpstream(t *t
 			if got := numericJSONValue(payload["max_tokens"]); got != 64000 {
 				t.Fatalf("expected provider max_tokens 64000, got %#v payload=%#v", payload["max_tokens"], payload)
 			}
+			if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "64000" {
+				t.Fatalf("expected %s 64000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+			}
 		})
 	}
 }
@@ -31,7 +34,7 @@ func TestProviderMaxOutputTokensFillsMissingClientLimitForAnthropicUpstream(t *t
 func TestProviderMaxOutputTokensKeepsClientLimitWhenForceFalseForAnthropicUpstream(t *testing.T) {
 	for _, tc := range providerMaxOutputTokensRouteCases(2048) {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+			payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
 				path:                    tc.path,
 				body:                    tc.body,
 				anthropicVersion:        tc.anthropicVersion,
@@ -41,6 +44,9 @@ func TestProviderMaxOutputTokensKeepsClientLimitWhenForceFalseForAnthropicUpstre
 			if got := numericJSONValue(payload["max_tokens"]); got != 2048 {
 				t.Fatalf("expected client max_tokens 2048, got %#v payload=%#v", payload["max_tokens"], payload)
 			}
+			if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "2048" {
+				t.Fatalf("expected %s 2048, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+			}
 		})
 	}
 }
@@ -48,7 +54,7 @@ func TestProviderMaxOutputTokensKeepsClientLimitWhenForceFalseForAnthropicUpstre
 func TestProviderMaxOutputTokensOverridesClientLimitWhenForceTrueForAnthropicUpstream(t *testing.T) {
 	for _, tc := range providerMaxOutputTokensRouteCases(2048) {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+			payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
 				path:                         tc.path,
 				body:                         tc.body,
 				anthropicVersion:             tc.anthropicVersion,
@@ -59,12 +65,76 @@ func TestProviderMaxOutputTokensOverridesClientLimitWhenForceTrueForAnthropicUps
 			if got := numericJSONValue(payload["max_tokens"]); got != 64000 {
 				t.Fatalf("expected forced provider max_tokens 64000, got %#v payload=%#v", payload["max_tokens"], payload)
 			}
+			if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "64000" {
+				t.Fatalf("expected %s 64000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+			}
+		})
+	}
+}
+
+func TestProviderMaxOutputTokensOmitsMissingClientLimitWhenProviderLimitIsMinusOne(t *testing.T) {
+	for _, tc := range providerMaxOutputTokensRouteCases(0) {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+				path:                    tc.path,
+				body:                    tc.body,
+				anthropicVersion:        tc.anthropicVersion,
+				providerMaxOutputTokens: -1,
+			})
+
+			if _, exists := payload["max_tokens"]; exists {
+				t.Fatalf("expected provider -1 to omit max_tokens when client did not send a limit, got payload=%#v", payload)
+			}
+			if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "" {
+				t.Fatalf("expected empty %s when provider max output tokens is -1, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+			}
+		})
+	}
+}
+
+func TestProviderMaxOutputTokensKeepsClientLimitWhenForceFalseEvenIfProviderLimitIsMinusOne(t *testing.T) {
+	for _, tc := range providerMaxOutputTokensRouteCases(2048) {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+				path:                    tc.path,
+				body:                    tc.body,
+				anthropicVersion:        tc.anthropicVersion,
+				providerMaxOutputTokens: -1,
+			})
+
+			if got := numericJSONValue(payload["max_tokens"]); got != 2048 {
+				t.Fatalf("expected client max_tokens 2048 to be trusted when force is false, got %#v payload=%#v", payload["max_tokens"], payload)
+			}
+			if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "2048" {
+				t.Fatalf("expected %s 2048, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+			}
+		})
+	}
+}
+
+func TestProviderMaxOutputTokensOmitsClientLimitWhenForceTrueAndProviderLimitIsMinusOne(t *testing.T) {
+	for _, tc := range providerMaxOutputTokensRouteCases(2048) {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+				path:                         tc.path,
+				body:                         tc.body,
+				anthropicVersion:             tc.anthropicVersion,
+				providerMaxOutputTokens:      -1,
+				forceProviderMaxOutputTokens: true,
+			})
+
+			if _, exists := payload["max_tokens"]; exists {
+				t.Fatalf("expected forced provider -1 to omit max_tokens, got payload=%#v", payload)
+			}
+			if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "" {
+				t.Fatalf("expected empty %s when forced provider max output tokens is -1, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+			}
 		})
 	}
 }
 
 func TestForceProviderMaxOutputTokensDoesNothingWhenProviderLimitUnset(t *testing.T) {
-	payload := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
 		path:                         "/v1/responses",
 		body:                         `{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`,
 		forceProviderMaxOutputTokens: true,
@@ -73,13 +143,17 @@ func TestForceProviderMaxOutputTokensDoesNothingWhenProviderLimitUnset(t *testin
 	if got := numericJSONValue(payload["max_tokens"]); got != 1024 {
 		t.Fatalf("expected existing anthropic upstream fallback max_tokens 1024, got %#v payload=%#v", payload["max_tokens"], payload)
 	}
+	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "" {
+		t.Fatalf("expected empty %s when canonical max output tokens is unset, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	}
 }
 
 func TestProviderMaxOutputTokensFeedsAnthropicThinkingBudget(t *testing.T) {
-	payload := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
-		path:                    "/v1/responses",
-		body:                    `{"model":"gpt-5-xhigh","input":[{"role":"user","content":"hello"}]}`,
-		providerMaxOutputTokens: 20000,
+	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+		path:                         "/v1/responses",
+		body:                         `{"model":"gpt-5-xhigh","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens:      20000,
+		forceProviderMaxOutputTokens: true,
 	})
 
 	if got := numericJSONValue(payload["max_tokens"]); got != 20000 {
@@ -88,6 +162,9 @@ func TestProviderMaxOutputTokensFeedsAnthropicThinkingBudget(t *testing.T) {
 	thinking, _ := payload["thinking"].(map[string]any)
 	if got := numericJSONValue(thinking["budget_tokens"]); got != 16000 {
 		t.Fatalf("expected provider max output tokens to feed thinking budget 16000, got %#v payload=%#v", thinking["budget_tokens"], payload)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "20000" {
+		t.Fatalf("expected %s 20000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
 	}
 }
 
@@ -135,7 +212,7 @@ type providerMaxOutputTokensScenario struct {
 	forceProviderMaxOutputTokens bool
 }
 
-func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutputTokensScenario) map[string]any {
+func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutputTokensScenario) (map[string]any, *httptest.ResponseRecorder) {
 	t.Helper()
 
 	var upstreamPayload map[string]any
@@ -189,7 +266,7 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 	if upstreamPayload == nil {
 		t.Fatalf("expected upstream request payload to be captured")
 	}
-	return upstreamPayload
+	return upstreamPayload, rec
 }
 
 func numericJSONValue(value any) int {

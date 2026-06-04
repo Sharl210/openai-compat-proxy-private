@@ -543,7 +543,7 @@ func parseProviderPositiveInt(value string, key string, path string) (int, error
 		return 0, nil
 	}
 	parsed, err := strconv.Atoi(trimmed)
-	if err != nil || parsed <= 0 {
+	if err != nil || parsed == 0 || parsed < -1 {
 		return 0, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
 	}
 	return parsed, nil

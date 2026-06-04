@@ -1350,7 +1350,7 @@ func buildChatRequestBody(req model.CanonicalRequest, xmlToolCallStyle ...string
 	if req.TopP != nil {
 		payload["top_p"] = *req.TopP
 	}
-	if req.MaxOutputTokens != nil {
+	if !req.OmitMaxOutputTokens && req.MaxOutputTokens != nil {
 		payload["max_tokens"] = *req.MaxOutputTokens
 	}
 	if len(req.Stop) == 1 {
@@ -1501,7 +1501,9 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	for key, value := range filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeAnthropic) {
 		payload[key] = cloneJSONValue(value)
 	}
-	if req.MaxOutputTokens != nil {
+	if req.OmitMaxOutputTokens {
+		// 不携带 max_tokens，供 provider 级强制置空语义使用。
+	} else if req.MaxOutputTokens != nil {
 		payload["max_tokens"] = *req.MaxOutputTokens
 	} else {
 		payload["max_tokens"] = 1024

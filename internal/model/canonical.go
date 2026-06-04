@@ -13,6 +13,7 @@ type CanonicalRequest struct {
 	Temperature             *float64
 	TopP                    *float64
 	MaxOutputTokens         *int
+	OmitMaxOutputTokens     bool
 	Stop                    []string
 	Tools                   []CanonicalTool
 	ToolChoice              CanonicalToolChoice

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"openai-compat-proxy/internal/config"
@@ -18,6 +19,7 @@ const (
 	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
 	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
+	headerProxyToUpstreamMaxOutputTokens     = "X-Proxy-To-Upstream-Max-Output-Tokens"
 	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
 )
 
@@ -140,7 +142,14 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 }
 
 func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig) {
-	if canon == nil || provider.UpstreamMaxOutputTokens <= 0 {
+	if canon == nil || provider.UpstreamMaxOutputTokens == 0 {
+		return
+	}
+	if provider.UpstreamMaxOutputTokens == -1 {
+		if canon.MaxOutputTokens == nil || provider.ForceUpstreamMaxOutputTokens {
+			canon.MaxOutputTokens = nil
+			canon.OmitMaxOutputTokens = true
+		}
 		return
 	}
 	if canon.MaxOutputTokens != nil && !provider.ForceUpstreamMaxOutputTokens {
@@ -148,6 +157,7 @@ func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider con
 	}
 	maxOutputTokens := provider.UpstreamMaxOutputTokens
 	canon.MaxOutputTokens = &maxOutputTokens
+	canon.OmitMaxOutputTokens = false
 }
 
 func serviceTierFromTopLevelFields(fields map[string]any) string {
@@ -217,6 +227,9 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg confi
 		w.Header().Set(headerProxyToUpstreamModel, value)
 	}
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
+	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {
+		w.Header().Set(headerProxyToUpstreamMaxOutputTokens, strconv.Itoa(*canon.MaxOutputTokens))
+	}
 	if value := strings.TrimSpace(preview.ReasoningParameters); value != "" {
 		w.Header().Set(headerProxyToUpstreamReasoningParameters, value)
 	}
@@ -236,6 +249,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerClientToProxyReasoningEffort,
 		headerProxyToUpstreamModel,
 		headerProxyToUpstreamServiceTier,
+		headerProxyToUpstreamMaxOutputTokens,
 		headerProxyToUpstreamReasoningParameters,
 	} {
 		w.Header().Del(header)

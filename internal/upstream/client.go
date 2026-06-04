@@ -1012,7 +1012,7 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 	if req.TopP != nil {
 		payload["top_p"] = *req.TopP
 	}
-	if req.MaxOutputTokens != nil {
+	if !req.OmitMaxOutputTokens && req.MaxOutputTokens != nil {
 		payload["max_output_tokens"] = *req.MaxOutputTokens
 	}
 	if len(req.Stop) > 0 {
