@@ -21,14 +21,14 @@ const (
 	// opencode 伪装：来自 @ai-sdk/provider-utils 的真实 User-Agent 格式
 	// 格式：opencode/{version} ai-sdk/provider-utils/{version} runtime/{runtime}/{version}
 	// 验证来源：issue #8444 (anomalyco/opencode), issue #12799/PR #12800 (vercel/ai)
-	opencodeUserAgent  = "opencode/1.3.7 ai-sdk/provider-utils/4.0.21 runtime/bun/1.3.11"
+	opencodeUserAgent  = "opencode/1.15.13 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"
 	opencodeOriginator = "opencode"
 
 	// claude 伪装：必须用 claude-cli/ 格式才能通过 sub2api 的 isClaudeCodeClient 检测
 	// sub2api 的检测 regex：^claude-cli/\d+\.\d+\.\d+（需同时有 metadata.user_id）
 	// 真实 Claude Code CLI 发的是 claude-code/（不匹配），但 sub2api 接受 claude-cli/ 作为有效标识
 	// 来源：sub2api gateway_service.go 的 claudeCliUserAgentRe + DefaultHeaders (constants.go)
-	claudeCodeUserAgent = "claude-cli/2.1.22 (external, cli)"
+	claudeCodeUserAgent = "claude-cli/2.1.163 (external, cli)"
 	claudeCodeXApp      = "cli"
 	// beta header：与 sub2api 的 DefaultBetaHeader 对齐
 	claudeCodeBeta         = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
@@ -36,8 +36,8 @@ const (
 
 	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
 	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
-	// 示例：codex_cli_rs/0.117.0 (Linux 6.1; x86_64) iTerm.app
-	codexUserAgent = "codex_cli_rs/0.117.0 (Linux 6.1; x86_64) iTerm.app"
+	// 示例：codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app
+	codexUserAgent = "codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app"
 
 	anthropicBetaCompact20260112           = "compact-2026-01-12"
 	anthropicBetaContextManagement20250627 = "context-management-2025-06-27"
