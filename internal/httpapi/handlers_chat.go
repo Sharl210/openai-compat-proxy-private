@@ -116,10 +116,10 @@ func handleChat() http.HandlerFunc {
 					return
 				}
 				if isUpstreamTimeout(err, ctx) {
-					_ = writeChatTerminalFailure(w, flusher, "upstream_timeout", "upstream request timed out")
+					_ = writeChatTerminalFailure(w, flusher, "upstream_timeout", "upstream request timed out", nil)
 					return
 				}
-				_ = writeChatTerminalFailure(w, flusher, "upstreamStreamBroken", err.Error())
+				_ = writeChatTerminalFailure(w, flusher, "upstreamStreamBroken", err.Error(), nil)
 				return
 			}
 			return

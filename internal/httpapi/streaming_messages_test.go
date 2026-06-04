@@ -586,6 +586,9 @@ func TestMessagesStreamSurfacesUpstreamResponseFailedDetails(t *testing.T) {
 	if !strings.Contains(body, `"health_flag":"context_length_exceeded"`) {
 		t.Fatalf("expected upstream error code to become health flag, got %s", body)
 	}
+	if !strings.Contains(body, `"type":"invalid_request_error"`) || !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `"param":"input"`) {
+		t.Fatalf("expected upstream error object to pass through to anthropic error event, got %s", body)
+	}
 	if !strings.Contains(body, `Your input exceeds the context window of this model`) {
 		t.Fatalf("expected upstream error message to be surfaced, got %s", body)
 	}

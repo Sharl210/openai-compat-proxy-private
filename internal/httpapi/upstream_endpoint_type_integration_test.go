@@ -1759,8 +1759,8 @@ func TestResponsesRouteUsesResponsesUpstreamForComplexFunctionCallFollowUp(t *te
 	if !strings.Contains(secondBody, `"parallel_tool_calls":true`) || !strings.Contains(secondBody, `"trace_id":"trace_123"`) {
 		t.Fatalf("expected complex responses follow-up to preserve top-level stateful fields, got %s", secondBody)
 	}
-	if !strings.Contains(secondBody, `"role":"assistant"`) || !strings.Contains(secondBody, `"tool_calls"`) {
-		t.Fatalf("expected complex responses follow-up to preserve assistant tool_call history, got %s", secondBody)
+	if !strings.Contains(secondBody, `"type":"function_call"`) || !strings.Contains(secondBody, `"name":"search_web"`) || !strings.Contains(secondBody, `"arguments":"{\"query\":\"weather\"}"`) {
+		t.Fatalf("expected complex responses follow-up to preserve assistant tool_call history as responses function_call item, got %s", secondBody)
 	}
 	if !strings.Contains(secondBody, `"type":"function_call_output"`) || !strings.Contains(secondBody, `"call_id":"call_1"`) {
 		t.Fatalf("expected complex responses follow-up to preserve function_call_output, got %s", secondBody)

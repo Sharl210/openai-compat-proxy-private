@@ -609,23 +609,16 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
-	case "response.incomplete":
+	case "error", "response.failed", "response.incomplete":
 		h.terminalSeen = true
 		h.reasoningStarted = true
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
-		healthFlag, _ := evt.Data["health_flag"].(string)
-		message, _ := evt.Data["message"].(string)
-		if healthFlag == "" {
-			healthFlag = "upstreamStreamBroken"
-		}
-		if message == "" {
-			message = "upstream response incomplete"
-		}
-		h.terminalFailure = &aggregate.TerminalFailureError{HealthFlag: healthFlag, Message: message}
-		evt.Data["health_flag"] = healthFlag
-		evt.Data["message"] = message
+		terminalFailure := terminalFailureFromEventData(evt.Data)
+		h.terminalFailure = terminalFailure
+		evt.Data["health_flag"] = terminalFailure.HealthFlag
+		evt.Data["message"] = terminalFailure.Message
 		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 	}
@@ -1259,7 +1252,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		return io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return state.terminalFailure
+		return nil
 	}
 	return nil
 }
@@ -1614,7 +1607,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
 			return err
 		}
-	case "response.incomplete":
+	case "error", "response.failed", "response.incomplete":
 		state.terminalSeen = true
 		terminalFailure := terminalFailureFromEventData(evt.Data)
 		state.terminalFailure = terminalFailure
@@ -1627,7 +1620,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if err := closeThinkingBlock(); err != nil {
 			return err
 		}
-		return writeAnthropicTerminalFailure(w, flusher, state, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message)
+		return writeAnthropicTerminalFailure(w, flusher, state, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
 	}
 	return nil
 }
@@ -1691,7 +1684,7 @@ func writeAnthropicSSEEvent(w http.ResponseWriter, flusher http.Flusher, event s
 	return nil
 }
 
-func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, requestID string, healthFlag string, message string) error {
+func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, requestID string, healthFlag string, message string, upstreamError map[string]any) error {
 	if state != nil {
 		if err := closeTextBlock(state, w, flusher); err != nil {
 			return err
@@ -1703,11 +1696,14 @@ func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 			return err
 		}
 	}
+	if len(upstreamError) == 0 {
+		upstreamError = map[string]any{"message": message}
+	}
 	if err := writeAnthropicSSEEvent(w, flusher, "error", map[string]any{
 		"type":        "error",
 		"request_id":  requestID,
 		"health_flag": healthFlag,
-		"error":       map[string]any{"message": message},
+		"error":       upstreamError,
 	}); err != nil {
 		return err
 	}
@@ -1922,7 +1918,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 		return io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return state.terminalFailure
+		return nil
 	}
 	return nil
 }
@@ -2268,10 +2264,10 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if flusher != nil {
 			flusher.Flush()
 		}
-	case "response.incomplete":
+	case "error", "response.failed", "response.incomplete":
 		state.terminalSeen = true
 		state.terminalFailure = terminalFailureFromEventData(evt.Data)
-		return writeChatTerminalFailure(w, flusher, state.terminalFailure.HealthFlag, state.terminalFailure.Message)
+		return writeChatTerminalFailure(w, flusher, state.terminalFailure.HealthFlag, state.terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
 	}
 	return nil
 }
@@ -2279,6 +2275,16 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 func terminalFailureFromEventData(data map[string]any) *aggregate.TerminalFailureError {
 	healthFlag, _ := data["health_flag"].(string)
 	message, _ := data["message"].(string)
+	errObj := upstreamErrorObjectFromEventData(data)
+	if healthFlag == "" {
+		healthFlag = stringValue(errObj["code"])
+		if healthFlag == "" {
+			healthFlag = stringValue(errObj["type"])
+		}
+	}
+	if message == "" {
+		message = stringValue(errObj["message"])
+	}
 	if healthFlag == "" {
 		healthFlag = "upstreamStreamBroken"
 	}
@@ -2286,6 +2292,20 @@ func terminalFailureFromEventData(data map[string]any) *aggregate.TerminalFailur
 		message = "upstream response incomplete"
 	}
 	return &aggregate.TerminalFailureError{HealthFlag: healthFlag, Message: message}
+}
+
+func upstreamErrorObjectFromEventData(data map[string]any) map[string]any {
+	if len(data) == 0 {
+		return nil
+	}
+	if errObj, _ := data["error"].(map[string]any); len(errObj) > 0 {
+		return cloneMap(errObj)
+	}
+	response, _ := data["response"].(map[string]any)
+	if errObj, _ := response["error"].(map[string]any); len(errObj) > 0 {
+		return cloneMap(errObj)
+	}
+	return nil
 }
 
 func mapUsageForLogging(usage any) map[string]any {
@@ -2337,8 +2357,18 @@ func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	return nil
 }
 
-func writeChatTerminalFailure(w http.ResponseWriter, flusher http.Flusher, healthFlag string, message string) error {
-	if err := writeChatChunk(w, flusher, nil, map[string]any{"error": map[string]any{"health_flag": healthFlag, "message": message}}, "error", nil); err != nil {
+func writeChatTerminalFailure(w http.ResponseWriter, flusher http.Flusher, healthFlag string, message string, upstreamError map[string]any) error {
+	errObj := map[string]any{"health_flag": healthFlag, "message": message}
+	for key, value := range upstreamError {
+		errObj[key] = value
+	}
+	if _, ok := errObj["health_flag"]; !ok {
+		errObj["health_flag"] = healthFlag
+	}
+	if _, ok := errObj["message"]; !ok {
+		errObj["message"] = message
+	}
+	if err := writeChatChunk(w, flusher, nil, map[string]any{"error": errObj}, "error", nil); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
