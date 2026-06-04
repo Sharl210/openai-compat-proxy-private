@@ -128,6 +128,65 @@ func TestNormalizeAnthropicFrame_ToolUse(t *testing.T) {
 	t.Logf("function_call_arguments.done: %d", argsDoneCount)
 }
 
+func TestNormalizeAnthropicFrame_ToolUseWaitsForInputJSONDeltaBeforeDone(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`message_start`, `{"message":{"id":"msg_123","type":"message","role":"assistant"}}`},
+		{`content_block_start`, `{"index":0,"content_block":{"type":"tool_use","id":"tool_0","name":"search_web","input":{}}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \""}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"input_json_delta","partial_json":"2026年6月最新热点新闻\"}"}}`},
+		{`message_delta`, `{"usage":{"input_tokens":10,"output_tokens":5},"delta":{"stop_reason":"tool_use"}}`},
+		{`message_stop`, `{}`},
+	}
+
+	state := &anthropicNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		usage:          map[string]any{},
+	}
+
+	var allEvents []Event
+	for _, f := range frames {
+		frame := &sseFrame{Event: f.event, Data: f.data}
+		events, done, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	var doneItems []map[string]any
+	var deltaBeforeDone bool
+	for _, evt := range allEvents {
+		switch evt.Event {
+		case "response.output_item.done":
+			item, _ := evt.Data["item"].(map[string]any)
+			doneItems = append(doneItems, item)
+		case "response.function_call_arguments.delta":
+			if len(doneItems) == 0 {
+				deltaBeforeDone = true
+			}
+		}
+	}
+	if !deltaBeforeDone {
+		t.Fatalf("expected arguments delta before final output_item.done, got %#v", allEvents)
+	}
+	if len(doneItems) != 1 {
+		t.Fatalf("expected exactly one output_item.done after arguments are complete, got %d: %#v", len(doneItems), doneItems)
+	}
+	item := doneItems[0]
+	if got := stringValue(item["name"]); got != "search_web" {
+		t.Fatalf("expected tool name search_web, got %q", got)
+	}
+	if got := stringValue(item["arguments"]); got != `{"query": "2026年6月最新热点新闻"}` {
+		t.Fatalf("expected complete tool arguments, got %q", got)
+	}
+}
+
 func TestNormalizeAnthropicFrame_ToolUseWithInput(t *testing.T) {
 	frames := []struct {
 		event string

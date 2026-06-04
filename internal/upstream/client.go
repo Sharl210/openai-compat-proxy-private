@@ -229,9 +229,9 @@ func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointTy
 		return buildResponsesRequestBody(req, c.responsesToolCompatMode)
 	}
 	if stream {
-		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
 	}
-	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt)
+	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
@@ -425,7 +425,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 }
 
 func PreviewRequestObservability(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) (RequestObservabilityPreview, error) {
-	body, err := buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
+	body, err := buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, config.UpstreamXMLToolCallStyleLegacy)
 	if err != nil {
 		return RequestObservabilityPreview{}, err
 	}

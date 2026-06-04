@@ -1985,6 +1985,44 @@ func TestBuildChatRequestBodyDropsAssistantToolCallsWithEmptyFunctionName(t *tes
 	}
 }
 
+func TestBuildChatRequestBodyConvertsLegacyXMLToolCallText(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "mimo-v2.5-pro",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			Parts: []model.CanonicalContentPart{{
+				Type: "text",
+				Text: "\n<tool_call>\n<function=mcp__mt_apk_read_text>\n<parameter=includeLineNumbers>False</parameter>\n<parameter=limit>520</parameter>\n<parameter=locator>{\"kind\": \"dex_class\", \"target\": \"Lacr/browser/lightning/view/IDMDownloadListener;\"}</parameter>\n<parameter=maxChars>80000</parameter>\n<parameter=workspaceId>69jas4bi</parameter>\n</function>\n</tool_call>\n",
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamXMLToolCallStyleLegacy)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	if _, exists := message["content"]; exists {
+		t.Fatalf("expected XML tool call text to be consumed from content, got %#v", message)
+	}
+	toolCalls, _ := message["tool_calls"].([]any)
+	if len(toolCalls) != 1 {
+		t.Fatalf("expected one recovered tool call, got %#v", message)
+	}
+	call, _ := toolCalls[0].(map[string]any)
+	function, _ := call["function"].(map[string]any)
+	if got := function["name"]; got != "mcp__mt_apk_read_text" {
+		t.Fatalf("unexpected recovered tool name: %#v", function)
+	}
+	if got, _ := function["arguments"].(string); got != `{"includeLineNumbers":false,"limit":520,"locator":{"kind":"dex_class","target":"Lacr/browser/lightning/view/IDMDownloadListener;"},"maxChars":80000,"workspaceId":"69jas4bi"}` {
+		t.Fatalf("unexpected recovered tool arguments: %s", got)
+	}
+}
+
 func TestBuildChatRequestBodySanitizesRepeatedConcatenatedToolArguments(t *testing.T) {
 	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
 		Model: "gpt-5",

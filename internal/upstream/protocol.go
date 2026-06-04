@@ -185,13 +185,13 @@ func extractOriginalToolIDs(req model.CanonicalRequest) map[int]string {
 	return result
 }
 
-func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
+func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, xmlToolCallStyle ...string) ([]byte, error) {
 	if err := validateRequestForEndpoint(req, endpointType); err != nil {
 		return nil, err
 	}
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return buildChatRequestBody(req)
+		return buildChatRequestBody(req, xmlToolCallStyle...)
 	case config.UpstreamEndpointTypeAnthropic:
 		return buildAnthropicRequestBody(req, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
 	default:
@@ -299,9 +299,9 @@ func isResponsesOnlyTopLevelField(key string, endpointType string) bool {
 	}
 }
 
-func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
+func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, xmlToolCallStyle ...string) ([]byte, error) {
 	req.Stream = true
-	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
+	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, xmlToolCallStyle...)
 }
 
 func normalizeResponsePayload(endpointType string, payload map[string]any, thinkingTagStyle string, xmlToolCallStyle string) map[string]any {
@@ -726,10 +726,17 @@ func parseLegacyXMLToolCall(text string) map[string]any {
 
 func parseLegacyXMLToolValue(value string) any {
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "true" {
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		var parsed any
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+			return parsed
+		}
+	}
+	if lower == "true" {
 		return true
 	}
-	if trimmed == "false" {
+	if lower == "false" {
 		return false
 	}
 	if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
@@ -767,6 +774,32 @@ func appendLegacyXMLToolCallsFromContent(content []any, output []any) ([]any, []
 	return kept, output
 }
 
+func legacyXMLToolCallsFromChatContent(content []any, existingToolCallCount int, enabled bool) []any {
+	if !enabled || len(content) != 1 {
+		return nil
+	}
+	part, _ := content[0].(map[string]any)
+	if stringValue(part["type"]) != "text" {
+		return nil
+	}
+	item := parseLegacyXMLToolCall(stringValue(part["text"]))
+	if item == nil {
+		return nil
+	}
+	callID := fmt.Sprintf("legacy_xml_tool_%d", existingToolCallCount)
+	if id := stringValue(item["id"]); id != "" {
+		callID = id
+	}
+	return []any{map[string]any{
+		"id":   callID,
+		"type": "function",
+		"function": map[string]any{
+			"name":      stringValue(item["name"]),
+			"arguments": sanitizeToolArguments(stringValue(item["arguments"])),
+		},
+	}}
+}
+
 func newAnthropicEventBatchReader(originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
 	state := &anthropicNormalizationState{toolIDsByIndex: map[int]string{}, usage: map[string]any{}, originalToolIDs: originalToolIDs, provider: "anthropic"}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
@@ -798,6 +831,9 @@ type anthropicNormalizationState struct {
 	usage           map[string]any
 	completed       bool
 	pendingFinish   string
+	pendingItems    map[string]map[string]any
+	pendingInitial  map[string]bool
+	pendingOrder    []string
 	responseID      string
 	originalToolIDs map[int]string
 	reasoningBlocks map[int]map[string]any
@@ -835,10 +871,24 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 				itemID = fmt.Sprintf("tool_%d", index)
 			}
 			state.toolIDsByIndex[index] = itemID
-			events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": stringValue(block["name"])}}})
+			if state.pendingItems == nil {
+				state.pendingItems = map[string]map[string]any{}
+			}
+			if _, ok := state.pendingItems[itemID]; !ok {
+				state.pendingOrder = append(state.pendingOrder, itemID)
+			}
+			state.pendingItems[itemID] = map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": stringValue(block["name"])}
+			events = append(events, Event{Event: "response.output_item.added", Data: map[string]any{"item": cloneMap(state.pendingItems[itemID])}})
 			if input, ok := block["input"].(map[string]any); ok {
 				encoded, _ := json.Marshal(input)
-				events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": string(encoded)}})
+				state.pendingItems[itemID]["arguments"] = string(encoded)
+				if state.pendingInitial == nil {
+					state.pendingInitial = map[string]bool{}
+				}
+				state.pendingInitial[itemID] = true
+				if len(input) > 0 {
+					events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": string(encoded)}})
+				}
 			}
 		} else if blockType == "thinking" || blockType == "redacted_thinking" {
 			if state.reasoningBlocks == nil {
@@ -887,6 +937,16 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 					itemID = fmt.Sprintf("tool_%d", index)
 					state.toolIDsByIndex[index] = itemID
 				}
+				if state.pendingItems != nil {
+					if pending, ok := state.pendingItems[itemID]; ok {
+						existingArgs, _ := pending["arguments"].(string)
+						if state.pendingInitial[itemID] {
+							existingArgs = ""
+							state.pendingInitial[itemID] = false
+						}
+						pending["arguments"] = existingArgs + partial
+					}
+				}
 				events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": partial}})
 			}
 		}
@@ -899,6 +959,16 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	case "message_stop":
 		if !state.completed {
 			state.completed = true
+			for _, itemID := range state.pendingOrder {
+				item := state.pendingItems[itemID]
+				if item == nil {
+					continue
+				}
+				events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": cloneMap(item)}})
+			}
+			state.pendingItems = nil
+			state.pendingInitial = nil
+			state.pendingOrder = nil
 			responseData := map[string]any{"id": state.responseID, "object": "response"}
 			if state.pendingFinish != "" {
 				responseData["finish_reason"] = state.pendingFinish
@@ -1155,7 +1225,7 @@ func normalizeChatMessageContent(raw any) []any {
 	return out
 }
 
-func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
+func buildChatRequestBody(req model.CanonicalRequest, xmlToolCallStyle ...string) ([]byte, error) {
 	if err := validateRequestForEndpoint(req, config.UpstreamEndpointTypeChat); err != nil {
 		return nil, err
 	}
@@ -1189,7 +1259,7 @@ func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
 			payload["reasoning_effort"] = req.Reasoning.Effort
 		}
 	}
-	payload["messages"] = buildChatMessages(req)
+	payload["messages"] = buildChatMessages(req, xmlToolCallStyle...)
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
 		for _, tool := range req.Tools {
@@ -1209,7 +1279,7 @@ func buildChatRequestBody(req model.CanonicalRequest) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-func buildChatMessages(req model.CanonicalRequest) []any {
+func buildChatMessages(req model.CanonicalRequest, xmlToolCallStyle ...string) []any {
 	messages := make([]any, 0, len(req.Messages)+1)
 	if req.Instructions != "" {
 		messages = append(messages, map[string]any{"role": "system", "content": req.Instructions})
@@ -1221,6 +1291,10 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 		}
 		entry := map[string]any{"role": msg.Role}
 		content := buildChatContentParts(msg.Parts)
+		recoveredToolCalls := legacyXMLToolCallsFromChatContent(content, len(msg.ToolCalls), len(xmlToolCallStyle) > 0 && xmlToolCallStyle[0] == config.UpstreamXMLToolCallStyleLegacy)
+		if len(recoveredToolCalls) > 0 {
+			content = nil
+		}
 		if len(content) == 1 {
 			if part, _ := content[0].(map[string]any); part != nil && part["type"] == "text" {
 				entry["content"] = part["text"]
@@ -1229,7 +1303,7 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 			}
 		} else if len(content) > 1 {
 			entry["content"] = content
-		} else if len(msg.ToolCalls) == 0 {
+		} else if len(msg.ToolCalls) == 0 && len(recoveredToolCalls) == 0 {
 			entry["content"] = ""
 		}
 		reasoningContent := msg.ReasoningContent
@@ -1239,8 +1313,9 @@ func buildChatMessages(req model.CanonicalRequest) []any {
 		if reasoningContent != "" {
 			entry["reasoning_content"] = reasoningContent
 		}
-		if len(msg.ToolCalls) > 0 {
-			toolCalls := make([]any, 0, len(msg.ToolCalls))
+		if len(msg.ToolCalls) > 0 || len(recoveredToolCalls) > 0 {
+			toolCalls := make([]any, 0, len(msg.ToolCalls)+len(recoveredToolCalls))
+			toolCalls = append(toolCalls, recoveredToolCalls...)
 			for _, call := range msg.ToolCalls {
 				if strings.TrimSpace(call.Name) == "" {
 					continue
