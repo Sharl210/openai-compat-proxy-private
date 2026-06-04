@@ -790,17 +790,8 @@ func TestChatRoutePrependsProviderPromptIntoChatUpstreamSystemMessage(t *testing
 	if role, _ := first["role"].(string); role != "system" {
 		t.Fatalf("expected first chat upstream message role system, got %#v", first)
 	}
-	content, _ := first["content"].([]any)
-	if len(content) != 2 {
-		t.Fatalf("expected merged system content parts, got %#v body=%s", first["content"], gotBody)
-	}
-	firstPart, _ := content[0].(map[string]any)
-	secondPart, _ := content[1].(map[string]any)
-	if text, _ := firstPart["text"].(string); text != "provider system\n\n" {
-		t.Fatalf("expected prepended provider text part, got %#v body=%s", firstPart, gotBody)
-	}
-	if text, _ := secondPart["text"].(string); text != "chat system" {
-		t.Fatalf("expected original system text part to remain, got %#v body=%s", secondPart, gotBody)
+	if content, _ := first["content"].(string); content != "provider system\n\nchat system" {
+		t.Fatalf("expected merged system content string, got %#v body=%s", first["content"], gotBody)
 	}
 }
 

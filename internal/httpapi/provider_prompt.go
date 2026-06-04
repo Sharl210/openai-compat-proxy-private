@@ -18,6 +18,9 @@ func applyProviderSystemPrompt(req *model.CanonicalRequest, provider config.Prov
 	}
 	if req.Instructions != "" {
 		req.Instructions = mergeSystemPromptText(req.Instructions, promptText, position)
+		if len(req.InstructionParts) > 0 {
+			req.InstructionParts = mergePromptIntoCanonicalParts(req.InstructionParts, promptText, position)
+		}
 		return
 	}
 	if applySystemPromptToResponseInputItems(req.ResponseInputItems, promptText, position) {

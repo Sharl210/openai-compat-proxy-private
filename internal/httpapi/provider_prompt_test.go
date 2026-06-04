@@ -34,6 +34,33 @@ func TestApplyProviderSystemPromptAppendsToInstructions(t *testing.T) {
 	if req.Instructions != "user system\n\nprovider system" {
 		t.Fatalf("expected appended instructions, got %q", req.Instructions)
 	}
+	if len(req.InstructionParts) != 0 {
+		t.Fatalf("expected plain string instructions not to create instruction parts, got %#v", req.InstructionParts)
+	}
+}
+
+func TestApplyProviderSystemPromptUpdatesInstructionParts(t *testing.T) {
+	req := model.CanonicalRequest{
+		Instructions:     "user system",
+		InstructionParts: []model.CanonicalContentPart{{Type: "text", Text: "user system", Raw: map[string]any{"cache_control": map[string]any{"type": "ephemeral"}}}},
+	}
+	provider := config.ProviderConfig{
+		SystemPromptText:     "provider system",
+		SystemPromptPosition: config.SystemPromptPositionPrepend,
+	}
+
+	applyProviderSystemPrompt(&req, provider)
+
+	if req.Instructions != "provider system\n\nuser system" {
+		t.Fatalf("expected prepended instructions, got %q", req.Instructions)
+	}
+	if len(req.InstructionParts) != 2 || req.InstructionParts[0].Text != "provider system\n\n" || req.InstructionParts[1].Text != "user system" {
+		t.Fatalf("expected provider prompt prepended to instruction parts, got %#v", req.InstructionParts)
+	}
+	cacheControl, _ := req.InstructionParts[1].Raw["cache_control"].(map[string]any)
+	if cacheControl["type"] != "ephemeral" {
+		t.Fatalf("expected original instruction cache_control preserved, got %#v", req.InstructionParts[1])
+	}
 }
 
 func TestApplyProviderSystemPromptPrependsToFirstSystemMessage(t *testing.T) {
