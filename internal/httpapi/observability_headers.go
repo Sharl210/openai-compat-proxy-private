@@ -139,6 +139,17 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	}
 }
 
+func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig) {
+	if canon == nil || provider.UpstreamMaxOutputTokens <= 0 {
+		return
+	}
+	if canon.MaxOutputTokens != nil && !provider.ForceUpstreamMaxOutputTokens {
+		return
+	}
+	maxOutputTokens := provider.UpstreamMaxOutputTokens
+	canon.MaxOutputTokens = &maxOutputTokens
+}
+
 func serviceTierFromTopLevelFields(fields map[string]any) string {
 	if len(fields) == 0 {
 		return ""
