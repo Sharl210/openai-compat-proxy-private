@@ -140,10 +140,11 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	defer file.Close()
 
 	provider := ProviderConfig{
-		UpstreamRetryCount:      DefaultUpstreamRetryCount,
-		UpstreamRetryDelay:      DefaultUpstreamRetryDelay,
-		UpstreamEndpointType:    UpstreamEndpointTypeResponses,
-		ResponsesToolCompatMode: ResponsesToolCompatModePreserve,
+		UpstreamRetryCount:       DefaultUpstreamRetryCount,
+		UpstreamRetryDelay:       DefaultUpstreamRetryDelay,
+		UpstreamEndpointType:     UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode:  ResponsesToolCompatModePreserve,
+		UpstreamXMLToolCallStyle: UpstreamXMLToolCallStyleLegacy,
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

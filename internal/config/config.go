@@ -62,7 +62,7 @@ func Default() Config {
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		ResponsesToolCompatMode:     ResponsesToolCompatModePreserve,
 		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
-		UpstreamXMLToolCallStyle:    UpstreamXMLToolCallStyleOff,
+		UpstreamXMLToolCallStyle:    UpstreamXMLToolCallStyleLegacy,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 "logs",
 		LogMaxRequests:              200,

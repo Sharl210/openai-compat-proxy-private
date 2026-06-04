@@ -48,6 +48,12 @@ func TestDefaultResponsesToolCompatModeIsPreserve(t *testing.T) {
 	}
 }
 
+func TestDefaultUpstreamXMLToolCallStyleIsLegacy(t *testing.T) {
+	if got := Default().UpstreamXMLToolCallStyle; got != UpstreamXMLToolCallStyleLegacy {
+		t.Fatalf("expected default upstream XML tool call style %q, got %q", UpstreamXMLToolCallStyleLegacy, got)
+	}
+}
+
 func TestDefaultLogMaxRequestsIsTwoHundred(t *testing.T) {
 	if got := Default().LogMaxRequests; got != 200 {
 		t.Fatalf("expected default log max requests 200, got %d", got)

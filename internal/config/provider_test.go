@@ -908,6 +908,23 @@ func TestLoadProviderFileParsesUpstreamXMLToolCallStyle(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileDefaultsUpstreamXMLToolCallStyleToLegacy(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamXMLToolCallStyle != UpstreamXMLToolCallStyleLegacy {
+		t.Fatalf("expected default XML tool call style %q, got %q", UpstreamXMLToolCallStyleLegacy, provider.UpstreamXMLToolCallStyle)
+	}
+}
+
 func TestLoadProviderFileRejectsInvalidUpstreamXMLToolCallStyle(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")
