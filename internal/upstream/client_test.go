@@ -1202,6 +1202,42 @@ func TestBuildRequestBodyLeavesPlainTextToolOutputUntouched(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBodyPreservesOrderedToolResultBetweenTextMessages(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			OrderedContent: []model.CanonicalContentBlock{
+				{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "工具前"}},
+				{Type: "tool_result", ToolCallID: "call_dynamic_1", ToolResultParts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+				{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "工具后"}},
+			},
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "工具前"}, {Type: "text", Text: "工具后"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 3 {
+		t.Fatalf("expected text, function_call_output, text input items, got %#v", input)
+	}
+	first, _ := input[0].(map[string]any)
+	second, _ := input[1].(map[string]any)
+	third, _ := input[2].(map[string]any)
+	if first["role"] != "user" || second["type"] != "function_call_output" || third["role"] != "user" {
+		t.Fatalf("expected ordered response input shape, got %#v", input)
+	}
+	if second["call_id"] != "call_dynamic_1" || second["output"] != `{"ok":true}` {
+		t.Fatalf("expected ordered tool output preserved, got %#v", second)
+	}
+}
+
 func TestBuildRequestBodyForwardsAssistantReasoningContentAsReasoningSummary(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
@@ -1344,6 +1380,47 @@ func TestBuildAnthropicMessagesMergesPendingToolResultsWithFollowingUserText(t *
 	}
 	if second["type"] != "text" || second["text"] != "继续处理" {
 		t.Fatalf("expected trailing user text in same message, got %#v", userMsg)
+	}
+}
+
+func TestBuildAnthropicMessagesPreservesOrderedContentBlocks(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
+		Role: "user",
+		OrderedContent: []model.CanonicalContentBlock{
+			{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "工具前"}},
+			{
+				Type:            "tool_result",
+				ToolCallID:      "call_dynamic_1",
+				ToolResultParts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}},
+				Raw:             map[string]any{"cache_control": map[string]any{"type": "ephemeral"}},
+			},
+			{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "工具后"}},
+		},
+	}}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one anthropic user message, got %#v", messages)
+	}
+	userMsg, _ := messages[0].(map[string]any)
+	content, _ := userMsg["content"].([]any)
+	if len(content) != 3 {
+		t.Fatalf("expected three ordered content blocks, got %#v", userMsg)
+	}
+	first, _ := content[0].(map[string]any)
+	second, _ := content[1].(map[string]any)
+	third, _ := content[2].(map[string]any)
+	if first["type"] != "text" || first["text"] != "工具前" {
+		t.Fatalf("expected leading text before tool_result, got %#v", content)
+	}
+	if second["type"] != "tool_result" || second["tool_use_id"] != "call_dynamic_1" || second["content"] != `{"ok":true}` {
+		t.Fatalf("expected middle tool_result block, got %#v", content)
+	}
+	cacheControl, _ := second["cache_control"].(map[string]any)
+	if cacheControl["type"] != "ephemeral" {
+		t.Fatalf("expected tool_result cache_control preserved, got %#v", second)
+	}
+	if third["type"] != "text" || third["text"] != "工具后" {
+		t.Fatalf("expected trailing text after tool_result, got %#v", content)
 	}
 }
 
@@ -1982,6 +2059,42 @@ func TestBuildChatRequestBodyDropsAssistantToolCallsWithEmptyFunctionName(t *tes
 	}
 	if got, _ := message["role"].(string); got != "assistant" {
 		t.Fatalf("expected assistant role preserved, got %#v", message)
+	}
+}
+
+func TestBuildChatRequestBodyPreservesOrderedToolResultBetweenTextMessages(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			OrderedContent: []model.CanonicalContentBlock{
+				{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "工具前"}},
+				{Type: "tool_result", ToolCallID: "call_dynamic_1", ToolResultParts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+				{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "工具后"}},
+			},
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "工具前"}, {Type: "text", Text: "工具后"}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 3 {
+		t.Fatalf("expected user, tool, user messages, got %#v", messages)
+	}
+	first, _ := messages[0].(map[string]any)
+	second, _ := messages[1].(map[string]any)
+	third, _ := messages[2].(map[string]any)
+	if first["role"] != "user" || second["role"] != "tool" || third["role"] != "user" {
+		t.Fatalf("expected ordered chat message shape, got %#v", messages)
+	}
+	if second["tool_call_id"] != "call_dynamic_1" || second["content"] != `{"ok":true}` {
+		t.Fatalf("expected ordered chat tool output preserved, got %#v", second)
 	}
 }
 

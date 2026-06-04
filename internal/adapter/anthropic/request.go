@@ -88,7 +88,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		}
 	}
 	for _, msg := range req.Messages {
-		parts, err := decodeContent(msg.Content)
+		parts, orderedContent, err := decodeContent(msg.Content, toolNames)
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
@@ -99,6 +99,13 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		toolCalls, toolResults, err := decodeToolTransitions(msg.Role, msg.Content, toolNames)
 		if err != nil {
 			return model.CanonicalRequest{}, err
+		}
+		if len(orderedContent) > 0 {
+			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, OrderedContent: orderedContent, Parts: parts, ToolCalls: toolCalls, ReasoningBlocks: reasoningBlocks})
+			for _, toolResult := range toolResults {
+				canon.Messages = append(canon.Messages, toolResult)
+			}
+			continue
 		}
 		if msg.Role == "user" && len(toolResults) > 0 {
 			canon.Messages = append(canon.Messages, toolResults...)
@@ -141,49 +148,76 @@ func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {
 	return fields
 }
 
-func decodeContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
+func decodeContent(raw json.RawMessage, toolNames map[string]struct{}) ([]model.CanonicalContentPart, []model.CanonicalContentBlock, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		return []model.CanonicalContentPart{{Type: "text", Text: text}}, nil
+		return []model.CanonicalContentPart{{Type: "text", Text: text}}, nil, nil
 	}
 	var parts []contentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	var rawParts []map[string]any
+	if err := json.Unmarshal(raw, &rawParts); err != nil {
+		return nil, nil, err
 	}
 	out := make([]model.CanonicalContentPart, 0, len(parts))
-	for _, part := range parts {
+	ordered := make([]model.CanonicalContentBlock, 0, len(parts))
+	for index, part := range parts {
 		cacheControl := decodeAnthropicCacheControl(part.CacheControl)
 		switch part.Type {
 		case "text":
-			out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text, Raw: anthropicContentPartRaw(cacheControl)})
+			contentPart := model.CanonicalContentPart{Type: "text", Text: part.Text, Raw: anthropicContentPartRaw(cacheControl)}
+			out = append(out, contentPart)
+			ordered = append(ordered, model.CanonicalContentBlock{Type: "content", Part: contentPart})
 		case "image":
 			imagePart, err := decodeAnthropicImagePart(part.Source)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			attachAnthropicCacheControl(&imagePart, cacheControl)
 			out = append(out, imagePart)
+			ordered = append(ordered, model.CanonicalContentBlock{Type: "content", Part: imagePart})
 		case "document":
 			docParts, err := decodeAnthropicDocumentParts(part.Source)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for i := range docParts {
 				attachAnthropicCacheControl(&docParts[i], cacheControl)
+				ordered = append(ordered, model.CanonicalContentBlock{Type: "content", Part: docParts[i]})
 			}
 			out = append(out, docParts...)
-		case "tool_use", "tool_result", "thinking", "redacted_thinking":
-			continue
+		case "tool_use":
+			arguments := "{}"
+			if len(part.Input) > 0 {
+				arguments = string(part.Input)
+			}
+			ordered = append(ordered, model.CanonicalContentBlock{Type: "tool_use", ToolCall: model.CanonicalToolCall{ID: part.ID, Type: "function", Name: repairRepeatedToolUseName(part.Name, toolNames), Arguments: arguments}})
+		case "tool_result":
+			toolParts, err := decodeToolResultContent(part.Content)
+			if err != nil {
+				return nil, nil, err
+			}
+			ordered = append(ordered, model.CanonicalContentBlock{Type: "tool_result", ToolCallID: part.ToolUseID, ToolResultParts: toolParts, Raw: anthropicContentPartRaw(cacheControl)})
+		case "thinking", "redacted_thinking":
+			block := map[string]any{}
+			if index < len(rawParts) {
+				block = rawParts[index]
+			}
+			ordered = append(ordered, model.CanonicalContentBlock{Type: part.Type, Raw: cloneAnyMap(block)})
 		case "":
 			if part.Text != "" {
-				out = append(out, model.CanonicalContentPart{Type: "text", Text: part.Text})
+				contentPart := model.CanonicalContentPart{Type: "text", Text: part.Text}
+				out = append(out, contentPart)
+				ordered = append(ordered, model.CanonicalContentBlock{Type: "content", Part: contentPart})
 				continue
 			}
 		default:
-			return nil, fmt.Errorf("unsupported anthropic content type: %s", part.Type)
+			return nil, nil, fmt.Errorf("unsupported anthropic content type: %s", part.Type)
 		}
 	}
-	return out, nil
+	return out, ordered, nil
 }
 
 func decodeReasoningBlocks(raw json.RawMessage) ([]map[string]any, error) {
@@ -280,7 +314,8 @@ func decodeAnthropicDocumentParts(raw json.RawMessage) ([]model.CanonicalContent
 		}
 		return []model.CanonicalContentPart{{Type: "text", Text: src.Data}}, nil
 	case "content":
-		return decodeContent(src.Content)
+		parts, _, err := decodeContent(src.Content, nil)
+		return parts, err
 	case "base64":
 		if src.MediaType == "" || src.Data == "" {
 			return nil, fmt.Errorf("anthropic base64 document requires media_type and data")
@@ -369,7 +404,7 @@ func decodeToolResultContent(raw json.RawMessage) ([]model.CanonicalContentPart,
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return []model.CanonicalContentPart{{Type: "text", Text: text}}, nil
 	}
-	parts, err := decodeContent(raw)
+	parts, _, err := decodeContent(raw, nil)
 	if err == nil {
 		return parts, nil
 	}

@@ -49,6 +49,90 @@ func TestDecodeRequestPreservesThinkingBlocksInFollowUpMessages(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesOrderedAnthropicContentBlocks(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"tools":[{"name":"lookup_dynamic_context","description":"Lookup","input_schema":{"type":"object"}}],
+		"messages":[{
+			"role":"assistant",
+			"content":[
+				{"type":"thinking","thinking":"先分析","signature":"sig_123"},
+				{"type":"text","text":"调用前"},
+				{"type":"tool_use","id":"call_dynamic_1","name":"lookup_dynamic_context","input":{"query":"alpha"}},
+				{"type":"text","text":"调用后"}
+			]
+		}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one canonical message, got %#v", canon.Messages)
+	}
+	blocks := canon.Messages[0].OrderedContent
+	if len(blocks) != 4 {
+		t.Fatalf("expected 4 ordered content blocks, got %#v", blocks)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Raw["signature"] != "sig_123" {
+		t.Fatalf("expected first block thinking with signature, got %#v", blocks[0])
+	}
+	if blocks[1].Type != "content" || blocks[1].Part.Text != "调用前" {
+		t.Fatalf("expected second block text before tool_use, got %#v", blocks[1])
+	}
+	if blocks[2].Type != "tool_use" || blocks[2].ToolCall.ID != "call_dynamic_1" || blocks[2].ToolCall.Name != "lookup_dynamic_context" {
+		t.Fatalf("expected third block tool_use, got %#v", blocks[2])
+	}
+	if blocks[3].Type != "content" || blocks[3].Part.Text != "调用后" {
+		t.Fatalf("expected fourth block text after tool_use, got %#v", blocks[3])
+	}
+}
+
+func TestDecodeRequestPreservesToolResultCacheControl(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"messages":[{
+			"role":"user",
+			"content":[
+				{"type":"text","text":"工具前"},
+				{"type":"tool_result","tool_use_id":"call_dynamic_1","content":"{\"ok\":true}","cache_control":{"type":"ephemeral"}},
+				{"type":"text","text":"工具后"}
+			]
+		}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected canonical user message plus compatibility tool message, got %#v", canon.Messages)
+	}
+	blocks := canon.Messages[0].OrderedContent
+	if len(blocks) != 3 {
+		t.Fatalf("expected 3 ordered content blocks, got %#v", blocks)
+	}
+	if blocks[0].Type != "content" || blocks[0].Part.Text != "工具前" {
+		t.Fatalf("expected leading text before tool_result, got %#v", blocks[0])
+	}
+	if blocks[1].Type != "tool_result" || blocks[1].ToolCallID != "call_dynamic_1" {
+		t.Fatalf("expected middle tool_result block, got %#v", blocks[1])
+	}
+	cacheControl, _ := blocks[1].Raw["cache_control"].(map[string]any)
+	if cacheControl["type"] != "ephemeral" {
+		t.Fatalf("expected tool_result cache_control preserved, got %#v", blocks[1])
+	}
+	if len(blocks[1].ToolResultParts) != 1 || blocks[1].ToolResultParts[0].Text != `{"ok":true}` {
+		t.Fatalf("expected tool_result content preserved, got %#v", blocks[1].ToolResultParts)
+	}
+	if blocks[2].Type != "content" || blocks[2].Part.Text != "工具后" {
+		t.Fatalf("expected trailing text after tool_result, got %#v", blocks[2])
+	}
+}
+
 func TestDecodeRequestPreservesRedactedThinkingBlocksInFollowUpMessages(t *testing.T) {
 	req := `{
 		"model":"claude-sonnet-4-5",
@@ -220,14 +304,18 @@ func TestDecodeRequestPreservesToolResultMultimodalContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
-	if len(canon.Messages) != 1 || canon.Messages[0].Role != "tool" {
+	if len(canon.Messages) != 2 || canon.Messages[0].Role != "user" || canon.Messages[1].Role != "tool" {
 		t.Fatalf("expected tool result message, got %#v", canon.Messages)
 	}
-	if len(canon.Messages[0].Parts) != 2 {
-		t.Fatalf("expected text+image tool result parts, got %#v", canon.Messages[0].Parts)
+	if len(canon.Messages[0].OrderedContent) != 1 || canon.Messages[0].OrderedContent[0].Type != "tool_result" {
+		t.Fatalf("expected ordered tool_result block, got %#v", canon.Messages[0])
 	}
-	if canon.Messages[0].Parts[1].Type != "image_url" {
-		t.Fatalf("expected image tool result part preserved, got %#v", canon.Messages[0].Parts)
+	toolParts := canon.Messages[0].OrderedContent[0].ToolResultParts
+	if len(toolParts) != 2 {
+		t.Fatalf("expected text+image tool result parts, got %#v", toolParts)
+	}
+	if toolParts[1].Type != "image_url" {
+		t.Fatalf("expected image tool result part preserved, got %#v", toolParts)
 	}
 }
 
@@ -255,13 +343,16 @@ func TestDecodeRequestKeepsToolResultAheadOfTrailingUserText(t *testing.T) {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
 	if len(canon.Messages) != 3 {
-		t.Fatalf("expected 3 canonical messages, got %#v", canon.Messages)
+		t.Fatalf("expected assistant, ordered user, and compatibility tool messages, got %#v", canon.Messages)
 	}
-	if canon.Messages[1].Role != "tool" || canon.Messages[1].ToolCallID != "call_1" {
-		t.Fatalf("expected tool result before trailing user text, got %#v", canon.Messages)
+	if len(canon.Messages[1].OrderedContent) != 2 {
+		t.Fatalf("expected ordered tool_result plus trailing text, got %#v", canon.Messages[1])
 	}
-	if canon.Messages[2].Role != "user" || len(canon.Messages[2].Parts) != 1 || canon.Messages[2].Parts[0].Text != "继续处理" {
-		t.Fatalf("expected trailing user text as final message, got %#v", canon.Messages[2])
+	if canon.Messages[1].OrderedContent[0].Type != "tool_result" || canon.Messages[1].OrderedContent[0].ToolCallID != "call_1" {
+		t.Fatalf("expected tool_result before trailing user text, got %#v", canon.Messages[1].OrderedContent)
+	}
+	if canon.Messages[1].OrderedContent[1].Type != "content" || canon.Messages[1].OrderedContent[1].Part.Text != "继续处理" {
+		t.Fatalf("expected trailing user text after tool_result, got %#v", canon.Messages[1].OrderedContent)
 	}
 }
 

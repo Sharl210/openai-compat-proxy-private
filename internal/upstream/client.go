@@ -1065,6 +1065,10 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 	} else if len(req.Messages) > 0 {
 		var input []map[string]any
 		for _, msg := range req.Messages {
+			if len(msg.OrderedContent) > 0 {
+				input = append(input, buildResponsesOrderedInputItems(msg)...)
+				continue
+			}
 			if msg.Role == "tool" {
 				input = append(input, map[string]any{
 					"type":    "function_call_output",
@@ -1145,6 +1149,62 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 		}
 	}
 	return json.Marshal(payload)
+}
+
+func buildResponsesOrderedInputItems(msg model.CanonicalMessage) []map[string]any {
+	var items []map[string]any
+	var content []map[string]any
+	flushContent := func() {
+		if len(content) == 0 {
+			return
+		}
+		items = append(items, map[string]any{"role": msg.Role, "content": content})
+		content = nil
+	}
+	for _, block := range msg.OrderedContent {
+		switch block.Type {
+		case "content":
+			content = append(content, buildResponsesContentPart(block.Part, msg.Role)...)
+		case "tool_use":
+			flushContent()
+			if strings.TrimSpace(block.ToolCall.Name) == "" {
+				continue
+			}
+			items = append(items, map[string]any{
+				"type":      "function_call",
+				"call_id":   block.ToolCall.ID,
+				"name":      block.ToolCall.Name,
+				"arguments": sanitizeToolArguments(block.ToolCall.Arguments),
+			})
+		case "tool_result":
+			flushContent()
+			items = append(items, map[string]any{
+				"type":    "function_call_output",
+				"call_id": block.ToolCallID,
+				"output":  buildToolOutput(block.ToolResultParts),
+			})
+		}
+	}
+	flushContent()
+	return items
+}
+
+func buildResponsesContentPart(part model.CanonicalContentPart, role string) []map[string]any {
+	switch part.Type {
+	case "text":
+		return []map[string]any{{"type": textPartTypeForRole(role), "text": part.Text}}
+	case "image_url", "input_image":
+		return []map[string]any{buildInputImageContent(part)}
+	case "input_file":
+		if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
+			return []map[string]any{{"type": "input_file", "input_file": cloneMap(rawFile)}}
+		}
+	case "input_audio":
+		if rawAudio, ok := part.Raw["input_audio"].(map[string]any); ok && len(rawAudio) > 0 {
+			return []map[string]any{{"type": "input_audio", "input_audio": cloneMap(rawAudio)}}
+		}
+	}
+	return nil
 }
 
 func isResponsesInstructionInputItem(item map[string]any) bool {

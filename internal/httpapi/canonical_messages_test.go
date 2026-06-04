@@ -144,6 +144,29 @@ func TestPrepareCanonicalMessagesKeepsAssistantToolCallsWithFollowingResult(t *t
 	}
 }
 
+func TestPrepareCanonicalMessagesKeepsAssistantToolCallsWithOrderedToolResult(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "search"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup_dynamic_context", Arguments: `{"query":"weather"}`}}},
+		{
+			Role: "user",
+			OrderedContent: []model.CanonicalContentBlock{
+				{Type: "tool_result", ToolCallID: "call_1", ToolResultParts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+				{Type: "content", Part: model.CanonicalContentPart{Type: "text", Text: "继续"}},
+			},
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续"}},
+		},
+	}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 3 {
+		t.Fatalf("expected ordered tool result to keep paired assistant tool_call, got %#v", prepared)
+	}
+	if len(prepared[1].ToolCalls) != 1 || prepared[2].Role != "user" || len(prepared[2].OrderedContent) != 2 {
+		t.Fatalf("expected ordered tool_call/result pair preserved, got %#v", prepared)
+	}
+}
+
 func TestPrepareCanonicalMessagesKeepsMultipleToolCallsWithFollowingResults(t *testing.T) {
 	messages := []model.CanonicalMessage{
 		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "inspect apk"}}},

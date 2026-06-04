@@ -98,6 +98,14 @@ func immediateToolResultIDs(messages []model.CanonicalMessage) map[string]struct
 		}
 		for j := i + 1; j < len(messages); j++ {
 			next := messages[j]
+			for _, block := range next.OrderedContent {
+				if block.Type != "tool_result" || block.ToolCallID == "" {
+					continue
+				}
+				if _, ok := toolCallIDs[block.ToolCallID]; ok {
+					matched[block.ToolCallID] = struct{}{}
+				}
+			}
 			if next.Role != "tool" {
 				break
 			}

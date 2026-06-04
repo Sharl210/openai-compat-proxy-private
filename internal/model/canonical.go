@@ -24,11 +24,21 @@ type CanonicalRequest struct {
 
 type CanonicalMessage struct {
 	Role             string
+	OrderedContent   []CanonicalContentBlock
 	Parts            []CanonicalContentPart
 	ToolCalls        []CanonicalToolCall
 	ToolCallID       string
 	ReasoningContent string
 	ReasoningBlocks  []map[string]any
+}
+
+type CanonicalContentBlock struct {
+	Type            string
+	Part            CanonicalContentPart
+	ToolCall        CanonicalToolCall
+	ToolCallID      string
+	ToolResultParts []CanonicalContentPart
+	Raw             map[string]any
 }
 
 type CanonicalToolCall struct {

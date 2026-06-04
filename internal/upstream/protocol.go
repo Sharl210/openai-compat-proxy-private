@@ -1393,6 +1393,10 @@ func buildChatMessages(req model.CanonicalRequest, xmlToolCallStyle ...string) [
 		messages = append(messages, map[string]any{"role": "system", "content": req.Instructions})
 	}
 	for _, msg := range req.Messages {
+		if len(msg.OrderedContent) > 0 {
+			messages = append(messages, buildChatOrderedMessages(msg)...)
+			continue
+		}
 		if msg.Role == "tool" {
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": msg.ToolCallID, "content": stringifyToolOutput(buildToolOutput(msg.Parts))})
 			continue
@@ -1441,6 +1445,55 @@ func buildChatMessages(req model.CanonicalRequest, xmlToolCallStyle ...string) [
 		messages = append(messages, entry)
 	}
 	return messages
+}
+
+func buildChatOrderedMessages(msg model.CanonicalMessage) []any {
+	var messages []any
+	var content []any
+	flushContent := func() {
+		entry := buildChatMessageEntry(msg.Role, content)
+		if entry == nil {
+			return
+		}
+		messages = append(messages, entry)
+		content = nil
+	}
+	for _, block := range msg.OrderedContent {
+		switch block.Type {
+		case "content":
+			content = append(content, buildChatContentParts([]model.CanonicalContentPart{block.Part})...)
+		case "tool_use":
+			flushContent()
+			if strings.TrimSpace(block.ToolCall.Name) == "" {
+				continue
+			}
+			callID := block.ToolCall.ID
+			if callID == "" {
+				callID = block.ToolCall.Name
+			}
+			messages = append(messages, map[string]any{"role": msg.Role, "tool_calls": []any{map[string]any{"id": callID, "type": "function", "function": map[string]any{"name": block.ToolCall.Name, "arguments": sanitizeToolArguments(block.ToolCall.Arguments)}}}})
+		case "tool_result":
+			flushContent()
+			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": block.ToolCallID, "content": stringifyToolOutput(buildToolOutput(block.ToolResultParts))})
+		}
+	}
+	flushContent()
+	return messages
+}
+
+func buildChatMessageEntry(role string, content []any) map[string]any {
+	if len(content) == 0 {
+		return nil
+	}
+	entry := map[string]any{"role": role}
+	if len(content) == 1 {
+		if part, _ := content[0].(map[string]any); part != nil && part["type"] == "text" {
+			entry["content"] = part["text"]
+			return entry
+		}
+	}
+	entry["content"] = content
+	return entry
 }
 
 func sanitizeToolArguments(arguments string) string {
@@ -1569,11 +1622,26 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		return nil
 	}
 	var pendingToolResults []any
+	emittedOrderedToolResults := map[string]struct{}{}
 	for _, msg := range req.Messages {
 		if isAnthropicInstructionRole(msg.Role) {
 			continue
 		}
+		if len(msg.OrderedContent) > 0 {
+			pendingToolResults = appendPendingToolResults(pendingToolResults)
+			content := buildAnthropicOrderedContent(msg.OrderedContent)
+			for _, block := range msg.OrderedContent {
+				if block.Type == "tool_result" && block.ToolCallID != "" {
+					emittedOrderedToolResults[block.ToolCallID] = struct{}{}
+				}
+			}
+			messages = append(messages, map[string]any{"role": msg.Role, "content": content})
+			continue
+		}
 		if msg.Role == "tool" {
+			if _, exists := emittedOrderedToolResults[msg.ToolCallID]; exists {
+				continue
+			}
 			pendingToolResults = append(pendingToolResults, map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": buildAnthropicToolResultContent(msg.Parts)})
 			continue
 		}
@@ -1605,6 +1673,35 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 	}
 	pendingToolResults = appendPendingToolResults(pendingToolResults)
 	return messages
+}
+
+func buildAnthropicOrderedContent(blocks []model.CanonicalContentBlock) []any {
+	content := make([]any, 0, len(blocks))
+	for _, block := range blocks {
+		switch block.Type {
+		case "content":
+			content = append(content, buildAnthropicContentParts([]model.CanonicalContentPart{block.Part})...)
+		case "thinking", "redacted_thinking":
+			if len(block.Raw) > 0 {
+				content = append(content, cloneMap(block.Raw))
+			}
+		case "tool_use":
+			call := block.ToolCall
+			if strings.TrimSpace(call.Name) == "" {
+				continue
+			}
+			callID := call.ID
+			if callID == "" {
+				callID = call.Name
+			}
+			content = append(content, map[string]any{"type": "tool_use", "id": callID, "name": call.Name, "input": parseJSONArguments(call.Arguments)})
+		case "tool_result":
+			result := map[string]any{"type": "tool_result", "tool_use_id": block.ToolCallID, "content": buildAnthropicToolResultContent(block.ToolResultParts)}
+			attachAnthropicCacheControlBlock(result, block.Raw)
+			content = append(content, result)
+		}
+	}
+	return content
 }
 
 func reasoningContentFromBlocks(blocks []map[string]any) string {
