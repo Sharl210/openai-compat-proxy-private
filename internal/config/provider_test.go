@@ -546,6 +546,90 @@ func TestLoadProviderFileParsesRetryOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesUpstreamMaxOutputTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamMaxOutputTokens != 64000 {
+		t.Fatalf("expected upstream max output tokens 64000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if !provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected force upstream max output tokens to be true")
+	}
+}
+
+func TestLoadProviderFileTreatsBlankUpstreamMaxOutputTokensAsUnset(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamMaxOutputTokens != 0 {
+		t.Fatalf("expected blank upstream max output tokens to stay unset, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected blank force upstream max output tokens to be false")
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidUpstreamMaxOutputTokens(t *testing.T) {
+	for _, value := range []string{"0", "-1", "bad"} {
+		t.Run(value, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=" + value + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			_, err := loadProviderFile(providerEnvPath)
+			if err == nil {
+				t.Fatalf("expected invalid upstream max output tokens to fail validation")
+			}
+			if _, ok := err.(invalidConfigError); !ok {
+				t.Fatalf("expected invalidConfigError for invalid upstream max output tokens, got %T", err)
+			}
+			if err.Error() != "invalid UPSTREAM_MAX_OUTPUT_TOKENS in "+providerEnvPath+": \""+value+"\"" {
+				t.Fatalf("unexpected error message: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidForceUpstreamMaxOutputTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=maybe\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid force upstream max output tokens to fail validation")
+	}
+	if _, ok := err.(invalidConfigError); !ok {
+		t.Fatalf("expected invalidConfigError for invalid force upstream max output tokens, got %T", err)
+	}
+	if err.Error() != "invalid FORCE_UPSTREAM_MAX_OUTPUT_TOKENS in "+providerEnvPath+": \"maybe\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestLoadProviderFileAllowsZeroRetryOverride(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

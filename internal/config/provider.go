@@ -20,6 +20,8 @@ type ProviderConfig struct {
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
 	OpenAIServiceTier                      string
+	UpstreamMaxOutputTokens                int
+	ForceUpstreamMaxOutputTokens           bool
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
@@ -182,6 +184,17 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid OPENAI_SERVICE_TIER in %s: %q (allowed: auto, default, flex, priority)", path, value))
 			}
 			provider.OpenAIServiceTier = normalized
+		case "UPSTREAM_MAX_OUTPUT_TOKENS":
+			parsed, err := parseProviderPositiveInt(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.UpstreamMaxOutputTokens = parsed
+		case "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS":
+			provider.ForceUpstreamMaxOutputTokens, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "RESPONSES_TOOL_COMPAT_MODE":
 			normalized, err := normalizeResponsesToolCompatMode(value)
 			if err != nil {
@@ -518,6 +531,18 @@ func parseProviderPositiveDuration(value string, key string, path string) (time.
 		return 0, nil
 	}
 	parsed, err := time.ParseDuration(trimmed)
+	if err != nil || parsed <= 0 {
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
+	}
+	return parsed, nil
+}
+
+func parseProviderPositiveInt(value string, key string, path string) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(trimmed)
 	if err != nil || parsed <= 0 {
 		return 0, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
 	}
