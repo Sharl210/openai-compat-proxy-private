@@ -3,6 +3,7 @@ package upstream
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -111,6 +112,54 @@ func TestNormalizeChatFrame_XMLToolCallTextLegacyConvertsToFunctionCall(t *testi
 	}
 	if got := stringValue(item["arguments"]); got != `{"className":"Lacr/browser/lightning/activity/BrowserActivity$16;","limit":50,"workspaceId":"69jas4bi"}` {
 		t.Fatalf("unexpected arguments: %s", got)
+	}
+}
+
+func TestNormalizeChatFrame_LegacyXMLToolCallSplitAcrossContentDeltasConvertsOnce(t *testing.T) {
+	frames := []string{
+		`{"id":"chat-123","choices":[{"delta":{"content":"<tool_call>\n<function=lookup_record>\n<parameter=query>"}}]}`,
+		`{"id":"chat-123","choices":[{"delta":{"content":"alpha"}}]}`,
+		`{"id":"chat-123","choices":[{"delta":{"content":"</parameter>\n<parameter=limit>3</parameter>\n</function>\n</tool_call>"},"finish_reason":"tool_calls"}]}`,
+	}
+	state := &chatNormalizationState{
+		toolIDsByIndex:       map[int]string{},
+		toolSent:             map[string]bool{},
+		upstreamXMLToolStyle: config.UpstreamXMLToolCallStyleLegacy,
+	}
+
+	var allEvents []Event
+	for _, frameData := range frames {
+		events, done, err := normalizeChatFrame(&sseFrame{Event: "chat", Data: frameData}, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		if done {
+			t.Fatal("unexpected done")
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	var toolDone []map[string]any
+	for _, evt := range allEvents {
+		if evt.Event == "response.output_text.delta" && strings.Contains(stringValue(evt.Data["delta"]), "<tool_call>") {
+			t.Fatalf("expected split XML tool text to be buffered, got %#v from %#v", evt, allEvents)
+		}
+		if evt.Event != "response.output_item.done" {
+			continue
+		}
+		item, _ := evt.Data["item"].(map[string]any)
+		if stringValue(item["type"]) == "function_call" {
+			toolDone = append(toolDone, item)
+		}
+	}
+	if len(toolDone) != 1 {
+		t.Fatalf("expected exactly one structured function call, got %d events=%#v", len(toolDone), allEvents)
+	}
+	if got := stringValue(toolDone[0]["name"]); got != "lookup_record" {
+		t.Fatalf("unexpected function name %q from %#v", got, toolDone[0])
+	}
+	if got := stringValue(toolDone[0]["arguments"]); got != `{"limit":3,"query":"alpha"}` {
+		t.Fatalf("unexpected arguments %s from %#v", got, toolDone[0])
 	}
 }
 
@@ -421,6 +470,55 @@ func TestChatEventBatchReaderFinalizesOnEOFWhenAllowedAndFinishReasonSeen(t *tes
 	usage, _ := response["usage"].(map[string]any)
 	if got := usage["input_tokens"]; got != float64(3) {
 		t.Fatalf("expected usage to survive EOF completion, got %#v", completed)
+	}
+}
+
+func TestChatEventBatchReaderDoesNotFinalizePartialToolCallOnTruncationFinishReasons(t *testing.T) {
+	for _, finishReason := range []string{"max_tokens", "length"} {
+		t.Run(finishReason, func(t *testing.T) {
+			rawSSE := strings.Join([]string{
+				"event: chat",
+				`data: {"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_partial","function":{"name":"lookup_record"}}]}}]}`,
+				"",
+				"event: chat",
+				`data: {"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":"}}]}}]}`,
+				"",
+				"event: chat",
+				fmt.Sprintf(`data: {"id":"chat-123","choices":[{"finish_reason":%q}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`, finishReason),
+				"",
+			}, "\n")
+
+			scanner := bufio.NewScanner(strings.NewReader(rawSSE))
+			readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, config.UpstreamXMLToolCallStyleOff, nil, "req-test", true)
+
+			var allEvents []Event
+			for {
+				events, err := readNext(scanner)
+				if err != nil {
+					t.Fatalf("readNext error: %v", err)
+				}
+				if len(events) == 0 {
+					break
+				}
+				allEvents = append(allEvents, events...)
+			}
+
+			for _, evt := range allEvents {
+				switch evt.Event {
+				case "response.output_item.done":
+					item, _ := evt.Data["item"].(map[string]any)
+					if stringValue(item["type"]) == "function_call" {
+						t.Fatalf("expected partial function_call to stay unfinished on %s, got %#v from %#v", finishReason, evt, allEvents)
+					}
+				case "response.function_call_arguments.done":
+					t.Fatalf("expected no synthesized arguments.done for partial args, got %#v from %#v", evt, allEvents)
+				}
+			}
+			terminal := allEvents[len(allEvents)-1]
+			if terminal.Event != "response.incomplete" {
+				t.Fatalf("expected %s terminal event to be incomplete, got %#v from %#v", finishReason, terminal, allEvents)
+			}
+		})
 	}
 }
 

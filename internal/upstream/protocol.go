@@ -476,7 +476,8 @@ func finalizeChatTerminalEvents(state *chatNormalizationState) []Event {
 		return nil
 	}
 	var events []Event
-	if state.pendingItems != nil {
+	incomplete := isChatIncompleteFinishReason(state.pendingFinish)
+	if state.pendingItems != nil && !incomplete {
 		for itemID, pending := range state.pendingItems {
 			item := map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": pending["name"]}
 			if args, ok := pending["arguments"].(string); ok && args != "" {
@@ -494,10 +495,37 @@ func finalizeChatTerminalEvents(state *chatNormalizationState) []Event {
 	if len(state.usage) > 0 {
 		responseData["usage"] = cloneMap(state.usage)
 	}
-	events = append(events, Event{Event: "response.completed", Data: map[string]any{"response": responseData}})
+	terminalEvent := "response.completed"
+	terminalData := map[string]any{"response": responseData}
+	if incomplete {
+		terminalEvent = "response.incomplete"
+		terminalData["health_flag"] = chatIncompleteHealthFlag(state.pendingFinish)
+		terminalData["message"] = fmt.Sprintf("upstream response finished with %s", state.pendingFinish)
+	}
+	events = append(events, Event{Event: terminalEvent, Data: terminalData})
 	state.completed = true
 	state.pendingFinish = ""
 	return events
+}
+
+func chatIncompleteHealthFlag(finishReason string) string {
+	switch finishReason {
+	case "max_tokens":
+		return "upstream_max_tokens"
+	case "length":
+		return "upstream_length"
+	default:
+		return "upstream_incomplete"
+	}
+}
+
+func isChatIncompleteFinishReason(finishReason string) bool {
+	switch finishReason {
+	case "max_tokens", "length":
+		return true
+	default:
+		return false
+	}
 }
 
 type chatNormalizationState struct {
@@ -510,6 +538,7 @@ type chatNormalizationState struct {
 	pendingItems                map[string]map[string]any
 	pendingThinkingTag          string
 	pendingThinking             string
+	pendingLegacyXMLToolText    string
 	thinkingTagStyle            string
 	upstreamXMLToolStyle        string
 	implicitThinkingInitialized bool
@@ -592,6 +621,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
 				if state.upstreamXMLToolStyle == config.UpstreamXMLToolCallStyleLegacy {
+					if item, buffered := consumeLegacyXMLToolText(text, state); buffered {
+						if item != nil {
+							events = append(events, legacyXMLToolCallEventsForState(item, state)...)
+						}
+						continue
+					}
 					if item := parseLegacyXMLToolCall(text); item != nil {
 						events = append(events, legacyXMLToolCallEventsForState(item, state)...)
 						continue
@@ -669,8 +704,32 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 			state.pendingFinish = finishReason
 		}
 	}
+	if isChatIncompleteFinishReason(state.pendingFinish) {
+		events = append(events, finalizeChatTerminalEvents(state)...)
+	}
 	shadowRecord(events, frame, state.provider)
 	return events, false, nil
+}
+
+func consumeLegacyXMLToolText(text string, state *chatNormalizationState) (map[string]any, bool) {
+	if state == nil {
+		return nil, false
+	}
+	if state.pendingLegacyXMLToolText == "" {
+		trimmed := strings.TrimSpace(text)
+		if !strings.HasPrefix(trimmed, "<tool_call>") || strings.HasSuffix(trimmed, "</tool_call>") {
+			return nil, false
+		}
+		state.pendingLegacyXMLToolText = text
+	} else {
+		state.pendingLegacyXMLToolText += text
+	}
+	if !strings.Contains(state.pendingLegacyXMLToolText, "</tool_call>") {
+		return nil, true
+	}
+	buffered := state.pendingLegacyXMLToolText
+	state.pendingLegacyXMLToolText = ""
+	return parseLegacyXMLToolCall(buffered), true
 }
 
 func parseLegacyXMLToolCall(text string) map[string]any {
