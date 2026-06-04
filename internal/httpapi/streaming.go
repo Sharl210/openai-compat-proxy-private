@@ -55,6 +55,7 @@ type anthropicStreamState struct {
 	toolDeltaSent     bool
 	pendingToolArgs   map[string]string
 	toolMeta          map[string]map[string]string
+	emittedToolItems  map[string]bool
 	terminalSeen      bool
 	terminalFailure   *aggregate.TerminalFailureError
 }
@@ -1216,6 +1217,9 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	if state.toolMeta == nil {
 		state.toolMeta = map[string]map[string]string{}
 	}
+	if state.emittedToolItems == nil {
+		state.emittedToolItems = map[string]bool{}
+	}
 	helper := &responseEventWriterHelper{
 		downstreamType:       "anthropic",
 		upstreamEndpointType: upstreamEndpointType,
@@ -1456,6 +1460,12 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}); err != nil {
 			return err
 		}
+		if itemID != "" {
+			state.emittedToolItems[itemID] = true
+		}
+		if rawItemID != "" {
+			state.emittedToolItems[rawItemID] = true
+		}
 		arguments := state.pendingToolArgs[itemID]
 		if rawItemID != "" && rawItemID != itemID {
 			arguments += state.pendingToolArgs[rawItemID]
@@ -1485,6 +1495,12 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
 		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			itemID := anthropicToolStateKey(item)
+			if evt.Event == "response.output_item.done" && itemID != "" && state.emittedToolItems[itemID] {
+				if !(state.toolStarted && !state.toolStopped && state.toolItemID == itemID) {
+					return nil
+				}
+			}
 			return startToolBlock(item)
 		}
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
