@@ -150,7 +150,7 @@ func TestDecodeRequestAcceptsAnthropicBase64ImageBlock(t *testing.T) {
 }
 
 func TestDecodeToolTransitionsReturnsErrorForMalformedArrayPayload(t *testing.T) {
-	_, _, err := decodeToolTransitions("assistant", json.RawMessage(`[{"type":"tool_use"`))
+	_, _, err := decodeToolTransitions("assistant", json.RawMessage(`[{"type":"tool_use"`), nil)
 	if err == nil {
 		t.Fatalf("expected malformed array payload to return error")
 	}
@@ -262,6 +262,29 @@ func TestDecodeRequestKeepsToolResultAheadOfTrailingUserText(t *testing.T) {
 	}
 	if canon.Messages[2].Role != "user" || len(canon.Messages[2].Parts) != 1 || canon.Messages[2].Parts[0].Text != "继续处理" {
 		t.Fatalf("expected trailing user text as final message, got %#v", canon.Messages[2])
+	}
+}
+
+func TestDecodeRequestRepairsRepeatedHistoricalToolUseNameFromCurrentTools(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"tools":[{"name":"lookup_project_facts","description":"Lookup","input_schema":{"type":"object"}}],
+		"messages":[{
+			"role":"assistant",
+			"content":[{"type":"tool_use","id":"call_1","name":"lookup_project_factslookup_project_facts","input":{"query":"hello"}}]
+		}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected one historical tool call, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].ToolCalls[0].Name; got != "lookup_project_facts" {
+		t.Fatalf("expected historical tool name repaired from current tools, got %q", got)
 	}
 }
 

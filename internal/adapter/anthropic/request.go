@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"openai-compat-proxy/internal/model"
 )
@@ -74,6 +75,18 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	if reasoning := decodeAnthropicThinking(req.ThinkingRaw); reasoning != nil {
 		canon.Reasoning = reasoning
 	}
+	toolNames := map[string]struct{}{}
+	for _, tool := range req.Tools {
+		canon.Tools = append(canon.Tools, model.CanonicalTool{
+			Type:        "function",
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  tool.InputSchema,
+		})
+		if strings.TrimSpace(tool.Name) != "" {
+			toolNames[tool.Name] = struct{}{}
+		}
+	}
 	for _, msg := range req.Messages {
 		parts, err := decodeContent(msg.Content)
 		if err != nil {
@@ -83,7 +96,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
-		toolCalls, toolResults, err := decodeToolTransitions(msg.Role, msg.Content)
+		toolCalls, toolResults, err := decodeToolTransitions(msg.Role, msg.Content, toolNames)
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
@@ -103,14 +116,6 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if len(toolCalls) > 0 {
 			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, ToolCalls: toolCalls})
 		}
-	}
-	for _, tool := range req.Tools {
-		canon.Tools = append(canon.Tools, model.CanonicalTool{
-			Type:        "function",
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  tool.InputSchema,
-		})
 	}
 	canon.ToolChoice = decodeAnthropicToolChoice(req.ToolChoiceRaw)
 	return canon, nil
@@ -300,7 +305,7 @@ func decodeAnthropicDocumentParts(raw json.RawMessage) ([]model.CanonicalContent
 	}
 }
 
-func decodeToolTransitions(role string, raw json.RawMessage) ([]model.CanonicalToolCall, []model.CanonicalMessage, error) {
+func decodeToolTransitions(role string, raw json.RawMessage, toolNames map[string]struct{}) ([]model.CanonicalToolCall, []model.CanonicalMessage, error) {
 	var parts []contentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		trimmed := string(raw)
@@ -318,7 +323,7 @@ func decodeToolTransitions(role string, raw json.RawMessage) ([]model.CanonicalT
 			if len(part.Input) > 0 {
 				arguments = string(part.Input)
 			}
-			toolCalls = append(toolCalls, model.CanonicalToolCall{ID: part.ID, Type: "function", Name: part.Name, Arguments: arguments})
+			toolCalls = append(toolCalls, model.CanonicalToolCall{ID: part.ID, Type: "function", Name: repairRepeatedToolUseName(part.Name, toolNames), Arguments: arguments})
 		case "tool_result":
 			toolParts, err := decodeToolResultContent(part.Content)
 			if err != nil {
@@ -328,6 +333,32 @@ func decodeToolTransitions(role string, raw json.RawMessage) ([]model.CanonicalT
 		}
 	}
 	return toolCalls, toolResults, nil
+}
+
+func repairRepeatedToolUseName(name string, toolNames map[string]struct{}) string {
+	if name == "" || len(toolNames) == 0 {
+		return name
+	}
+	if _, ok := toolNames[name]; ok {
+		return name
+	}
+	var repaired string
+	for toolName := range toolNames {
+		if toolName == "" || len(name) <= len(toolName) || len(name)%len(toolName) != 0 {
+			continue
+		}
+		if strings.Repeat(toolName, len(name)/len(toolName)) != name {
+			continue
+		}
+		if repaired != "" {
+			return name
+		}
+		repaired = toolName
+	}
+	if repaired != "" {
+		return repaired
+	}
+	return name
 }
 
 func decodeToolResultContent(raw json.RawMessage) ([]model.CanonicalContentPart, error) {
