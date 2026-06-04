@@ -65,11 +65,13 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return model.CanonicalRequest{}, err
 	}
+	instructions, instructionParts := decodeAnthropicSystem(req.System)
 	canon := model.CanonicalRequest{
 		Model:                   req.Model,
 		Stream:                  decodeAnthropicOptionalBool(req.StreamRaw),
 		PreservedTopLevelFields: collectUnhandledTopLevelFields(raw),
-		Instructions:            decodeAnthropicSystem(req.System),
+		Instructions:            instructions,
+		InstructionParts:        instructionParts,
 		MaxOutputTokens:         req.MaxTokens,
 	}
 	if reasoning := decodeAnthropicThinking(req.ThinkingRaw); reasoning != nil {
@@ -411,28 +413,32 @@ func decodeToolResultContent(raw json.RawMessage) ([]model.CanonicalContentPart,
 	return []model.CanonicalContentPart{{Type: "text", Text: string(raw)}}, nil
 }
 
-func decodeAnthropicSystem(raw json.RawMessage) string {
+func decodeAnthropicSystem(raw json.RawMessage) (string, []model.CanonicalContentPart) {
 	if len(raw) == 0 {
-		return ""
+		return "", nil
 	}
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		if isUndefinedString(text) {
-			return ""
+			return "", nil
 		}
-		return text
+		return text, nil
 	}
 	var parts []contentPart
 	if err := json.Unmarshal(raw, &parts); err == nil {
 		var out string
+		instructionParts := make([]model.CanonicalContentPart, 0, len(parts))
 		for _, part := range parts {
 			if part.Type == "text" || part.Type == "" {
+				cacheControl := decodeAnthropicCacheControl(part.CacheControl)
+				contentPart := model.CanonicalContentPart{Type: "text", Text: part.Text, Raw: anthropicContentPartRaw(cacheControl)}
 				out += part.Text
+				instructionParts = append(instructionParts, contentPart)
 			}
 		}
-		return out
+		return out, instructionParts
 	}
-	return ""
+	return "", nil
 }
 
 func decodeAnthropicOptionalBool(raw json.RawMessage) bool {

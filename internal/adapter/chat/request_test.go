@@ -128,6 +128,28 @@ func TestDecodeRequestAcceptsInputAudioContentPart(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestHoistsInstructionMessages(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"messages":[
+			{"role":"system","content":"system one"},
+			{"role":"developer","content":[{"type":"text","text":"developer two"}]},
+			{"role":"user","content":"hello"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.Instructions != "system one\n\ndeveloper two" {
+		t.Fatalf("expected instruction messages hoisted, got %q", canon.Instructions)
+	}
+	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
+		t.Fatalf("expected only user message to remain, got %#v", canon.Messages)
+	}
+}
+
 func TestDecodeRequestMapsServiceTierAliasToServiceTierSnakeCase(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

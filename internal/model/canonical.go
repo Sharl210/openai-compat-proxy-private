@@ -8,6 +8,7 @@ type CanonicalRequest struct {
 	ResponseStore           *bool
 	ResponseInclude         []string
 	Instructions            string
+	InstructionParts        []CanonicalContentPart
 	ResponseInputItems      []map[string]any
 	Messages                []CanonicalMessage
 	Temperature             *float64

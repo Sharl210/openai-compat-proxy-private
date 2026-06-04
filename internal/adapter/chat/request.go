@@ -134,10 +134,17 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
 	}
 
+	var instructions []string
 	for _, msg := range req.Messages {
 		parts, err := decodeContent(msg.Content)
 		if err != nil {
 			return model.CanonicalRequest{}, fmt.Errorf("decode message content: %w", err)
+		}
+		if isInstructionRole(msg.Role) {
+			if text := joinTextParts(parts); text != "" {
+				instructions = append(instructions, text)
+			}
+			continue
 		}
 
 		var toolCalls []model.CanonicalToolCall
@@ -158,8 +165,25 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			ReasoningContent: msg.ReasoningContent,
 		})
 	}
+	if len(instructions) > 0 {
+		canon.Instructions = strings.Join(instructions, "\n\n")
+	}
 
 	return canon, nil
+}
+
+func isInstructionRole(role string) bool {
+	return role == "system" || role == "developer"
+}
+
+func joinTextParts(parts []model.CanonicalContentPart) string {
+	var builder strings.Builder
+	for _, part := range parts {
+		if part.Type == "text" {
+			builder.WriteString(part.Text)
+		}
+	}
+	return builder.String()
 }
 
 func sanitizeToolArguments(arguments string) string {

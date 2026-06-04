@@ -133,6 +133,32 @@ func TestDecodeRequestPreservesToolResultCacheControl(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesSystemCacheControlBlocks(t *testing.T) {
+	req := `{
+		"model":"claude-sonnet-4-5",
+		"max_tokens":1024,
+		"system":[
+			{"type":"text","text":"stable prefix","cache_control":{"type":"ephemeral"}}
+		],
+		"messages":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.Instructions != "stable prefix" {
+		t.Fatalf("expected system text in instructions, got %q", canon.Instructions)
+	}
+	if len(canon.InstructionParts) != 1 {
+		t.Fatalf("expected one instruction part with cache_control, got %#v", canon.InstructionParts)
+	}
+	cacheControl, _ := canon.InstructionParts[0].Raw["cache_control"].(map[string]any)
+	if cacheControl["type"] != "ephemeral" {
+		t.Fatalf("expected system cache_control preserved, got %#v", canon.InstructionParts[0])
+	}
+}
+
 func TestDecodeRequestPreservesRedactedThinkingBlocksInFollowUpMessages(t *testing.T) {
 	req := `{
 		"model":"claude-sonnet-4-5",
