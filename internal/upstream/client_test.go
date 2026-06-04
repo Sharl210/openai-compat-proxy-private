@@ -469,6 +469,90 @@ func TestBuildRequestBodyOmitsCacheControlForUpstreamCompatibility(t *testing.T)
 	}
 }
 
+func TestBuildAnthropicRequestBodyPreservesSystemCacheControlBlocks(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model:        "claude-sonnet-4-5",
+		Instructions: "stable prefix",
+		InstructionParts: []model.CanonicalContentPart{{
+			Type: "text",
+			Text: "stable prefix",
+			Raw:  map[string]any{"cache_control": map[string]any{"type": "ephemeral"}},
+		}},
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, "", false, false)
+	if err != nil {
+		t.Fatalf("buildAnthropicRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	system, _ := payload["system"].([]any)
+	if len(system) != 1 {
+		t.Fatalf("expected one system block, got %#v", payload["system"])
+	}
+	block, _ := system[0].(map[string]any)
+	if block["type"] != "text" || block["text"] != "stable prefix" {
+		t.Fatalf("expected text system block, got %#v", block)
+	}
+	cacheControl, _ := block["cache_control"].(map[string]any)
+	if cacheControl["type"] != "ephemeral" {
+		t.Fatalf("expected system cache_control preserved, got %#v", block)
+	}
+}
+
+func TestBuildAnthropicRequestBodyKeepsStringSystemWhenNoInstructionParts(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model:        "claude-sonnet-4-5",
+		Instructions: "plain system",
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, "", false, false)
+	if err != nil {
+		t.Fatalf("buildAnthropicRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["system"].(string); got != "plain system" {
+		t.Fatalf("expected string system without instruction parts, got %#v", payload["system"])
+	}
+}
+
+func TestBuildAnthropicRequestBodyUsesHoistedInstructionsAsSystem(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:        "claude-sonnet-4-5",
+		Instructions: "stable prefix",
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["system"].(string); got != "stable prefix" {
+		t.Fatalf("expected hoisted instructions to become anthropic system, got %#v", payload["system"])
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("expected only user message in anthropic messages, got %#v", payload["messages"])
+	}
+}
+
 func TestBuildRequestBodyPreservesResponsesMetadataAndTypedInputItems(t *testing.T) {
 	store := false
 	body, err := buildRequestBody(model.CanonicalRequest{
@@ -1522,6 +1606,30 @@ func TestParseSSEStreamingReturnsUnexpectedEOFWhenStreamEndsWithoutTerminalEvent
 	}
 	if len(events) != 1 || events[0].Event != "response.output_text.delta" {
 		t.Fatalf("expected streamed delta before EOF, got %#v", events)
+	}
+}
+
+func TestParseSSEStreamingTreatsResponseFailedAsTerminal(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("event: error\n" +
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"too long\",\"param\":\"input\"}}\n\n" +
+			"event: response.failed\n" +
+			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"too long\"}}}\n\n")),
+	}
+
+	var events []Event
+	err := parseSSEStreaming(resp, func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected response.failed to terminate stream without EOF error, got %v", err)
+	}
+	if len(events) != 2 || events[0].Event != "response.incomplete" || events[1].Event != "response.incomplete" {
+		t.Fatalf("expected upstream failure events to normalize to response.incomplete, got %#v", events)
+	}
+	if events[0].Data["health_flag"] != "context_length_exceeded" || events[0].Data["message"] != "too long" {
+		t.Fatalf("expected upstream error details to be preserved, got %#v", events[0].Data)
 	}
 }
 

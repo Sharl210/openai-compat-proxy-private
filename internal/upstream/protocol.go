@@ -1563,6 +1563,8 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	}
 	if injectSystemPrompt && masqueradeTarget == config.MasqueradeTargetClaude {
 		payload["system"] = claudeCodeSystemPrompt
+	} else if systemParts := buildAnthropicSystemParts(req); len(systemParts) > 0 {
+		payload["system"] = systemParts
 	} else if system := buildAnthropicSystemPrompt(req); system != "" {
 		payload["system"] = system
 	}
@@ -1768,6 +1770,20 @@ func buildAnthropicSystemPrompt(req model.CanonicalRequest) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func buildAnthropicSystemParts(req model.CanonicalRequest) []any {
+	if len(req.InstructionParts) == 0 {
+		return nil
+	}
+	content := buildAnthropicContentParts(req.InstructionParts)
+	for _, msg := range req.Messages {
+		if !isAnthropicInstructionRole(msg.Role) {
+			continue
+		}
+		content = append(content, buildAnthropicContentParts(msg.Parts)...)
+	}
+	return content
 }
 
 func joinAnthropicInstructionParts(parts []model.CanonicalContentPart) string {
