@@ -381,6 +381,16 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `Fast` 模式对应的就是 `priority`
 - 写成非法值时，provider 配置会直接校验失败，不会静默回退
 
+### 3.6 provider 级输出上限
+
+每个 provider 可通过 `UPSTREAM_MAX_OUTPUT_TOKENS` 设置发往上游的默认最大输出 token 数：
+
+- 留空：代理不设置 provider 默认值，继续使用客户端请求里的 `max_tokens` / `max_output_tokens`，或协议构造层自己的默认值
+- 正整数：当客户端没有携带输出上限时，代理自动补这个值
+- `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用 provider 配置值
+
+这两个字段支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 写成 `0`、负数或非整数，或者强制开关写成非法布尔值时，provider 配置会直接校验失败。
+
 ### 4. 模型映射与 reasoning suffix
 
 支持：
@@ -536,6 +546,7 @@ Claude 相关还有两个配套开关：
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS` | 注入与模型能力 |
 | 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
 | OpenAI 服务层级 | `OPENAI_SERVICE_TIER` | 仅 OpenAI `responses/chat` 上游生效；留空时沿用下游传参，非空时强制覆写 |
+| 输出上限 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` | 未传输出上限时补 provider 默认值；强制开关开启后覆盖客户端值 |
 | 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
 
 补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；而 provider 级 Claude 注入开关留空则表示继承根配置。
