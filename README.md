@@ -354,6 +354,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 - 首字节前失败可按 provider 配置重试
 - 已开始 SSE 后出错会尽量保持下游流协议终态，而不是中途退化成 JSON 错误体
+- 上游流式返回 `error` / `response.failed` 时，代理会把上游错误码和错误消息映射到下游终态错误里，避免被泛化成单纯的 `unexpected EOF`
 - chat 上游的 reasoning 标签、reasoning_content、tool_calls 会在代理层统一归一后再下发
 
 ### 3. responses 上游工具兼容模式
@@ -573,7 +574,7 @@ Claude 相关还有两个配套开关：
    不会静默吞掉。
 
 5. **`cache_control` 现在区分“同端点透传”和“跨协议兼容”两种语义**  
-   当 `/v1/messages` 直接对接 `anthropic` 上游时，代理会把内容块里的 `cache_control` 一并继续传给上游；但跨协议转换时，它仍然只是兼容输入，不承诺把它翻译成真正的 Anthropic prompt caching 语义。
+当 `/v1/messages` 直接对接 `anthropic` 上游时，代理会把消息内容块和 system block 里的 `cache_control` 一并继续传给上游；纯字符串 system 仍保持字符串形态。跨协议转换时，`cache_control` 仍然只是兼容输入，不承诺翻译成真正的 Anthropic prompt caching 语义。
 
 6. **chat 上游的思维标签当前支持三种写法**
    当 `UPSTREAM_THINKING_TAG_STYLE=true` 时，代理会把 `<think>`、`<thinking>`、`<reasoning>` 识别为 reasoning 内容，再按目标下游协议重写。
