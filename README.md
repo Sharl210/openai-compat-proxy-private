@@ -297,6 +297,7 @@ http://127.0.0.1:21021/
 | `X-Client-To-Proxy-Reasoning-Effort` | 客户端这一侧最终体现出来的推理强度摘要，便于快速看出 `low/medium/high/xhigh` | `high` |
 | `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
 | `X-Proxy-To-Upstream-Service-Tier` | 代理最终实际发给上游的服务层级；如果 provider 配置覆写了该值，这里会显示覆写后的结果；没有值时为空字符串 | `priority` |
+| `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
 | `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
 | `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
@@ -311,6 +312,7 @@ http://127.0.0.1:21021/
 - 服务层级响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置服务层级”。
 - `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
 - `X-Client-To-Proxy-Reasoning-Effort` 是客户端侧的**摘要值**；如果同一请求里模型 suffix 和请求体参数同时存在，代理会按本地优先级先决出最终强度，再把这个摘要值写进来。
+- `X-Proxy-To-Upstream-Max-Output-Tokens` 展示的是 canonical 请求里最终决定的输出上限；它会体现 `UPSTREAM_MAX_OUTPUT_TOKENS` 和 `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` 的处理结果。最终不携带输出上限时，这个响应头为空。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
   - `responses/chat` 常见为 `{"reasoning":{...}}`
   - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
@@ -387,9 +389,10 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 - 留空：代理不设置 provider 默认值，继续使用客户端请求里的 `max_tokens` / `max_output_tokens`，或协议构造层自己的默认值
 - 正整数：当客户端没有携带输出上限时，代理自动补这个值
-- `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用 provider 配置值
+- `-1`：客户端没有携带输出上限时，代理会主动省略最大输出 token 字段；如果强制开关开启，也会忽略客户端传值并省略该字段
+- `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用 provider 配置值；配置值为 `-1` 时表示强制不携带该字段
 
-这两个字段支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 写成 `0`、负数或非整数，或者强制开关写成非法布尔值时，provider 配置会直接校验失败。
+这两个字段支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，provider 配置会直接校验失败。
 
 ### 4. 模型映射与 reasoning suffix
 
