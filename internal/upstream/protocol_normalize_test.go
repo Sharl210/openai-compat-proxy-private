@@ -114,6 +114,87 @@ func TestNormalizeChatFrame_XMLToolCallTextLegacyConvertsToFunctionCall(t *testi
 	}
 }
 
+func TestNormalizeChatFrame_LegacyXMLToolTextCompletesPendingToolArguments(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`chat`, `{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"mcp__mt_apk_read_text"}}]}}]}`},
+		{`chat`, `{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"locator\": "}}]}}]}`},
+		{`chat`, `{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"kind\": \"dex_method\", \"target\": \"Lacr/browser/lightning/activity/BrowserActivity$16;->x()V\"}"}}]}}]}`},
+		{`chat`, `{"id":"chat-123","choices":[{"delta":{"content":"<tool_call>\n<function=mcp__mt_apk_read_text>\n<parameter=locator>{\"kind\": \"dex_method\", \"target\": \"Lacr/browser/lightning/activity/BrowserActivity$16;->x()V\"}</parameter>\n<parameter=maxChars>80000</parameter>\n<parameter=workspaceId>69jas4bi</parameter>\n<parameter=includeLineNumbers>False</parameter>\n<parameter=limit>2000</parameter>\n<parameter=startColumn>1</parameter>\n<parameter=startLine>1</parameter>\n</function>\n</tool_call>"}}]}`},
+		{`chat`, `{"id":"chat-123","usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15},"choices":[{"finish_reason":"tool_calls"}]}`},
+	}
+	state := &chatNormalizationState{
+		toolIDsByIndex:       map[int]string{},
+		toolSent:             map[string]bool{},
+		upstreamXMLToolStyle: config.UpstreamXMLToolCallStyleLegacy,
+	}
+
+	var allEvents []Event
+	for _, f := range frames {
+		events, done, err := normalizeChatFrame(&sseFrame{Event: f.event, Data: f.data}, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	for _, evt := range allEvents {
+		if evt.Event == "response.output_text.delta" && strings.Contains(stringValue(evt.Data["delta"]), "<tool_call>") {
+			t.Fatalf("expected XML tool text to be consumed, got %#v", evt)
+		}
+	}
+	var doneItem map[string]any
+	for _, evt := range allEvents {
+		if evt.Event != "response.output_item.done" {
+			continue
+		}
+		item, _ := evt.Data["item"].(map[string]any)
+		if stringValue(item["id"]) == "call_1" {
+			doneItem = item
+		}
+	}
+	if doneItem == nil {
+		t.Fatalf("expected final tool item, got %#v", allEvents)
+	}
+	expected := `{"includeLineNumbers":false,"limit":2000,"locator":{"kind":"dex_method","target":"Lacr/browser/lightning/activity/BrowserActivity$16;->x()V"},"maxChars":80000,"startColumn":1,"startLine":1,"workspaceId":"69jas4bi"}`
+	if got := stringValue(doneItem["arguments"]); got != expected {
+		t.Fatalf("unexpected final arguments:\n got: %s\nwant: %s", got, expected)
+	}
+}
+
+func TestNormalizeChatFrame_LegacyXMLToolTextParsesLooseParameters(t *testing.T) {
+	frame := &sseFrame{Event: "chat", Data: `{"id":"chat-123","choices":[{"delta":{"content":"<tool_call>\n<function=mcp__mt_apk_read_text>\n<parameter=includeLineNumbers>False\n<parameter=limit>520\n<parameter=locator>{\"kind\": \"dex_class\", \"target\": \"Lacr/browser/lightning/view/IDMDownloadListener;\"}\n<parameter=maxChars>80000\n<parameter=startColumn>1\n<parameter=startLine>500\n<parameter=workspaceId>69jas4bi\n</tool_call>"},"finish_reason":"tool_calls"}]}`}
+	state := &chatNormalizationState{
+		toolIDsByIndex:       map[int]string{},
+		toolSent:             map[string]bool{},
+		upstreamXMLToolStyle: config.UpstreamXMLToolCallStyleLegacy,
+	}
+
+	events, done, err := normalizeChatFrame(frame, state)
+	if err != nil {
+		t.Fatalf("normalizeChatFrame error: %v", err)
+	}
+	if done {
+		t.Fatal("unexpected done")
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected created and function call events, got %#v", events)
+	}
+	item, _ := events[1].Data["item"].(map[string]any)
+	if stringValue(item["name"]) != "mcp__mt_apk_read_text" {
+		t.Fatalf("unexpected function name: %#v", item)
+	}
+	expected := `{"includeLineNumbers":false,"limit":520,"locator":{"kind":"dex_class","target":"Lacr/browser/lightning/view/IDMDownloadListener;"},"maxChars":80000,"startColumn":1,"startLine":500,"workspaceId":"69jas4bi"}`
+	if got := stringValue(item["arguments"]); got != expected {
+		t.Fatalf("unexpected arguments:\n got: %s\nwant: %s", got, expected)
+	}
+}
+
 func TestNormalizeChatFrame_ToolCall(t *testing.T) {
 	// 测试 tool call 的转换 - 模拟上游 chat SSE 事件序列
 	// 1. tool_call 开始（index=0, id="tool_0", name="get_weather"）

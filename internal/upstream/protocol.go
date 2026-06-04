@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -592,7 +593,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 			if text, _ := delta["content"].(string); text != "" {
 				if state.upstreamXMLToolStyle == config.UpstreamXMLToolCallStyleLegacy {
 					if item := parseLegacyXMLToolCall(text); item != nil {
-						events = append(events, legacyXMLToolCallEvents(item)...)
+						events = append(events, legacyXMLToolCallEventsForState(item, state)...)
 						continue
 					}
 				}
@@ -689,11 +690,10 @@ func parseLegacyXMLToolCall(text string) map[string]any {
 	if name == "" {
 		return nil
 	}
-	closeTag := "</function>"
-	if !strings.HasSuffix(body, closeTag) {
-		return nil
+	paramsText := strings.TrimSpace(body[nameEnd+1:])
+	if closeIndex := strings.LastIndex(paramsText, "</function>"); closeIndex >= 0 {
+		paramsText = strings.TrimSpace(paramsText[:closeIndex])
 	}
-	paramsText := strings.TrimSpace(body[nameEnd+1 : len(body)-len(closeTag)])
 	arguments := map[string]any{}
 	for paramsText != "" {
 		paramsText = strings.TrimSpace(paramsText)
@@ -708,20 +708,41 @@ func parseLegacyXMLToolCall(text string) map[string]any {
 		if key == "" {
 			return nil
 		}
-		closeParam := "</parameter>"
-		valueEnd := strings.Index(paramsText[keyEnd+1:], closeParam)
-		if valueEnd < 0 {
-			return nil
-		}
-		valueEnd += keyEnd + 1
-		arguments[key] = parseLegacyXMLToolValue(paramsText[keyEnd+1 : valueEnd])
-		paramsText = paramsText[valueEnd+len(closeParam):]
+		value, rest := splitLegacyXMLParameterValue(paramsText[keyEnd+1:])
+		arguments[key] = parseLegacyXMLToolValue(value)
+		paramsText = rest
 	}
-	encoded, err := json.Marshal(arguments)
+	encoded, err := marshalJSONWithoutHTMLEscape(arguments)
 	if err != nil {
 		return nil
 	}
 	return map[string]any{"type": "function_call", "id": "legacy_xml_tool_0", "call_id": "legacy_xml_tool_0", "name": name, "arguments": string(encoded)}
+}
+
+func splitLegacyXMLParameterValue(text string) (string, string) {
+	valueEnd := len(text)
+	restStart := len(text)
+	if closeParam := strings.Index(text, "</parameter>"); closeParam >= 0 {
+		valueEnd = closeParam
+		restStart = closeParam + len("</parameter>")
+	}
+	for _, marker := range []string{"<parameter=", "</function>", "</tool_call>"} {
+		if idx := strings.Index(text, marker); idx >= 0 && idx < valueEnd {
+			valueEnd = idx
+			restStart = idx
+		}
+	}
+	return text[:valueEnd], text[restStart:]
+}
+
+func marshalJSONWithoutHTMLEscape(value any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
 }
 
 func parseLegacyXMLToolValue(value string) any {
@@ -753,6 +774,34 @@ func legacyXMLToolCallEvents(item map[string]any) []Event {
 		return nil
 	}
 	return []Event{{Event: "response.output_item.done", Data: map[string]any{"item": item}}}
+}
+
+func legacyXMLToolCallEventsForState(item map[string]any, state *chatNormalizationState) []Event {
+	if len(item) == 0 {
+		return nil
+	}
+	if state == nil || len(state.pendingItems) == 0 {
+		return legacyXMLToolCallEvents(item)
+	}
+	name := stringValue(item["name"])
+	if name == "" {
+		return legacyXMLToolCallEvents(item)
+	}
+	for itemID, pending := range state.pendingItems {
+		if stringValue(pending["name"]) != name {
+			continue
+		}
+		completed := map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}
+		if arguments := stringValue(item["arguments"]); arguments != "" {
+			completed["arguments"] = arguments
+		}
+		delete(state.pendingItems, itemID)
+		if state.toolSent != nil {
+			state.toolSent[itemID] = true
+		}
+		return []Event{{Event: "response.output_item.done", Data: map[string]any{"item": completed}}}
+	}
+	return legacyXMLToolCallEvents(item)
 }
 
 func appendLegacyXMLToolCallsFromContent(content []any, output []any) ([]any, []any) {
