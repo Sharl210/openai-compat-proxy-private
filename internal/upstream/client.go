@@ -766,9 +766,8 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 	for len(s.pendingEvents) > 0 {
 		evt := s.pendingEvents[0]
 		s.pendingEvents = s.pendingEvents[1:]
-		normalized := normalizeResponsesFailureEvent(evt)
-		s.recordEvent(evt, normalized)
-		if err := onEvent(normalized); err != nil {
+		s.recordEvent(evt, evt)
+		if err := onEvent(evt); err != nil {
 			return err
 		}
 	}
@@ -776,9 +775,8 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 		return nil
 	}
 	return consumeSSEScannerWithReader(s.scanner, s.readNext, func(evt Event) error {
-		normalized := normalizeResponsesFailureEvent(evt)
-		s.recordEvent(evt, normalized)
-		return onEvent(normalized)
+		s.recordEvent(evt, evt)
+		return onEvent(evt)
 	})
 }
 
@@ -1053,7 +1051,7 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
-	if len(responseInputItems) > 0 {
+	if len(responseInputItems) > 0 && len(req.Messages) == 0 {
 		input := make([]map[string]any, 0, len(responseInputItems))
 		for _, item := range responseInputItems {
 			if isResponsesInstructionInputItem(item) {
@@ -1905,58 +1903,13 @@ func consumeSSEScanner(scanner *bufio.Scanner, onEvent func(Event) error) error 
 			return nil
 		}
 		seenEvent = true
-		normalized := normalizeResponsesFailureEvent(*evt)
-		if isTerminalStreamEvent(normalized) {
+		if isTerminalStreamEvent(*evt) {
 			seenTerminal = true
 		}
-		if err := onEvent(normalized); err != nil {
+		if err := onEvent(*evt); err != nil {
 			return err
 		}
 	}
-}
-
-func normalizeResponsesFailureEvent(evt Event) Event {
-	switch evt.Event {
-	case "error":
-		if failure := failureEventFromErrorEvent(evt); failure != nil {
-			return *failure
-		}
-	case "response.failed":
-		if failure := failureEventFromResponseFailed(evt); failure != nil {
-			return *failure
-		}
-	}
-	return evt
-}
-
-func failureEventFromErrorEvent(evt Event) *Event {
-	errMap := anyMap(evt.Data["error"])
-	if len(errMap) == 0 {
-		return nil
-	}
-	return &Event{Event: "response.incomplete", Data: upstreamFailureData(errMap), Raw: evt.Raw}
-}
-
-func failureEventFromResponseFailed(evt Event) *Event {
-	response := anyMap(evt.Data["response"])
-	errMap := anyMap(response["error"])
-	if len(errMap) == 0 {
-		return nil
-	}
-	return &Event{Event: "response.incomplete", Data: upstreamFailureData(errMap), Raw: evt.Raw}
-}
-
-func upstreamFailureData(errMap map[string]any) map[string]any {
-	message := stringValue(errMap["message"])
-	if message == "" {
-		message = "upstream response failed"
-	}
-	healthFlag := firstNonEmptyString(stringValue(errMap["code"]), stringValue(errMap["type"]), "upstream_error")
-	data := map[string]any{"health_flag": healthFlag, "message": message}
-	if len(errMap) > 0 {
-		data["error"] = cloneMap(errMap)
-	}
-	return data
 }
 
 func isTerminalStreamEvent(evt Event) bool {

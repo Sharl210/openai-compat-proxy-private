@@ -1625,11 +1625,42 @@ func TestParseSSEStreamingTreatsResponseFailedAsTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected response.failed to terminate stream without EOF error, got %v", err)
 	}
-	if len(events) != 2 || events[0].Event != "response.incomplete" || events[1].Event != "response.incomplete" {
-		t.Fatalf("expected upstream failure events to normalize to response.incomplete, got %#v", events)
+	if len(events) != 2 || events[0].Event != "error" || events[1].Event != "response.failed" {
+		t.Fatalf("expected upstream failure events to preserve original terminal shapes, got %#v", events)
 	}
-	if events[0].Data["health_flag"] != "context_length_exceeded" || events[0].Data["message"] != "too long" {
+	errorObj, _ := events[0].Data["error"].(map[string]any)
+	if errorObj["code"] != "context_length_exceeded" || errorObj["message"] != "too long" {
 		t.Fatalf("expected upstream error details to be preserved, got %#v", events[0].Data)
+	}
+}
+
+func TestParseSSEStreamingPreservesUpstreamFailureEventShapes(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("event: error\n" +
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"too long\",\"param\":\"input\"},\"sequence_number\":2}\n\n" +
+			"event: response.failed\n" +
+			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"quota_exceeded\",\"message\":\"quota hit\",\"param\":\"input\"}}}\n\n")),
+	}
+
+	var events []Event
+	err := parseSSEStreaming(resp, func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected upstream failure events to terminate stream without EOF error, got %v", err)
+	}
+	if len(events) != 2 || events[0].Event != "error" || events[1].Event != "response.failed" {
+		t.Fatalf("expected upstream failure event shapes to be preserved, got %#v", events)
+	}
+	firstErr, _ := events[0].Data["error"].(map[string]any)
+	if firstErr["type"] != "invalid_request_error" || firstErr["code"] != "context_length_exceeded" || firstErr["param"] != "input" {
+		t.Fatalf("expected upstream error object to remain intact, got %#v", events[0].Data)
+	}
+	response, _ := events[1].Data["response"].(map[string]any)
+	secondErr, _ := response["error"].(map[string]any)
+	if response["status"] != "failed" || secondErr["code"] != "quota_exceeded" || secondErr["param"] != "input" {
+		t.Fatalf("expected upstream response.failed object to remain intact, got %#v", events[1].Data)
 	}
 }
 
@@ -2029,6 +2060,79 @@ func TestBuildResponsesRequestBodyOmitsInstructionInputMessages(t *testing.T) {
 	item, _ := input[0].(map[string]any)
 	if got, _ := item["role"].(string); got != "user" {
 		t.Fatalf("expected user role to remain, got %#v", item)
+	}
+}
+
+func TestBuildResponsesRequestBodyPrefersCanonicalMessagesForCacheStableToolSequences(t *testing.T) {
+	logical := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},
+		{Role: "assistant", ReasoningContent: "我先从对象池引用开始追", Parts: []model.CanonicalContentPart{{Type: "text", Text: "开始追引用"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_lookup", Type: "function", Name: "mcp__run_ubuntu", Arguments: `{"command":"python3 scan.py"}`}}},
+		{Role: "tool", ToolCallID: "call_lookup", Parts: []model.CanonicalContentPart{{Type: "text", Text: "pool 0x36eb0 hits 2"}}},
+		{Role: "assistant", ReasoningContent: "引用点只有两个", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续追 AECAB0"}}},
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续"}}},
+	}
+
+	canonicalOnly := model.CanonicalRequest{Model: "gpt-5", Messages: logical}
+	withPreservedResponsesItems := model.CanonicalRequest{
+		Model:    "gpt-5",
+		Messages: logical,
+		ResponseInputItems: []map[string]any{
+			{"role": "user", "content": []map[string]any{{"type": "input_text", "text": "先找永久会员字符串"}}},
+			{"type": "reasoning", "summary": []map[string]any{{"type": "summary_text", "text": "我先从对象池引用开始追"}}},
+			{"type": "function_call", "call_id": "call_stale", "name": "mcp__run_ubuntu", "arguments": `{"command":"stale timeout"}`},
+			{"type": "function_call_output", "call_id": "call_stale", "output": `{"error":"timeout"}`},
+			{"role": "assistant", "content": []map[string]any{{"type": "output_text", "text": "开始追引用"}}},
+		},
+	}
+
+	wantBody, err := buildResponsesRequestBody(canonicalOnly, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build canonical-only responses body: %v", err)
+	}
+	gotBody, err := buildResponsesRequestBody(withPreservedResponsesItems, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build preserved responses body: %v", err)
+	}
+
+	var wantPayload, gotPayload map[string]any
+	if err := json.Unmarshal(wantBody, &wantPayload); err != nil {
+		t.Fatalf("unmarshal canonical-only payload: %v", err)
+	}
+	if err := json.Unmarshal(gotBody, &gotPayload); err != nil {
+		t.Fatalf("unmarshal preserved payload: %v", err)
+	}
+	assertJSONEqual(t, gotPayload["input"], wantPayload["input"])
+}
+
+func TestBuildRequestBodyForAllEndpointTypesIgnoresStaleResponsesItemsWhenCanonicalMessagesExist(t *testing.T) {
+	req := model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},
+			{Role: "assistant", ReasoningContent: "从对象池引用开始追", Parts: []model.CanonicalContentPart{{Type: "text", Text: "开始追引用"}}, ToolCalls: []model.CanonicalToolCall{{ID: "call_lookup", Type: "function", Name: "mcp__run_ubuntu", Arguments: `{"command":"python3 scan.py"}`}}},
+			{Role: "tool", ToolCallID: "call_lookup", Parts: []model.CanonicalContentPart{{Type: "text", Text: "pool hits 2"}}},
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续"}}},
+		},
+		ResponseInputItems: []map[string]any{
+			{"type": "function_call", "call_id": "call_stale", "name": "mcp__run_ubuntu", "arguments": `{"command":"stale timeout"}`},
+			{"type": "function_call_output", "call_id": "call_stale", "output": `{"error":"timeout"}`},
+		},
+	}
+
+	for _, endpointType := range []string{config.UpstreamEndpointTypeResponses, config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		t.Run(endpointType, func(t *testing.T) {
+			body, err := buildRequestBodyForEndpoint(req, endpointType, "", false, false)
+			if err != nil {
+				t.Fatalf("build body for %s: %v", endpointType, err)
+			}
+			if strings.Contains(string(body), "call_stale") || strings.Contains(string(body), "stale timeout") {
+				t.Fatalf("expected %s payload to use canonical messages instead of stale responses items, got %s", endpointType, string(body))
+			}
+			if !strings.Contains(string(body), "call_lookup") || !strings.Contains(string(body), "pool hits 2") || !strings.Contains(string(body), "继续") {
+				t.Fatalf("expected %s payload to preserve canonical tool sequence and user continuation, got %s", endpointType, string(body))
+			}
+		})
 	}
 }
 
