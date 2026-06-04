@@ -547,6 +547,53 @@ func TestMessagesStreamUpstreamDisconnectClosesOpenBlocksBeforeTerminalStop(t *t
 	}
 }
 
+func TestMessagesStreamSurfacesUpstreamResponseFailedDetails(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: error\n" +
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\",\"param\":\"input\"},\"sequence_number\":2}\n\n",
+		"event: response.failed\n" +
+			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\"}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, `unexpected EOF`) {
+		t.Fatalf("expected upstream error details instead of EOF, got %s", body)
+	}
+	if !strings.Contains(body, `"health_flag":"context_length_exceeded"`) {
+		t.Fatalf("expected upstream error code to become health flag, got %s", body)
+	}
+	if !strings.Contains(body, `Your input exceeds the context window of this model`) {
+		t.Fatalf("expected upstream error message to be surfaced, got %s", body)
+	}
+	if !strings.Contains(body, `event: message_stop`) {
+		t.Fatalf("expected anthropic stream to end with message_stop, got %s", body)
+	}
+}
+
 func TestMessagesStreamSeparatesMultipleToolCallsIntoDistinctBlocks(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
