@@ -37,6 +37,7 @@ type Config struct {
 	UpstreamRetryCount                int
 	UpstreamRetryDelay                time.Duration
 	UpstreamThinkingTagStyle          string
+	UpstreamXMLToolCallStyle          string
 	LogFilePath                       string
 	LogMaxRequests                    int
 	LogMaxBodySizeMB                  float64
@@ -61,6 +62,7 @@ func Default() Config {
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		ResponsesToolCompatMode:     ResponsesToolCompatModePreserve,
 		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
+		UpstreamXMLToolCallStyle:    UpstreamXMLToolCallStyleOff,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 "logs",
 		LogMaxRequests:              200,

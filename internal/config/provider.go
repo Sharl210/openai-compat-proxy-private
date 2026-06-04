@@ -51,6 +51,7 @@ type ProviderConfig struct {
 	SystemPromptText                       string
 	AnthropicVersion                       string
 	UpstreamThinkingTagStyle               string
+	UpstreamXMLToolCallStyle               string
 }
 
 type ModelMapEntry struct {
@@ -83,6 +84,8 @@ const (
 const (
 	UpstreamThinkingTagStyleOff    = "off"
 	UpstreamThinkingTagStyleLegacy = "legacy"
+	UpstreamXMLToolCallStyleOff    = "off"
+	UpstreamXMLToolCallStyleLegacy = "legacy"
 
 	MasqueradeTargetOpenCode = "opencode"
 	MasqueradeTargetClaude   = "claude" // 模拟 Claude Code 客户端
@@ -300,6 +303,16 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				provider.UpstreamThinkingTagStyle = UpstreamThinkingTagStyleLegacy
 			} else {
 				provider.UpstreamThinkingTagStyle = UpstreamThinkingTagStyleOff
+			}
+		case "UPSTREAM_XML_TOOL_CALL_STYLE":
+			enabled, parseErr := parseProviderStrictBool(value, key, path)
+			if parseErr != nil {
+				return ProviderConfig{}, parseErr
+			}
+			if enabled {
+				provider.UpstreamXMLToolCallStyle = UpstreamXMLToolCallStyleLegacy
+			} else {
+				provider.UpstreamXMLToolCallStyle = UpstreamXMLToolCallStyleOff
 			}
 		}
 	}

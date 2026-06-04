@@ -34,6 +34,7 @@ type Client struct {
 	injectClaudeCodeMetadataUserID bool
 	injectClaudeCodeSystemPrompt   bool
 	upstreamThinkingTagStyle       string
+	upstreamXMLToolCallStyle       string
 }
 
 type RequestObservabilityPreview struct {
@@ -125,6 +126,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		injectClaudeCodeMetadataUserID: cfg.InjectClaudeCodeMetadataUserID,
 		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
 		upstreamThinkingTagStyle:       cfg.UpstreamThinkingTagStyle,
+		upstreamXMLToolCallStyle:       cfg.UpstreamXMLToolCallStyle,
 	}
 }
 
@@ -618,7 +620,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		return nil, err
 	}
-	return normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle), nil
+	return normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle, c.upstreamXMLToolCallStyle), nil
 }
 
 func responseEndpointPathForType(endpointType string, compact bool) string {
@@ -655,7 +657,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		return &EventStream{resp: resp, pendingEvents: events, archive: debugarchive.ArchiveWriterFromContext(ctx)}, nil
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, originalToolIDs, requestID, allowEOFCompletion), archive: debugarchive.ArchiveWriterFromContext(ctx)}
+	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, c.upstreamXMLToolCallStyle, originalToolIDs, requestID, allowEOFCompletion), archive: debugarchive.ArchiveWriterFromContext(ctx)}
 	if primeFirstEvent {
 		if err := stream.prime(); err != nil {
 			_ = stream.Close()
@@ -678,7 +680,7 @@ func (c *Client) syntheticEventsFromJSONResponse(resp *http.Response, endpointTy
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
 		return nil, err
 	}
-	normalized := normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle)
+	normalized := normalizeResponsePayload(endpointType, payload, c.upstreamThinkingTagStyle, c.upstreamXMLToolCallStyle)
 	return payloadToSyntheticStreamEvents(normalized), nil
 }
 

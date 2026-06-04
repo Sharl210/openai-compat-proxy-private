@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"openai-compat-proxy/internal/config"
@@ -303,10 +304,10 @@ func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, 
 	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
 }
 
-func normalizeResponsePayload(endpointType string, payload map[string]any, thinkingTagStyle string) map[string]any {
+func normalizeResponsePayload(endpointType string, payload map[string]any, thinkingTagStyle string, xmlToolCallStyle string) map[string]any {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return normalizeChatPayload(payload, thinkingTagStyle)
+		return normalizeChatPayload(payload, thinkingTagStyle, xmlToolCallStyle)
 	case config.UpstreamEndpointTypeAnthropic:
 		return normalizeAnthropicPayload(payload)
 	default:
@@ -314,10 +315,10 @@ func normalizeResponsePayload(endpointType string, payload map[string]any, think
 	}
 }
 
-func eventBatchReaderForType(endpointType string, thinkingTagStyle string, originalToolIDs map[int]string, requestID string, allowEOFCompletion bool) func(*bufio.Scanner) ([]Event, error) {
+func eventBatchReaderForType(endpointType string, thinkingTagStyle string, xmlToolCallStyle string, originalToolIDs map[int]string, requestID string, allowEOFCompletion bool) func(*bufio.Scanner) ([]Event, error) {
 	switch normalizeEndpointType(endpointType) {
 	case config.UpstreamEndpointTypeChat:
-		return newChatEventBatchReader(thinkingTagStyle, originalToolIDs, requestID, allowEOFCompletion)
+		return newChatEventBatchReader(thinkingTagStyle, xmlToolCallStyle, originalToolIDs, requestID, allowEOFCompletion)
 	case config.UpstreamEndpointTypeAnthropic:
 		return newAnthropicEventBatchReader(originalToolIDs)
 	default:
@@ -419,15 +420,16 @@ func readNextSSEFrame(scanner *bufio.Scanner) (*sseFrame, error) {
 	return nil, nil
 }
 
-func newChatEventBatchReader(thinkingTagStyle string, originalToolIDs map[int]string, requestID string, allowEOFCompletion bool) func(*bufio.Scanner) ([]Event, error) {
+func newChatEventBatchReader(thinkingTagStyle string, xmlToolCallStyle string, originalToolIDs map[int]string, requestID string, allowEOFCompletion bool) func(*bufio.Scanner) ([]Event, error) {
 	state := &chatNormalizationState{
-		toolIDsByIndex:   map[int]string{},
-		toolSent:         map[string]bool{},
-		pendingItems:     map[string]map[string]any{},
-		thinkingTagStyle: thinkingTagStyle,
-		originalToolIDs:  originalToolIDs,
-		requestID:        requestID,
-		provider:         "chat",
+		toolIDsByIndex:       map[int]string{},
+		toolSent:             map[string]bool{},
+		pendingItems:         map[string]map[string]any{},
+		thinkingTagStyle:     thinkingTagStyle,
+		upstreamXMLToolStyle: xmlToolCallStyle,
+		originalToolIDs:      originalToolIDs,
+		requestID:            requestID,
+		provider:             "chat",
 	}
 	return func(scanner *bufio.Scanner) ([]Event, error) {
 		for {
@@ -508,6 +510,7 @@ type chatNormalizationState struct {
 	pendingThinkingTag          string
 	pendingThinking             string
 	thinkingTagStyle            string
+	upstreamXMLToolStyle        string
 	implicitThinkingInitialized bool
 	implicitThinkingActive      bool
 	suppressBlankTextAfterThink bool
@@ -587,6 +590,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		delta, _ := choice["delta"].(map[string]any)
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
+				if state.upstreamXMLToolStyle == config.UpstreamXMLToolCallStyleLegacy {
+					if item := parseLegacyXMLToolCall(text); item != nil {
+						events = append(events, legacyXMLToolCallEvents(item)...)
+						continue
+					}
+				}
 				if state.thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy && !state.implicitThinkingInitialized {
 					state.implicitThinkingInitialized = true
 					state.implicitThinkingActive = true
@@ -661,6 +670,101 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 	}
 	shadowRecord(events, frame, state.provider)
 	return events, false, nil
+}
+
+func parseLegacyXMLToolCall(text string) map[string]any {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "<tool_call>") || !strings.HasSuffix(trimmed, "</tool_call>") {
+		return nil
+	}
+	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "<tool_call>"), "</tool_call>"))
+	if !strings.HasPrefix(body, "<function=") {
+		return nil
+	}
+	nameEnd := strings.Index(body, ">")
+	if nameEnd < 0 {
+		return nil
+	}
+	name := strings.TrimSpace(body[len("<function="):nameEnd])
+	if name == "" {
+		return nil
+	}
+	closeTag := "</function>"
+	if !strings.HasSuffix(body, closeTag) {
+		return nil
+	}
+	paramsText := strings.TrimSpace(body[nameEnd+1 : len(body)-len(closeTag)])
+	arguments := map[string]any{}
+	for paramsText != "" {
+		paramsText = strings.TrimSpace(paramsText)
+		if !strings.HasPrefix(paramsText, "<parameter=") {
+			return nil
+		}
+		keyEnd := strings.Index(paramsText, ">")
+		if keyEnd < 0 {
+			return nil
+		}
+		key := strings.TrimSpace(paramsText[len("<parameter="):keyEnd])
+		if key == "" {
+			return nil
+		}
+		closeParam := "</parameter>"
+		valueEnd := strings.Index(paramsText[keyEnd+1:], closeParam)
+		if valueEnd < 0 {
+			return nil
+		}
+		valueEnd += keyEnd + 1
+		arguments[key] = parseLegacyXMLToolValue(paramsText[keyEnd+1 : valueEnd])
+		paramsText = paramsText[valueEnd+len(closeParam):]
+	}
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return nil
+	}
+	return map[string]any{"type": "function_call", "id": "legacy_xml_tool_0", "call_id": "legacy_xml_tool_0", "name": name, "arguments": string(encoded)}
+}
+
+func parseLegacyXMLToolValue(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "true" {
+		return true
+	}
+	if trimmed == "false" {
+		return false
+	}
+	if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return parsed
+	}
+	if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		return parsed
+	}
+	return value
+}
+
+func legacyXMLToolCallEvents(item map[string]any) []Event {
+	if len(item) == 0 {
+		return nil
+	}
+	return []Event{{Event: "response.output_item.done", Data: map[string]any{"item": item}}}
+}
+
+func appendLegacyXMLToolCallsFromContent(content []any, output []any) ([]any, []any) {
+	kept := make([]any, 0, len(content))
+	for _, raw := range content {
+		item, _ := raw.(map[string]any)
+		if stringValue(item["type"]) != "output_text" {
+			kept = append(kept, raw)
+			continue
+		}
+		toolItem := parseLegacyXMLToolCall(stringValue(item["text"]))
+		if toolItem == nil {
+			kept = append(kept, raw)
+			continue
+		}
+		toolItem["status"] = "completed"
+		output = append(output, toolItem)
+	}
+	return kept, output
 }
 
 func newAnthropicEventBatchReader(originalToolIDs map[int]string) func(*bufio.Scanner) ([]Event, error) {
@@ -813,7 +917,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	return events, false, nil
 }
 
-func normalizeChatPayload(payload map[string]any, thinkingTagStyle string) map[string]any {
+func normalizeChatPayload(payload map[string]any, thinkingTagStyle string, xmlToolCallStyle ...string) map[string]any {
 	responseID := stringValue(payload["id"])
 	if responseID == "" {
 		responseID = "resp_proxy"
@@ -840,6 +944,9 @@ func normalizeChatPayload(payload map[string]any, thinkingTagStyle string) map[s
 	}
 	messageItem := map[string]any{"id": messageID, "type": "message", "status": "completed", "role": "assistant"}
 	content := normalizeChatMessageContent(message["content"])
+	if len(xmlToolCallStyle) > 0 && xmlToolCallStyle[0] == config.UpstreamXMLToolCallStyleLegacy {
+		content, output = appendLegacyXMLToolCallsFromContent(content, output)
+	}
 	if refusal := stringValue(message["refusal"]); refusal != "" {
 		content = append(content, map[string]any{"type": "refusal", "refusal": refusal})
 	}

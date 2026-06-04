@@ -880,3 +880,47 @@ func TestLoadProviderFileRejectsUnknownResponsesToolCompatMode(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestLoadProviderFileParsesUpstreamXMLToolCallStyle(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  string
+	}{
+		{value: "true", want: UpstreamXMLToolCallStyleLegacy},
+		{value: "false", want: UpstreamXMLToolCallStyleOff},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nUPSTREAM_XML_TOOL_CALL_STYLE=" + tc.value + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			provider, err := loadProviderFile(providerEnvPath)
+			if err != nil {
+				t.Fatalf("loadProviderFile returned error: %v", err)
+			}
+			if provider.UpstreamXMLToolCallStyle != tc.want {
+				t.Fatalf("expected XML tool call style %q, got %q", tc.want, provider.UpstreamXMLToolCallStyle)
+			}
+		})
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidUpstreamXMLToolCallStyle(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_XML_TOOL_CALL_STYLE=maybe\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid UPSTREAM_XML_TOOL_CALL_STYLE to fail validation")
+	}
+	if err.Error() != "invalid UPSTREAM_XML_TOOL_CALL_STYLE in "+providerEnvPath+": \"maybe\"" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

@@ -52,6 +52,68 @@ func TestNormalizeChatFrame_TextOnly(t *testing.T) {
 	}
 }
 
+func TestNormalizeChatFrame_XMLToolCallTextDefaultPreservesText(t *testing.T) {
+	frame := &sseFrame{Event: "chat", Data: `{"id":"chat-123","choices":[{"delta":{"content":"\n<tool_call>\n<function=mcp__mt_apk_outline_class>\n<parameter=className>Lacr/browser/lightning/activity/BrowserActivity$16;</parameter>\n<parameter=limit>50</parameter>\n<parameter=workspaceId>69jas4bi</parameter>\n</function>\n</tool_call>\n"}}]}`}
+	state := &chatNormalizationState{toolIDsByIndex: map[int]string{}, toolSent: map[string]bool{}}
+
+	events, done, err := normalizeChatFrame(frame, state)
+	if err != nil {
+		t.Fatalf("normalizeChatFrame error: %v", err)
+	}
+	if done {
+		t.Fatal("unexpected done")
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected created and text events, got %#v", events)
+	}
+	if events[1].Event != "response.output_text.delta" {
+		t.Fatalf("expected XML text to stay output_text by default, got %#v", events[1])
+	}
+	if got := stringValue(events[1].Data["delta"]); !strings.Contains(got, "<tool_call>") {
+		t.Fatalf("expected XML text to be preserved, got %q", got)
+	}
+}
+
+func TestNormalizeChatFrame_XMLToolCallTextLegacyConvertsToFunctionCall(t *testing.T) {
+	frame := &sseFrame{Event: "chat", Data: `{"id":"chat-123","choices":[{"delta":{"content":"\n<tool_call>\n<function=mcp__mt_apk_outline_class>\n<parameter=className>Lacr/browser/lightning/activity/BrowserActivity$16;</parameter>\n<parameter=limit>50</parameter>\n<parameter=workspaceId>69jas4bi</parameter>\n</function>\n</tool_call>\n"},"finish_reason":"tool_calls"}]}`}
+	state := &chatNormalizationState{
+		toolIDsByIndex:       map[int]string{},
+		toolSent:             map[string]bool{},
+		upstreamXMLToolStyle: config.UpstreamXMLToolCallStyleLegacy,
+	}
+
+	events, done, err := normalizeChatFrame(frame, state)
+	if err != nil {
+		t.Fatalf("normalizeChatFrame error: %v", err)
+	}
+	if done {
+		t.Fatal("unexpected done")
+	}
+
+	for _, evt := range events {
+		if evt.Event == "response.output_text.delta" {
+			t.Fatalf("expected XML tool call text to be consumed, got text event %#v", evt)
+		}
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected created and function call events, got %#v", events)
+	}
+	if events[1].Event != "response.output_item.done" {
+		t.Fatalf("expected function call item, got %#v", events[1])
+	}
+	item, _ := events[1].Data["item"].(map[string]any)
+	if stringValue(item["type"]) != "function_call" {
+		t.Fatalf("expected function_call item, got %#v", item)
+	}
+	if stringValue(item["name"]) != "mcp__mt_apk_outline_class" {
+		t.Fatalf("unexpected function name: %#v", item)
+	}
+	if got := stringValue(item["arguments"]); got != `{"className":"Lacr/browser/lightning/activity/BrowserActivity$16;","limit":50,"workspaceId":"69jas4bi"}` {
+		t.Fatalf("unexpected arguments: %s", got)
+	}
+}
+
 func TestNormalizeChatFrame_ToolCall(t *testing.T) {
 	// 测试 tool call 的转换 - 模拟上游 chat SSE 事件序列
 	// 1. tool_call 开始（index=0, id="tool_0", name="get_weather"）
@@ -215,7 +277,7 @@ func TestChatEventBatchReaderDoesNotFinalizeOnEOFWithoutTerminalEvent(t *testing
 	}, "\n")
 
 	scanner := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "req-test", false)
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, config.UpstreamXMLToolCallStyleOff, nil, "req-test", false)
 
 	var allEvents []Event
 	for {
@@ -250,7 +312,7 @@ func TestChatEventBatchReaderFinalizesOnEOFWhenAllowedAndFinishReasonSeen(t *tes
 	}, "\n")
 
 	scanner := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "req-test", true)
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, config.UpstreamXMLToolCallStyleOff, nil, "req-test", true)
 
 	var allEvents []Event
 	for {
@@ -658,7 +720,7 @@ data: [DONE]
 `
 
 	reader := bufio.NewScanner(strings.NewReader(rawSSE))
-	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, nil, "", false)
+	readNext := newChatEventBatchReader(config.UpstreamThinkingTagStyleOff, config.UpstreamXMLToolCallStyleOff, nil, "", false)
 
 	var allEvents []Event
 	for {

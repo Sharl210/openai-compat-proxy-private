@@ -21,6 +21,7 @@
 | Responses compact 端点 | ✅ | `/v1/responses/compact` 非流式 Responses 专用，上游须为 `responses` 类型；普通 `/v1/responses` SSE 流现可携带 compaction items |
 | 无 /v1 路由别名 | ✅ | `/responses`、`/chat/completions`、`/messages`、`/models`、`/responses/compact` 及其 `/{providerId}/...` 形式均可等效访问对应 `/v1/*` 入口；复用同一套 handler 与鉴权语义 |
 | responses 工具兼容模式 | ✅ | provider 级 `RESPONSES_TOOL_COMPAT_MODE=function_only` 将 `custom` / `web_search` 工具在发往 responses 上游前重写成普通 function 类型，以兼容不完整上游；代价是丢失原生 free-form / grammar 约束（custom）或原生 citations/sources 语义（web_search）；默认 `preserve` |
+| chat 上游 XML 工具调用兼容 | ✅ | provider 级 `UPSTREAM_XML_TOOL_CALL_STYLE=true` 可把完整 XML 工具调用正文恢复成结构化 function call；默认关闭，避免误解析普通文本 |
 | 模型映射 | ✅ | 支持 `MODEL_MAP` 通配符、`$0` 与 `$1..$N` 占位符、`MANUAL_MODELS` |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
@@ -345,6 +346,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `proxy_buffer`：下游非流时，代理继续向上游请求 SSE，再本地聚合
 - `upstream_non_stream`：下游非流时，代理直接向上游请求非流 JSON
 - `UPSTREAM_THINKING_TAG_STYLE=true/false`：当 `UPSTREAM_ENDPOINT_TYPE=chat` 时，决定是否把 `<think>` / `<thinking>` / `<reasoning>` 标签拆成 reasoning 内容
+- `UPSTREAM_XML_TOOL_CALL_STYLE=true/false`：当 `UPSTREAM_ENDPOINT_TYPE=chat` 时，决定是否把完整 `<tool_call>` XML 正文恢复成结构化工具调用；默认关闭
 
 这层还有几项专门做稳定性的代理侧兜底：
 
@@ -528,7 +530,7 @@ Claude 相关还有两个配套开关：
 | 字段组 | 例子 | 说明 |
 |---|---|---|
 | 上游连接 | `UPSTREAM_BASE_URL`、`UPSTREAM_API_KEY`、`UPSTREAM_ENDPOINT_TYPE` | 当前 provider 如何连上游 |
-| Anthropic / thinking | `ANTHROPIC_VERSION`、`UPSTREAM_THINKING_TAG_STYLE` | Anthropic 上游版本与 chat 上游 thinking 标签策略 |
+| Anthropic / thinking | `ANTHROPIC_VERSION`、`UPSTREAM_THINKING_TAG_STYLE`、`UPSTREAM_XML_TOOL_CALL_STYLE` | Anthropic 上游版本、chat 上游 thinking 标签策略与 XML 工具调用兼容 |
 | 能力开关 | `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES` | 控制公开端口是否开放 |
 | 非流 / timeout / retry | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`、`UPSTREAM_FIRST_BYTE_TIMEOUT`、`UPSTREAM_RETRY_COUNT`、`UPSTREAM_RETRY_DELAY` | provider 级运行时策略 |
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS` | 注入与模型能力 |
@@ -562,10 +564,13 @@ Claude 相关还有两个配套开关：
 6. **chat 上游的思维标签当前支持三种写法**
    当 `UPSTREAM_THINKING_TAG_STYLE=true` 时，代理会把 `<think>`、`<thinking>`、`<reasoning>` 识别为 reasoning 内容，再按目标下游协议重写。
 
-7. **`/v1/responses/compact` 是 Responses 专用非流端点，不支持 `stream=true`**
+7. **chat 上游的 XML 工具调用兼容默认关闭**
+   当 `UPSTREAM_XML_TOOL_CALL_STYLE=true` 时，代理只会把完整的 `<tool_call><function=...><parameter=...>...</parameter></function></tool_call>` 正文恢复成结构化工具调用；普通 XML 文本仍建议保持默认关闭，避免误解析。
+
+8. **`/v1/responses/compact` 是 Responses 专用非流端点，不支持 `stream=true`**
    仅在 provider 的 `UPSTREAM_ENDPOINT_TYPE=responses` 时可用；请求 `stream=true` 或上游不是 `responses` 类型时直接返回 `400`。成功时直接返回上游原始 JSON，不再走聚合归一逻辑。
 
-8. **普通 `/v1/responses` SSE 流现可携带 compaction items 和 opaque `encrypted_content`**
+9. **普通 `/v1/responses` SSE 流现可携带 compaction items 和 opaque `encrypted_content`**
    这些字段不会被代理层解析或丢弃，会完整透传给下游客户端。
 
 ---
