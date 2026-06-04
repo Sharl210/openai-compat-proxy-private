@@ -243,6 +243,48 @@ func TestResponseEventWriterHelperBeginsCompactionLifecycleByClosingSyntheticRea
 	}
 }
 
+func TestResponsesWriterChatReasoningDeltaStartsReasoningLifecycleWithoutSyntheticPrelude(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
+		upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_chat"}}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "alpha"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	addedIdx := strings.Index(body, `"type":"response.output_item.added"`)
+	deltaIdx := strings.Index(body, `"type":"response.reasoning_summary_text.delta"`)
+	doneIdx := strings.Index(body, `{"item":{"id":"rs_chat_reasoning","summary":[{"text":"alpha","type":"summary_text"}],"type":"reasoning"},"type":"response.output_item.done"}`)
+	completedIdx := strings.Index(body, `event: response.completed`)
+	if addedIdx == -1 || deltaIdx == -1 || doneIdx == -1 || completedIdx == -1 {
+		t.Fatalf("expected reasoning added/delta/done lifecycle and completed event, got %s", body)
+	}
+	if !(addedIdx < deltaIdx && deltaIdx < doneIdx && doneIdx < completedIdx) {
+		t.Fatalf("expected reasoning lifecycle added -> delta -> done -> completed, got %s", body)
+	}
+	if strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected real reasoning lifecycle without synthetic rs_proxy, got %s", body)
+	}
+}
+
+func TestResponsesWriterClosesChatReasoningLifecycleBeforeText(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
+		upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_chat"}}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "alpha"}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "answer"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	addedIdx := strings.Index(body, `"type":"response.output_item.added"`)
+	deltaIdx := strings.Index(body, `"type":"response.reasoning_summary_text.delta"`)
+	doneIdx := strings.Index(body, `{"item":{"id":"rs_chat_reasoning","summary":[{"text":"alpha","type":"summary_text"}],"type":"reasoning"},"type":"response.output_item.done"}`)
+	textIdx := strings.Index(body, `"type":"response.output_text.delta"`)
+	if addedIdx == -1 || deltaIdx == -1 || doneIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected reasoning lifecycle and text event, got %s", body)
+	}
+	if !(addedIdx < deltaIdx && deltaIdx < doneIdx && doneIdx < textIdx) {
+		t.Fatalf("expected reasoning lifecycle to close before output text, got %s", body)
+	}
+}
+
 func TestResponsesStreamPreservesNativeFunctionCallArgumentDeltasForResponsesUpstream(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
@@ -602,6 +644,42 @@ func TestResponsesStreamUpstreamDisconnectsWithoutTerminalEventStaysInSSEProtoco
 	}
 	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
 		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	}
+}
+
+func TestResponsesStreamChatMaxTokensToolCallIsIncompleteButNotStreamBroken(t *testing.T) {
+	upstream := newChatStreamingUpstream(t, []string{
+		"event: chat\n" +
+			"data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_partial\",\"function\":{\"name\":\"lookup_record\"}}]}}]}\n\n",
+		"event: chat\n" +
+			"data: {\"id\":\"chat-123\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\"}}]}}]}\n\n",
+		"event: chat\n" +
+			"data: {\"id\":\"chat-123\",\"choices\":[{\"finish_reason\":\"max_tokens\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeChat))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected response.incomplete terminal event, got %s", body)
+	}
+	if strings.Contains(body, `"health_flag":"upstreamStreamBroken"`) {
+		t.Fatalf("expected max_tokens truncation not to be reported as stream broken, got %s", body)
+	}
+	if !strings.Contains(body, `"health_flag":"upstream_max_tokens"`) || !strings.Contains(body, `"finish_reason":"max_tokens"`) {
+		t.Fatalf("expected max_tokens health flag and finish reason, got %s", body)
+	}
+	if strings.Contains(body, `"type":"function_call","id":"call_partial"`) && strings.Contains(body, `"type":"response.output_item.done"`) {
+		t.Fatalf("expected partial tool call not to be completed, got %s", body)
 	}
 }
 

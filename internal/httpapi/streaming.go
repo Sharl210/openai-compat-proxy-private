@@ -69,6 +69,8 @@ type responsesStreamState struct {
 	toolStatusSent       bool
 	reasoningStarted     bool
 	reasoningClosed      bool
+	realReasoningItemID  string
+	realReasoningSummary strings.Builder
 	syntheticInjected    bool
 	syntheticSummary     strings.Builder
 	toolItems            map[string]*responsesToolItemState
@@ -114,6 +116,8 @@ type responseProjectionState struct {
 	toolOrder                  []string
 	reasoningStarted           bool
 	reasoningClosed            bool
+	realReasoningItemID        string
+	realReasoningSummary       *strings.Builder
 	syntheticInjected          bool
 	realReasoningSeen          bool
 	compactionLifecycleStarted bool
@@ -135,6 +139,8 @@ type responseEventWriterHelper struct {
 	toolOrder                  []string
 	reasoningStarted           bool
 	reasoningClosed            bool
+	realReasoningItemID        string
+	realReasoningSummary       *strings.Builder
 	syntheticInjected          bool
 	realReasoningSeen          bool
 	compactionLifecycleStarted bool
@@ -284,6 +290,7 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state.toolStatusSent = initialState.toolStatusSent
 	state.reasoningStarted = initialState.reasoningStarted
 	state.reasoningClosed = initialState.reasoningClosed
+	state.realReasoningItemID = initialState.realReasoningItemID
 	state.syntheticInjected = initialState.syntheticInjected
 	state.toolItems = initialState.toolItems
 	state.toolIDAliases = initialState.toolIDAliases
@@ -292,6 +299,9 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state.terminalFailure = initialState.terminalFailure
 	if summary := initialState.syntheticSummary.String(); summary != "" {
 		state.syntheticSummary.WriteString(summary)
+	}
+	if summary := initialState.realReasoningSummary.String(); summary != "" {
+		state.realReasoningSummary.WriteString(summary)
 	}
 	if state.toolItems == nil {
 		state.toolItems = map[string]*responsesToolItemState{}
@@ -347,6 +357,37 @@ func (h *responseEventWriterHelper) markRealReasoningSeen() {
 	}
 	h.realReasoningSeen = true
 	h.closeSyntheticReasoning()
+}
+
+func (h *responseEventWriterHelper) ensureRealReasoningLifecycleStarted() {
+	if h.downstreamType != "responses" || h.reasoningStarted || h.syntheticInjected {
+		return
+	}
+	h.realReasoningItemID = "rs_chat_reasoning"
+	h.addEvent("response.output_item.added", map[string]any{"item": map[string]any{
+		"id":      h.realReasoningItemID,
+		"type":    "reasoning",
+		"summary": []any{},
+	}})
+	h.reasoningStarted = true
+}
+
+func (h *responseEventWriterHelper) closeRealReasoningLifecycle() {
+	if h.downstreamType != "responses" || h.realReasoningItemID == "" || h.reasoningClosed {
+		return
+	}
+	summary := []any{}
+	if h.realReasoningSummary != nil {
+		if text := h.realReasoningSummary.String(); text != "" {
+			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
+		}
+	}
+	h.addEvent("response.output_item.done", map[string]any{"item": map[string]any{
+		"id":      h.realReasoningItemID,
+		"type":    "reasoning",
+		"summary": summary,
+	}})
+	h.reasoningClosed = true
 }
 
 func (h *responseEventWriterHelper) beginCompactionLifecycle() {
@@ -439,6 +480,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
+		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 		h.reasoningStarted = true
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
@@ -466,6 +508,10 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
 		if evt.Event == "response.reasoning.delta" {
 			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
+				h.ensureRealReasoningLifecycleStarted()
+				if h.realReasoningSummary != nil && h.realReasoningItemID != "" {
+					h.realReasoningSummary.WriteString(summary)
+				}
 				converted := map[string]any{"delta": summary}
 				if blocks, ok := evt.Data["blocks"]; ok {
 					converted["blocks"] = blocks
@@ -527,6 +573,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				response["usage"] = cloneMap(usage)
 			}
 		}
+		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 	case "response.done":
 		if h.terminalFailure != nil {
@@ -559,6 +606,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				response["usage"] = cloneMap(usage)
 			}
 		}
+		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 	case "response.incomplete":
 		h.terminalSeen = true
@@ -577,6 +625,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		h.terminalFailure = &aggregate.TerminalFailureError{HealthFlag: healthFlag, Message: message}
 		evt.Data["health_flag"] = healthFlag
 		evt.Data["message"] = message
+		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 	}
 	return result, nil
@@ -902,6 +951,8 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		toolOrder:            state.toolOrder,
 		reasoningStarted:     state.reasoningStarted,
 		reasoningClosed:      state.reasoningClosed,
+		realReasoningItemID:  state.realReasoningItemID,
+		realReasoningSummary: &state.realReasoningSummary,
 		syntheticInjected:    state.syntheticInjected,
 		realReasoningSeen:    state.realReasoningSeen,
 		syntheticSummary:     &state.syntheticSummary,
@@ -924,6 +975,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.toolOrder = h.toolOrder
 	state.reasoningStarted = h.reasoningStarted
 	state.reasoningClosed = h.reasoningClosed
+	state.realReasoningItemID = h.realReasoningItemID
 	state.syntheticInjected = h.syntheticInjected
 	state.realReasoningSeen = h.realReasoningSeen
 	state.terminalSeen = h.terminalSeen
@@ -1040,6 +1092,8 @@ func newResponseEventWriterHelper(downstreamType string, state responseProjectio
 		toolOrder:            state.toolOrder,
 		reasoningStarted:     state.reasoningStarted,
 		reasoningClosed:      state.reasoningClosed,
+		realReasoningItemID:  state.realReasoningItemID,
+		realReasoningSummary: state.realReasoningSummary,
 		syntheticInjected:    state.syntheticInjected,
 		realReasoningSeen:    state.realReasoningSeen,
 		syntheticSummary:     state.syntheticSummary,
