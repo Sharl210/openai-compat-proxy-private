@@ -87,6 +87,32 @@ func TestLoadFromEnvParsesAllDefaultProviderModelTagsFlag(t *testing.T) {
 	}
 }
 
+func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"V1_MODEL_MAP": "alias-alpha:alpha-chat, alias-(.*):owned-$1",
+	})
+
+	if got, want := len(cfg.V1ModelMap), 2; got != want {
+		t.Fatalf("expected %d V1_MODEL_MAP entries, got %d", want, got)
+	}
+	if got := cfg.ResolveV1Model("alias-alpha"); got != "alpha-chat" {
+		t.Fatalf("expected exact V1 model alias to resolve to alpha-chat, got %q", got)
+	}
+	if got := cfg.ResolveV1Model("alias-5"); got != "owned-5" {
+		t.Fatalf("expected regex V1 model alias to resolve to owned-5, got %q", got)
+	}
+	if got := cfg.ResolveV1Model("already-canonical"); got != "already-canonical" {
+		t.Fatalf("expected unmatched V1 model to remain unchanged, got %q", got)
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidV1ModelMap(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"V1_MODEL_MAP": "missing-target:"})
+	if err == nil {
+		t.Fatalf("expected invalid V1_MODEL_MAP to fail validation")
+	}
+}
+
 func TestLoadFromEnvParsesCacheInfoTimezone(t *testing.T) {
 	t.Setenv("CACHE_INFO_TIMEZONE", "UTC")
 
@@ -376,7 +402,7 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelRequiresVisibleModelList
 					ID:      "openai",
 					Enabled: true,
 					ModelMap: []ModelMapEntry{
-						NewModelMapEntry("gpt-*", "openai-$1"),
+						NewModelMapEntry("gpt-(.*)", "openai-$1"),
 					},
 					ManualModels: []string{"listed-model"},
 				},
@@ -384,7 +410,7 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelRequiresVisibleModelList
 					ID:      "azure",
 					Enabled: true,
 					ModelMap: []ModelMapEntry{
-						NewModelMapEntry("gpt-*", "azure-$1"),
+						NewModelMapEntry("gpt-(.*)", "azure-$1"),
 					},
 				},
 			},
@@ -397,7 +423,7 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelRequiresVisibleModelList
 		t.Fatalf("expected listed model to resolve openai, got owner=%q ok=%v", owner, ok)
 	}
 	if owner, ok := snapshot.ResolveDefaultProviderIDForModel("gpt-5"); ok || owner != "" {
-		t.Fatalf("expected wildcard-only model outside visible list to miss default provider routing, got owner=%q ok=%v", owner, ok)
+		t.Fatalf("expected regex-only model outside visible list to miss default provider routing, got owner=%q ok=%v", owner, ok)
 	}
 }
 
@@ -413,7 +439,7 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 					NewModelMapEntry("openai-only", "openai-only-upstream"),
 				},
 				ManualModels: []string{"manual-openai"},
-				HiddenModels: []string{"gpt-4*", "manual-openai"},
+				HiddenModels: []string{"gpt-4.*", "manual-openai"},
 			},
 			{
 				ID:      "azure",
@@ -434,7 +460,7 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 		t.Fatalf("expected hidden models removed while manual model stays visible, got %v", visible)
 	}
 	if got := owners["gpt-4o"]; got != "azure" {
-		t.Fatalf("expected hidden wildcard model gpt-4o to fall through to azure, got %q", got)
+		t.Fatalf("expected hidden regex model gpt-4o to fall through to azure, got %q", got)
 	}
 	if got := owners["manual-openai"]; got != "openai" {
 		t.Fatalf("expected manual model to override hidden rules and stay owned by openai, got %#v", owners)

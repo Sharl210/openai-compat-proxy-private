@@ -339,6 +339,9 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 	if err := validateDownstreamNonStreamStrategy(values, "DOWNSTREAM_NON_STREAM_STRATEGY"); err != nil {
 		return err
 	}
+	if err := validateRootModelMap(values, "V1_MODEL_MAP"); err != nil {
+		return err
+	}
 	return nil
 }
 

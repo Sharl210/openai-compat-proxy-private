@@ -24,6 +24,7 @@ type Config struct {
 	InjectClaudeCodeSystemPrompt      bool
 	ProvidersDir                      string
 	DefaultProvider                   string
+	V1ModelMap                        []ModelMapEntry
 	EnableDefaultProviderModelTags    bool
 	EnableAllDefaultProviderModelTags bool
 	EnableLegacyV1Routes              bool
@@ -99,6 +100,11 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	}
 	if value, ok := lookup("DEFAULT_PROVIDER"); ok && value != "" {
 		cfg.DefaultProvider = value
+	}
+	if value, ok := lookup("V1_MODEL_MAP"); ok && value != "" {
+		if parsed, err := parseModelMap(value, "root env V1_MODEL_MAP"); err == nil {
+			cfg.V1ModelMap = parsed
+		}
 	}
 	if value, ok := lookup("ENABLE_DEFAULT_PROVIDER_MODEL_TAGS"); ok && value != "" {
 		cfg.EnableDefaultProviderModelTags = parseRootBool(value)
@@ -192,6 +198,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateDownstreamNonStreamStrategy(values, "DOWNSTREAM_NON_STREAM_STRATEGY"); err != nil {
 		return err
 	}
+	if err := validateRootModelMap(values, "V1_MODEL_MAP"); err != nil {
+		return err
+	}
 	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
 		return err
 	}
@@ -275,6 +284,27 @@ func validateDownstreamNonStreamStrategy(values map[string]string, key string) e
 		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
 	}
 	return nil
+}
+
+func validateRootModelMap(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	_, err := parseModelMap(value, "root env "+key)
+	return err
+}
+
+func modelMapEntriesEqual(a, b []ModelMapEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Key != b[i].Key || a[i].Target != b[i].Target {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeDownstreamNonStreamStrategy(value string) (string, error) {
@@ -433,6 +463,11 @@ func ResolveProvidersDir(rootEnvPath string, providersDir string) string {
 	return filepath.Join(filepath.Dir(rootEnvPath), providersDir)
 }
 
+func (c Config) ResolveV1Model(model string) string {
+	provider := ProviderConfig{ModelMap: c.V1ModelMap}
+	return provider.ResolveModel(model, false)
+}
+
 func (c *Config) applyStartupOnlyFrom(previous Config) {
 	c.ListenAddr = previous.ListenAddr
 	c.CacheInfoTimezone = previous.CacheInfoTimezone
@@ -448,6 +483,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 	return c.ProxyAPIKey == other.ProxyAPIKey &&
 		c.ProvidersDir == other.ProvidersDir &&
 		c.DefaultProvider == other.DefaultProvider &&
+		modelMapEntriesEqual(c.V1ModelMap, other.V1ModelMap) &&
 		c.EnableDefaultProviderModelTags == other.EnableDefaultProviderModelTags &&
 		c.EnableAllDefaultProviderModelTags == other.EnableAllDefaultProviderModelTags &&
 		c.EnableLegacyV1Routes == other.EnableLegacyV1Routes &&
