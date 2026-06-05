@@ -26,13 +26,14 @@ const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 const runtimeStoreKey routeContextKey = "runtime-store"
+const legacyRoutingModelKey routeContextKey = "legacy-routing-model"
 
 const (
-	canonicalV1ModelsPath           = "/v1/models"
-	canonicalV1ResponsesPath        = "/v1/responses"
-	canonicalV1ResponsesCompactPath = "/v1/responses/compact"
-	canonicalV1ChatCompletionsPath  = "/v1/chat/completions"
-	canonicalV1MessagesPath         = "/v1/messages"
+	canonicalV1ModelsPath            = "/v1/models"
+	canonicalV1ResponsesPath         = "/v1/responses"
+	canonicalV1ResponsesCompactPath  = "/v1/responses/compact"
+	canonicalV1ChatCompletionsPath   = "/v1/chat/completions"
+	canonicalV1MessagesPath          = "/v1/messages"
 	canonicalV1ImagesGenerationsPath = "/v1/images/generations"
 	canonicalV1ImagesEditsPath       = "/v1/images/edits"
 	canonicalV1ImagesVariationsPath  = "/v1/images/variations"
@@ -54,11 +55,11 @@ var canonicalV1RoutePaths = []string{
 }
 
 var publicRouteAliases = map[string]string{
-	"/models":            canonicalV1ModelsPath,
-	"/responses":         canonicalV1ResponsesPath,
-	"/responses/compact": canonicalV1ResponsesCompactPath,
-	"/chat/completions":  canonicalV1ChatCompletionsPath,
-	"/messages":          canonicalV1MessagesPath,
+	"/models":             canonicalV1ModelsPath,
+	"/responses":          canonicalV1ResponsesPath,
+	"/responses/compact":  canonicalV1ResponsesCompactPath,
+	"/chat/completions":   canonicalV1ChatCompletionsPath,
+	"/messages":           canonicalV1MessagesPath,
 	"/images/generations": canonicalV1ImagesGenerationsPath,
 	"/images/edits":       canonicalV1ImagesEditsPath,
 	"/images/variations":  canonicalV1ImagesVariationsPath,
@@ -164,6 +165,11 @@ func runtimeStoreFromRequest(r *http.Request) *config.RuntimeStore {
 	return store
 }
 
+func legacyRoutingModelFromRequest(r *http.Request) (string, bool) {
+	model, ok := r.Context().Value(legacyRoutingModelKey).(string)
+	return model, ok
+}
+
 func providerConfigForRequest(r *http.Request) config.Config {
 	_, providerCfg, _, ok := providerSelectionForRequest(r, "")
 	if !ok {
@@ -224,6 +230,9 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		providerID := info.ProviderID
 		resolvedModel := canonicalModel
 		if info.Legacy && canonicalModel != "" {
+			canonicalModel = snapshot.Config.ResolveV1Model(canonicalModel)
+			resolvedModel = canonicalModel
+			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, canonicalModel))
 			refreshDefaultProviderOverlayCacheFromRequest(r)
 			snapshot, _ = runtimeSnapshotFromRequest(r)
 			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {

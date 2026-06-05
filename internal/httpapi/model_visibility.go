@@ -28,6 +28,11 @@ func (e *modelAllowanceError) Error() string {
 
 func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, requestedModel string, authorization string) error {
 	requestedModel = strings.TrimSpace(requestedModel)
+	if info, ok := routeInfoFromRequest(r); ok && info.Legacy {
+		if mappedModel, mapped := legacyRoutingModelFromRequest(r); mapped {
+			requestedModel = strings.TrimSpace(mappedModel)
+		}
+	}
 	if requestedModel == "" {
 		return nil
 	}

@@ -41,6 +41,156 @@ func TestLegacyChatRouteChoosesProviderByExactModelOwner(t *testing.T) {
 	}
 }
 
+func TestLegacyChatRouteAppliesRootV1ModelMapBeforeDefaultProviderSelection(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("alias-(alpha)", "$1-chat")}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias-alpha","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "alpha" {
+		t.Fatalf("expected V1 model alias to route to alpha, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "alpha-chat-upstream" {
+		t.Fatalf("expected provider MODEL_MAP to still run after V1_MODEL_MAP, got %q", got)
+	}
+	if alpha.Hits() != 1 || beta.Hits() != 0 {
+		t.Fatalf("expected only alpha upstream to be hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestExplicitProviderChatRouteDoesNotApplyRootV1ModelMap(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("alias-alpha", "alpha-chat")}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/beta/v1/chat/completions", strings.NewReader(`{"model":"alias-alpha","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected explicit provider route to stay on beta, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "alias-alpha" {
+		t.Fatalf("expected explicit provider route to skip V1_MODEL_MAP, got upstream model %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only beta upstream to be hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyChatRouteRejectsRootV1ModelMapTargetOutsideVisibleModels(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("alias-missing", "missing-model")}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias-missing","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected mapped unknown model to return invalid_model, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_model") {
+		t.Fatalf("expected invalid_model error body, got %s", rec.Body.String())
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 0 {
+		t.Fatalf("expected no upstream hit for mapped unknown model, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyResponsesRouteV1ModelMapTargetKeepsReasoningSuffixBehavior(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("alias-reason-high", "reason-model-high")}
+	cfg.Providers[0].ModelMap = nil
+	cfg.Providers[0].ManualModels = []string{"reason-model"}
+	cfg.Providers[0].EnableReasoningEffortSuffix = true
+	cfg.Providers[0].ExposeReasoningSuffixModels = true
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"alias-reason-high","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected mapped reasoning suffix target to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "alpha" {
+		t.Fatalf("expected mapped reasoning suffix target to route to alpha, got %q", got)
+	}
+	if got := rec.Header().Get("X-Client-To-Proxy-Reasoning-Effort"); got != "high" {
+		t.Fatalf("expected reasoning suffix target to preserve high effort semantics, got %q", got)
+	}
+	if alpha.Hits() != 1 || beta.Hits() != 0 {
+		t.Fatalf("expected only alpha upstream to be hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyChatRouteV1ModelMapTargetPassesSingleDefaultProviderModelAllowance(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "alpha",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		V1ModelMap:                  []config.ModelMapEntry{config.NewModelMapEntry("alias-alpha", "alpha-chat")},
+		Providers: []config.ProviderConfig{{
+			ID:                   "alpha",
+			Enabled:              true,
+			UpstreamBaseURL:      alpha.URL,
+			UpstreamAPIKey:       "alpha-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsChat:         true,
+			ModelMap:             []config.ModelMapEntry{config.NewModelMapEntry("alpha-chat", "alpha-chat-upstream")},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias-alpha","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected mapped target to pass single default provider allowance, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "alpha-chat-upstream" {
+		t.Fatalf("expected provider MODEL_MAP to run after single-provider V1_MODEL_MAP, got %q", got)
+	}
+}
+
 func TestLegacyResponsesRouteRejectsModelOutsideVisibleModelsList(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
@@ -55,7 +205,7 @@ func TestLegacyResponsesRouteRejectsModelOutsideVisibleModelsList(t *testing.T) 
 	server.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected wildcard-only model outside visible list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected regex-only model outside visible list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if alpha.Hits() != 0 || beta.Hits() != 0 {
 		t.Fatalf("expected no upstream hit for model outside visible list, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
@@ -193,7 +343,7 @@ func TestLegacyResponsesRouteRejectsTaggedModelOutsideVisibleModelsList(t *testi
 	server.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected tagged wildcard-only model outside visible list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected tagged regex-only model outside visible list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if alpha.Hits() != 0 || beta.Hits() != 0 {
 		t.Fatalf("expected no upstream hit for tagged model outside visible list, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
@@ -301,7 +451,7 @@ func TestLegacyResponsesRouteRejectsUntaggedOverlappingModelWhenTagModeEnabled(t
 	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
 	cfg.EnableDefaultProviderModelTags = true
 	cfg.Providers[1].ModelMap = []config.ModelMapEntry{
-		config.NewModelMapEntry("owned-*", "beta-$1-upstream"),
+		config.NewModelMapEntry("owned-(.*)", "beta-$1-upstream"),
 	}
 	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"owned-5","input":"hello"}`))
@@ -496,7 +646,7 @@ func testLegacyModelRoutingConfig(alphaURL, betaURL string) config.Config {
 				ModelMap: []config.ModelMapEntry{
 					config.NewModelMapEntry("alpha-chat", "alpha-chat-upstream"),
 					config.NewModelMapEntry("alpha-message", "alpha-message-upstream"),
-					config.NewModelMapEntry("owned-*", "alpha-$1-upstream"),
+					config.NewModelMapEntry("owned-(.*)", "alpha-$1-upstream"),
 				},
 			},
 			{

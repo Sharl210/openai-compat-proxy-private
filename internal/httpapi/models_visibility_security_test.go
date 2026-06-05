@@ -11,7 +11,7 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
-func TestSecurity_DefaultGroupRejectsWildcardBypassOutsideVisibleModels(t *testing.T) {
+func TestSecurity_DefaultGroupRejectsRegexBypassOutsideVisibleModels(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -25,10 +25,35 @@ func TestSecurity_DefaultGroupRejectsWildcardBypassOutsideVisibleModels(t *testi
 	server.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected wildcard bypass outside visible models to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected regex bypass outside visible models to be rejected, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit for wildcard bypass attempt, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+		t.Fatalf("expected no upstream hit for regex bypass attempt, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestSecurity_DefaultGroupRejectsRegexOnlyMappingOutsideVisibleModels(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("owned-(.*)", "alpha-$1-upstream")}
+	cfg.Providers[0].ManualModels = []string{"visible-alpha"}
+	cfg.Providers[1].ModelMap = nil
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"owned-999","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected regex-only mapping outside visible models to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 0 {
+		t.Fatalf("expected no upstream hit for regex-only mapping bypass attempt, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
 	}
 }
 
@@ -84,7 +109,7 @@ func TestSecurity_ExplicitProviderHiddenUpstreamModelCannotBeRequested(t *testin
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
 			SupportsModels:       true,
-			HiddenModels:         []string{"admin-*"},
+			HiddenModels:         []string{"admin-.*"},
 		}},
 	})
 
@@ -151,7 +176,7 @@ func TestSecurity_BareSingleDefaultProviderRejectsHiddenUpstreamModelRequest(t *
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
 			SupportsModels:       true,
-			HiddenModels:         []string{"admin-*"},
+			HiddenModels:         []string{"admin-.*"},
 		}},
 	})
 
