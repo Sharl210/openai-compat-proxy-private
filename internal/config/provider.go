@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,10 +62,9 @@ type ModelMapEntry struct {
 	Target            string
 	UnescapedKey      string
 	UnescapedTarget   string
-	HasWildcard       bool
-	KeyParts          []string
+	Pattern           *regexp.Regexp
+	IsStaticKey       bool
 	TargetHasCaptures bool
-	CaptureCount      int
 }
 
 const (
@@ -228,8 +228,14 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 		case "MANUAL_MODELS":
 			provider.ManualModels = parseCommaSeparatedList(value)
+			if err := validateModelPatternList(provider.ManualModels, key, path); err != nil {
+				return ProviderConfig{}, err
+			}
 		case "HIDDEN_MODELS":
 			provider.HiddenModels = parseCommaSeparatedList(value)
+			if err := validateModelPatternList(provider.HiddenModels, key, path); err != nil {
+				return ProviderConfig{}, err
+			}
 		case "ENABLE_REASONING_EFFORT_SUFFIX":
 			provider.EnableReasoningEffortSuffix, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
@@ -621,6 +627,9 @@ func parseModelMap(raw string, path string) ([]ModelMapEntry, error) {
 		}
 		key := strings.TrimSpace(kv[0])
 		target := strings.TrimSpace(kv[1])
+		if _, err := regexp.Compile("^(?:" + key + ")$"); err != nil {
+			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP pattern in %s: %q", path, key))
+		}
 		entries = append(entries, NewModelMapEntry(key, target))
 	}
 	return entries, nil
@@ -637,13 +646,26 @@ func parseCommaSeparatedList(raw string) []string {
 	for _, part := range parts {
 		trimmed := strings.TrimSpace(part)
 		if trimmed != "" {
-			result = append(result, unescapeString(trimmed))
+			result = append(result, trimmed)
 		}
 	}
 	if len(result) == 0 {
 		return nil
 	}
 	return result
+}
+
+func validateModelPatternList(patterns []string, key string, path string) error {
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if _, err := regexp.Compile("^(?:" + pattern + ")$"); err != nil {
+			return ErrInvalidConfig(fmt.Sprintf("invalid %s pattern in %s: %q", key, path, pattern))
+		}
+	}
+	return nil
 }
 
 func unescapeString(s string) string {
@@ -666,17 +688,10 @@ func unescapeString(s string) string {
 
 func NewModelMapEntry(key, target string) ModelMapEntry {
 	entry := ModelMapEntry{Key: key, Target: target}
-	entry.UnescapedKey = unescapeString(key)
-	entry.UnescapedTarget = unescapeString(target)
-	entry.HasWildcard = strings.Contains(entry.UnescapedKey, "*")
-	parts := strings.Split(entry.UnescapedKey, "*")
-	entry.KeyParts = make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" {
-			entry.KeyParts = append(entry.KeyParts, p)
-		}
-	}
-	entry.CaptureCount = len(parts) - 1
+	entry.UnescapedKey = key
+	entry.UnescapedTarget = target
+	entry.Pattern = compileModelPattern(entry.UnescapedKey)
+	entry.IsStaticKey = isStaticModelPattern(entry.UnescapedKey)
 	entry.TargetHasCaptures = strings.Contains(entry.UnescapedTarget, "$")
 	return entry
 }
@@ -743,7 +758,7 @@ func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
 		return ""
 	}
 	for _, entry := range p.ModelMap {
-		if matchModelWildcard(model, entry) {
+		if matchModelPattern(model, entry) {
 			return applyCaptureReplacement(model, entry)
 		}
 	}
@@ -760,13 +775,13 @@ func (p ProviderConfig) HidesModel(model string) bool {
 		if manualModel == "" {
 			continue
 		}
-		if manualModel == model {
+		if modelPatternMatches(manualModel, model) {
 			return false
 		}
-		if baseModel, _, ok := reasoning.SplitSuffix(model); ok && baseModel == manualModel {
+		if baseModel, _, ok := reasoning.SplitSuffix(model); ok && modelPatternMatches(manualModel, baseModel) {
 			for _, pattern := range p.HiddenModels {
 				pattern = strings.TrimSpace(pattern)
-				if pattern == model {
+				if modelPatternMatches(pattern, model) {
 					return true
 				}
 			}
@@ -778,7 +793,7 @@ func (p ProviderConfig) HidesModel(model string) bool {
 		if pattern == "" {
 			continue
 		}
-		if matchModelWildcard(model, NewModelMapEntry(pattern, "")) {
+		if modelPatternMatches(pattern, model) {
 			return true
 		}
 	}
@@ -801,7 +816,7 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 	}
 	for _, manualModel := range p.ManualModels {
 		id := strings.TrimSpace(manualModel)
-		if id == "" {
+		if id == "" || !isStaticModelPattern(id) {
 			continue
 		}
 		if _, ok := seen[id]; ok {
@@ -815,7 +830,9 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 	}
 	keys := make([]string, 0, len(p.ModelMap))
 	for _, entry := range p.ModelMap {
-		keys = append(keys, entry.Key)
+		if isStaticModelPattern(entry.Key) {
+			keys = append(keys, entry.Key)
+		}
 	}
 	expanded := reasoning.ExpandModelIDs(base, keys, true)
 	filtered := make([]string, 0, len(expanded))
@@ -835,45 +852,15 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 
 func shouldHideVisibleModelAlias(id string) bool {
 	id = strings.TrimSpace(id)
-	return id == "" || strings.Contains(id, "*")
+	return id == "" || !isStaticModelPattern(id)
 }
 
-func matchModelWildcard(model string, entry ModelMapEntry) bool {
-	actualKey := entry.UnescapedKey
-	if actualKey == "" {
-		actualKey = entry.Key
+func matchModelPattern(model string, entry ModelMapEntry) bool {
+	pattern := entry.Pattern
+	if pattern == nil {
+		pattern = compileModelPattern(patternKey(entry))
 	}
-	if actualKey == "*" {
-		return true
-	}
-	if !entry.HasWildcard {
-		return model == actualKey
-	}
-	parts := strings.Split(actualKey, "*")
-	pos := 0
-	if first := parts[0]; first != "" {
-		if !strings.HasPrefix(model, first) {
-			return false
-		}
-		pos = len(first)
-	}
-	for i := 1; i < len(parts)-1; i++ {
-		part := parts[i]
-		if part == "" {
-			continue
-		}
-		idx := strings.Index(model[pos:], part)
-		if idx < 0 {
-			return false
-		}
-		pos += idx + len(part)
-	}
-	last := parts[len(parts)-1]
-	if last == "" {
-		return true
-	}
-	end := strings.LastIndex(model, last)
-	return end >= pos && end+len(last) == len(model)
+	return pattern != nil && pattern.MatchString(model)
 }
 
 func applyCaptureReplacement(model string, entry ModelMapEntry) string {
@@ -884,35 +871,90 @@ func applyCaptureReplacement(model string, entry ModelMapEntry) string {
 	if !entry.TargetHasCaptures {
 		return target
 	}
-	actualKey := entry.UnescapedKey
-	if actualKey == "" {
-		actualKey = entry.Key
+	pattern := entry.Pattern
+	if pattern == nil {
+		pattern = compileModelPattern(patternKey(entry))
 	}
-	parts := strings.Split(actualKey, "*")
-	captures := make([]string, 0, entry.CaptureCount)
-	pos := len(parts[0])
+	if pattern == nil {
+		return target
+	}
+	matches := pattern.FindStringSubmatch(model)
+	if len(matches) == 0 {
+		return target
+	}
+	return replaceSingleDigitCaptures(target, matches)
+}
 
-	for i := 1; i < len(parts); i++ {
-		part := parts[i]
-		if part == "" {
-			captures = append(captures, model[pos:])
-			pos = len(model)
+func replaceSingleDigitCaptures(target string, matches []string) string {
+	var result strings.Builder
+	for i := 0; i < len(target); i++ {
+		if target[i] == '\\' && i+1 < len(target) && target[i+1] == '$' {
+			result.WriteByte('$')
+			i++
 			continue
 		}
-		idx := strings.Index(model[pos:], part)
-		if idx < 0 {
-			break
+		if target[i] != '$' || i+1 >= len(target) || target[i+1] < '0' || target[i+1] > '9' {
+			result.WriteByte(target[i])
+			continue
 		}
-		captures = append(captures, model[pos:pos+idx])
-		pos += idx + len(part)
+		if i+2 < len(target) && target[i+2] >= '0' && target[i+2] <= '9' {
+			result.WriteByte(target[i])
+			continue
+		}
+		captureIndex := int(target[i+1] - '0')
+		if captureIndex < len(matches) {
+			result.WriteString(matches[captureIndex])
+		}
+		i++
 	}
+	return result.String()
+}
 
-	result := entry.UnescapedTarget
-	result = strings.Replace(result, "$0", model, -1)
-	for i, cap := range captures {
-		result = strings.Replace(result, fmt.Sprintf("$%d", i+1), cap, -1)
+func patternKey(entry ModelMapEntry) string {
+	if entry.UnescapedKey != "" {
+		return entry.UnescapedKey
 	}
-	return result
+	return entry.Key
+}
+
+func compileModelPattern(pattern string) *regexp.Regexp {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil
+	}
+	compiled, err := regexp.Compile("^(?:" + pattern + ")$")
+	if err != nil {
+		return nil
+	}
+	return compiled
+}
+
+func modelPatternMatches(pattern string, model string) bool {
+	compiled := compileModelPattern(pattern)
+	return compiled != nil && compiled.MatchString(model)
+}
+
+func ModelPatternMatches(pattern string, model string) bool {
+	return modelPatternMatches(pattern, model)
+}
+
+func isStaticModelPattern(pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	return !strings.ContainsAny(pattern, `*+?()[]{}|^$\\`)
+}
+
+func IsStaticModelPattern(pattern string) bool {
+	return isStaticModelPattern(pattern)
+}
+
+func (entry ModelMapEntry) Resolve(model string) string {
+	if !matchModelPattern(model, entry) {
+		return ""
+	}
+	return applyCaptureReplacement(model, entry)
 }
 
 func finalizeResolvedModelAndEffort(model string, requestedEffort string, enableSuffix bool) (string, string) {

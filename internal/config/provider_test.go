@@ -21,7 +21,7 @@ func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T)
 }
 
 func TestResolveModelAndEffortDoesNotParseSuffixWhenDisabled(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "*", Target: "claude-sonnet-4-5-low"}}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(".*", "claude-sonnet-4-5-low")}}
 
 	model, effort := p.ResolveModelAndEffort("gpt-5-high", false)
 	if model != "claude-sonnet-4-5-low" {
@@ -44,15 +44,55 @@ func TestResolveModelAndEffortUsesMappedSuffixWhenNoRequestSuffix(t *testing.T) 
 	}
 }
 
-func TestResolveModelSupportsTrailingWildcardCaptures(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-*", "azure-$1")}}
+func TestResolveModelSupportsRegexCaptures(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("mini(.*)o", "real-$0-$1")}}
 
-	model, effort := p.ResolveModelAndEffort("gpt-5", false)
-	if model != "azure-5" {
-		t.Fatalf("expected trailing wildcard to resolve to %q, got %q", "azure-5", model)
+	model, effort := p.ResolveModelAndEffort("mini2o", false)
+	if model != "real-mini2o-2" {
+		t.Fatalf("expected regex captures to resolve to %q, got %q", "real-mini2o-2", model)
 	}
 	if effort != "" {
-		t.Fatalf("expected no effort override for wildcard mapping, got %q", effort)
+		t.Fatalf("expected no effort override for regex mapping, got %q", effort)
+	}
+}
+
+func TestResolveModelOnlyExpandsSingleDigitRegexCaptures(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("mini(.*)o", "real-$0-$1-$9-$12")}}
+
+	model := p.ResolveModel("mini2o", false)
+	if model != "real-mini2o-2--$12" {
+		t.Fatalf("expected only $0-$9 captures to expand without ambiguous $12 handling, got %q", model)
+	}
+}
+
+func TestResolveModelKeepsEscapedCapturePlaceholdersLiteral(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("mini(.*)o", `real-\$1-$1-\$12-$12`)}}
+
+	model := p.ResolveModel("mini2o", false)
+	if model != "real-$1-2-$12-$12" {
+		t.Fatalf("expected escaped capture placeholders to stay literal, got %q", model)
+	}
+}
+
+func TestResolveModelKeepsSourcePatternAsStandardRegexp(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\.1`, "exact")}}
+
+	if got := p.ResolveModel("gpt-4.1", false); got != "exact" {
+		t.Fatalf("expected escaped regexp dot to match literal dot, got %q", got)
+	}
+	if got := p.ResolveModel("gpt-4x1", false); got != "gpt-4x1" {
+		t.Fatalf("expected escaped regexp dot not to match arbitrary char, got %q", got)
+	}
+}
+
+func TestResolveModelTreatsEscapedRegexpStarAsLiteralStar(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\*mini`, "literal-star")}}
+
+	if got := p.ResolveModel("gpt-4*mini", false); got != "literal-star" {
+		t.Fatalf("expected escaped regexp star to match literal star, got %q", got)
+	}
+	if got := p.ResolveModel("gpt-4ooooomini", false); got != "gpt-4ooooomini" {
+		t.Fatalf("expected escaped regexp star not to behave like wildcard, got %q", got)
 	}
 }
 
@@ -61,7 +101,7 @@ func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
 	providerEnvPath := filepath.Join(rootDir, "openai.env")
 	providerBody := strings.Join([]string{
 		"PROVIDER_ID=openai",
-		"HIDDEN_MODELS=gpt-4*,manual-alpha,claude-sonnet",
+		"HIDDEN_MODELS=gpt-4.*,manual-alpha,claude-sonnet",
 		"",
 	}, "\n")
 	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
@@ -72,26 +112,26 @@ func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadProviderFile returned error: %v", err)
 	}
-	if want := []string{"gpt-4*", "manual-alpha", "claude-sonnet"}; len(provider.HiddenModels) != len(want) {
+	if want := []string{"gpt-4.*", "manual-alpha", "claude-sonnet"}; len(provider.HiddenModels) != len(want) {
 		t.Fatalf("expected hidden models %v, got %#v", want, provider.HiddenModels)
 	}
-	for i, want := range []string{"gpt-4*", "manual-alpha", "claude-sonnet"} {
+	for i, want := range []string{"gpt-4.*", "manual-alpha", "claude-sonnet"} {
 		if provider.HiddenModels[i] != want {
 			t.Fatalf("expected hidden model %q at index %d, got %#v", want, i, provider.HiddenModels)
 		}
 	}
 	if !provider.HidesModel("gpt-4o") || !provider.HidesModel("manual-alpha") || provider.HidesModel("gpt-5") {
-		t.Fatalf("expected hidden model matcher to honor wildcard and exact patterns")
+		t.Fatalf("expected hidden model matcher to honor regex and exact patterns")
 	}
 }
 
 func TestManualModelsOverrideHiddenModels(t *testing.T) {
 	provider := ProviderConfig{
 		ManualModels: []string{"manual-alpha"},
-		HiddenModels: []string{"*"},
+		HiddenModels: []string{".*"},
 	}
 	if provider.HidesModel("manual-alpha") {
-		t.Fatalf("expected manual model to stay visible even when hidden wildcard matches")
+		t.Fatalf("expected manual model to stay visible even when hidden regex matches")
 	}
 	visible := provider.VisibleModelIDs()
 	if len(visible) != 1 || visible[0] != "manual-alpha" {
