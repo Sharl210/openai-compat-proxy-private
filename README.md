@@ -422,7 +422,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；`#re:` pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露
 - `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
-- `EXPOSE_REASONING_SUFFIX_MODELS`：让 `/models` 也把这些后缀变体展示给客户端
+- `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把 effort 自动翻译成 `thinking` / `output_config`
 
 当前实现里，**请求准入会遵循代理实际对外返回的 `/models` 列表**：
@@ -430,7 +430,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 默认分组 bare `/v1/*` 只允许请求当前 bare `/v1/models` 里可见的模型
 - 显式 `/{providerId}/v1/*` 也只允许请求该 provider 自己 `/models` 列表里可见的模型
 - 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
-- 如果同时开启了 `EXPOSE_REASONING_SUFFIX_MODELS=true`，那么 suffix 变体是否允许请求，也严格跟随 `/models` 里的可见结果
+- suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
 
 当前已验证的推理强度入口包括：
 
