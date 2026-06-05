@@ -85,7 +85,7 @@ func TestResolveModelKeepsSourcePatternAsStandardRegexp(t *testing.T) {
 	}
 }
 
-func TestResolveModelTreatsEscapedRegexpStarAsLiteralStar(t *testing.T) {
+func TestResolveModelTreatsRegexpEscapedStarAsLiteralStar(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\*mini`, "literal-star")}}
 
 	if got := p.ResolveModel("gpt-4*mini", false); got != "literal-star" {
@@ -93,6 +93,17 @@ func TestResolveModelTreatsEscapedRegexpStarAsLiteralStar(t *testing.T) {
 	}
 	if got := p.ResolveModel("gpt-4ooooomini", false); got != "gpt-4ooooomini" {
 		t.Fatalf("expected escaped regexp star not to behave like wildcard, got %q", got)
+	}
+}
+
+func TestResolveModelTreatsEscapedBackslashThenEscapedStarAsLiteralBackslashStar(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\\\*mini`, "literal-backslash-star")}}
+
+	if got := p.ResolveModel(`gpt-4\*mini`, false); got != "literal-backslash-star" {
+		t.Fatalf("expected escaped backslash plus escaped star to match literal backslash-star, got %q", got)
+	}
+	if got := p.ResolveModel("gpt-4*mini", false); got != "gpt-4*mini" {
+		t.Fatalf("expected backslash-star regexp not to match bare literal star, got %q", got)
 	}
 }
 
