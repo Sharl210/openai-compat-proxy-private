@@ -355,6 +355,22 @@ func TestDecodeRequestPreservesPreviousResponseIDMetadataParallelToolCallsTrunca
 	}
 }
 
+func TestDecodeRequestPreservesPromptCacheKey(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"prompt_cache_key":"client-session-key",
+		"input":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if got, _ := canon.PreservedTopLevelFields["prompt_cache_key"].(string); got != "client-session-key" {
+		t.Fatalf("expected prompt_cache_key preserved, got %#v", canon.PreservedTopLevelFields)
+	}
+}
+
 func TestDecodeRequestPreservesPreviousResponseIDMetadataParallelToolCallsTruncationAndTextThroughUpstreamConstruction(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
