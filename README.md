@@ -576,16 +576,19 @@ Claude 相关还有两个配套开关：
 5. **`cache_control` 现在区分“同端点透传”和“跨协议兼容”两种语义**  
 当 `/v1/messages` 直接对接 `anthropic` 上游时，代理会把消息内容块和 system block 里的 `cache_control` 一并继续传给上游；纯字符串 system 仍保持字符串形态。跨协议转换时，`cache_control` 仍然只是兼容输入，不承诺翻译成真正的 Anthropic prompt caching 语义。
 
-6. **chat 上游的思维标签当前支持三种写法**
+6. **Responses 上游会补齐缺失的 `prompt_cache_key`**  
+   当目标上游是 `responses`，且客户端没有显式传入 `prompt_cache_key` 时，代理会基于模型、系统提示、工具定义和输入前缀生成不含原文的稳定缓存键，用来提升同前缀请求的缓存路由命中概率；如果客户端已传该字段，代理会原样保留。该字段不会透传到 `chat` 或 `anthropic` 上游，也不承诺上游一定命中缓存。
+
+7. **chat 上游的思维标签当前支持三种写法**
    当 `UPSTREAM_THINKING_TAG_STYLE=true` 时，代理会把 `<think>`、`<thinking>`、`<reasoning>` 识别为 reasoning 内容，再按目标下游协议重写。
 
-7. **chat 上游的 XML 工具调用兼容默认开启**
+8. **chat 上游的 XML 工具调用兼容默认开启**
    当 `UPSTREAM_XML_TOOL_CALL_STYLE=true` 时，代理只会把完整的 `<tool_call><function=...><parameter=...>...</parameter></function></tool_call>` 正文恢复成结构化工具调用；如果上游不会产生这类 XML 工具调用文本，可以显式设置为 `false`。
 
-8. **`/v1/responses/compact` 是 Responses 专用非流端点，不支持 `stream=true`**
+9. **`/v1/responses/compact` 是 Responses 专用非流端点，不支持 `stream=true`**
    仅在 provider 的 `UPSTREAM_ENDPOINT_TYPE=responses` 时可用；请求 `stream=true` 或上游不是 `responses` 类型时直接返回 `400`。成功时直接返回上游原始 JSON，不再走聚合归一逻辑。
 
-9. **普通 `/v1/responses` SSE 流现可携带 compaction items 和 opaque `encrypted_content`**
+10. **普通 `/v1/responses` SSE 流现可携带 compaction items 和 opaque `encrypted_content`**
    这些字段不会被代理层解析或丢弃，会完整透传给下游客户端。
 
 ---
