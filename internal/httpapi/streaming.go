@@ -37,6 +37,8 @@ type anthropicStreamState struct {
 	textStarted       bool
 	textIndex         int
 	textStopped       bool
+	textRealSeen      bool
+	pendingTextBlank  string
 	thinkingStarted   bool
 	thinkingStopped   bool
 	signatureSent     bool
@@ -1328,6 +1330,21 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			},
 		})
 	}
+	writeTextDelta := func(delta string) error {
+		return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": state.textIndex,
+			"delta": map[string]any{"type": "text_delta", "text": delta},
+		})
+	}
+	flushPendingTextBlank := func() error {
+		if state.pendingTextBlank == "" {
+			return nil
+		}
+		blank := state.pendingTextBlank
+		state.pendingTextBlank = ""
+		return writeTextDelta(blank)
+	}
 	startThinkingBlock := func() error {
 		if state.thinkingStarted && !state.thinkingStopped {
 			return nil
@@ -1519,11 +1536,19 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if delta == "" {
 			return nil
 		}
-		return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
-			"type":  "content_block_delta",
-			"index": state.textIndex,
-			"delta": map[string]any{"type": "text_delta", "text": delta},
-		})
+		if strings.TrimSpace(delta) == "" {
+			state.pendingTextBlank += delta
+			return nil
+		}
+		if state.textRealSeen {
+			if err := flushPendingTextBlank(); err != nil {
+				return err
+			}
+		} else {
+			state.pendingTextBlank = ""
+		}
+		state.textRealSeen = true
+		return writeTextDelta(delta)
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
 		if block := firstReasoningBlock(evt.Data); len(block) > 0 {
 			if blockType, _ := block["type"].(string); blockType != "" {
@@ -1576,6 +1601,13 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		if !state.textRealSeen {
+			if err := flushPendingTextBlank(); err != nil {
+				return err
+			}
+		} else {
+			state.pendingTextBlank = ""
+		}
 		if err := closeTextBlock(state, w, flusher); err != nil {
 			return err
 		}
