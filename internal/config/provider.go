@@ -41,6 +41,8 @@ type ProviderConfig struct {
 	EnableReasoningEffortSuffix            bool
 	ExposeReasoningSuffixModels            bool
 	MapReasoningSuffixToAnthropicThinking  bool
+	EnableNoPromptModelSuffix              bool
+	EnableNoPromptModelSuffixSet           bool
 	UpstreamFirstByteTimeout               time.Duration
 	UpstreamRetryCount                     int
 	UpstreamRetryDelay                     time.Duration
@@ -84,6 +86,8 @@ const (
 )
 
 const (
+	manualReasonSuffixPrefix = "#reason_suffix:"
+
 	UpstreamThinkingTagStyleOff    = "off"
 	UpstreamThinkingTagStyleLegacy = "legacy"
 	UpstreamXMLToolCallStyleOff    = "off"
@@ -251,6 +255,16 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+		case "ENABLE_NOPROMPT_MODEL_SUFFIX":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			parsed, parseErr := parseProviderStrictBool(value, key, path)
+			if parseErr != nil {
+				return ProviderConfig{}, parseErr
+			}
+			provider.EnableNoPromptModelSuffixSet = true
+			provider.EnableNoPromptModelSuffix = parsed
 		case "UPSTREAM_FIRST_BYTE_TIMEOUT":
 			parsed, err := parseProviderPositiveDuration(value, "UPSTREAM_FIRST_BYTE_TIMEOUT", path)
 			if err != nil {
@@ -362,6 +376,13 @@ func (p ProviderConfig) EffectiveDownstreamNonStreamStrategy(rootStrategy string
 		return p.DownstreamNonStreamStrategyOverride
 	}
 	return rootStrategy
+}
+
+func (p ProviderConfig) EffectiveNoPromptModelSuffix(rootEnabled bool) bool {
+	if p.EnableNoPromptModelSuffixSet {
+		return p.EnableNoPromptModelSuffix
+	}
+	return rootEnabled
 }
 
 func (p ProviderConfig) UsesUpstreamNonStreamForDownstreamNonStream(rootStrategy string) bool {
@@ -759,6 +780,7 @@ func (p ProviderConfig) ResolveModel(model string, enableSuffix bool) string {
 }
 
 func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (string, string) {
+	enableSuffix = enableSuffix || (p.HasManualReasonSuffixForModel(model) && !p.HasLiteralManualModel(model))
 	requestedModel := model
 	requestedEffort := ""
 	if enableSuffix {
@@ -776,6 +798,69 @@ func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (
 		}
 	}
 	return finalizeResolvedModelAndEffort(requestedModel, requestedEffort, enableSuffix)
+}
+
+func (p ProviderConfig) HasLiteralManualModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, manualModel := range p.ManualModels {
+		manualModel = strings.TrimSpace(manualModel)
+		if manualModel == "" || strings.HasPrefix(manualModel, manualReasonSuffixPrefix) || !isStaticModelPattern(manualModel) {
+			continue
+		}
+		if manualModel == model {
+			return true
+		}
+	}
+	return false
+}
+
+func (p ProviderConfig) HasManualReasonSuffixForModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	baseModel := model
+	if stripped, _, ok := splitReasoningSuffix(model); ok {
+		baseModel = stripped
+	}
+	for _, manualModel := range p.ManualModels {
+		manualBase, ok := manualReasonSuffixBase(manualModel)
+		if ok && manualBase == baseModel {
+			return true
+		}
+	}
+	return false
+}
+
+func (p ProviderConfig) ManualReasonSuffixModelIDs() []string {
+	ids := []string{}
+	seen := map[string]struct{}{}
+	for _, manualModel := range p.ManualModels {
+		manualBase, ok := manualReasonSuffixBase(manualModel)
+		if !ok {
+			continue
+		}
+		for _, id := range reasoning.ExpandModelIDs([]string{manualBase}, nil, true) {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func manualReasonSuffixBase(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(trimmed, manualReasonSuffixPrefix) {
+		return "", false
+	}
+	base := strings.TrimSpace(strings.TrimPrefix(trimmed, manualReasonSuffixPrefix))
+	return base, base != "" && isStaticModelPattern(base)
 }
 
 func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
@@ -798,6 +883,21 @@ func (p ProviderConfig) HidesModel(model string) bool {
 	for _, manualModel := range p.ManualModels {
 		manualModel = strings.TrimSpace(manualModel)
 		if manualModel == "" {
+			continue
+		}
+		if manualBase, ok := manualReasonSuffixBase(manualModel); ok {
+			if model == manualBase {
+				return false
+			}
+			if baseModel, _, suffixOK := reasoning.SplitSuffix(model); suffixOK && baseModel == manualBase {
+				for _, pattern := range p.HiddenModels {
+					pattern = strings.TrimSpace(pattern)
+					if modelPatternMatches(pattern, model) {
+						return true
+					}
+				}
+				return false
+			}
 			continue
 		}
 		if modelPatternMatches(manualModel, model) {
@@ -841,6 +941,16 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 	}
 	for _, manualModel := range p.ManualModels {
 		id := strings.TrimSpace(manualModel)
+		if manualBase, ok := manualReasonSuffixBase(id); ok {
+			for _, expandedID := range reasoning.ExpandModelIDs([]string{manualBase}, nil, true) {
+				if _, ok := seen[expandedID]; ok || p.HidesModel(expandedID) {
+					continue
+				}
+				seen[expandedID] = struct{}{}
+				base = append(base, expandedID)
+			}
+			continue
+		}
 		if id == "" || !isStaticModelPattern(id) {
 			continue
 		}
@@ -1007,7 +1117,7 @@ func finalizeResolvedModelAndEffort(model string, requestedEffort string, enable
 }
 
 func splitReasoningSuffix(modelName string) (string, string, bool) {
-	supportedSuffixes := []string{"-xhigh", "-medium", "-high", "-low"}
+	supportedSuffixes := []string{"-minimal", "-xhigh", "-medium", "-high", "-low", "-none"}
 	for _, suffix := range supportedSuffixes {
 		if len(modelName) > len(suffix) && modelName[len(modelName)-len(suffix):] == suffix {
 			return modelName[:len(modelName)-len(suffix)], suffix[1:], true

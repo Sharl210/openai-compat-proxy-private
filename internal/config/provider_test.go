@@ -44,6 +44,76 @@ func TestResolveModelAndEffortUsesMappedSuffixWhenNoRequestSuffix(t *testing.T) 
 	}
 }
 
+func TestResolveModelAndEffortSupportsNoneSuffix(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5-high"}}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5-none", true)
+	if model != "claude-sonnet-4-5" {
+		t.Fatalf("expected mapped model without suffix, got %q", model)
+	}
+	if effort != "none" {
+		t.Fatalf("expected request suffix none to win, got %q", effort)
+	}
+}
+
+func TestResolveModelAndEffortSupportsMinimalSuffix(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5"}}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5-minimal", true)
+	if model != "claude-sonnet-4-5" {
+		t.Fatalf("expected mapped model without suffix, got %q", model)
+	}
+	if effort != "minimal" {
+		t.Fatalf("expected request suffix minimal to win, got %q", effort)
+	}
+}
+
+func TestResolveModelAndEffortManualReasonSuffixWorksWhenSuffixFlagDisabled(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5.5-minimal", false)
+	if model != "gpt-5.5" {
+		t.Fatalf("expected manual reason suffix family to strip to base model, got %q", model)
+	}
+	if effort != "minimal" {
+		t.Fatalf("expected manual reason suffix family to resolve minimal effort, got %q", effort)
+	}
+}
+
+func TestResolveModelAndEffortLiteralManualSuffixOverridesFamilyWhenSuffixFlagDisabled(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5", "gpt-5.5-low"}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5.5-low", false)
+	if model != "gpt-5.5-low" {
+		t.Fatalf("expected literal manual suffix model to stay intact when suffix flag is disabled, got %q", model)
+	}
+	if effort != "" {
+		t.Fatalf("expected literal manual suffix model to avoid effort parsing, got %q", effort)
+	}
+}
+
+func TestResolveModelAndEffortParsesLiteralManualSuffixWhenSuffixFlagEnabled(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5", "gpt-5.5-low"}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5.5-low", true)
+	if model != "gpt-5.5" {
+		t.Fatalf("expected suffix-enabled literal manual model to strip to base model, got %q", model)
+	}
+	if effort != "low" {
+		t.Fatalf("expected suffix-enabled literal manual model to resolve low effort, got %q", effort)
+	}
+}
+
+func TestVisibleModelIDsExpandsManualReasonSuffixFamilyIndependentOfSuffixFlags(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}}
+
+	got := p.VisibleModelIDs()
+	want := []string{"gpt-5.5", "gpt-5.5-minimal", "gpt-5.5-xhigh", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-low", "gpt-5.5-none"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected manual reason suffix family expansion, want %v got %v", want, got)
+	}
+}
+
 func TestResolveModelTreatsUnmarkedPatternAsLiteral(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.5", "real")}}
 
