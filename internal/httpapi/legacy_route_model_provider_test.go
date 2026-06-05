@@ -48,7 +48,7 @@ func TestLegacyChatRouteAppliesRootV1ModelMapBeforeDefaultProviderSelection(t *t
 	defer beta.Close()
 
 	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
-	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("alias-(alpha)", "$1-chat")}
+	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("#re:alias-(alpha)", "$1-chat")}
 	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias-alpha","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -451,7 +451,7 @@ func TestLegacyResponsesRouteRejectsUntaggedOverlappingModelWhenTagModeEnabled(t
 	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
 	cfg.EnableDefaultProviderModelTags = true
 	cfg.Providers[1].ModelMap = []config.ModelMapEntry{
-		config.NewModelMapEntry("owned-(.*)", "beta-$1-upstream"),
+		config.NewModelMapEntry("#re:owned-(.*)", "beta-$1-upstream"),
 	}
 	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"owned-5","input":"hello"}`))
@@ -646,7 +646,7 @@ func testLegacyModelRoutingConfig(alphaURL, betaURL string) config.Config {
 				ModelMap: []config.ModelMapEntry{
 					config.NewModelMapEntry("alpha-chat", "alpha-chat-upstream"),
 					config.NewModelMapEntry("alpha-message", "alpha-message-upstream"),
-					config.NewModelMapEntry("owned-(.*)", "alpha-$1-upstream"),
+					config.NewModelMapEntry("#re:owned-(.*)", "alpha-$1-upstream"),
 				},
 			},
 			{

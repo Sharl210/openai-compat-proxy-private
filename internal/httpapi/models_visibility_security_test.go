@@ -39,7 +39,7 @@ func TestSecurity_DefaultGroupRejectsRegexOnlyMappingOutsideVisibleModels(t *tes
 	defer beta.Close()
 
 	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
-	cfg.Providers[0].ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("owned-(.*)", "alpha-$1-upstream")}
+	cfg.Providers[0].ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("#re:owned-(.*)", "alpha-$1-upstream")}
 	cfg.Providers[0].ManualModels = []string{"visible-alpha"}
 	cfg.Providers[1].ModelMap = nil
 	server := NewServer(cfg)
@@ -109,7 +109,7 @@ func TestSecurity_ExplicitProviderHiddenUpstreamModelCannotBeRequested(t *testin
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
 			SupportsModels:       true,
-			HiddenModels:         []string{"admin-.*"},
+			HiddenModels:         []string{"#re:admin-.*"},
 		}},
 	})
 
@@ -176,7 +176,7 @@ func TestSecurity_BareSingleDefaultProviderRejectsHiddenUpstreamModelRequest(t *
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
 			SupportsModels:       true,
-			HiddenModels:         []string{"admin-.*"},
+			HiddenModels:         []string{"#re:admin-.*"},
 		}},
 	})
 

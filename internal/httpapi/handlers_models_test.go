@@ -15,7 +15,7 @@ func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersRegexAliases(t *testi
 	provider := config.ProviderConfig{
 		ModelMap: []config.ModelMapEntry{
 			config.NewModelMapEntry("public-gpt", "gpt-5.4"),
-			config.NewModelMapEntry(".*", "gpt-5.4"),
+			config.NewModelMapEntry("#re:.*", "gpt-5.4"),
 		},
 	}
 
@@ -155,7 +155,7 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 			SupportsModels:  true,
 			ModelMap: []config.ModelMapEntry{
 				config.NewModelMapEntry("public-gpt", "gpt-5.4"),
-				config.NewModelMapEntry(".*", "gpt-5.4"),
+				config.NewModelMapEntry("#re:.*", "gpt-5.4"),
 			},
 		}},
 	})
@@ -278,7 +278,7 @@ func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
 			{Key: "public-gpt", Target: "gpt-5"},
 		},
 		ManualModels: []string{"manual-alpha", "manual-beta"},
-		HiddenModels: []string{"gpt-4.*", "manual-alpha", "public-.*"},
+		HiddenModels: []string{"#re:gpt-4.*", "manual-alpha", "#re:public-.*"},
 	}
 
 	rewritten := rewriteModelsBody(body, provider)
@@ -302,7 +302,7 @@ func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
 
 func TestRewriteModelsBodyExpandsRegexManualModelsFromUpstreamList(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"1","object":"model"},{"id":"2","object":"model"},{"id":"2.4","object":"model"},{"id":"5","object":"model"}]}`)
-	provider := config.ProviderConfig{ManualModels: []string{"2.*"}}
+	provider := config.ProviderConfig{ManualModels: []string{"#re:2.*"}}
 
 	rewritten := rewriteModelsBody(body, provider)
 	var payload map[string]any
@@ -321,7 +321,7 @@ func TestRewriteModelsBodyExpandsRegexManualModelsFromUpstreamList(t *testing.T)
 }
 
 func TestConfiguredModelsFallbackSkipsRegexManualPatterns(t *testing.T) {
-	provider := config.ProviderConfig{ManualModels: []string{"2.*", "literal-model"}}
+	provider := config.ProviderConfig{ManualModels: []string{"#re:2.*", "literal-model"}}
 
 	body, ok := configuredModelsFallbackBody(provider)
 	if !ok {
@@ -346,7 +346,7 @@ func TestRewriteModelsBodyKeepsManualModelsEvenWhenHiddenRegexMatches(t *testing
 	body := []byte(`{"object":"list","data":[]}`)
 	provider := config.ProviderConfig{
 		ManualModels: []string{"manual-alpha"},
-		HiddenModels: []string{".*"},
+		HiddenModels: []string{"#re:.*"},
 	}
 
 	rewritten := rewriteModelsBody(body, provider)
