@@ -486,6 +486,72 @@ func TestExplicitProviderResponsesRouteAllowsReasoningSuffixWhenNotExposedInMode
 	}
 }
 
+func TestLegacyResponsesRouteAllowsReasoningSuffixForMappedTargetWhenNotExposedInModelsList(t *testing.T) {
+	var responsesHits atomic.Int32
+	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`))
+		case "/responses":
+			responsesHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":"resp_alpha","object":"response","status":"completed","output":[{"id":"msg_alpha","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"hello from alpha"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer alpha.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "alpha",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "alpha",
+			Enabled:              true,
+			UpstreamBaseURL:      alpha.URL,
+			UpstreamAPIKey:       "alpha-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"gpt-5.4-mini"},
+			ModelMap: []config.ModelMapEntry{
+				config.NewModelMapEntry("MiniMax-M2.7", "gpt-5.5-low"),
+				config.NewModelMapEntry("gpt-5.4", "gpt-5.5"),
+			},
+			EnableReasoningEffortSuffix: true,
+			ExposeReasoningSuffixModels: false,
+			HiddenModels:                []string{"#re:.*mini.*", "#re:.*5\\.4-.*"},
+		}},
+	})
+
+	allowedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-low","input":"hello"}`))
+	allowedReq.Header.Set("Content-Type", "application/json")
+	allowedRec := httptest.NewRecorder()
+	server.ServeHTTP(allowedRec, allowedReq)
+	if allowedRec.Code != http.StatusOK {
+		t.Fatalf("expected bare /v1 target suffix request to succeed even when suffix variants are hidden from /models, got %d body=%s", allowedRec.Code, allowedRec.Body.String())
+	}
+	if got := allowedRec.Header().Get("X-Client-To-Proxy-Reasoning-Effort"); got != "low" {
+		t.Fatalf("expected reasoning suffix effort low to be preserved, got %q", got)
+	}
+	if got := allowedRec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
+		t.Fatalf("expected upstream model to resolve to suffix base gpt-5.5, got %q", got)
+	}
+	if responsesHits.Load() != 1 {
+		t.Fatalf("expected one upstream responses hit, got %d", responsesHits.Load())
+	}
+
+	rejectedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4-high","input":"hello"}`))
+	rejectedReq.Header.Set("Content-Type", "application/json")
+	rejectedRec := httptest.NewRecorder()
+	server.ServeHTTP(rejectedRec, rejectedReq)
+	if rejectedRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected explicitly hidden public suffix alias to stay rejected, got %d body=%s", rejectedRec.Code, rejectedRec.Body.String())
+	}
+}
+
 func TestLegacyResponsesRealtimeModels429SurfacesUpstreamErrorInsteadOfInvalidModel(t *testing.T) {
 	var modelsHits atomic.Int32
 	var responsesHits atomic.Int32

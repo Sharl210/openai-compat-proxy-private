@@ -9,6 +9,7 @@ import (
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -422,7 +423,7 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 		if !ok {
 			continue
 		}
-		if modelEntriesContain(decodeModelEntries(body), model) {
+		if modelEntriesAllowModel(decodeModelEntries(body), model, provider) {
 			owner = providerID
 		}
 	}
@@ -444,6 +445,17 @@ func modelEntriesContain(entries []map[string]any, model string) bool {
 		}
 	}
 	return false
+}
+
+func modelEntriesAllowModel(entries []map[string]any, model string, provider config.ProviderConfig) bool {
+	if modelEntriesContain(entries, model) {
+		return true
+	}
+	baseModel, _, ok := reasoning.SplitSuffix(model)
+	if !ok || !provider.EnableReasoningEffortSuffix || provider.HidesModel(model) {
+		return false
+	}
+	return modelEntriesContain(entries, baseModel)
 }
 
 func taggedModelID(providerID string, modelID string) string {
