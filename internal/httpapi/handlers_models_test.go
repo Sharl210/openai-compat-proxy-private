@@ -136,6 +136,58 @@ func TestRewriteModelsBodyDoesNotExposeReasoningSuffixModelsWhenDisabled(t *test
 	}
 }
 
+func TestRewriteModelsBodyExpandsManualReasonSuffixFamilyIndependentOfExposeFlag(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"openai"}]}`)
+	provider := config.ProviderConfig{
+		ManualModels:                []string{"#reason_suffix:gpt-5.5"},
+		EnableReasoningEffortSuffix: false,
+		ExposeReasoningSuffixModels: false,
+	}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	for _, want := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-minimal", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if !contains(ids, want) {
+			t.Fatalf("expected manual reason suffix family model %q in rewritten models, got %#v", want, ids)
+		}
+	}
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		if entry["id"] == "#reason_suffix:gpt-5.5" {
+			t.Fatalf("expected marker to stay hidden from /models, got %#v", ids)
+		}
+	}
+}
+
+func TestRewriteModelsBodyKeepsManualNoPromptModelLiteral(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`)
+	provider := config.ProviderConfig{ManualModels: []string{"gpt-5.5-noprompt"}}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if !contains(ids, "gpt-5.5-noprompt") {
+		t.Fatalf("expected manually added noprompt model to be visible literally, got %#v", ids)
+	}
+}
+
 func TestModelsUpstreamHTTPErrorMarksFailedStatus(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

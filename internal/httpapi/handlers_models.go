@@ -240,7 +240,8 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		}
 	}
 	for _, manualModel := range provider.ManualModels {
-		if strings.TrimSpace(manualModel) == "" {
+		manualModel = strings.TrimSpace(manualModel)
+		if manualModel == "" || strings.HasPrefix(manualModel, "#reason_suffix:") {
 			continue
 		}
 		if !config.IsStaticModelPattern(manualModel) {
@@ -249,6 +250,15 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		if _, exists := seenIDs[manualModel]; !exists {
 			baseIDs = append(baseIDs, manualModel)
 			seenIDs[manualModel] = struct{}{}
+		}
+	}
+	for _, id := range provider.ManualReasonSuffixModelIDs() {
+		if strings.TrimSpace(id) == "" || provider.HidesModel(id) {
+			continue
+		}
+		if _, exists := seenIDs[id]; !exists {
+			baseIDs = append(baseIDs, id)
+			seenIDs[id] = struct{}{}
 		}
 	}
 	expanded := baseIDs
