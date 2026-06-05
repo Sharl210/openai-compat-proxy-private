@@ -9,7 +9,7 @@ import (
 
 func applyProviderSystemPrompt(req *model.CanonicalRequest, provider config.ProviderConfig) {
 	promptText := provider.SystemPromptText
-	if req == nil || promptText == "" {
+	if req == nil || promptText == "" || req.SkipProviderSystemPrompt {
 		return
 	}
 	position := config.SystemPromptPositionPrepend

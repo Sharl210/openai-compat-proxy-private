@@ -113,6 +113,20 @@ func TestApplyProviderSystemPromptCreatesInstructionsWhenRequestHasNoSystemPromp
 	}
 }
 
+func TestApplyProviderSystemPromptSkipsWhenRequestDisablesProviderPrompt(t *testing.T) {
+	req := model.CanonicalRequest{Instructions: "user system", SkipProviderSystemPrompt: true}
+	provider := config.ProviderConfig{
+		SystemPromptText:     "provider system",
+		SystemPromptPosition: config.SystemPromptPositionPrepend,
+	}
+
+	applyProviderSystemPrompt(&req, provider)
+
+	if req.Instructions != "user system" {
+		t.Fatalf("expected provider prompt injection to be skipped, got %q", req.Instructions)
+	}
+}
+
 func TestApplyProviderSystemPromptIsNoOpWhenProviderPromptBlank(t *testing.T) {
 	req := model.CanonicalRequest{
 		Instructions: "user system",

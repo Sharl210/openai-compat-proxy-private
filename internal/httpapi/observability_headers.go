@@ -16,6 +16,7 @@ const (
 	headerClientToProxyServiceTier           = "X-Client-To-Proxy-Service-Tier"
 	headerClientToProxyReasoningParameters   = "X-Client-To-Proxy-Reasoning-Parameters"
 	headerClientToProxyReasoningEffort       = "X-Client-To-Proxy-Reasoning-Effort"
+	headerClientToProxyNoPrompt              = "X-Client-To-Proxy-NoPrompt"
 	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
 	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
@@ -223,6 +224,9 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg confi
 	if value := strings.TrimSpace(clientReasoningEffort); value != "" {
 		w.Header().Set(headerClientToProxyReasoningEffort, value)
 	}
+	if canon.SkipProviderSystemPrompt {
+		w.Header().Set(headerClientToProxyNoPrompt, "true")
+	}
 	if value := strings.TrimSpace(preview.UpstreamModel); value != "" {
 		w.Header().Set(headerProxyToUpstreamModel, value)
 	}
@@ -247,6 +251,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerClientToProxyServiceTier,
 		headerClientToProxyReasoningParameters,
 		headerClientToProxyReasoningEffort,
+		headerClientToProxyNoPrompt,
 		headerProxyToUpstreamModel,
 		headerProxyToUpstreamServiceTier,
 		headerProxyToUpstreamMaxOutputTokens,

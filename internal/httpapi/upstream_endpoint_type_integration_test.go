@@ -828,6 +828,159 @@ func TestResponsesRouteAppendsProviderPromptIntoResponsesUpstreamInstructions(t 
 	}
 }
 
+func TestResponsesRouteNoPromptSuffixSkipsProviderPromptAndKeepsReasoningSuffix(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses upstream"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsChat:                true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+			SystemPromptText:            "provider system",
+			SystemPromptPosition:        config.SystemPromptPositionAppend,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-low-noprompt","instructions":"user instructions","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
+		t.Fatalf("expected noprompt suffix to be stripped before upstream model resolution, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5-low" {
+		t.Fatalf("expected client model observability header to show effective client model without noprompt marker, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected noprompt observability header true, got %q", got)
+	}
+	if got := rec.Header().Get("X-Client-To-Proxy-Reasoning-Effort"); got != "low" {
+		t.Fatalf("expected reasoning suffix effort low to be preserved, got %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["instructions"].(string); got != "user instructions" {
+		t.Fatalf("expected provider prompt to be skipped while client instructions remain, got %#v body=%s", payload["instructions"], gotBody)
+	}
+}
+
+func TestResponsesRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses upstream"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+			ManualModels:         []string{"gpt-5.5"},
+			SystemPromptText:     "provider system",
+			SystemPromptPosition: config.SystemPromptPositionAppend,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-noprompt","instructions":"user instructions","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
+		t.Fatalf("expected noprompt suffix to be stripped before upstream model resolution, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5" {
+		t.Fatalf("expected client model observability header to show effective client model without noprompt marker, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected noprompt observability header true, got %q", got)
+	}
+	if got := rec.Header().Get("X-Client-To-Proxy-Reasoning-Effort"); got != "" {
+		t.Fatalf("expected no reasoning effort when request only has noprompt suffix, got %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["instructions"].(string); got != "user instructions" {
+		t.Fatalf("expected provider prompt to be skipped while client instructions remain, got %#v body=%s", payload["instructions"], gotBody)
+	}
+}
+
+func TestResponsesRouteNoPromptSuffixIsLiteralWhenDisabled(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   false,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsChat:                true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+			SystemPromptText:            "provider system",
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-low-noprompt","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected disabled noprompt suffix to be treated as a literal unavailable model, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestChatRouteUsesProviderPromptAsSystemMessageWhenClientHasNoInstructionRole(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

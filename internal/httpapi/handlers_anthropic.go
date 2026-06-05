@@ -28,6 +28,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
+			applyNoPromptModelSuffix(&canon, snapshot.Config)
+		}
 		clientModel := canon.Model
 		provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 		if !ok {
