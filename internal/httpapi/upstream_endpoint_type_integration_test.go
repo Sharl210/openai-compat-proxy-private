@@ -945,6 +945,63 @@ func TestResponsesRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 	}
 }
 
+func TestExplicitResponsesRouteManualNoPromptModelStillActsAsProxySuffix(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		if r.URL.Path == "/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		EnableNoPromptModelSuffix: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "test",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"gpt-5.5-noprompt"},
+			SystemPromptText:     "provider system",
+			SystemPromptPosition: config.SystemPromptPositionAppend,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/test/v1/responses", strings.NewReader(`{"model":"gpt-5.5-noprompt","instructions":"user instructions","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected manual noprompt model to still set noprompt header true, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5" {
+		t.Fatalf("expected client model header to show stripped model, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
+		t.Fatalf("expected upstream model to strip noprompt suffix, got %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["instructions"].(string); got != "user instructions" {
+		t.Fatalf("expected provider prompt to be skipped while client instructions remain, got %#v body=%s", payload["instructions"], gotBody)
+	}
+}
+
 func TestResponsesRouteNoneReasoningSuffixDisablesReasoning(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

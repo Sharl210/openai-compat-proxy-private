@@ -437,6 +437,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
 - suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` / `model-none` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
 - `#reason_suffix:model` 是手动 family 例外：即使 `ENABLE_REASONING_EFFORT_SUFFIX=false` 或 `EXPOSE_REASONING_SUFFIX_MODELS=false`，它仍会把该 base model 的推理后缀家族放进 `/models` 并允许请求；极端情况下，如果 `ENABLE_REASONING_EFFORT_SUFFIX=false` 且 `MANUAL_MODELS` 同时写了 `#reason_suffix:gpt-5.5` 和字面 `gpt-5.5-low`，字面模型优先，`gpt-5.5-low` 会按 provider 原生模型处理；如果 `ENABLE_REASONING_EFFORT_SUFFIX=true`，同名 suffix 仍按可解析推理后缀处理
+- `HIDDEN_MODELS` 的 `#re:` 是按完整模型名做普通 Go regexp 匹配，不理解“模型名”和“后缀强度”的语义边界；因此 `#re:.*mini.*` 会同时隐藏 `gpt-5.4-mini` 和 `gpt-5.5-minimal`。如果只想隐藏 `mini` 模型而保留 `-minimal` 推理强度，建议写成更精确的规则，例如 `#re:.*(^|-|:)mini($|-|\.).*`，或者直接列出要隐藏的字面模型。
 - `-noprompt` 是另一个代理层后缀：默认开启时，`gpt-5.5-noprompt` 会按 `gpt-5.5` 路由，`gpt-5.5-low-noprompt` 会按 `gpt-5.5-low` 路由并保留 `low` 推理强度，同时跳过 provider prompt 注入；provider 级 `ENABLE_NOPROMPT_MODEL_SUFFIX=false` 会让该 provider 把 `-noprompt` 当普通模型名处理；`HIDDEN_MODELS=gpt-5.5-noprompt` 可以隐藏并禁用该 noprompt 变体；响应头 `X-Client-To-Proxy-NoPrompt: true` 表示该标记已生效，`false` 表示客户端带了 `-noprompt` 但有效配置关闭了该能力，`X-Proxy-To-Upstream-Model` 仍显示最终发给上游的模型名
 
 当前已验证的推理强度入口包括：
