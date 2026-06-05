@@ -1121,7 +1121,8 @@ func TestAnthropicRouteForwardsSuccessfulToolResultWithNullErrorToResponsesUpstr
 		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
 	}
 	input, _ := payload["input"].([]any)
-	var sawFunctionCall, sawFunctionOutput bool
+	var sawFunctionCall bool
+	functionOutputCount := 0
 	for _, raw := range input {
 		item, _ := raw.(map[string]any)
 		switch item["type"] {
@@ -1131,11 +1132,11 @@ func TestAnthropicRouteForwardsSuccessfulToolResultWithNullErrorToResponsesUpstr
 			}
 		case "function_call_output":
 			if item["call_id"] == "call_1" && strings.Contains(stringValue(item["output"]), `"error":null`) {
-				sawFunctionOutput = true
+				functionOutputCount++
 			}
 		}
 	}
-	if !sawFunctionCall || !sawFunctionOutput {
+	if !sawFunctionCall || functionOutputCount != 1 {
 		t.Fatalf("expected function_call and function_call_output in responses upstream input, got %s", gotBody)
 	}
 }

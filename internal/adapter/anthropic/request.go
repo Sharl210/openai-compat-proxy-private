@@ -104,9 +104,6 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		}
 		if len(orderedContent) > 0 {
 			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, OrderedContent: orderedContent, Parts: parts, ToolCalls: toolCalls, ReasoningBlocks: reasoningBlocks})
-			for _, toolResult := range toolResults {
-				canon.Messages = append(canon.Messages, toolResult)
-			}
 			continue
 		}
 		if msg.Role == "user" && len(toolResults) > 0 {

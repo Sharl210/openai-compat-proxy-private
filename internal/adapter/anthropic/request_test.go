@@ -108,8 +108,8 @@ func TestDecodeRequestPreservesToolResultCacheControl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
-	if len(canon.Messages) != 2 {
-		t.Fatalf("expected canonical user message plus compatibility tool message, got %#v", canon.Messages)
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected canonical user message with ordered tool_result only, got %#v", canon.Messages)
 	}
 	blocks := canon.Messages[0].OrderedContent
 	if len(blocks) != 3 {
@@ -330,7 +330,7 @@ func TestDecodeRequestPreservesToolResultMultimodalContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
-	if len(canon.Messages) != 2 || canon.Messages[0].Role != "user" || canon.Messages[1].Role != "tool" {
+	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
 		t.Fatalf("expected tool result message, got %#v", canon.Messages)
 	}
 	if len(canon.Messages[0].OrderedContent) != 1 || canon.Messages[0].OrderedContent[0].Type != "tool_result" {
@@ -368,8 +368,8 @@ func TestDecodeRequestKeepsToolResultAheadOfTrailingUserText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
-	if len(canon.Messages) != 3 {
-		t.Fatalf("expected assistant, ordered user, and compatibility tool messages, got %#v", canon.Messages)
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected assistant and ordered user messages, got %#v", canon.Messages)
 	}
 	if len(canon.Messages[1].OrderedContent) != 2 {
 		t.Fatalf("expected ordered tool_result plus trailing text, got %#v", canon.Messages[1])
