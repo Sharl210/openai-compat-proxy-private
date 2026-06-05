@@ -414,6 +414,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `HIDDEN_MODELS` 手动隐藏模型（支持 `#re:` 正则）
 - `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-low/-medium/-high/-xhigh`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
+- `ENABLE_NOPROMPT_MODEL_SUFFIX=true` 后解析 `-noprompt` 代理层标记，用来跳过 provider prompt 注入
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix 或请求体里解析出的 effort 自动映射到 Anthropic thinking
 
 这些变量的实际含义：
@@ -423,6 +424,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
+- `ENABLE_NOPROMPT_MODEL_SUFFIX`：允许像 `model-noprompt`、`model-low-noprompt` 这样的请求跳过 provider 级 `SYSTEM_PROMPT_FILES` 注入；`-noprompt` 会先从模型名剥离，不会出现在上游模型名里，也不会额外出现在 `/models` 列表里
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把 effort 自动翻译成 `thinking` / `output_config`
 
 当前实现里，**请求准入会遵循代理实际对外返回的 `/models` 列表**：
@@ -431,6 +433,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 显式 `/{providerId}/v1/*` 也只允许请求该 provider 自己 `/models` 列表里可见的模型
 - 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
 - suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
+- `-noprompt` 是另一个代理层后缀：默认开启时，`gpt-5.5-noprompt` 会按 `gpt-5.5` 路由，`gpt-5.5-low-noprompt` 会按 `gpt-5.5-low` 路由并保留 `low` 推理强度，同时跳过 provider prompt 注入；响应头 `X-Client-To-Proxy-NoPrompt: true` 表示该标记已生效，`X-Proxy-To-Upstream-Model` 仍显示最终发给上游的模型名
 
 当前已验证的推理强度入口包括：
 
@@ -532,7 +535,7 @@ Claude 相关还有两个配套开关：
 
 | 字段组 | 例子 | 热加载 |
 |---|---|---|
-| 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`V1_MODEL_MAP`、`ENABLE_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
+| 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`V1_MODEL_MAP`、`ENABLE_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_NOPROMPT_MODEL_SUFFIX`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
 | 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
