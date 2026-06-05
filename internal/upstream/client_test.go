@@ -2105,6 +2105,84 @@ func TestBuildResponsesRequestBodyPrefersCanonicalMessagesForCacheStableToolSequ
 	assertJSONEqual(t, gotPayload["input"], wantPayload["input"])
 }
 
+func TestBuildResponsesRequestBodyAutoFillsPromptCacheKeyWhenMissing(t *testing.T) {
+	req := model.CanonicalRequest{
+		Model:        "gpt-5.5",
+		Instructions: "stable system prompt",
+		Tools: []model.CanonicalTool{{
+			Type:        "function",
+			Name:        "lookup_membership",
+			Description: "Look up membership status",
+			Parameters:  map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
+		}},
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "first private prompt text"}}},
+			{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "working"}}, ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup_membership", Arguments: `{"query":"premium"}`}}},
+			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: "private tool output"}}},
+		},
+	}
+
+	body, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	cacheKey, _ := payload["prompt_cache_key"].(string)
+	if cacheKey == "" {
+		t.Fatalf("expected generated prompt_cache_key, got %#v", payload)
+	}
+	if strings.Contains(cacheKey, "private") || strings.Contains(cacheKey, "lookup_membership") || strings.Contains(cacheKey, "stable system prompt") {
+		t.Fatalf("generated prompt_cache_key leaks raw request content: %q", cacheKey)
+	}
+
+	secondBody, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build second responses body: %v", err)
+	}
+	var secondPayload map[string]any
+	if err := json.Unmarshal(secondBody, &secondPayload); err != nil {
+		t.Fatalf("unmarshal second payload: %v", err)
+	}
+	if got, _ := secondPayload["prompt_cache_key"].(string); got != cacheKey {
+		t.Fatalf("expected stable prompt_cache_key %q, got %q", cacheKey, got)
+	}
+
+	changed := req
+	changed.Instructions = "different system prompt"
+	changedBody, err := buildResponsesRequestBody(changed, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build changed responses body: %v", err)
+	}
+	var changedPayload map[string]any
+	if err := json.Unmarshal(changedBody, &changedPayload); err != nil {
+		t.Fatalf("unmarshal changed payload: %v", err)
+	}
+	if got, _ := changedPayload["prompt_cache_key"].(string); got == cacheKey {
+		t.Fatalf("expected prompt_cache_key to change when cache prefix changes, still got %q", got)
+	}
+}
+
+func TestBuildResponsesRequestBodyPreservesClientPromptCacheKey(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model:                   "gpt-5.5",
+		PreservedTopLevelFields: map[string]any{"prompt_cache_key": "client-session-key"},
+		Messages:                []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}},
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["prompt_cache_key"].(string); got != "client-session-key" {
+		t.Fatalf("expected client prompt_cache_key to be preserved, got %#v", payload)
+	}
+}
+
 func TestBuildRequestBodyForAllEndpointTypesIgnoresStaleResponsesItemsWhenCanonicalMessagesExist(t *testing.T) {
 	req := model.CanonicalRequest{
 		Model: "gpt-5",
@@ -2602,6 +2680,7 @@ func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testin
 		PreservedTopLevelFields: map[string]any{
 			"output_config":        map[string]any{"format": map[string]any{"type": "json_schema"}},
 			"previous_response_id": "resp_123",
+			"prompt_cache_key":     "responses-cache-key",
 			"parallel_tool_calls":  true,
 			"truncation":           "auto",
 			"text":                 map[string]any{"format": map[string]any{"type": "text"}},
@@ -2617,7 +2696,7 @@ func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testin
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	for _, key := range []string{"output_config", "previous_response_id", "truncation", "text"} {
+	for _, key := range []string{"output_config", "previous_response_id", "prompt_cache_key", "truncation", "text"} {
 		if _, exists := payload[key]; exists {
 			t.Fatalf("expected chat upstream payload to drop responses-only field %q, got %#v", key, payload)
 		}
@@ -2801,6 +2880,7 @@ func TestBuildAnthropicRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *t
 		PreservedTopLevelFields: map[string]any{
 			"output_config":        map[string]any{"format": map[string]any{"type": "json_schema"}},
 			"previous_response_id": "resp_123",
+			"prompt_cache_key":     "responses-cache-key",
 			"parallel_tool_calls":  true,
 			"truncation":           "auto",
 			"text":                 map[string]any{"format": map[string]any{"type": "text"}},
@@ -2816,7 +2896,7 @@ func TestBuildAnthropicRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *t
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	for _, key := range []string{"output_config", "previous_response_id", "parallel_tool_calls", "truncation", "text", "response_format"} {
+	for _, key := range []string{"output_config", "previous_response_id", "prompt_cache_key", "parallel_tool_calls", "truncation", "text", "response_format"} {
 		if _, exists := payload[key]; exists {
 			t.Fatalf("expected anthropic upstream payload to drop responses-only field %q, got %#v", key, payload)
 		}

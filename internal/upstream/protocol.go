@@ -289,7 +289,7 @@ func isAnthropicOnlyTopLevelField(key string, endpointType string) bool {
 
 func isResponsesOnlyTopLevelField(key string, endpointType string) bool {
 	switch key {
-	case "output_config", "previous_response_id", "store", "include", "truncation", "text":
+	case "output_config", "previous_response_id", "prompt_cache_key", "store", "include", "truncation", "text":
 		return true
 	case "parallel_tool_calls":
 		return endpointType == config.UpstreamEndpointTypeAnthropic

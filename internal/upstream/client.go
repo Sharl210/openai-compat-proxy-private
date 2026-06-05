@@ -76,6 +76,8 @@ var sseScannerMaxTokenSize = 8 * 1024 * 1024
 
 const preservedResponsesTopLevelFieldsKey = "__openai_compat_responses_top_level"
 
+const generatedPromptCacheKeyPrefix = "ocp_v1_"
+
 const defaultResponsesWebSearchToolDescription = "Compatibility fallback for web search query input."
 
 var responsesFallbackFunctionToolSchema = map[string]any{
@@ -1148,7 +1150,38 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 			}
 		}
 	}
+	ensureResponsesPromptCacheKey(payload)
 	return json.Marshal(payload)
+}
+
+func ensureResponsesPromptCacheKey(payload map[string]any) {
+	if _, exists := payload["prompt_cache_key"]; exists {
+		return
+	}
+	seed := map[string]any{
+		"model":        payload["model"],
+		"instructions": payload["instructions"],
+		"tools":        payload["tools"],
+		"input_prefix": promptCacheInputPrefix(payload["input"]),
+	}
+	encoded, err := json.Marshal(seed)
+	if err != nil {
+		return
+	}
+	digest := sha256.Sum256(encoded)
+	payload["prompt_cache_key"] = generatedPromptCacheKeyPrefix + fmt.Sprintf("%x", digest[:])[:48]
+}
+
+func promptCacheInputPrefix(input any) any {
+	items, ok := input.([]map[string]any)
+	if !ok {
+		return input
+	}
+	const maxItems = 32
+	if len(items) <= maxItems {
+		return items
+	}
+	return items[:maxItems]
 }
 
 func buildResponsesOrderedInputItems(msg model.CanonicalMessage) []map[string]any {
