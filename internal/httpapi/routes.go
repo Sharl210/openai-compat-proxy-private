@@ -217,14 +217,14 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 }
 
 func providerSelectionForRequest(r *http.Request, canonicalModel string) (config.ProviderConfig, config.Config, string, bool) {
-	provider, providerCfg, providerID, _, ok := providerSelectionForModelRequest(r, canonicalModel)
+	provider, providerCfg, providerID, _, ok, _ := providerSelectionForModelRequest(r, canonicalModel)
 	return provider, providerCfg, providerID, ok
 }
 
-func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (config.ProviderConfig, config.Config, string, string, bool) {
+func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (config.ProviderConfig, config.Config, string, string, bool, error) {
 	snapshot, ok := runtimeSnapshotFromRequest(r)
 	if !ok || snapshot == nil {
-		return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
+		return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 	}
 	if info, ok := routeInfoFromRequest(r); ok {
 		providerID := info.ProviderID
@@ -238,7 +238,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
-			} else if resolvedID, ok := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel); ok {
+			} else if resolvedID, realtimeErr, ok := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel); ok {
 				providerID = resolvedID
 				refreshDefaultProviderOverlayCacheFromRequest(r)
 				snapshot, _ = runtimeSnapshotFromRequest(r)
@@ -246,19 +246,21 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 					providerID = refreshedID
 					resolvedModel = refreshedModel
 				}
+			} else if realtimeErr != nil {
+				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
 			} else if shouldBypassUsageRecorderForRequest(r) {
 				if len(snapshot.DefaultProviderIDs) > 0 {
 					providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
 				}
 			} else if legacyModelsListEnforced(snapshot) {
-				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
+				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 			}
 		}
 		if provider, err := snapshot.Config.ProviderByID(providerID); err == nil {
-			return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true
+			return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true, nil
 		}
 	}
-	return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false
+	return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 }
 
 func refreshDefaultProviderOverlayCacheFromRequest(r *http.Request) {
@@ -396,11 +398,12 @@ func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {
 	return provider, ok
 }
 
-func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot *config.RuntimeSnapshot, model string) (string, bool) {
+func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot *config.RuntimeSnapshot, model string) (string, error, bool) {
 	if snapshot == nil || snapshot.Config.EnableDefaultProviderModelTags || strings.TrimSpace(model) == "" {
-		return "", false
+		return "", nil, false
 	}
 	owner := ""
+	var upstreamErr error
 	for _, providerID := range snapshot.DefaultProviderIDs {
 		provider, err := snapshot.Config.ProviderByID(providerID)
 		if err != nil || !provider.Enabled || !provider.SupportsModels {
@@ -412,7 +415,10 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 			continue
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		body, ok := fetchProviderModelsBody(r.Context(), client, authorization, provider)
+		body, ok, err := fetchProviderModelsBody(r.Context(), client, authorization, provider)
+		if err != nil {
+			upstreamErr = err
+		}
 		if !ok {
 			continue
 		}
@@ -421,9 +427,9 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 		}
 	}
 	if owner == "" {
-		return "", false
+		return "", upstreamErr, false
 	}
-	return owner, true
+	return owner, nil, true
 }
 
 func modelEntriesContain(entries []map[string]any, model string) bool {

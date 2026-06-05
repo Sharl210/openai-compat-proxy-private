@@ -324,8 +324,11 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		return nil, false
 	}
 	clientModel := canon.Model
-	provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, canon.Model)
+	provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 	if !ok {
+		if writeUpstreamError(w, selectionErr) {
+			return nil, false
+		}
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 		return nil, false
 	}

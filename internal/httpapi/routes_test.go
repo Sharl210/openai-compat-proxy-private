@@ -246,15 +246,15 @@ func TestLegacyImageRouteRefreshesDefaultProviderSelectionAfterModelChange(t *te
 		DefaultProvider:      "p1,p2",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:           "p1",
-			Enabled:      true,
+			ID:             "p1",
+			Enabled:        true,
 			SupportsModels: true,
-			ManualModels: []string{"model-a"},
+			ManualModels:   []string{"model-a"},
 		}, {
-			ID:           "p2",
-			Enabled:      true,
+			ID:             "p2",
+			Enabled:        true,
 			SupportsModels: true,
-			ManualModels: []string{"model-b"},
+			ManualModels:   []string{"model-b"},
 		}},
 	})
 	server := NewServerWithStore(store, nil)
@@ -263,7 +263,10 @@ func TestLegacyImageRouteRefreshesDefaultProviderSelectionAfterModelChange(t *te
 
 	req := httptest.NewRequest("POST", "/v1/images/generations", nil)
 	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "p2", Legacy: true, CanonicalPath: canonicalV1ImagesGenerationsPath}), store.Active()))
-	provider, _, providerID, resolvedModel, ok := providerSelectionForModelRequest(req, "model-new")
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "model-new")
+	if err != nil {
+		t.Fatalf("expected refreshed provider selection without error, got %v", err)
+	}
 	if !ok {
 		t.Fatalf("expected refreshed provider selection to succeed")
 	}

@@ -134,11 +134,11 @@ func handleJSONPassthrough(routePath string, upstreamPath string) http.HandlerFu
 }
 
 type preparedImagesRequest struct {
-	providerCfg   config.Config
-	authorization string
-	resolvedModel string
-	body          []byte
-	contentType   string
+	providerCfg     config.Config
+	authorization   string
+	resolvedModel   string
+	body            []byte
+	contentType     string
 	requestedFormat string
 }
 
@@ -166,8 +166,11 @@ func prepareImagesRequest(w http.ResponseWriter, r *http.Request) (*preparedImag
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
-	provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, modelName)
+	provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, modelName)
 	if !ok {
+		if writeUpstreamError(w, selectionErr) {
+			return nil, false
+		}
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 		return nil, false
 	}
@@ -189,11 +192,11 @@ func prepareImagesRequest(w http.ResponseWriter, r *http.Request) (*preparedImag
 	}
 	requestedFormat, _ := extractRequestedImageResponseFormat(body, contentType)
 	return &preparedImagesRequest{
-		providerCfg:   providerCfg,
-		authorization: authorization,
-		resolvedModel: resolvedModel,
-		body:          body,
-		contentType:   contentType,
+		providerCfg:     providerCfg,
+		authorization:   authorization,
+		resolvedModel:   resolvedModel,
+		body:            body,
+		contentType:     contentType,
 		requestedFormat: requestedFormat,
 	}, true
 }
@@ -213,8 +216,11 @@ func prepareJSONPassthroughRequest(w http.ResponseWriter, r *http.Request) (*pre
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
-	provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, modelName)
+	provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, modelName)
 	if !ok {
+		if writeUpstreamError(w, selectionErr) {
+			return nil, false
+		}
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 		return nil, false
 	}

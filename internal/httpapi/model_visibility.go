@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -106,6 +105,9 @@ func writeModelAllowanceError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
+	if writeUpstreamError(w, err) {
+		return
+	}
 	if typed, ok := err.(*modelAllowanceError); ok {
 		errorsx.WriteJSON(w, typed.status, typed.code, typed.message)
 		return
@@ -116,7 +118,7 @@ func writeModelAllowanceError(w http.ResponseWriter, err error) {
 func explicitProviderVisibleModelSet(ctx context.Context, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, bool, error) {
 	if provider.SupportsModels {
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		status, body, _, err := client.Models(ctx, authorization)
+		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
 			return nil, false, err
 		}
@@ -126,11 +128,16 @@ func explicitProviderVisibleModelSet(ctx context.Context, provider config.Provid
 				return set, true, err
 			}
 			return nil, false, nil
-		} else if status >= 200 && status < 300 {
+		}
+		if status >= 200 && status < 300 {
 			set, err := modelIDSetFromBody(rewriteModelsBody(body, provider))
 			return set, true, err
-		} else {
-			return nil, false, &modelAllowanceError{status: http.StatusBadGateway, code: "upstream_error", message: fmt.Sprintf("failed to load provider models list: status %d", status)}
+		}
+		return nil, false, &upstream.HTTPStatusError{
+			StatusCode:  status,
+			ContentType: contentType,
+			BodyBytes:   append([]byte(nil), body...),
+			Body:        strings.TrimSpace(string(body)),
 		}
 	}
 	ids := provider.VisibleModelIDs()

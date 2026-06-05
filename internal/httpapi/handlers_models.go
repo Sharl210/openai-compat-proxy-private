@@ -125,7 +125,7 @@ func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.R
 			continue
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		body, ok := fetchProviderModelsBody(ctx, client, authorization, provider)
+		body, ok, _ := fetchProviderModelsBody(ctx, client, authorization, provider)
 		if !ok {
 			continue
 		}
@@ -158,20 +158,26 @@ func authHeaderForOverlayProviderUpstream(r *http.Request, cfg config.Config, pr
 	return authHeaderForResolvedProviderUpstream(r, cfg, providerID)
 }
 
-func fetchProviderModelsBody(ctx context.Context, client *upstream.Client, authorization string, provider config.ProviderConfig) ([]byte, bool) {
-	status, body, _, err := client.Models(ctx, authorization)
+func fetchProviderModelsBody(ctx context.Context, client *upstream.Client, authorization string, provider config.ProviderConfig) ([]byte, bool, error) {
+	status, body, contentType, err := client.Models(ctx, authorization)
 	if err == nil {
 		if status >= 200 && status < 300 {
-			return rewriteModelsBody(body, provider), true
+			return rewriteModelsBody(body, provider), true, nil
 		}
 		if status == http.StatusNotFound {
 			if fallbackBody, ok := configuredModelsFallbackBody(provider); ok {
-				return fallbackBody, true
+				return fallbackBody, true, nil
 			}
+			return nil, false, nil
 		}
-		return nil, false
+		return nil, false, &upstream.HTTPStatusError{
+			StatusCode:  status,
+			ContentType: contentType,
+			BodyBytes:   append([]byte(nil), body...),
+			Body:        strings.TrimSpace(string(body)),
+		}
 	}
-	return nil, false
+	return nil, false, err
 }
 
 func decodeModelEntries(body []byte) []map[string]any {

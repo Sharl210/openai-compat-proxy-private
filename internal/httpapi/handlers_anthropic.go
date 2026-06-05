@@ -29,8 +29,11 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		clientModel := canon.Model
-		provider, providerCfg, providerID, resolvedModel, ok := providerSelectionForModelRequest(r, canon.Model)
+		provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 		if !ok {
+			if writeUpstreamError(w, selectionErr) {
+				return
+			}
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 			return
 		}
