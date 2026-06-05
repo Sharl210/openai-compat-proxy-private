@@ -56,10 +56,18 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		return nil
 	}
 	if _, ok := allowed[requestedModel]; ok {
+		if provider.HidesModel(requestedModel) {
+			return &modelAllowanceError{status: http.StatusBadRequest, code: "invalid_model", message: "requested model is not in models list"}
+		}
 		return nil
 	}
 	if baseModel, _, ok := reasoning.SplitSuffix(requestedModel); ok {
-		if _, exists := allowed[baseModel]; exists && provider.EnableReasoningEffortSuffix && !provider.HidesModel(requestedModel) {
+		if _, exists := allowed[baseModel]; exists && (provider.EnableReasoningEffortSuffix || provider.HasManualReasonSuffixForModel(requestedModel)) && !provider.HidesModel(requestedModel) {
+			return nil
+		}
+	}
+	if baseModel, ok := stripNoPromptModelSuffix(requestedModel); ok {
+		if _, exists := allowed[baseModel]; exists && providerCfg.EnableNoPromptModelSuffix && !provider.HidesModel(requestedModel) {
 			return nil
 		}
 	}

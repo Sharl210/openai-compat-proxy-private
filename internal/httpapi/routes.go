@@ -194,6 +194,7 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	providerCfg.ResponsesToolCompatMode = provider.ResponsesToolCompatMode
 	providerCfg.AnthropicVersion = provider.AnthropicVersion
 	providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)
+	providerCfg.EnableNoPromptModelSuffix = provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix)
 	if provider.UpstreamFirstByteTimeout > 0 {
 		providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout
 	}
@@ -249,6 +250,17 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				}
 			} else if realtimeErr != nil {
 				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
+			} else if strippedModel, stripped := stripNoPromptModelSuffix(canonicalModel); stripped {
+				if resolvedID, modelForProvider, strippedOK := snapshot.ResolveDefaultProviderSelection(strippedModel); strippedOK {
+					if provider, err := snapshot.Config.ProviderByID(resolvedID); err == nil && provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(canonicalModel) {
+						providerID = resolvedID
+						resolvedModel = modelForProvider
+					} else if legacyModelsListEnforced(snapshot) {
+						return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+					}
+				} else if legacyModelsListEnforced(snapshot) {
+					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+				}
 			} else if shouldBypassUsageRecorderForRequest(r) {
 				if len(snapshot.DefaultProviderIDs) > 0 {
 					providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
@@ -423,7 +435,7 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 		if !ok {
 			continue
 		}
-		if modelEntriesAllowModel(decodeModelEntries(body), model, provider) {
+		if modelEntriesAllowModel(decodeModelEntries(body), model, provider, providerCfg.EnableNoPromptModelSuffix) {
 			owner = providerID
 		}
 	}
@@ -447,12 +459,15 @@ func modelEntriesContain(entries []map[string]any, model string) bool {
 	return false
 }
 
-func modelEntriesAllowModel(entries []map[string]any, model string, provider config.ProviderConfig) bool {
+func modelEntriesAllowModel(entries []map[string]any, model string, provider config.ProviderConfig, enableNoPrompt bool) bool {
 	if modelEntriesContain(entries, model) {
 		return true
 	}
+	if strippedModel, stripped := stripNoPromptModelSuffix(model); stripped {
+		return enableNoPrompt && !provider.HidesModel(model) && modelEntriesAllowModel(entries, strippedModel, provider, enableNoPrompt)
+	}
 	baseModel, _, ok := reasoning.SplitSuffix(model)
-	if !ok || !provider.EnableReasoningEffortSuffix || provider.HidesModel(model) {
+	if !ok || (!provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(model)) || provider.HidesModel(model) {
 		return false
 	}
 	return modelEntriesContain(entries, baseModel)
