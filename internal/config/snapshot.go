@@ -315,6 +315,9 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 	if err := validateStrictBool(values, "ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS"); err != nil {
 		return err
 	}
+	if err := validateStrictBool(values, "ENABLE_NOPROMPT_MODEL_SUFFIX"); err != nil {
+		return err
+	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
 		return err
 	}

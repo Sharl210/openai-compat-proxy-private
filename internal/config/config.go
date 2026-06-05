@@ -27,6 +27,7 @@ type Config struct {
 	V1ModelMap                        []ModelMapEntry
 	EnableDefaultProviderModelTags    bool
 	EnableAllDefaultProviderModelTags bool
+	EnableNoPromptModelSuffix         bool
 	EnableLegacyV1Routes              bool
 	DownstreamNonStreamStrategy       string
 	Providers                         []ProviderConfig
@@ -64,6 +65,7 @@ func Default() Config {
 		ResponsesToolCompatMode:     ResponsesToolCompatModePreserve,
 		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
 		UpstreamXMLToolCallStyle:    UpstreamXMLToolCallStyleLegacy,
+		EnableNoPromptModelSuffix:   true,
 		DownstreamNonStreamStrategy: DownstreamNonStreamStrategyProxyBuffer,
 		LogFilePath:                 "logs",
 		LogMaxRequests:              200,
@@ -111,6 +113,9 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	}
 	if value, ok := lookup("ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS"); ok && value != "" {
 		cfg.EnableAllDefaultProviderModelTags = parseRootBool(value)
+	}
+	if value, ok := lookup("ENABLE_NOPROMPT_MODEL_SUFFIX"); ok && value != "" {
+		cfg.EnableNoPromptModelSuffix = parseRootBool(value)
 	}
 	if value, ok := lookup("ENABLE_LEGACY_V1_ROUTES"); ok && value != "" {
 		cfg.EnableLegacyV1Routes = parseRootBool(value)
@@ -208,6 +213,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateStrictBool(values, "ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_NOPROMPT_MODEL_SUFFIX"); err != nil {
 		return err
 	}
 	if err := validateStrictBool(values, "LOG_ENABLE"); err != nil {
@@ -486,6 +494,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		modelMapEntriesEqual(c.V1ModelMap, other.V1ModelMap) &&
 		c.EnableDefaultProviderModelTags == other.EnableDefaultProviderModelTags &&
 		c.EnableAllDefaultProviderModelTags == other.EnableAllDefaultProviderModelTags &&
+		c.EnableNoPromptModelSuffix == other.EnableNoPromptModelSuffix &&
 		c.EnableLegacyV1Routes == other.EnableLegacyV1Routes &&
 		c.DownstreamNonStreamStrategy == other.DownstreamNonStreamStrategy &&
 		c.ConnectTimeout == other.ConnectTimeout &&

@@ -87,6 +87,14 @@ func TestLoadFromEnvParsesAllDefaultProviderModelTagsFlag(t *testing.T) {
 	}
 }
 
+func TestLoadFromValuesParsesNoPromptModelSuffixFlag(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{"ENABLE_NOPROMPT_MODEL_SUFFIX": "true"})
+
+	if !cfg.EnableNoPromptModelSuffix {
+		t.Fatalf("expected ENABLE_NOPROMPT_MODEL_SUFFIX=true to enable noprompt suffix parsing")
+	}
+}
+
 func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
 		"V1_MODEL_MAP": "alias-alpha:alpha-chat, #re:alias-(.*):owned-$1",
@@ -260,6 +268,13 @@ func TestValidateRootEnvValuesRejectsInvalidAllDefaultProviderModelTagsBoolean(t
 	}
 }
 
+func TestValidateRootEnvValuesRejectsInvalidNoPromptModelSuffixBoolean(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"ENABLE_NOPROMPT_MODEL_SUFFIX": "enabled"})
+	if err == nil {
+		t.Fatalf("expected invalid ENABLE_NOPROMPT_MODEL_SUFFIX to fail validation")
+	}
+}
+
 func TestValidateRootEnvValuesRejectsInvalidStartupBoolValues(t *testing.T) {
 	for _, key := range []string{"LOG_ENABLE"} {
 		t.Run(key, func(t *testing.T) {
@@ -281,6 +296,12 @@ func TestValidateRootEnvValuesIgnoresUnknownLegacyVariables(t *testing.T) {
 func TestDefaultFirstByteTimeoutIsThirtyMinutes(t *testing.T) {
 	if got := Default().FirstByteTimeout; got != 30*time.Minute {
 		t.Fatalf("expected default FirstByteTimeout 30m, got %v", got)
+	}
+}
+
+func TestDefaultEnablesNoPromptModelSuffix(t *testing.T) {
+	if !Default().EnableNoPromptModelSuffix {
+		t.Fatalf("expected noprompt model suffix parsing to be enabled by default")
 	}
 }
 
