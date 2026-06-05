@@ -89,7 +89,7 @@ func TestLoadFromEnvParsesAllDefaultProviderModelTagsFlag(t *testing.T) {
 
 func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
-		"V1_MODEL_MAP": "alias-alpha:alpha-chat, alias-(.*):owned-$1",
+		"V1_MODEL_MAP": "alias-alpha:alpha-chat, #re:alias-(.*):owned-$1",
 	})
 
 	if got, want := len(cfg.V1ModelMap), 2; got != want {
@@ -402,7 +402,7 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelRequiresVisibleModelList
 					ID:      "openai",
 					Enabled: true,
 					ModelMap: []ModelMapEntry{
-						NewModelMapEntry("gpt-(.*)", "openai-$1"),
+						NewModelMapEntry("#re:gpt-(.*)", "openai-$1"),
 					},
 					ManualModels: []string{"listed-model"},
 				},
@@ -410,7 +410,7 @@ func TestRuntimeSnapshotResolveDefaultProviderIDForModelRequiresVisibleModelList
 					ID:      "azure",
 					Enabled: true,
 					ModelMap: []ModelMapEntry{
-						NewModelMapEntry("gpt-(.*)", "azure-$1"),
+						NewModelMapEntry("#re:gpt-(.*)", "azure-$1"),
 					},
 				},
 			},
@@ -439,7 +439,7 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 					NewModelMapEntry("openai-only", "openai-only-upstream"),
 				},
 				ManualModels: []string{"manual-openai"},
-				HiddenModels: []string{"gpt-4.*", "manual-openai"},
+				HiddenModels: []string{"#re:gpt-4.*", "manual-openai"},
 			},
 			{
 				ID:      "azure",

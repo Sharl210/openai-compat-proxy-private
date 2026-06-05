@@ -621,18 +621,43 @@ func parseModelMap(raw string, path string) ([]ModelMapEntry, error) {
 		if part == "" {
 			continue
 		}
-		kv := strings.SplitN(part, ":", 2)
-		if len(kv) != 2 || strings.TrimSpace(kv[0]) == "" || strings.TrimSpace(kv[1]) == "" {
+		key, target, ok := splitModelMapEntry(part)
+		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(target) == "" {
 			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP entry in %s: %q (expected format: src:target,src2:target2)", path, part))
 		}
-		key := strings.TrimSpace(kv[0])
-		target := strings.TrimSpace(kv[1])
-		if _, err := regexp.Compile("^(?:" + key + ")$"); err != nil {
+		key = strings.TrimSpace(key)
+		target = strings.TrimSpace(target)
+		if _, err := compileModelPatternStrict(key); err != nil {
 			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP pattern in %s: %q", path, key))
 		}
 		entries = append(entries, NewModelMapEntry(key, target))
 	}
 	return entries, nil
+}
+
+func splitModelMapEntry(part string) (string, string, bool) {
+	escaped := false
+	colonCount := 0
+	for i := 0; i < len(part); i++ {
+		ch := part[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch != ':' {
+			continue
+		}
+		colonCount++
+		if strings.HasPrefix(strings.TrimSpace(part), "#re:") && colonCount == 1 {
+			continue
+		}
+		return part[:i], part[i+1:], true
+	}
+	return part, "", false
 }
 
 func parseCommaSeparatedList(raw string) []string {
@@ -661,7 +686,7 @@ func validateModelPatternList(patterns []string, key string, path string) error 
 		if pattern == "" {
 			continue
 		}
-		if _, err := regexp.Compile("^(?:" + pattern + ")$"); err != nil {
+		if _, err := compileModelPatternStrict(pattern); err != nil {
 			return ErrInvalidConfig(fmt.Sprintf("invalid %s pattern in %s: %q", key, path, pattern))
 		}
 	}
@@ -918,15 +943,22 @@ func patternKey(entry ModelMapEntry) string {
 }
 
 func compileModelPattern(pattern string) *regexp.Regexp {
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return nil
-	}
-	compiled, err := regexp.Compile("^(?:" + pattern + ")$")
+	compiled, err := compileModelPatternStrict(pattern)
 	if err != nil {
 		return nil
 	}
 	return compiled
+}
+
+func compileModelPatternStrict(pattern string) (*regexp.Regexp, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil, fmt.Errorf("empty model pattern")
+	}
+	if strings.HasPrefix(pattern, "#re:") {
+		return regexp.Compile("^(?:" + strings.TrimPrefix(pattern, "#re:") + ")$")
+	}
+	return regexp.Compile("^(?:" + regexp.QuoteMeta(pattern) + ")$")
 }
 
 func modelPatternMatches(pattern string, model string) bool {
@@ -943,7 +975,7 @@ func isStaticModelPattern(pattern string) bool {
 	if pattern == "" {
 		return false
 	}
-	return !strings.ContainsAny(pattern, `*+?()[]{}|^$\\`)
+	return !strings.HasPrefix(pattern, "#re:")
 }
 
 func IsStaticModelPattern(pattern string) bool {

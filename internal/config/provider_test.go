@@ -21,7 +21,7 @@ func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T)
 }
 
 func TestResolveModelAndEffortDoesNotParseSuffixWhenDisabled(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(".*", "claude-sonnet-4-5-low")}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:.*", "claude-sonnet-4-5-low")}}
 
 	model, effort := p.ResolveModelAndEffort("gpt-5-high", false)
 	if model != "claude-sonnet-4-5-low" {
@@ -44,8 +44,19 @@ func TestResolveModelAndEffortUsesMappedSuffixWhenNoRequestSuffix(t *testing.T) 
 	}
 }
 
+func TestResolveModelTreatsUnmarkedPatternAsLiteral(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.5", "real")}}
+
+	if got := p.ResolveModel("gpt-5.5", false); got != "real" {
+		t.Fatalf("expected literal model to resolve, got %q", got)
+	}
+	if got := p.ResolveModel("gpt-5x5", false); got != "gpt-5x5" {
+		t.Fatalf("expected unmarked dot to stay literal, got %q", got)
+	}
+}
+
 func TestResolveModelSupportsRegexCaptures(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("mini(.*)o", "real-$0-$1")}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:mini(.*)o", "real-$0-$1")}}
 
 	model, effort := p.ResolveModelAndEffort("mini2o", false)
 	if model != "real-mini2o-2" {
@@ -57,7 +68,7 @@ func TestResolveModelSupportsRegexCaptures(t *testing.T) {
 }
 
 func TestResolveModelOnlyExpandsSingleDigitRegexCaptures(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("mini(.*)o", "real-$0-$1-$9-$12")}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:mini(.*)o", "real-$0-$1-$9-$12")}}
 
 	model := p.ResolveModel("mini2o", false)
 	if model != "real-mini2o-2--$12" {
@@ -66,7 +77,7 @@ func TestResolveModelOnlyExpandsSingleDigitRegexCaptures(t *testing.T) {
 }
 
 func TestResolveModelKeepsEscapedCapturePlaceholdersLiteral(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("mini(.*)o", `real-\$1-$1-\$12-$12`)}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:mini(.*)o", `real-\$1-$1-\$12-$12`)}}
 
 	model := p.ResolveModel("mini2o", false)
 	if model != "real-$1-2-$12-$12" {
@@ -75,7 +86,7 @@ func TestResolveModelKeepsEscapedCapturePlaceholdersLiteral(t *testing.T) {
 }
 
 func TestResolveModelKeepsSourcePatternAsStandardRegexp(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\.1`, "exact")}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`#re:gpt-4\.1`, "exact")}}
 
 	if got := p.ResolveModel("gpt-4.1", false); got != "exact" {
 		t.Fatalf("expected escaped regexp dot to match literal dot, got %q", got)
@@ -86,7 +97,7 @@ func TestResolveModelKeepsSourcePatternAsStandardRegexp(t *testing.T) {
 }
 
 func TestResolveModelTreatsRegexpEscapedStarAsLiteralStar(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\*mini`, "literal-star")}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`#re:gpt-4\*mini`, "literal-star")}}
 
 	if got := p.ResolveModel("gpt-4*mini", false); got != "literal-star" {
 		t.Fatalf("expected escaped regexp star to match literal star, got %q", got)
@@ -97,7 +108,7 @@ func TestResolveModelTreatsRegexpEscapedStarAsLiteralStar(t *testing.T) {
 }
 
 func TestResolveModelTreatsEscapedBackslashThenEscapedStarAsLiteralBackslashStar(t *testing.T) {
-	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`gpt-4\\\*mini`, "literal-backslash-star")}}
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry(`#re:gpt-4\\\*mini`, "literal-backslash-star")}}
 
 	if got := p.ResolveModel(`gpt-4\*mini`, false); got != "literal-backslash-star" {
 		t.Fatalf("expected escaped backslash plus escaped star to match literal backslash-star, got %q", got)
@@ -107,12 +118,12 @@ func TestResolveModelTreatsEscapedBackslashThenEscapedStarAsLiteralBackslashStar
 	}
 }
 
-func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
+func TestLoadProviderFileParsesRegexModelMapPrefixWithColonSeparator(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")
 	providerBody := strings.Join([]string{
 		"PROVIDER_ID=openai",
-		"HIDDEN_MODELS=gpt-4.*,manual-alpha,claude-sonnet",
+		"MODEL_MAP=#re:mini(.*)o:real-$1,gpt-5.5:gpt-5.6",
 		"",
 	}, "\n")
 	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
@@ -123,10 +134,48 @@ func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadProviderFile returned error: %v", err)
 	}
-	if want := []string{"gpt-4.*", "manual-alpha", "claude-sonnet"}; len(provider.HiddenModels) != len(want) {
+	if got := provider.ResolveModel("mini2o", false); got != "real-2" {
+		t.Fatalf("expected regex MODEL_MAP entry to resolve, got %q", got)
+	}
+	if got := provider.ResolveModel("gpt-5.5", false); got != "gpt-5.6" {
+		t.Fatalf("expected literal MODEL_MAP entry to resolve, got %q", got)
+	}
+	if got := provider.ResolveModel("gpt-5x5", false); got != "gpt-5x5" {
+		t.Fatalf("expected literal MODEL_MAP dot not to match arbitrary char, got %q", got)
+	}
+}
+
+func TestResolveModelTreatsReColonAsLiteralWithoutHashPrefix(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("re:mini(.*)o", "literal")}}
+
+	if got := p.ResolveModel("re:mini(.*)o", false); got != "literal" {
+		t.Fatalf("expected unmarked re: prefix to stay literal, got %q", got)
+	}
+	if got := p.ResolveModel("mini2o", false); got != "mini2o" {
+		t.Fatalf("expected unmarked re: prefix not to enable regex, got %q", got)
+	}
+}
+
+func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"HIDDEN_MODELS=#re:gpt-4.*,manual-alpha,claude-sonnet",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if want := []string{"#re:gpt-4.*", "manual-alpha", "claude-sonnet"}; len(provider.HiddenModels) != len(want) {
 		t.Fatalf("expected hidden models %v, got %#v", want, provider.HiddenModels)
 	}
-	for i, want := range []string{"gpt-4.*", "manual-alpha", "claude-sonnet"} {
+	for i, want := range []string{"#re:gpt-4.*", "manual-alpha", "claude-sonnet"} {
 		if provider.HiddenModels[i] != want {
 			t.Fatalf("expected hidden model %q at index %d, got %#v", want, i, provider.HiddenModels)
 		}
@@ -139,7 +188,7 @@ func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
 func TestManualModelsOverrideHiddenModels(t *testing.T) {
 	provider := ProviderConfig{
 		ManualModels: []string{"manual-alpha"},
-		HiddenModels: []string{".*"},
+		HiddenModels: []string{"#re:.*"},
 	}
 	if provider.HidesModel("manual-alpha") {
 		t.Fatalf("expected manual model to stay visible even when hidden regex matches")
