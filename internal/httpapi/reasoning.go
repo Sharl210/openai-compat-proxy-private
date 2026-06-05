@@ -18,6 +18,17 @@ func applyResolvedReasoningEffort(reasoning *modelpkg.CanonicalReasoning, effort
 	if reasoning.Raw == nil {
 		reasoning.Raw = map[string]any{}
 	}
+	if effort == "none" {
+		delete(reasoning.Raw, "thinking")
+		delete(reasoning.Raw, "output_config")
+		reasoning.Raw["effort"] = effort
+		if _, ok := reasoning.Raw["summary"]; !ok {
+			reasoning.Raw["summary"] = reasoning.Summary
+		}
+		return reasoning
+	}
+	delete(reasoning.Raw, "thinking")
+	delete(reasoning.Raw, "output_config")
 	reasoning.Raw["effort"] = effort
 	if _, ok := reasoning.Raw["summary"]; !ok {
 		reasoning.Raw["summary"] = reasoning.Summary
@@ -32,9 +43,16 @@ func applyAnthropicThinkingFromResolvedEffort(reasoning *modelpkg.CanonicalReaso
 	if reasoning.Raw == nil {
 		reasoning.Raw = map[string]any{}
 	}
-	if _, ok := reasoning.Raw["thinking"]; ok {
+	if reasoning.Effort == "none" {
+		delete(reasoning.Raw, "output_config")
+		reasoning.Raw["thinking"] = map[string]any{"type": "disabled"}
 		return reasoning
 	}
+	if thinking, ok := reasoning.Raw["thinking"].(map[string]any); ok && strings.TrimSpace(stringValue(thinking["type"])) != "disabled" {
+		return reasoning
+	}
+	delete(reasoning.Raw, "thinking")
+	delete(reasoning.Raw, "output_config")
 	if supportsAnthropicAdaptiveThinking(model) {
 		reasoning.Raw["thinking"] = map[string]any{"type": "adaptive"}
 		reasoning.Raw["output_config"] = map[string]any{"effort": anthropicAdaptiveEffortForSuffix(reasoning.Effort)}
@@ -59,6 +77,8 @@ func anthropicAdaptiveEffortForSuffix(effort string) string {
 	case "medium":
 		return "medium"
 	case "low":
+		return "low"
+	case "minimal":
 		return "low"
 	default:
 		return "medium"
@@ -93,6 +113,8 @@ func anthropicThinkingBudgetForEffort(effort string, maxOutputTokens *int) int {
 
 func anthropicThinkingBudgetProfile(effort string) (ratioNumerator int, ratioDenominator int, floor int, ceiling int) {
 	switch effort {
+	case "minimal":
+		return 1, 8, 512, 2048
 	case "low":
 		return 1, 4, 1024, 4096
 	case "medium":

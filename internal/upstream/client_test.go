@@ -916,8 +916,9 @@ func TestBuildRequestBodyOmitsReasoningForDisabledAnthropicThinking(t *testing.T
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if _, exists := payload["reasoning"]; exists {
-		t.Fatalf("expected disabled anthropic thinking to be omitted for responses upstream, got %#v", payload)
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "none" {
+		t.Fatalf("expected disabled anthropic thinking to map to explicit none effort, got %#v", payload)
 	}
 }
 
@@ -2627,7 +2628,7 @@ func TestBuildChatRequestBodyMapsAnthropicThinkingToChatReasoning(t *testing.T) 
 	}
 }
 
-func TestBuildRequestBodyMapsAnthropicAdaptiveThinkingToResponsesReasoning(t *testing.T) {
+func TestBuildRequestBodyMapsAnthropicAdaptiveThinkingToXHighResponsesReasoning(t *testing.T) {
 	body, err := buildRequestBody(model.CanonicalRequest{
 		Model:     "gpt-5",
 		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "adaptive"}}},
@@ -2641,15 +2642,15 @@ func TestBuildRequestBodyMapsAnthropicAdaptiveThinkingToResponsesReasoning(t *te
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	reasoning, _ := payload["reasoning"].(map[string]any)
-	if got := reasoning["effort"]; got != "medium" {
-		t.Fatalf("expected anthropic adaptive thinking to map to medium effort, got %#v", payload)
+	if got := reasoning["effort"]; got != "xhigh" {
+		t.Fatalf("expected anthropic adaptive thinking to map to xhigh effort, got %#v", payload)
 	}
 	if got := reasoning["summary"]; got != "auto" {
 		t.Fatalf("expected summary auto, got %#v", payload)
 	}
 }
 
-func TestBuildChatRequestBodyMapsAnthropicAdaptiveThinkingToChatReasoning(t *testing.T) {
+func TestBuildChatRequestBodyMapsAnthropicAdaptiveThinkingToXHighChatReasoning(t *testing.T) {
 	body, err := buildChatRequestBody(model.CanonicalRequest{
 		Model:     "gpt-5",
 		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "adaptive"}}},
@@ -2663,8 +2664,8 @@ func TestBuildChatRequestBodyMapsAnthropicAdaptiveThinkingToChatReasoning(t *tes
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	reasoning, _ := payload["reasoning"].(map[string]any)
-	if got := reasoning["effort"]; got != "medium" {
-		t.Fatalf("expected anthropic adaptive thinking to map to medium effort, got %#v", payload)
+	if got := reasoning["effort"]; got != "xhigh" {
+		t.Fatalf("expected anthropic adaptive thinking to map to xhigh effort, got %#v", payload)
 	}
 	if got := reasoning["summary"]; got != "auto" {
 		t.Fatalf("expected summary auto, got %#v", payload)

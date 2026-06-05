@@ -1427,7 +1427,10 @@ func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[st
 	}
 	raw := cloneMap(reasoning.Raw)
 	if anthropicThinkingDisabled(raw) {
-		return nil
+		return map[string]any{
+			"effort":  "none",
+			"summary": reasoningSummaryOrAuto(raw, reasoning.Summary),
+		}
 	}
 	if inferred := inferReasoningEffortFromAnthropicRaw(raw); inferred != "" {
 		return map[string]any{
@@ -1447,6 +1450,14 @@ func anthropicThinkingDisabled(raw map[string]any) bool {
 		return false
 	}
 	return stringValue(thinking["type"]) == "disabled"
+}
+
+func anthropicThinkingAdaptive(raw map[string]any) bool {
+	thinking, _ := raw["thinking"].(map[string]any)
+	if len(thinking) == 0 {
+		return false
+	}
+	return stringValue(thinking["type"]) == "adaptive"
 }
 
 func InferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
@@ -1482,7 +1493,7 @@ func inferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
 		return effort
 	}
 	if stringValue(thinking["type"]) == "adaptive" {
-		return "medium"
+		return "xhigh"
 	}
 	budget := intFromAny(thinking["budget_tokens"])
 	if budget <= 0 {

@@ -6,7 +6,7 @@ import (
 	"openai-compat-proxy/internal/model"
 )
 
-var supportedSuffixes = []string{"-xhigh", "-medium", "-high", "-low"}
+var supportedSuffixes = []string{"-minimal", "-xhigh", "-medium", "-high", "-low", "-none"}
 
 func ApplyModelSuffix(req model.CanonicalRequest, enabled bool) model.CanonicalRequest {
 	if !enabled {
