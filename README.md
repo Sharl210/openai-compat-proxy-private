@@ -22,7 +22,7 @@
 | 无 /v1 路由别名 | ✅ | `/responses`、`/chat/completions`、`/messages`、`/models`、`/responses/compact` 及其 `/{providerId}/...` 形式均可等效访问对应 `/v1/*` 入口；复用同一套 handler 与鉴权语义 |
 | responses 工具兼容模式 | ✅ | provider 级 `RESPONSES_TOOL_COMPAT_MODE=function_only` 将 `custom` / `web_search` 工具在发往 responses 上游前重写成普通 function 类型，以兼容不完整上游；代价是丢失原生 free-form / grammar 约束（custom）或原生 citations/sources 语义（web_search）；默认 `preserve` |
 | chat 上游 XML 工具调用兼容 | ✅ | provider 级 `UPSTREAM_XML_TOOL_CALL_STYLE=true` 可把完整 XML 工具调用正文恢复成结构化 function call；默认开启 |
-| 模型映射 | ✅ | 支持 `MODEL_MAP` / `V1_MODEL_MAP` 正则 source pattern、`$0-$9` 捕获占位符、`MANUAL_MODELS` 正则扩展、`HIDDEN_MODELS` 正则隐藏 |
+| 模型映射 | ✅ | 支持 `MODEL_MAP` / `V1_MODEL_MAP` 字面量映射、`#re:` 正则 pattern、`$0-$9` 捕获占位符、`MANUAL_MODELS` 正则扩展、`HIDDEN_MODELS` 正则隐藏 |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
 | 调试归档 | ✅ | 仅当 `LOG_ENABLE=true` 且 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 非空时写出 `request/raw/canonical/final.ndjson`；保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制（与 `LOG_MAX_REQUESTS` 解耦） |
@@ -209,10 +209,10 @@ http://127.0.0.1:21021/
 `V1_MODEL_MAP` 是裸 `/v1/*` 专用的根级预映射，格式与 provider 级 `MODEL_MAP` 相同，例如：
 
 ```env
-V1_MODEL_MAP=gpt-oss:claude-sonnet-4-5,alias-(.*):real-$1
+V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 ```
 
-它只在 bare `/v1/*` 和无 `/v1` 裸别名上生效，不会影响显式 `/{providerId}/v1/*` 路由。`src` 使用 Go regexp 全字符串匹配；正则转义也完全按 Go regexp 标准处理，例如 `\*` 匹配字面星号、`\.` 匹配字面点；如果要匹配字面反斜杠加星号，需要写成 `\\\*`。捕获替换只支持 `$0-$9`，其中 `$0` 是完整匹配，`$1-$9` 是第 1 到第 9 个 regexp 捕获组，例如 `mini(.*)o:real-$0-$1` 会把 `mini2o` 映射成 `real-mini2o-2`；`$10` 及以上会保留字面值，避免 `$12` 到底表示第 12 组还是 `$1` 后接 `2` 的歧义；如果要输出字面 `$`，在 target 中写成 `\$`，例如 `\$12` 输出 `$12`。处理顺序是：`V1_MODEL_MAP` 先把入站模型名纯文本改成 canonical routing input，然后进入 `DEFAULT_PROVIDER` / default group 模型归属选择，最后才进入命中 provider 自己的 `MODEL_MAP` 与 reasoning suffix 处理。`V1_MODEL_MAP` 不是纠错或兜底机制；如果映射 target 不在默认分组可见模型列表中，请求仍会按现有 `invalid_model` 路径失败。该字段属于根级可热加载配置。
+它只在 bare `/v1/*` 和无 `/v1` 裸别名上生效，不会影响显式 `/{providerId}/v1/*` 路由。`src` 默认按字面量精确匹配，所以 `gpt-5.5` 里的点就是普通点；只有以 `#re:` 开头时才按 Go regexp 全字符串匹配。捕获替换只支持 `$0-$9`，其中 `$0` 是完整匹配，`$1-$9` 是第 1 到第 9 个 regexp 捕获组，例如 `#re:mini(.*)o:real-$0-$1` 会把 `mini2o` 映射成 `real-mini2o-2`；`$10` 及以上会保留字面值，避免 `$12` 到底表示第 12 组还是 `$1` 后接 `2` 的歧义；如果要输出字面 `$`，在 target 中写成 `\$`，例如 `\$12` 输出 `$12`。处理顺序是：`V1_MODEL_MAP` 先把入站模型名纯文本改成 canonical routing input，然后进入 `DEFAULT_PROVIDER` / default group 模型归属选择，最后才进入命中 provider 自己的 `MODEL_MAP` 与 reasoning suffix 处理。`V1_MODEL_MAP` 不是纠错或兜底机制；如果映射 target 不在默认分组可见模型列表中，请求仍会按现有 `invalid_model` 路径失败。该字段属于根级可热加载配置。
 
 如果启用了 `ENABLE_DEFAULT_PROVIDER_MODEL_TAGS=true`，则默认分组会切到“标签模式”：
 
@@ -408,19 +408,19 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 支持：
 
-- `MODEL_MAP` 正则 source pattern 映射
-- `$0-$9` 占位符替换（按 Go regexp 子匹配动态生效；`$10` 及以上保留字面值以避免歧义）
-- `MANUAL_MODELS` 手动补模型，也支持从上游 `/models` 列表按正则匹配扩展
-- `HIDDEN_MODELS` 手动隐藏模型（支持正则）
+- `MODEL_MAP` 默认字面量映射，`#re:` source pattern 映射
+- `$0-$9` 占位符替换（仅对 `#re:` 的 Go regexp 子匹配有捕获意义；`$10` 及以上保留字面值以避免歧义）
+- `MANUAL_MODELS` 手动补模型，也支持从上游 `/models` 列表按 `#re:` 正则匹配扩展
+- `HIDDEN_MODELS` 手动隐藏模型（支持 `#re:` 正则）
 - `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-low/-medium/-high/-xhigh`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix 或请求体里解析出的 effort 自动映射到 Anthropic thinking
 
 这些变量的实际含义：
 
-- `MODEL_MAP`：把下游请求里的模型名按 Go regexp source pattern 重写成上游真正要调用的模型名；兜底匹配写成 `.*`，单独 `*` 不是合法 regexp
-- `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；非静态 regexp pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露
-- `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；支持 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽
+- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`
+- `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；`#re:` pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露
+- `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
 - `EXPOSE_REASONING_SUFFIX_MODELS`：让 `/models` 也把这些后缀变体展示给客户端
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把 effort 自动翻译成 `thinking` / `output_config`
