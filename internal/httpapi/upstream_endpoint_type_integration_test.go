@@ -945,6 +945,50 @@ func TestResponsesRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 	}
 }
 
+func TestResponsesRouteNoneReasoningSuffixDisablesReasoning(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsChat:                true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-none","reasoning":{"effort":"high","summary":"auto"},"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "none" {
+		t.Fatalf("expected client reasoning effort none, got %q", got)
+	}
+	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), map[string]any{"reasoning": map[string]any{"effort": "none", "summary": "auto"}})
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"none","summary":"auto"}`) {
+		t.Fatalf("expected none suffix to send explicit reasoning none upstream, got %s", gotBody)
+	}
+}
+
 func TestResponsesRouteNoPromptSuffixIsLiteralWhenDisabled(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -978,6 +1022,84 @@ func TestResponsesRouteNoPromptSuffixIsLiteralWhenDisabled(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected disabled noprompt suffix to be treated as a literal unavailable model, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "false" {
+		t.Fatalf("expected disabled noprompt suffix to report false, got %q", got)
+	}
+}
+
+func TestResponsesRouteProviderNoPromptSuffixOverrideDisablesRootEnabledSuffix(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                           "openai",
+			Enabled:                      true,
+			UpstreamBaseURL:              upstream.URL,
+			UpstreamAPIKey:               "test-key",
+			UpstreamEndpointType:         config.UpstreamEndpointTypeResponses,
+			SupportsResponses:            true,
+			SupportsChat:                 true,
+			ManualModels:                 []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix:  true,
+			EnableNoPromptModelSuffixSet: true,
+			EnableNoPromptModelSuffix:    false,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-noprompt","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected provider noprompt override to keep suffix literal and unavailable, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "false" {
+		t.Fatalf("expected provider noprompt override to report false, got %q", got)
+	}
+}
+
+func TestResponsesRouteHiddenNoPromptSuffixDisablesVariant(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+			ManualModels:         []string{"gpt-5.5"},
+			HiddenModels:         []string{"gpt-5.5-noprompt"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-noprompt","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected hidden noprompt variant to be rejected, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

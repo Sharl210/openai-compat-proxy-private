@@ -28,12 +28,11 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
-			applyNoPromptModelSuffix(&canon, snapshot.Config)
-		}
-		clientModel := canon.Model
 		provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 		if !ok {
+			if hasNoPromptModelSuffix(canon.Model) {
+				w.Header().Set(headerClientToProxyNoPrompt, "false")
+			}
 			if writeUpstreamError(w, selectionErr) {
 				return
 			}
@@ -43,6 +42,18 @@ func handleAnthropicMessages() http.HandlerFunc {
 		if !provider.SupportsAnthropicMessages {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
 			return
+		}
+		if !provider.HidesModel(canon.Model) {
+			applyNoPromptModelSuffix(&canon, providerCfg)
+		}
+		if hasNoPromptModelSuffix(canon.Model) {
+			w.Header().Set(headerClientToProxyNoPrompt, "false")
+		} else if canon.SkipProviderSystemPrompt {
+			resolvedModel = canon.Model
+		}
+		clientModel := canon.Model
+		if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {
+			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 		}
 		canon.Model = resolvedModel
 		if snapshot, ok := runtimeSnapshotFromRequest(r); ok {

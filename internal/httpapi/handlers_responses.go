@@ -323,12 +323,11 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
-	if snapshot, ok := runtimeSnapshotFromRequest(r); ok && snapshot != nil {
-		applyNoPromptModelSuffix(&canon, snapshot.Config)
-	}
-	clientModel := canon.Model
 	provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 	if !ok {
+		if hasNoPromptModelSuffix(canon.Model) {
+			w.Header().Set(headerClientToProxyNoPrompt, "false")
+		}
 		if writeUpstreamError(w, selectionErr) {
 			return nil, false
 		}
@@ -338,6 +337,18 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 	if !provider.SupportsResponses {
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support responses")
 		return nil, false
+	}
+	if !provider.HidesModel(canon.Model) {
+		applyNoPromptModelSuffix(&canon, providerCfg)
+	}
+	if hasNoPromptModelSuffix(canon.Model) {
+		w.Header().Set(headerClientToProxyNoPrompt, "false")
+	} else if canon.SkipProviderSystemPrompt {
+		resolvedModel = canon.Model
+	}
+	clientModel := canon.Model
+	if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {
+		*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 	}
 	return &initialResponsesRequest{
 		canon:         canon,
