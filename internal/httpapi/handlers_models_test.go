@@ -107,6 +107,35 @@ func TestExpandModelIDsKeepsExplicitAliases(t *testing.T) {
 	}
 }
 
+func TestRewriteModelsBodyDoesNotExposeReasoningSuffixModelsWhenDisabled(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"visible-reasoning","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		ManualModels:                []string{"visible-reasoning"},
+		EnableReasoningEffortSuffix: true,
+		ExposeReasoningSuffixModels: false,
+	}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if !contains(ids, "visible-reasoning") {
+		t.Fatalf("expected base model to stay visible, got %#v", ids)
+	}
+	for _, hidden := range []string{"visible-reasoning-low", "visible-reasoning-medium", "visible-reasoning-high", "visible-reasoning-xhigh"} {
+		if contains(ids, hidden) {
+			t.Fatalf("expected suffix model %q to stay hidden from /models when exposure is disabled, got %#v", hidden, ids)
+		}
+	}
+}
+
 func TestModelsUpstreamHTTPErrorMarksFailedStatus(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

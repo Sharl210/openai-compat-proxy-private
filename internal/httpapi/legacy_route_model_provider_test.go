@@ -442,6 +442,180 @@ func TestExplicitProviderResponsesRouteFollowsReasoningSuffixVisibleModels(t *te
 	}
 }
 
+func TestExplicitProviderResponsesRouteAllowsReasoningSuffixWhenNotExposedInModelsList(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "alpha",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "alpha",
+			Enabled:                     true,
+			UpstreamBaseURL:             alpha.URL,
+			UpstreamAPIKey:              "alpha-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			ManualModels:                []string{"visible-reasoning"},
+			EnableReasoningEffortSuffix: true,
+			ExposeReasoningSuffixModels: false,
+			HiddenModels:                []string{"visible-reasoning-high"},
+		}},
+	})
+
+	allowedReq := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"visible-reasoning-medium","input":"hello"}`))
+	allowedReq.Header.Set("Content-Type", "application/json")
+	allowedReq.Header.Set("Authorization", "Bearer alpha-key")
+	allowedRec := httptest.NewRecorder()
+	server.ServeHTTP(allowedRec, allowedReq)
+	if allowedRec.Code != http.StatusOK {
+		t.Fatalf("expected explicit suffix request to succeed even when suffix variants are hidden from /models, got %d body=%s", allowedRec.Code, allowedRec.Body.String())
+	}
+	if got := allowedRec.Header().Get("X-Client-To-Proxy-Reasoning-Effort"); got != "medium" {
+		t.Fatalf("expected reasoning suffix effort medium to be preserved, got %q", got)
+	}
+
+	rejectedReq := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"visible-reasoning-high","input":"hello"}`))
+	rejectedReq.Header.Set("Content-Type", "application/json")
+	rejectedReq.Header.Set("Authorization", "Bearer alpha-key")
+	rejectedRec := httptest.NewRecorder()
+	server.ServeHTTP(rejectedRec, rejectedReq)
+	if rejectedRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected explicitly hidden suffix model to stay rejected, got %d body=%s", rejectedRec.Code, rejectedRec.Body.String())
+	}
+}
+
+func TestLegacyResponsesRealtimeModels429SurfacesUpstreamErrorInsteadOfInvalidModel(t *testing.T) {
+	var modelsHits atomic.Int32
+	var responsesHits atomic.Int32
+	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			modelsHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":"USAGE_LIMIT_EXCEEDED","message":"daily usage limit exceeded","type":"insufficient_quota"}}`))
+		case "/responses":
+			responsesHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "alpha,beta",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{
+			{
+				ID:                   "alpha",
+				Enabled:              true,
+				UpstreamBaseURL:      alpha.URL,
+				UpstreamAPIKey:       "alpha-key",
+				UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+				SupportsResponses:    true,
+				SupportsModels:       true,
+			},
+			{
+				ID:                   "beta",
+				Enabled:              true,
+				UpstreamBaseURL:      beta.URL,
+				UpstreamAPIKey:       "beta-key",
+				UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+				SupportsResponses:    true,
+				ManualModels:         []string{"beta-model"},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"alpha-live","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected upstream 429 to surface, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "USAGE_LIMIT_EXCEEDED") || !strings.Contains(body, "daily usage limit exceeded") {
+		t.Fatalf("expected upstream quota body to be preserved, got %s", body)
+	}
+	if strings.Contains(body, "requested model is not in models list") || strings.Contains(body, "invalid_model") {
+		t.Fatalf("expected upstream error not model availability error, got %s", body)
+	}
+	if modelsHits.Load() == 0 {
+		t.Fatalf("expected realtime /models lookup to be attempted")
+	}
+	if responsesHits.Load() != 0 || beta.Hits() != 0 {
+		t.Fatalf("expected no upstream response call after model discovery 429, alpha responses=%d beta hits=%d", responsesHits.Load(), beta.Hits())
+	}
+}
+
+func TestExplicitProviderResponsesModelList429SurfacesUpstreamError(t *testing.T) {
+	var modelsHits atomic.Int32
+	var responsesHits atomic.Int32
+	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			modelsHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":"USAGE_LIMIT_EXCEEDED","message":"daily usage limit exceeded","type":"insufficient_quota"}}`))
+		case "/responses":
+			responsesHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer alpha.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "alpha",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "alpha",
+			Enabled:              true,
+			UpstreamBaseURL:      alpha.URL,
+			UpstreamAPIKey:       "alpha-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"alpha-live","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer alpha-key")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected provider model preflight 429 to surface, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "USAGE_LIMIT_EXCEEDED") || !strings.Contains(body, "daily usage limit exceeded") {
+		t.Fatalf("expected upstream quota body to be preserved, got %s", body)
+	}
+	if strings.Contains(body, "requested model is not in models list") || strings.Contains(body, "invalid_model") {
+		t.Fatalf("expected upstream error not model availability error, got %s", body)
+	}
+	if modelsHits.Load() == 0 {
+		t.Fatalf("expected provider /models preflight to be attempted")
+	}
+	if responsesHits.Load() != 0 {
+		t.Fatalf("expected no upstream response call after model preflight 429, got %d", responsesHits.Load())
+	}
+}
+
 func TestLegacyResponsesRouteRejectsUntaggedOverlappingModelWhenTagModeEnabled(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
