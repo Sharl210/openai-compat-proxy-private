@@ -206,7 +206,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		if id != "" {
-			if provider.HidesModel(id) {
+			if provider.HidesModel(id) || !modelSelectedByManualPatterns(provider, id) {
 				continue
 			}
 			if _, exists := seenIDs[id]; !exists {
@@ -235,6 +235,9 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	for _, manualModel := range provider.ManualModels {
 		if strings.TrimSpace(manualModel) == "" {
+			continue
+		}
+		if !config.IsStaticModelPattern(manualModel) {
 			continue
 		}
 		if _, exists := seenIDs[manualModel]; !exists {
@@ -321,7 +324,7 @@ func sortedPublicModelAliases(entries []config.ModelMapEntry) []string {
 
 func shouldHideModelAlias(id string) bool {
 	id = strings.TrimSpace(id)
-	return id == "" || strings.Contains(id, "*")
+	return id == "" || !config.IsStaticModelPattern(id)
 }
 
 func cloneSourceModelEntry(provider config.ProviderConfig, publicModel string, entriesByID map[string]map[string]any) map[string]any {
@@ -341,10 +344,32 @@ func cloneSourceModelEntry(provider config.ProviderConfig, publicModel string, e
 	return nil
 }
 
+func modelSelectedByManualPatterns(provider config.ProviderConfig, modelID string) bool {
+	if !hasRegexManualModelPattern(provider) {
+		return true
+	}
+	for _, pattern := range provider.ManualModels {
+		if config.ModelPatternMatches(pattern, modelID) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRegexManualModelPattern(provider config.ProviderConfig) bool {
+	for _, pattern := range provider.ManualModels {
+		pattern = strings.TrimSpace(pattern)
+		if pattern != "" && !config.IsStaticModelPattern(pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveModelMapTarget(entries []config.ModelMapEntry, model string) string {
 	for _, entry := range entries {
-		if !entry.HasWildcard && entry.Key == model {
-			return entry.Target
+		if config.IsStaticModelPattern(entry.Key) && entry.Key == model {
+			return entry.Resolve(model)
 		}
 	}
 	return ""
@@ -353,7 +378,9 @@ func resolveModelMapTarget(entries []config.ModelMapEntry, model string) string 
 func modelMapKeysFromEntries(entries []config.ModelMapEntry) []string {
 	keys := make([]string, 0, len(entries))
 	for _, e := range entries {
-		keys = append(keys, e.Key)
+		if config.IsStaticModelPattern(e.Key) {
+			keys = append(keys, e.Key)
+		}
 	}
 	return keys
 }

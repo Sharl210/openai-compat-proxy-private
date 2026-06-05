@@ -10,12 +10,12 @@ import (
 	"openai-compat-proxy/internal/reasoning"
 )
 
-func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersWildcardAliases(t *testing.T) {
+func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersRegexAliases(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model","owned_by":"openai"}]}`)
 	provider := config.ProviderConfig{
 		ModelMap: []config.ModelMapEntry{
-			{Key: "public-gpt", Target: "gpt-5.4"},
-			{Key: "*", Target: "gpt-5.4"},
+			config.NewModelMapEntry("public-gpt", "gpt-5.4"),
+			config.NewModelMapEntry(".*", "gpt-5.4"),
 		},
 	}
 
@@ -33,8 +33,8 @@ func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersWildcardAliases(t *te
 		entry, _ := item.(map[string]any)
 		entries[entry["id"].(string)] = entry
 	}
-	if _, ok := entries["*"]; ok {
-		t.Fatalf("expected wildcard alias to stay hidden, got %#v", entries)
+	if _, ok := entries[".*"]; ok {
+		t.Fatalf("expected regex alias to stay hidden, got %#v", entries)
 	}
 	if got := entries["gpt-5.4"]["owned_by"]; got != "openai" {
 		t.Fatalf("expected upstream entry fields to be preserved, got %#v", entries["gpt-5.4"])
@@ -90,8 +90,8 @@ func TestRewriteModelsBodyHidesAliasWhenMappedTargetIsMissing(t *testing.T) {
 	}
 }
 
-func TestExpandModelIDsKeepsExplicitAliasesAndSkipsWildcardPatterns(t *testing.T) {
-	expanded := reasoning.ExpandModelIDs([]string{"public-gpt", "gpt-5.4", "*", "gpt-5.4-high"}, []string{"public-gpt", "*"}, true)
+func TestExpandModelIDsKeepsExplicitAliases(t *testing.T) {
+	expanded := reasoning.ExpandModelIDs([]string{"public-gpt", "gpt-5.4", "gpt-5.4-high"}, []string{"public-gpt"}, true)
 	got := map[string]bool{}
 	for _, id := range expanded {
 		got[id] = true
@@ -101,9 +101,6 @@ func TestExpandModelIDsKeepsExplicitAliasesAndSkipsWildcardPatterns(t *testing.T
 	}
 	if !got["public-gpt-high"] {
 		t.Fatalf("expected explicit alias to expand suffix variants, got %#v", expanded)
-	}
-	if got["*"] || got["*-high"] {
-		t.Fatalf("expected wildcard patterns to stay hidden, got %#v", expanded)
 	}
 	if got["gpt-5.4-high-low"] {
 		t.Fatalf("expected already suffixed ids to stop expanding, got %#v", expanded)
@@ -157,8 +154,8 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 			UpstreamAPIKey:  "test-key",
 			SupportsModels:  true,
 			ModelMap: []config.ModelMapEntry{
-				{Key: "public-gpt", Target: "gpt-5.4"},
-				{Key: "*", Target: "gpt-5.4"},
+				config.NewModelMapEntry("public-gpt", "gpt-5.4"),
+				config.NewModelMapEntry(".*", "gpt-5.4"),
 			},
 		}},
 	})
@@ -281,7 +278,7 @@ func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
 			{Key: "public-gpt", Target: "gpt-5"},
 		},
 		ManualModels: []string{"manual-alpha", "manual-beta"},
-		HiddenModels: []string{"gpt-4*", "manual-alpha", "public-*"},
+		HiddenModels: []string{"gpt-4.*", "manual-alpha", "public-.*"},
 	}
 
 	rewritten := rewriteModelsBody(body, provider)
@@ -303,11 +300,53 @@ func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
 	}
 }
 
-func TestRewriteModelsBodyKeepsManualModelsEvenWhenHiddenWildcardMatches(t *testing.T) {
+func TestRewriteModelsBodyExpandsRegexManualModelsFromUpstreamList(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"1","object":"model"},{"id":"2","object":"model"},{"id":"2.4","object":"model"},{"id":"5","object":"model"}]}`)
+	provider := config.ProviderConfig{ManualModels: []string{"2.*"}}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if contains(ids, "1") || contains(ids, "5") || !contains(ids, "2") || !contains(ids, "2.4") {
+		t.Fatalf("expected regex manual pattern to expose only matching upstream models 2 and 2.4, got %#v", ids)
+	}
+}
+
+func TestConfiguredModelsFallbackSkipsRegexManualPatterns(t *testing.T) {
+	provider := config.ProviderConfig{ManualModels: []string{"2.*", "literal-model"}}
+
+	body, ok := configuredModelsFallbackBody(provider)
+	if !ok {
+		t.Fatalf("expected literal manual model to provide fallback body")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode fallback body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if contains(ids, "2.*") || !contains(ids, "literal-model") {
+		t.Fatalf("expected regex manual pattern hidden from fallback while literal remains, got %#v", ids)
+	}
+}
+
+func TestRewriteModelsBodyKeepsManualModelsEvenWhenHiddenRegexMatches(t *testing.T) {
 	body := []byte(`{"object":"list","data":[]}`)
 	provider := config.ProviderConfig{
 		ManualModels: []string{"manual-alpha"},
-		HiddenModels: []string{"*"},
+		HiddenModels: []string{".*"},
 	}
 
 	rewritten := rewriteModelsBody(body, provider)

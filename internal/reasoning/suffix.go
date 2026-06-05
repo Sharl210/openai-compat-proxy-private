@@ -51,14 +51,8 @@ func SplitSuffix(modelName string) (string, string, bool) {
 func ExpandModelIDs(baseIDs []string, modelMapKeys []string, enabled bool) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(baseIDs)*5)
-	hiddenPatterns := map[string]bool{}
-	for _, k := range modelMapKeys {
-		if strings.Contains(k, "*") {
-			hiddenPatterns[k] = true
-		}
-	}
 	for _, id := range baseIDs {
-		if id == "" || seen[id] || hiddenPatterns[id] || strings.Contains(id, "*") {
+		if id == "" || seen[id] {
 			continue
 		}
 		seen[id] = true
