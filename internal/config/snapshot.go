@@ -241,7 +241,7 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string
 		return "", false
 	}
 	provider, err := s.Config.ProviderByID(owner)
-	if err != nil || !provider.EnableReasoningEffortSuffix || provider.HidesModel(model) {
+	if err != nil || (!provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(model)) || provider.HidesModel(model) {
 		return "", false
 	}
 	return owner, true
@@ -261,7 +261,12 @@ func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (
 	}
 	if s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseModel)] != providerID {
 		baseVisibleModel, _, ok := reasoning.SplitSuffix(baseModel)
-		if !ok || !provider.EnableReasoningEffortSuffix || provider.HidesModel(baseModel) || s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseVisibleModel)] != providerID {
+		if !ok || (!provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(baseModel)) || provider.HidesModel(baseModel) || s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseVisibleModel)] != providerID {
+			if strippedModel, stripped := stripNoPromptModelSuffix(baseModel); stripped && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(baseModel) {
+				if _, _, strippedOK := s.ResolveTaggedDefaultProviderIDForModel(formatTaggedModelID(providerID, strippedModel)); strippedOK {
+					return providerID, strippedModel, true
+				}
+			}
 			return "", "", false
 		}
 	}
@@ -276,13 +281,40 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 		return providerID, baseModel, true
 	}
 	if !s.Config.EnableDefaultProviderModelTags {
-		providerID, ok := s.ResolveDefaultProviderIDForModel(model)
-		return providerID, model, ok
+		if providerID, ok := s.ResolveDefaultProviderIDForModel(model); ok {
+			return providerID, model, true
+		}
+		if baseModel, ok := stripNoPromptModelSuffix(model); ok {
+			if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
+				provider, err := s.Config.ProviderByID(owner)
+				if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(model) {
+					return owner, resolvedModel, true
+				}
+			}
+		}
+		return "", model, false
 	}
 	if owner, ok := s.DefaultModelOwners[model]; ok {
 		return owner, model, true
 	}
+	if baseModel, ok := stripNoPromptModelSuffix(model); ok {
+		if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
+			provider, err := s.Config.ProviderByID(owner)
+			if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(model) {
+				return owner, resolvedModel, true
+			}
+		}
+	}
 	return "", model, false
+}
+
+func stripNoPromptModelSuffix(model string) (string, bool) {
+	const suffix = "-noprompt"
+	trimmed := strings.TrimSpace(model)
+	if len(trimmed) <= len(suffix) || !strings.HasSuffix(trimmed, suffix) {
+		return model, false
+	}
+	return strings.TrimSuffix(trimmed, suffix), true
 }
 
 func providerResolvesModel(provider ProviderConfig, model string) bool {
@@ -292,7 +324,7 @@ func providerResolvesModel(provider ProviderConfig, model string) bool {
 	if provider.resolveModel(model, provider.EnableReasoningEffortSuffix) != "" {
 		return true
 	}
-	if !provider.EnableReasoningEffortSuffix {
+	if !provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(model) {
 		return false
 	}
 	baseModel, _, ok := splitReasoningSuffix(model)

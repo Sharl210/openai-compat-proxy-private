@@ -510,8 +510,31 @@ func TestBuildDefaultOverlayModelIndexHiddenModelsFilterReasoningSuffixVariants(
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
-	if want := []string{"reason-model", "reason-model-xhigh", "reason-model-medium"}; !reflect.DeepEqual(visible, want) {
+	if want := []string{"reason-model", "reason-model-minimal", "reason-model-xhigh", "reason-model-medium", "reason-model-none"}; !reflect.DeepEqual(visible, want) {
 		t.Fatalf("expected explicitly hidden suffix variants to stay hidden while the manual model hierarchy remains visible, want %v got %v", want, visible)
+	}
+}
+
+func TestRuntimeSnapshotResolveDefaultProviderSelectionStripsNoPromptBeforeReasoningSuffix(t *testing.T) {
+	cfg := Config{
+		DefaultProvider:           "openai",
+		EnableNoPromptModelSuffix: true,
+		Providers: []ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+		}},
+	}
+	providerIDs, owners, visible, taggedOwners, taggedVisible, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("build overlay: %v", err)
+	}
+	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible}
+
+	providerID, model, ok := snapshot.ResolveDefaultProviderSelection("gpt-5.5-low-noprompt")
+	if !ok || providerID != "openai" || model != "gpt-5.5-low" {
+		t.Fatalf("expected noprompt reasoning suffix selection to resolve to openai/gpt-5.5-low, got provider=%q model=%q ok=%v", providerID, model, ok)
 	}
 }
 
