@@ -1970,6 +1970,7 @@ func streamLiveWithSyntheticTicks(
 	defer ticker.Stop()
 	heartbeatTicker := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeatTicker.Stop()
+	seenEvent := false
 
 	for {
 		select {
@@ -1992,12 +1993,16 @@ func streamLiveWithSyntheticTicks(
 				return io.ErrUnexpectedEOF
 			}
 			if sig.evt != nil {
+				seenEvent = true
 				if err := onEvent(*sig.evt); err != nil {
 					return err
 				}
 				continue
 			}
 			if sig.done {
+				if sig.err == nil && !seenEvent {
+					return io.ErrUnexpectedEOF
+				}
 				return sig.err
 			}
 		}

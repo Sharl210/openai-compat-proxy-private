@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,6 +98,36 @@ func TestStreamLiveWithSyntheticTicksSendsHeartbeatWhileWaiting(t *testing.T) {
 	}
 	if eventCount != 1 {
 		t.Fatalf("expected one upstream event, got %d", eventCount)
+	}
+}
+
+func TestStreamLiveWithSyntheticTicksReturnsUnexpectedEOFWhenUpstreamEndsBeforeAnyEvent(t *testing.T) {
+	oldTickInterval := syntheticReasoningTickInterval
+	oldHeartbeatInterval := sseHeartbeatInterval
+	syntheticReasoningTickInterval = time.Hour
+	sseHeartbeatInterval = time.Hour
+	defer func() {
+		syntheticReasoningTickInterval = oldTickInterval
+		sseHeartbeatInterval = oldHeartbeatInterval
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err := streamLiveWithSyntheticTicks(
+		ctx,
+		func(func(upstream.Event) error) error { return nil },
+		func() bool { return false },
+		func() error { return nil },
+		func() error { return nil },
+		func(upstream.Event) error {
+			t.Fatal("empty upstream stream must not emit events")
+			return nil
+		},
+	)
+
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected empty upstream stream to return io.ErrUnexpectedEOF, got %v", err)
 	}
 }
 
