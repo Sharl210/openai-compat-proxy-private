@@ -513,8 +513,8 @@ UPSTREAM_ENDPOINT_TYPE=responses
 | 值 | 作用 |
 |---|---|
 | `opencode` | 注入 OpenCode 风格 `User-Agent` + `originator` |
-| `claude` | 注入 Claude Code 风格 `User-Agent`、`X-App`、`anthropic-beta`、`X-Stainless-*` |
-| `codex` | 注入 Codex CLI 风格 `User-Agent`、`originator`、residency header |
+| `claude` | 注入 Claude Code 风格 `User-Agent`、`X-App`、完整 `anthropic-beta`、`X-Stainless-*`，并可按现有开关注入官方 system prompt / metadata.user_id |
+| `codex` | 注入 Codex CLI 风格 `User-Agent`、`originator`、residency header；当请求带 reasoning 时自动补 `include=reasoning.encrypted_content` |
 | `none` | 显式禁用伪装 |
 | 留空 | provider 级留空表示继承根配置 |
 
