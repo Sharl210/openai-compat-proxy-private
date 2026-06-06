@@ -167,6 +167,87 @@ func TestResponsesUpstreamNonStreamPreservesUpstreamServiceTier(t *testing.T) {
 	}
 }
 
+func TestResponsesNonStreamSuppressesRealUpstreamReasoning(t *testing.T) {
+	semanticPayload := map[string]any{
+		"id":     "resp_123",
+		"object": "response",
+		"status": "completed",
+		"reasoning": map[string]any{
+			"summary": "secret upstream reasoning",
+		},
+		"usage": map[string]any{
+			"input_tokens":  11,
+			"output_tokens": 7,
+			"total_tokens":  18,
+		},
+		"output": []any{
+			map[string]any{
+				"id":     "msg_123",
+				"type":   "message",
+				"status": "completed",
+				"role":   "assistant",
+				"content": []any{
+					map[string]any{"type": "output_text", "text": "hello"},
+				},
+			},
+			map[string]any{
+				"id":   "rs_123",
+				"type": "reasoning",
+				"summary": []any{
+					map[string]any{"type": "summary_text", "text": "secret upstream reasoning"},
+				},
+			},
+		},
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+
+		if stream, _ := req["stream"].(bool); stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(
+				"event: response.output_item.done\n" +
+					"data: {\"item\":{\"id\":\"rs_123\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"secret upstream reasoning\"}]}}\n\n" +
+					"event: response.output_text.delta\n" +
+					"data: {\"delta\":\"hello\"}\n\n" +
+					"event: response.completed\n" +
+					"data: {\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n",
+			))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(semanticPayload); err != nil {
+			t.Fatalf("encode upstream payload: %v", err)
+		}
+	}))
+	defer upstream.Close()
+
+	for _, strategy := range []string{config.DownstreamNonStreamStrategyProxyBuffer, config.DownstreamNonStreamStrategyUpstreamNonStream} {
+		payload := performResponsesNonStreamRequest(t, upstream.URL, strategy)
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal payload for strategy %s: %v", strategy, err)
+		}
+		body := string(encoded)
+		if strings.Contains(body, "secret upstream reasoning") {
+			t.Fatalf("expected strategy %s to suppress real upstream reasoning, got %s", strategy, body)
+		}
+		if !strings.Contains(body, "hello") {
+			t.Fatalf("expected strategy %s to preserve final answer, got %s", strategy, body)
+		}
+	}
+}
+
 func performResponsesNonStreamRequest(t *testing.T, upstreamURL string, strategy string) map[string]any {
 	t.Helper()
 

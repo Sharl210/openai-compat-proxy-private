@@ -546,14 +546,11 @@ func TestChatUpstreamReasoningPreservedInResponsesNonStream(t *testing.T) {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	reasoning, _ := resp["reasoning"].(map[string]any)
-	if reasoning == nil {
-		t.Fatalf("expected reasoning field in responses output, got body=%s", rec.Body.String())
+	if resp["reasoning"] != nil {
+		t.Fatalf("expected real chat upstream reasoning to be suppressed in responses output, got body=%s", rec.Body.String())
 	}
-
-	summary, _ := reasoning["summary"].(string)
-	if !strings.Contains(summary, "thinking step by step") {
-		t.Fatalf("expected reasoning.summary to contain thinking, got %q body=%s", summary, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "final answer") {
+		t.Fatalf("expected final answer to remain in responses output, got body=%s", rec.Body.String())
 	}
 }
 
@@ -664,14 +661,11 @@ func TestAnthropicUpstreamThinkingPreservedInResponsesNonStream(t *testing.T) {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 
-	reasoning, _ := resp["reasoning"].(map[string]any)
-	if reasoning == nil {
-		t.Fatalf("expected reasoning field in responses output from anthropic thinking, got body=%s", rec.Body.String())
+	if resp["reasoning"] != nil {
+		t.Fatalf("expected anthropic upstream thinking to be suppressed in responses output, got body=%s", rec.Body.String())
 	}
-
-	summary, _ := reasoning["summary"].(string)
-	if !strings.Contains(summary, "let me think about this") {
-		t.Fatalf("expected reasoning.summary to contain thinking, got %q body=%s", summary, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "final answer") {
+		t.Fatalf("expected final answer to remain in responses output, got body=%s", rec.Body.String())
 	}
 }
 

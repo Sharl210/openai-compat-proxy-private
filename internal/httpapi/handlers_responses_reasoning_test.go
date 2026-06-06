@@ -40,16 +40,12 @@ func TestResponsesNonStreamPreservesReasoningOutputItems(t *testing.T) {
 		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
 	}
 
+	if payload["reasoning"] != nil {
+		t.Fatalf("expected top-level reasoning to be suppressed, got %#v", payload["reasoning"])
+	}
 	output, _ := payload["output"].([]any)
-	if len(output) != 1 {
-		t.Fatalf("expected one output item, got %#v", payload["output"])
-	}
-	item, _ := output[0].(map[string]any)
-	if got, _ := item["type"].(string); got != "reasoning" {
-		t.Fatalf("expected reasoning output item, got %#v", item)
-	}
-	if got, _ := item["encrypted_content"].(string); got != "enc_123" {
-		t.Fatalf("expected encrypted_content to be preserved, got %#v", item)
+	if len(output) != 0 {
+		t.Fatalf("expected real upstream reasoning output items to be suppressed, got %#v", payload["output"])
 	}
 }
 
