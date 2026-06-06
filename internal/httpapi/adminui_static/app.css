@@ -1223,10 +1223,25 @@ button { cursor: pointer; }
   background: var(--md-sys-color-surface-container);
   border: 1px solid var(--md-sys-color-outline-variant);
   color: var(--md-sys-color-on-surface-variant);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: calc(13px * var(--env-comment-zoom, 1));
   line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: hidden;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  text-rendering: geometricPrecision;
+  touch-action: pan-x pan-y;
+}
+.env-comment-block:focus {
+  outline: none;
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 3px rgba(47, 91, 218, 0.16);
 }
 .comment-input {
   min-height: 32px;

@@ -21,6 +21,7 @@ const state = {
   recoveryAction: '',
   recoveryDeadline: 0,
   editorZoom: loadEditorZoom(),
+  envCommentZoom: loadEnvCommentZoom(),
   lastSaveFeedback: null,
   toast: null,
   statusRefreshInFlight: false,
@@ -865,6 +866,7 @@ function bindEvents() {
         render();
       });
     }
+    envContainer.querySelectorAll('.env-comment-block').forEach(bindEnvCommentBlock);
     const tailInput = document.getElementById('env-tail-lines');
     if (tailInput) {
       autoSizeTextarea(tailInput);
@@ -1241,7 +1243,7 @@ function renderEnvEntry(entry, index, sourceIndex = index) {
           <button class="env-toggle secondary-btn material-outlined-button" type="button" data-env-toggle="${escapeAttr(entryId)}">${expanded ? '收起' : '说明'}</button>
         </div>
         ${expanded ? `
-          <pre class="env-comment-block">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
+          <pre class="env-comment-block" tabindex="0" aria-label="环境变量说明" style="${escapeAttr(envCommentZoomStyle())}">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
         ` : ''}
         <div class="env-value-row">
           <textarea class="env-value-input auto-resize no-wrap-editor" rows="1" name="env-value-${sourceIndex}" data-index="${sourceIndex}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
@@ -1877,6 +1879,91 @@ function autoSizeTextarea(textarea) {
   textarea.style.height = '0px';
   textarea.style.height = `${Math.max(textarea.scrollHeight, minHeight)}px`;
   syncCodeEditor(textarea);
+}
+
+function loadEnvCommentZoom() {
+  try {
+    const saved = Number(window.localStorage.getItem('admin-env-comment-zoom') || '1');
+    return Number.isFinite(saved) ? clampEnvCommentZoom(saved) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function persistEnvCommentZoom() {
+  try {
+    window.localStorage.setItem('admin-env-comment-zoom', String(state.envCommentZoom));
+  } catch {
+  }
+}
+
+function clampEnvCommentZoom(value) {
+  return Math.min(2.5, Math.max(0.75, Math.round(value * 20) / 20));
+}
+
+function envCommentZoomStyle() {
+  return `--env-comment-zoom:${state.envCommentZoom};`;
+}
+
+function setEnvCommentZoom(value) {
+  const next = clampEnvCommentZoom(value);
+  if (next === state.envCommentZoom) {
+    return;
+  }
+  state.envCommentZoom = next;
+  persistEnvCommentZoom();
+  document.querySelectorAll('.env-comment-block').forEach((block) => {
+    block.style.setProperty('--env-comment-zoom', String(state.envCommentZoom));
+  });
+}
+
+function bindEnvCommentBlock(block) {
+  if (!(block instanceof HTMLElement) || block.dataset.envCommentBound === 'true') {
+    return;
+  }
+  block.dataset.envCommentBound = 'true';
+  block.style.setProperty('--env-comment-zoom', String(state.envCommentZoom));
+  block.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey) {
+      return;
+    }
+    event.preventDefault();
+    setEnvCommentZoom(state.envCommentZoom + (event.deltaY < 0 ? 0.1 : -0.1));
+  }, { passive: false });
+
+  let pinchDistance = 0;
+  block.addEventListener('touchstart', (event) => {
+    if (event.touches.length === 2 && touchesInsideElement(event.touches, block)) {
+      pinchDistance = touchDistance(event.touches[0], event.touches[1]);
+    } else {
+      pinchDistance = 0;
+    }
+  }, { passive: true });
+  block.addEventListener('touchmove', (event) => {
+    if (event.touches.length !== 2 || pinchDistance <= 0 || !touchesInsideElement(event.touches, block)) {
+      return;
+    }
+    event.preventDefault();
+    const nextDistance = touchDistance(event.touches[0], event.touches[1]);
+    const delta = nextDistance - pinchDistance;
+    if (Math.abs(delta) >= 16) {
+      setEnvCommentZoom(state.envCommentZoom + (delta > 0 ? 0.05 : -0.05));
+      pinchDistance = nextDistance;
+    }
+  }, { passive: false });
+  block.addEventListener('touchend', () => {
+    pinchDistance = 0;
+  });
+  block.addEventListener('touchcancel', () => {
+    pinchDistance = 0;
+  });
+}
+
+function touchesInsideElement(touches, element) {
+  const rect = element.getBoundingClientRect();
+  return Array.from(touches).every((touch) => (
+    touch.clientX >= rect.left && touch.clientX <= rect.right && touch.clientY >= rect.top && touch.clientY <= rect.bottom
+  ));
 }
 
 function loadEditorZoom() {
