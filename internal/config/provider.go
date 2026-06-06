@@ -892,6 +892,9 @@ func (p ProviderConfig) HidesModel(model string) bool {
 			if baseModel, _, suffixOK := reasoning.SplitSuffix(model); suffixOK && baseModel == manualBase {
 				for _, pattern := range p.HiddenModels {
 					pattern = strings.TrimSpace(pattern)
+					if hiddenBase, ok := manualReasonSuffixBase(pattern); ok && hiddenBase == manualBase {
+						continue
+					}
 					if modelPatternMatches(pattern, model) {
 						return true
 					}
@@ -916,6 +919,15 @@ func (p ProviderConfig) HidesModel(model string) bool {
 	for _, pattern := range p.HiddenModels {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
+			continue
+		}
+		if hiddenBase, ok := manualReasonSuffixBase(pattern); ok {
+			if model == hiddenBase {
+				return true
+			}
+			if baseModel, _, suffixOK := reasoning.SplitSuffix(model); suffixOK && baseModel == hiddenBase {
+				return true
+			}
 			continue
 		}
 		if modelPatternMatches(pattern, model) {

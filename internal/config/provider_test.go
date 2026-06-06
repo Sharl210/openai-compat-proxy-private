@@ -114,6 +114,69 @@ func TestVisibleModelIDsExpandsManualReasonSuffixFamilyIndependentOfSuffixFlags(
 	}
 }
 
+func TestManualModelOverridesHiddenModel(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"gpt-5.5-noprompt"}, HiddenModels: []string{"gpt-5.5-noprompt", "#re:gpt-5\\.5.*"}}
+
+	if p.HidesModel("gpt-5.5-noprompt") {
+		t.Fatalf("expected explicit manual model to override hidden model patterns")
+	}
+	ids := p.VisibleModelIDs()
+	if strings.Join(ids, ",") != "gpt-5.5-noprompt" {
+		t.Fatalf("expected explicit manual model to stay visible despite hidden patterns, got %v", ids)
+	}
+}
+
+func TestManualReasonSuffixFamilyAllowsHiddenModelVariant(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}, HiddenModels: []string{"gpt-5.5-minimal"}}
+
+	for _, model := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if p.HidesModel(model) {
+			t.Fatalf("expected manual reason suffix family model %q to stay visible", model)
+		}
+	}
+	if !p.HidesModel("gpt-5.5-minimal") {
+		t.Fatalf("expected hidden model to remove one generated reason suffix family variant")
+	}
+	ids := p.VisibleModelIDs()
+	for _, want := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if !containsString(ids, want) {
+			t.Fatalf("expected manual reason suffix family model %q to stay visible, got %v", want, ids)
+		}
+	}
+	if containsString(ids, "gpt-5.5-minimal") {
+		t.Fatalf("expected hidden generated reason suffix family variant to be removed, got %v", ids)
+	}
+}
+
+func TestHiddenReasonSuffixFamilyHidesGeneratedVariants(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.5", "upstream-gpt-5.5")}, EnableReasoningEffortSuffix: true, ExposeReasoningSuffixModels: true, HiddenModels: []string{"#reason_suffix:gpt-5.5"}}
+
+	for _, model := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-minimal", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if !p.HidesModel(model) {
+			t.Fatalf("expected hidden reason suffix family marker to hide %q", model)
+		}
+	}
+	if ids := p.VisibleModelIDs(); len(ids) != 0 {
+		t.Fatalf("expected hidden reason suffix family marker to remove visible models, got %v", ids)
+	}
+}
+
+func TestManualReasonSuffixFamilyOverridesSameHiddenFamilyMarker(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}, HiddenModels: []string{"#reason_suffix:gpt-5.5"}}
+
+	for _, model := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-minimal", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if p.HidesModel(model) {
+			t.Fatalf("expected manual reason suffix family to override identical hidden family marker for %q", model)
+		}
+	}
+	ids := p.VisibleModelIDs()
+	for _, want := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-minimal", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if !containsString(ids, want) {
+			t.Fatalf("expected manual reason suffix family model %q to remain visible, got %v", want, ids)
+		}
+	}
+}
+
 func TestResolveModelTreatsUnmarkedPatternAsLiteral(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.5", "real")}}
 

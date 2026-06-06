@@ -422,9 +422,9 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 这些变量的实际含义：
 
-- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`
+- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`；`#re:` 左侧支持 Go regexp 的 `^` / `$` 锚点，它们表示正则开头/结尾，和 target 里的 `$1` 捕获组替换不是一回事
 - `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；静态模型名可以直接写 `gpt-5.5-noprompt` 这类代理层后缀模型，让它作为字面模型出现在 `/models`；`#re:` pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露；`#reason_suffix:gpt-5.5` 会单独为 `gpt-5.5` 生成 `none/minimal/low/medium/high/xhigh` 推理后缀家族，不受 `ENABLE_REASONING_EFFORT_SUFFIX` 和 `EXPOSE_REASONING_SUFFIX_MODELS` 约束
-- `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽；它也可以隐藏 `gpt-5.5-noprompt`、`gpt-5.5-low-noprompt` 这类 noprompt 变体，作为禁用某个 noprompt 入口的手段
+- `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽；`#re:` 里可以正常使用 `^` / `$` 锚点；它也可以隐藏 `gpt-5.5-noprompt`、`gpt-5.5-low-noprompt` 这类 noprompt 变体，作为禁用某个 noprompt 入口的手段；它还支持 `#reason_suffix:gpt-5.5` 这种 family marker，用来隐藏该 base model 的整组推理后缀家族；但静态 `MANUAL_MODELS=gpt-5.5-noprompt` 这种显式手动添加优先级最高，同一个字面模型即使也被 `HIDDEN_MODELS` 命中，最终仍会显示
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
 - `ENABLE_NOPROMPT_MODEL_SUFFIX`：允许像 `model-noprompt`、`model-low-noprompt` 这样的请求跳过 provider 级 `SYSTEM_PROMPT_FILES` 注入；根级默认开启，provider 级同名字段留空时继承根配置，显式 `true/false` 时覆盖根配置；`-noprompt` 会先从模型名剥离，不会出现在上游模型名里，也不会自动额外出现在 `/models` 列表里，除非你在 `MANUAL_MODELS` 里把这个字面模型写出来
@@ -436,7 +436,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 显式 `/{providerId}/v1/*` 也只允许请求该 provider 自己 `/models` 列表里可见的模型
 - 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
 - suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` / `model-none` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
-- `#reason_suffix:model` 是手动 family 例外：即使 `ENABLE_REASONING_EFFORT_SUFFIX=false` 或 `EXPOSE_REASONING_SUFFIX_MODELS=false`，它仍会把该 base model 的推理后缀家族放进 `/models` 并允许请求；极端情况下，如果 `ENABLE_REASONING_EFFORT_SUFFIX=false` 且 `MANUAL_MODELS` 同时写了 `#reason_suffix:gpt-5.5` 和字面 `gpt-5.5-low`，字面模型优先，`gpt-5.5-low` 会按 provider 原生模型处理；如果 `ENABLE_REASONING_EFFORT_SUFFIX=true`，同名 suffix 仍按可解析推理后缀处理
+- `#reason_suffix:model` 是手动 family 例外：即使 `ENABLE_REASONING_EFFORT_SUFFIX=false` 或 `EXPOSE_REASONING_SUFFIX_MODELS=false`，它仍会把该 base model 的推理后缀家族放进 `/models` 并允许请求；但它生成的是一个批量 family，不等同于每个档位都被静态手动添加，所以 `HIDDEN_MODELS` 仍可以隐藏其中某个具体档位，例如用 `HIDDEN_MODELS=gpt-5.5-minimal` 只取消 `minimal` 这个变体，也可以用 `HIDDEN_MODELS=#reason_suffix:gpt-5.5` 隐藏整组家族；如果 `MANUAL_MODELS` 和 `HIDDEN_MODELS` 同时写了同一个 `#reason_suffix:gpt-5.5`，手动添加优先，最终仍会显示；极端情况下，如果 `ENABLE_REASONING_EFFORT_SUFFIX=false` 且 `MANUAL_MODELS` 同时写了 `#reason_suffix:gpt-5.5` 和字面 `gpt-5.5-low`，字面模型优先，`gpt-5.5-low` 会按 provider 原生模型处理；如果 `ENABLE_REASONING_EFFORT_SUFFIX=true`，同名 suffix 仍按可解析推理后缀处理
 - `HIDDEN_MODELS` 的 `#re:` 是按完整模型名做普通 Go regexp 匹配，不理解“模型名”和“后缀强度”的语义边界；因此 `#re:.*mini.*` 会同时隐藏 `gpt-5.4-mini` 和 `gpt-5.5-minimal`。如果只想隐藏 `mini` 模型而保留 `-minimal` 推理强度，建议写成更精确的规则，例如 `#re:.*(^|-|:)mini($|-|\.).*`，或者直接列出要隐藏的字面模型。
 - `-noprompt` 是另一个代理层后缀：默认开启时，`gpt-5.5-noprompt` 会按 `gpt-5.5` 路由，`gpt-5.5-low-noprompt` 会按 `gpt-5.5-low` 路由并保留 `low` 推理强度，同时跳过 provider prompt 注入；provider 级 `ENABLE_NOPROMPT_MODEL_SUFFIX=false` 会让该 provider 把 `-noprompt` 当普通模型名处理；`HIDDEN_MODELS=gpt-5.5-noprompt` 可以隐藏并禁用该 noprompt 变体；响应头 `X-Client-To-Proxy-NoPrompt: true` 表示该标记已生效，`false` 表示客户端带了 `-noprompt` 但有效配置关闭了该能力，`X-Proxy-To-Upstream-Model` 仍显示最终发给上游的模型名
 
