@@ -138,7 +138,9 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 	}
 	msg := model.CanonicalMessage{Role: "assistant", Parts: parts, ToolCalls: toolCalls, ReasoningBlocks: reasoningBlocks}
 	if summary, _ := result.Reasoning["summary"].(string); summary != "" {
-		msg.ReasoningContent = summary
+		if !isSyntheticReasoningSummary(summary) {
+			msg.ReasoningContent = summary
+		}
 	}
 	return []model.CanonicalMessage{msg}
 }
@@ -175,6 +177,14 @@ func isSyntheticResponsesReasoningBlock(block map[string]any) bool {
 		return false
 	}
 	return true
+}
+
+func isSyntheticReasoningSummary(summary string) bool {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return false
+	}
+	return strings.Contains(summary, "代理层占位")
 }
 
 func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {

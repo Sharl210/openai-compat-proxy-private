@@ -3,6 +3,7 @@ package httpapi
 import (
 	"testing"
 
+	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -178,6 +179,27 @@ func TestBuildResponsesHistorySnapshotKeepsRealReasoningBlocks(t *testing.T) {
 	}
 	if got, _ := snapshot[1].ReasoningBlocks[0]["type"].(string); got != "thinking" {
 		t.Fatalf("expected real thinking block preserved, got %#v", snapshot[1].ReasoningBlocks)
+	}
+}
+
+func TestAssistantHistoryMessagesFromResultDropsSyntheticReasoningSummary(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		ResponseMessageContent: []map[string]any{{"type": "output_text", "text": "final answer"}},
+		Reasoning: map[string]any{
+			"summary": "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
+		},
+	})
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant history message, got %#v", messages)
+	}
+	if got := messages[0].ReasoningContent; got != "" {
+		t.Fatalf("expected synthetic reasoning summary to be dropped from history message, got %#v", messages[0])
+	}
+	if len(messages[0].ReasoningBlocks) != 0 {
+		t.Fatalf("expected no reasoning blocks when only synthetic summary exists, got %#v", messages[0])
+	}
+	if len(messages[0].Parts) != 1 || messages[0].Parts[0].Text != "final answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", messages[0])
 	}
 }
 
