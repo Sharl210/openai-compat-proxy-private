@@ -312,7 +312,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
 | `X-Provider-Version` | 当前 provider 配置的热加载版本戳 | `2026-03-25T11:04:00.222Z` |
-| `X-SYSTEM-PROMPT-ATTACH` | 当 provider 级系统提示词真的注入时，展示注入位置与原始文件串 | `prepend:prompt.md, prompts/extra.md` |
+| `X-SYSTEM-PROMPT-ATTACH` | 展示本次请求的 provider 级系统提示词附加状态；正常注入时为位置与原始文件串，`-noprompt` 生效或没有可注入内容时保留为空值 | `prepend:prompt.md, prompts/extra.md` |
 
 补充说明：
 
@@ -322,6 +322,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 - 服务层级响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置服务层级”。
 - `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
 - `X-Client-To-Proxy-Reasoning-Effort` 是客户端侧的**摘要值**；如果同一请求里模型 suffix 和请求体参数同时存在，代理会按本地优先级先决出最终强度，再把这个摘要值写进来。
+- `X-SYSTEM-PROMPT-ATTACH` 是本次请求的提示词附加透明度字段：正常注入 provider prompt 时显示 `prepend:prompt.md` 或 `append:...`；当 `-noprompt` 真正生效且 `X-Client-To-Proxy-NoPrompt=true` 时，这个 header 仍会存在但值为空，表示本次已明确跳过 provider prompt 注入；如果 `-noprompt` 没有生效，则继续按实际注入状态显示文件串。
 - 模型名里的 reasoning suffix 优先于客户端请求体里的任何 reasoning / thinking 设置；例如 `model-low` 会覆盖客户端传入的 `thinking: {"type":"disabled"}`，`model-none` 会强制关闭推理；当上游是 Anthropic 协议时会发送 `thinking: {"type":"disabled"}`，当上游是 OpenAI 风格协议时会显式携带 `none`。
 - `X-Proxy-To-Upstream-Max-Output-Tokens` 展示的是 canonical 请求里最终决定的输出上限；它会体现 `UPSTREAM_MAX_OUTPUT_TOKENS` 和 `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` 的处理结果。最终不携带输出上限时，这个响应头为空。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
