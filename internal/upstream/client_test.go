@@ -1578,6 +1578,38 @@ func TestBuildAnthropicMessagesNormalizesResponsesReasoningBlocksToThinkingBlock
 	}
 }
 
+func TestBuildAnthropicMessagesPreservesNativeThinkingBlocksForThinkingModeReplay(t *testing.T) {
+	original := map[string]any{
+		"type":      "thinking",
+		"thinking":  "原始推理",
+		"signature": "sig_123",
+	}
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
+		Role:            "assistant",
+		ReasoningBlocks: []map[string]any{original},
+		Parts:           []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one anthropic assistant message, got %#v", messages)
+	}
+	assistantMsg, _ := messages[0].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected preserved thinking block plus text block, got %#v", assistantMsg)
+	}
+	thinking, _ := content[0].(map[string]any)
+	if got, _ := thinking["type"].(string); got != "thinking" {
+		t.Fatalf("expected native thinking block preserved, got %#v", thinking)
+	}
+	if got, _ := thinking["thinking"].(string); got != "原始推理" {
+		t.Fatalf("expected native thinking text preserved, got %#v", thinking)
+	}
+	if got, _ := thinking["signature"].(string); got != "sig_123" {
+		t.Fatalf("expected native signature preserved, got %#v", thinking)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{
