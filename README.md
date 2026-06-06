@@ -618,10 +618,10 @@ Claude 相关还有两个配套开关：
 
 | 脚本 | 作用 |
 |---|---|
-| `bash scripts/deploy-linux.sh` | 预检、编译、停旧、启新、健康检查、失败回滚 |
+| `bash scripts/deploy-linux.sh` | 预检、编译、注册并启用 systemd 开机自启动、停旧、启新、健康检查、失败回滚 |
 | `bash scripts/restart-linux.sh` | 重启服务 |
-| `bash scripts/stop-linux.sh` | 停止服务 |
-| `bash scripts/uninstall-linux.sh` | 卸载部署产物 |
+| `bash scripts/stop-linux.sh` | 停止服务并停用 systemd 开机自启动 |
+| `bash scripts/uninstall-linux.sh` | 停止服务、注销 systemd 服务并卸载部署产物 |
 
 如果你主要通过内置管理台维护服务，推荐的工作流是：
 
