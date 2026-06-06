@@ -17,6 +17,7 @@ const (
 	headerClientToProxyReasoningParameters   = "X-Client-To-Proxy-Reasoning-Parameters"
 	headerClientToProxyReasoningEffort       = "X-Client-To-Proxy-Reasoning-Effort"
 	headerClientToProxyNoPrompt              = "X-Client-To-Proxy-NoPrompt"
+	headerSystemPromptAttach                 = "X-SYSTEM-PROMPT-ATTACH"
 	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
 	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
@@ -209,11 +210,12 @@ func applyProviderOpenAIServiceTierOverride(canon *modelpkg.CanonicalRequest, pr
 	canon.PreservedTopLevelFields["service_tier"] = provider.OpenAIServiceTier
 }
 
-func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
+func setDirectionalObservabilityHeaders(w http.ResponseWriter, provider config.ProviderConfig, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
 	preview, err := upstream.PreviewRequestObservability(canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
 	if err != nil {
 		return err
 	}
+	setProviderSystemPromptAttachHeader(w, provider, canon)
 	if value := strings.TrimSpace(clientModel); value != "" {
 		w.Header().Set(headerClientToProxyModel, value)
 	}
@@ -240,13 +242,25 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, providerCfg confi
 	return nil
 }
 
+func setProviderSystemPromptAttachHeader(w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest) {
+	if canon.SkipProviderSystemPrompt {
+		w.Header().Set(headerSystemPromptAttach, "")
+		return
+	}
+	if strings.TrimSpace(provider.SystemPromptText) == "" || strings.TrimSpace(provider.SystemPromptFilesRaw) == "" {
+		w.Header().Set(headerSystemPromptAttach, "")
+		return
+	}
+	w.Header().Set(headerSystemPromptAttach, provider.SystemPromptPosition+":"+provider.SystemPromptFilesRaw)
+}
+
 func clearTransparencyHeaders(w http.ResponseWriter) {
 	for _, header := range []string{
 		"X-Env-Version",
 		headerCacheInfoTimezone,
 		"X-Provider-Name",
 		"X-Provider-Version",
-		"X-SYSTEM-PROMPT-ATTACH",
+		headerSystemPromptAttach,
 		headerClientToProxyModel,
 		headerClientToProxyServiceTier,
 		headerClientToProxyReasoningParameters,

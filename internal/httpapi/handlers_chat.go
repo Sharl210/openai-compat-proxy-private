@@ -76,7 +76,7 @@ func handleChat() http.HandlerFunc {
 			normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		}
-		if err := setDirectionalObservabilityHeaders(w, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			if writeRequestValidationError(w, err) {
 				return
 			}

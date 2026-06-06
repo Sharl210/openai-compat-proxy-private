@@ -175,13 +175,6 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 	if version := snapshot.ProviderVersionByID[providerID]; version != "" {
 		w.Header().Set("X-Provider-Version", version)
 	}
-	provider, err := snapshot.Config.ProviderByID(providerID)
-	if err != nil {
-		return
-	}
-	if provider.SystemPromptText != "" && provider.SystemPromptFilesRaw != "" {
-		w.Header().Set("X-SYSTEM-PROMPT-ATTACH", provider.SystemPromptPosition+":"+provider.SystemPromptFilesRaw)
-	}
 }
 
 type responseCaptureWriter struct {

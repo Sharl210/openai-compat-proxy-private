@@ -224,6 +224,51 @@ func TestSystemPromptAttachHeaderPresentOnlyWhenProviderPromptActuallyInjected(t
 	}
 }
 
+func TestSystemPromptAttachHeaderPresentButEmptyWhenNoPromptSkipsProviderPrompt(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	promptPath := filepath.Join(providersDir, "prompt.md")
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nENABLE_NOPROMPT_MODEL_SUFFIX=true\nTOTAL_TIMEOUT=1h\n", time.Date(2026, 3, 26, 9, 3, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL="+upstream.URL+"\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nSYSTEM_PROMPT_FILES=prompt.md\n", time.Date(2026, 3, 26, 9, 4, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, promptPath, "provider prompt\n", time.Date(2026, 3, 26, 9, 4, 30, 0, time.UTC))
+
+	store, err := config.NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	server := NewServerWithStore(store, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-noprompt","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected %s true, got %q", headerClientToProxyNoPrompt, got)
+	}
+	values, exists := rec.Result().Header[http.CanonicalHeaderKey("X-SYSTEM-PROMPT-ATTACH")]
+	if !exists {
+		t.Fatalf("expected X-SYSTEM-PROMPT-ATTACH to remain present with an empty value when noprompt skips provider prompt")
+	}
+	if len(values) != 1 || values[0] != "" {
+		t.Fatalf("expected X-SYSTEM-PROMPT-ATTACH empty value, got %#v", values)
+	}
+}
+
 func TestProviderVersionHeaderUpdatesAfterPromptOnlyRefresh(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")
