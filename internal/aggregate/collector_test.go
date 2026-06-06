@@ -117,6 +117,36 @@ func TestCollectorPreservesServiceTierFromCompletedResponse(t *testing.T) {
 	}
 }
 
+func TestCollectorPreservesReasoningSourceMetadata(t *testing.T) {
+	c := NewCollector()
+
+	c.Accept(upstream.Event{
+		Event: "response.reasoning.delta",
+		Data: map[string]any{
+			"_proxy_reasoning_source": "upstream",
+			"summary":                 "alpha",
+		},
+	})
+
+	c.Accept(upstream.Event{
+		Event: "response.completed",
+		Data: map[string]any{
+			"response": map[string]any{"finish_reason": "stop"},
+		},
+	})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if got, _ := result.Reasoning["_proxy_reasoning_source"].(string); got != "upstream" {
+		t.Fatalf("expected reasoning source metadata preserved, got %#v", result.Reasoning)
+	}
+	if got, _ := result.Reasoning["summary"].(string); got != "alpha" {
+		t.Fatalf("expected reasoning summary preserved internally, got %#v", result.Reasoning)
+	}
+}
+
 func TestCollectorFillsRefusalFromOutputItemDoneMessageRefusal(t *testing.T) {
 	c := NewCollector()
 

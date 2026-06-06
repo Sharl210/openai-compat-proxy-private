@@ -29,6 +29,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 	}
 	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
 		result.Reasoning = cloneMap(reasoning)
+		result.Reasoning[InternalReasoningSourceKey] = ReasoningSourceUpstream
 		result.ReasoningBlocks = cloneReasoningBlocks(reasoningBlocksFromMap(reasoning))
 	}
 	if len(result.Usage) > 0 {
@@ -78,6 +79,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 				if result.Reasoning == nil {
 					result.Reasoning = map[string]any{}
 				}
+				result.Reasoning[InternalReasoningSourceKey] = ReasoningSourceUpstream
 				if existing := stringValue(result.Reasoning["summary"]); existing == "" {
 					result.Reasoning["summary"] = summary
 				}

@@ -145,6 +145,12 @@ func (c *Collector) Accept(evt upstream.Event) {
 			}
 		}
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			if c.reasoning == nil {
+				c.reasoning = map[string]any{}
+			}
+			if _, ok := c.reasoning[InternalReasoningSourceKey]; !ok {
+				c.reasoning[InternalReasoningSourceKey] = ReasoningSourceUpstream
+			}
 			if summary := reasoningSummaryFromItem(item); summary != "" {
 				c.reasoning["summary"] = stringValue(c.reasoning["summary"]) + summary
 			}
@@ -210,6 +216,14 @@ func (c *Collector) Accept(evt upstream.Event) {
 		c.terminalFailure = &TerminalFailureError{HealthFlag: healthFlag, Message: message}
 		c.completed = true
 	case "response.reasoning.delta":
+		if c.reasoning == nil {
+			c.reasoning = map[string]any{}
+		}
+		if source, _ := evt.Data[InternalReasoningSourceKey].(string); source != "" {
+			c.reasoning[InternalReasoningSourceKey] = source
+		} else {
+			c.reasoning[InternalReasoningSourceKey] = ReasoningSourceUpstream
+		}
 		for k, v := range evt.Data {
 			if k == "blocks" {
 				rawBlocks, _ := v.([]any)
