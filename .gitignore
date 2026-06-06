@@ -8,3 +8,7 @@ tests/
 # Local worktrees
 .worktrees/
 worktrees/
+
+# 本地 AI 编程代理私有指令文件，不上传到远程仓库
+AGENTS.md
+**/AGENTS.md
