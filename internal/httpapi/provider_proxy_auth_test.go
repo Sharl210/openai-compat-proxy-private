@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -312,5 +313,121 @@ func TestMultiDefaultLegacyRouteUsesResolvedProvidersOwnUpstreamAuth(t *testing.
 	}
 	if minimaxHits != 1 || codexHits != 0 {
 		t.Fatalf("expected only minimax upstream hit, minimax=%d codex=%d", minimaxHits, codexHits)
+	}
+}
+
+func TestProviderScopedMasqueradeTargetsDoNotLeakAcrossProviders(t *testing.T) {
+	var claudeUserAgent string
+	var claudeBeta string
+	var claudeXApp string
+	var claudeSystem []any
+	claudeUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claudeUserAgent = r.Header.Get("User-Agent")
+		claudeBeta = r.Header.Get("anthropic-beta")
+		claudeXApp = r.Header.Get("X-App")
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode claude payload: %v", err)
+		}
+		claudeSystem, _ = payload["system"].([]any)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer claudeUpstream.Close()
+
+	var codexUserAgent string
+	var codexOriginator string
+	var codexResidency string
+	var codexInclude []any
+	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		codexUserAgent = r.Header.Get("User-Agent")
+		codexOriginator = r.Header.Get("originator")
+		codexResidency = r.Header.Get("x-openai-internal-codex-residency")
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode codex payload: %v", err)
+		}
+		codexInclude, _ = payload["include"].([]any)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_codex","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer codexUpstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:                 "root-secret",
+		DefaultProvider:             "claude,codex",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                                "claude",
+			Enabled:                           true,
+			UpstreamBaseURL:                   claudeUpstream.URL,
+			UpstreamAPIKey:                    "claude-upstream-key",
+			UpstreamEndpointType:              config.UpstreamEndpointTypeAnthropic,
+			SupportsAnthropicMessages:         true,
+			MasqueradeTarget:                  config.MasqueradeTargetClaude,
+			InjectClaudeCodeSystemPrompt:      true,
+			InjectClaudeCodeSystemPromptSet:   true,
+			InjectClaudeCodeMetadataUserID:    true,
+			InjectClaudeCodeMetadataUserIDSet: true,
+		}, {
+			ID:                   "codex",
+			Enabled:              true,
+			UpstreamBaseURL:      codexUpstream.URL,
+			UpstreamAPIKey:       "codex-upstream-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			MasqueradeTarget:     config.MasqueradeTargetCodex,
+		}},
+	})
+
+	claudeReq := httptest.NewRequest(http.MethodPost, "/claude/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	claudeReq.Header.Set("Content-Type", "application/json")
+	claudeReq.Header.Set("Authorization", "Bearer root-secret")
+	claudeReq.Header.Set("anthropic-version", "2023-06-01")
+	claudeRec := httptest.NewRecorder()
+	server.ServeHTTP(claudeRec, claudeReq)
+	if claudeRec.Code != http.StatusOK {
+		t.Fatalf("expected claude provider request to succeed, got %d body=%s", claudeRec.Code, claudeRec.Body.String())
+	}
+	if claudeUserAgent != "claude-cli/2.1.167 (external, cli)" {
+		t.Fatalf("expected claude provider UA, got %q", claudeUserAgent)
+	}
+	if claudeXApp != "cli" {
+		t.Fatalf("expected claude X-App cli, got %q", claudeXApp)
+	}
+	if !strings.Contains(claudeBeta, "claude-code-20250219") {
+		t.Fatalf("expected claude beta fingerprint, got %q", claudeBeta)
+	}
+	if len(claudeSystem) == 0 {
+		t.Fatalf("expected claude masquerade system injection, got %#v", claudeSystem)
+	}
+
+	codexReq := httptest.NewRequest(http.MethodPost, "/codex/v1/responses", strings.NewReader(`{"model":"gpt-5.5","reasoning":{"effort":"high"},"input":"hello"}`))
+	codexReq.Header.Set("Content-Type", "application/json")
+	codexReq.Header.Set("Authorization", "Bearer root-secret")
+	codexRec := httptest.NewRecorder()
+	server.ServeHTTP(codexRec, codexReq)
+	if codexRec.Code != http.StatusOK {
+		t.Fatalf("expected codex provider request to succeed, got %d body=%s", codexRec.Code, codexRec.Body.String())
+	}
+	if codexUserAgent != "codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app" {
+		t.Fatalf("expected codex provider UA, got %q", codexUserAgent)
+	}
+	if codexOriginator != "codex_cli_rs" {
+		t.Fatalf("expected codex originator, got %q", codexOriginator)
+	}
+	if codexResidency != "us" {
+		t.Fatalf("expected codex residency header, got %q", codexResidency)
+	}
+	hasEncryptedInclude := false
+	for _, item := range codexInclude {
+		if text, _ := item.(string); text == "reasoning.encrypted_content" {
+			hasEncryptedInclude = true
+			break
+		}
+	}
+	if !hasEncryptedInclude {
+		t.Fatalf("expected codex masquerade include enhancement, got %#v", codexInclude)
 	}
 }
