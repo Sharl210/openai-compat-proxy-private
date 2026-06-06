@@ -827,8 +827,8 @@ func (p ProviderConfig) HasManualReasonSuffixForModel(model string) bool {
 		baseModel = stripped
 	}
 	for _, manualModel := range p.ManualModels {
-		manualBase, ok := manualReasonSuffixBase(manualModel)
-		if ok && manualBase == baseModel {
+		manualSpec, ok := manualReasonSuffixSpecFromValue(manualModel)
+		if ok && manualReasonSuffixSpecMatches(manualSpec, model, baseModel) {
 			return true
 		}
 	}
@@ -839,11 +839,11 @@ func (p ProviderConfig) ManualReasonSuffixModelIDs() []string {
 	ids := []string{}
 	seen := map[string]struct{}{}
 	for _, manualModel := range p.ManualModels {
-		manualBase, ok := manualReasonSuffixBase(manualModel)
-		if !ok {
+		manualSpec, ok := manualReasonSuffixSpecFromValue(manualModel)
+		if !ok || manualSpec.pattern == "" || manualSpec.suffix != "" || !isStaticModelPattern(manualSpec.pattern) {
 			continue
 		}
-		for _, id := range reasoning.ExpandModelIDs([]string{manualBase}, nil, true) {
+		for _, id := range reasoning.ExpandModelIDs([]string{manualSpec.pattern}, nil, true) {
 			if _, exists := seen[id]; exists {
 				continue
 			}
@@ -854,13 +854,134 @@ func (p ProviderConfig) ManualReasonSuffixModelIDs() []string {
 	return ids
 }
 
-func manualReasonSuffixBase(value string) (string, bool) {
-	trimmed := strings.TrimSpace(value)
-	if !strings.HasPrefix(trimmed, manualReasonSuffixPrefix) {
-		return "", false
+func (p ProviderConfig) ManualReasonSuffixModelIDsFrom(modelIDs []string) []string {
+	ids := []string{}
+	seen := map[string]struct{}{}
+	for _, manualModel := range p.ManualModels {
+		manualSpec, ok := manualReasonSuffixSpecFromValue(manualModel)
+		if !ok {
+			continue
+		}
+		if manualSpec.pattern != "" && manualSpec.suffix == "" && isStaticModelPattern(manualSpec.pattern) {
+			for _, id := range reasoning.ExpandModelIDs([]string{manualSpec.pattern}, nil, true) {
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+			continue
+		}
+		for _, modelID := range modelIDs {
+			modelID = strings.TrimSpace(modelID)
+			if modelID == "" || manualSpec.matchesSuffix(modelID) || (manualSpec.pattern != "" && !modelPatternMatches(manualSpec.pattern, modelID)) {
+				continue
+			}
+			expanded := reasoning.ExpandModelIDs([]string{modelID}, nil, true)
+			if manualSpec.suffix != "" {
+				expanded = []string{modelID + "-" + manualSpec.suffix}
+			}
+			for _, id := range expanded {
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+		}
 	}
-	base := strings.TrimSpace(strings.TrimPrefix(trimmed, manualReasonSuffixPrefix))
-	return base, base != "" && isStaticModelPattern(base)
+	return ids
+}
+
+func manualReasonSuffixStaticBase(value string) (string, bool) {
+	spec, ok := manualReasonSuffixSpecFromValue(value)
+	return spec.pattern, ok && spec.pattern != "" && spec.suffix == "" && isStaticModelPattern(spec.pattern)
+}
+
+func manualReasonSuffixPattern(value string) (string, bool) {
+	spec, ok := manualReasonSuffixSpecFromValue(value)
+	return spec.pattern, ok && spec.pattern != ""
+}
+
+type manualReasonSuffixSpec struct {
+	pattern string
+	suffix  string
+}
+
+func manualReasonSuffixSpecFromValue(value string) (manualReasonSuffixSpec, bool) {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, manualReasonSuffixPrefix) {
+		return manualReasonSuffixSpecFromTail(strings.TrimSpace(strings.TrimPrefix(trimmed, manualReasonSuffixPrefix)), false)
+	}
+	return manualReasonSuffixSpec{}, false
+}
+
+func manualReasonSuffixSpecFromTail(tail string, forceRegex bool) (manualReasonSuffixSpec, bool) {
+	if tail == "" {
+		return manualReasonSuffixSpec{}, false
+	}
+	if suffix := manualReasonSuffixSelector(tail); suffix != "" {
+		return manualReasonSuffixSpec{suffix: suffix}, true
+	}
+	if forceRegex && !strings.HasPrefix(tail, "#re:") {
+		tail = "#re:" + tail
+	}
+	return manualReasonSuffixSpec{pattern: tail}, true
+}
+
+func manualReasonSuffixSelector(value string) string {
+	if !strings.HasPrefix(value, "-") {
+		return ""
+	}
+	suffix := strings.TrimPrefix(value, "-")
+	switch suffix {
+	case "none", "minimal", "low", "medium", "high", "xhigh":
+		return suffix
+	default:
+		return ""
+	}
+}
+
+func manualReasonSuffixPatternsEqual(left string, right string) bool {
+	leftSpec, leftOK := manualReasonSuffixSpecFromValue(left)
+	rightSpec, rightOK := manualReasonSuffixSpecFromValue(right)
+	if !leftOK || !rightOK {
+		return false
+	}
+	return leftSpec == rightSpec
+}
+
+func manualReasonSuffixSpecMatches(spec manualReasonSuffixSpec, model string, baseModel string) bool {
+	if spec.suffix != "" {
+		return spec.matchesSuffix(model)
+	}
+	return spec.pattern != "" && modelPatternMatches(spec.pattern, baseModel)
+}
+
+func (spec manualReasonSuffixSpec) matchesSuffix(model string) bool {
+	_, effort, ok := reasoning.SplitSuffix(strings.TrimSpace(model))
+	return ok && spec.suffix != "" && effort == spec.suffix
+}
+
+func manualReasonSuffixPatternMatches(pattern string, model string) bool {
+	manualSpec, ok := manualReasonSuffixSpecFromValue(pattern)
+	if !ok {
+		return false
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	if manualSpec.suffix != "" {
+		return manualSpec.matchesSuffix(model)
+	}
+	if manualSpec.pattern != "" && modelPatternMatches(manualSpec.pattern, model) {
+		return true
+	}
+	if baseModel, _, ok := reasoning.SplitSuffix(model); ok && manualSpec.pattern != "" && modelPatternMatches(manualSpec.pattern, baseModel) {
+		return true
+	}
+	return false
 }
 
 func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
@@ -885,14 +1006,14 @@ func (p ProviderConfig) HidesModel(model string) bool {
 		if manualModel == "" {
 			continue
 		}
-		if manualBase, ok := manualReasonSuffixBase(manualModel); ok {
-			if model == manualBase {
+		if manualSpec, ok := manualReasonSuffixSpecFromValue(manualModel); ok {
+			if manualSpec.pattern != "" && modelPatternMatches(manualSpec.pattern, model) {
 				return false
 			}
-			if baseModel, _, suffixOK := reasoning.SplitSuffix(model); suffixOK && baseModel == manualBase {
+			if baseModel, _, suffixOK := reasoning.SplitSuffix(model); suffixOK && manualReasonSuffixSpecMatches(manualSpec, model, baseModel) {
 				for _, pattern := range p.HiddenModels {
 					pattern = strings.TrimSpace(pattern)
-					if hiddenBase, ok := manualReasonSuffixBase(pattern); ok && hiddenBase == manualBase {
+					if manualReasonSuffixPatternsEqual(pattern, manualModel) {
 						continue
 					}
 					if modelPatternMatches(pattern, model) {
@@ -921,13 +1042,10 @@ func (p ProviderConfig) HidesModel(model string) bool {
 		if pattern == "" {
 			continue
 		}
-		if hiddenBase, ok := manualReasonSuffixBase(pattern); ok {
-			if model == hiddenBase {
-				return true
-			}
-			if baseModel, _, suffixOK := reasoning.SplitSuffix(model); suffixOK && baseModel == hiddenBase {
-				return true
-			}
+		if manualReasonSuffixPatternMatches(pattern, model) {
+			return true
+		}
+		if _, ok := manualReasonSuffixPattern(pattern); ok {
 			continue
 		}
 		if modelPatternMatches(pattern, model) {
@@ -953,7 +1071,7 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 	}
 	for _, manualModel := range p.ManualModels {
 		id := strings.TrimSpace(manualModel)
-		if manualBase, ok := manualReasonSuffixBase(id); ok {
+		if manualBase, ok := manualReasonSuffixStaticBase(id); ok {
 			for _, expandedID := range reasoning.ExpandModelIDs([]string{manualBase}, nil, true) {
 				if _, ok := seen[expandedID]; ok || p.HidesModel(expandedID) {
 					continue
@@ -967,6 +1085,13 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 			continue
 		}
 		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		base = append(base, id)
+	}
+	for _, id := range p.ManualReasonSuffixModelIDsFrom(base) {
+		if _, ok := seen[id]; ok || p.HidesModel(id) {
 			continue
 		}
 		seen[id] = struct{}{}

@@ -148,6 +148,21 @@ func TestManualReasonSuffixFamilyAllowsHiddenModelVariant(t *testing.T) {
 	}
 }
 
+func TestManualNarrowReasonSuffixVariantOverridesHiddenFamily(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"gpt-5.5-minimal"}, HiddenModels: []string{"#reason_suffix:gpt-5.5"}}
+
+	if p.HidesModel("gpt-5.5-minimal") {
+		t.Fatalf("expected narrow static manual variant to override broad hidden family")
+	}
+	if !p.HidesModel("gpt-5.5-low") || !p.HidesModel("gpt-5.5") {
+		t.Fatalf("expected broad hidden family to still hide non-manual variants")
+	}
+	ids := p.VisibleModelIDs()
+	if strings.Join(ids, ",") != "gpt-5.5-minimal" {
+		t.Fatalf("expected only narrow manual variant to remain visible, got %v", ids)
+	}
+}
+
 func TestHiddenReasonSuffixFamilyHidesGeneratedVariants(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.5", "upstream-gpt-5.5")}, EnableReasoningEffortSuffix: true, ExposeReasoningSuffixModels: true, HiddenModels: []string{"#reason_suffix:gpt-5.5"}}
 
@@ -158,6 +173,64 @@ func TestHiddenReasonSuffixFamilyHidesGeneratedVariants(t *testing.T) {
 	}
 	if ids := p.VisibleModelIDs(); len(ids) != 0 {
 		t.Fatalf("expected hidden reason suffix family marker to remove visible models, got %v", ids)
+	}
+}
+
+func TestManualReasonSuffixRegexMarkerResolvesSuffix(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:#re:gpt-5\\..*"}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5.5-low", false)
+	if model != "gpt-5.5" || effort != "low" {
+		t.Fatalf("expected regex reason suffix marker to resolve gpt-5.5-low to gpt-5.5/low, got %q/%q", model, effort)
+	}
+	if !p.HasManualReasonSuffixForModel("gpt-5.5-minimal") {
+		t.Fatalf("expected regex reason suffix marker to match generated minimal suffix")
+	}
+	if p.HasManualReasonSuffixForModel("gpt-4.1-low") {
+		t.Fatalf("expected regex reason suffix marker not to match gpt-4.1-low")
+	}
+}
+
+func TestReasonSuffixRegexMarkerRequiresSuffixBeforeRegex(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#re:#reason_suffix:gpt-5\\..*"}, HiddenModels: []string{"#re:#reason_suffix:gpt-5\\..*"}}
+
+	if p.HasManualReasonSuffixForModel("gpt-5.5-low") {
+		t.Fatalf("expected #re:#reason_suffix order not to enable reason suffix parsing")
+	}
+	if p.HidesModel("gpt-5.5-low") {
+		t.Fatalf("expected #re:#reason_suffix order not to hide reason suffix family")
+	}
+}
+
+func TestHiddenReasonSuffixRegexMarkerHidesSuffixFamily(t *testing.T) {
+	p := ProviderConfig{HiddenModels: []string{"#reason_suffix:#re:gpt-5\\..*"}}
+
+	if !p.HidesModel("gpt-5.5") || !p.HidesModel("gpt-5.5-low") || !p.HidesModel("gpt-5.5-minimal") {
+		t.Fatalf("expected regex reason suffix marker to hide base and suffix family")
+	}
+	if p.HidesModel("gpt-4.1-low") {
+		t.Fatalf("expected regex reason suffix marker not to hide unmatched family")
+	}
+}
+
+func TestManualReasonSuffixSelectorAddsOnlyRequestedEffort(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:-minimal"}}
+
+	ids := p.ManualReasonSuffixModelIDsFrom([]string{"gpt-5.5", "gpt-4.1"})
+	want := []string{"gpt-5.5-minimal", "gpt-4.1-minimal"}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected suffix selector to add only minimal variants, want %v got %v", want, ids)
+	}
+}
+
+func TestHiddenReasonSuffixSelectorHidesOnlyRequestedEffort(t *testing.T) {
+	p := ProviderConfig{HiddenModels: []string{"#reason_suffix:-minimal"}}
+
+	if !p.HidesModel("gpt-5.5-minimal") {
+		t.Fatalf("expected suffix selector to hide minimal variant")
+	}
+	if p.HidesModel("gpt-5.5-low") || p.HidesModel("gpt-5.5") {
+		t.Fatalf("expected suffix selector not to hide other efforts or base model")
 	}
 }
 

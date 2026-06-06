@@ -252,7 +252,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 			seenIDs[manualModel] = struct{}{}
 		}
 	}
-	for _, id := range provider.ManualReasonSuffixModelIDs() {
+	for _, id := range provider.ManualReasonSuffixModelIDsFrom(baseIDs) {
 		if strings.TrimSpace(id) == "" || provider.HidesModel(id) {
 			continue
 		}

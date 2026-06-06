@@ -168,6 +168,59 @@ func TestRewriteModelsBodyExpandsManualReasonSuffixFamilyIndependentOfExposeFlag
 	}
 }
 
+func TestRewriteModelsBodyExpandsManualReasonSuffixRegexFamily(t *testing.T) {
+	manual := "#reason_suffix:#re:gpt-5\\..*"
+	t.Run(manual, func(t *testing.T) {
+		body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"},{"id":"gpt-4.1","object":"model"}]}`)
+		provider := config.ProviderConfig{ManualModels: []string{manual}}
+
+		rewritten := rewriteModelsBody(body, provider)
+		var payload map[string]any
+		if err := json.Unmarshal(rewritten, &payload); err != nil {
+			t.Fatalf("decode rewritten models body: %v", err)
+		}
+		data, _ := payload["data"].([]any)
+		ids := make([]string, 0, len(data))
+		for _, item := range data {
+			entry, _ := item.(map[string]any)
+			ids = append(ids, entry["id"].(string))
+		}
+		for _, want := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-minimal", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+			if !contains(ids, want) {
+				t.Fatalf("expected %q to expose %q, got %#v", manual, want, ids)
+			}
+		}
+		if contains(ids, "gpt-4.1-low") {
+			t.Fatalf("expected %q not to expand unmatched gpt-4.1 family, got %#v", manual, ids)
+		}
+	})
+}
+
+func TestRewriteModelsBodyExpandsManualReasonSuffixSelector(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"},{"id":"gpt-4.1","object":"model"}]}`)
+	provider := config.ProviderConfig{ManualModels: []string{"#reason_suffix:-minimal"}}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	for _, want := range []string{"gpt-5.5-minimal", "gpt-4.1-minimal"} {
+		if !contains(ids, want) {
+			t.Fatalf("expected suffix selector to expose %q, got %#v", want, ids)
+		}
+	}
+	if contains(ids, "gpt-5.5-low") {
+		t.Fatalf("expected suffix selector not to expose unrelated effort, got %#v", ids)
+	}
+}
+
 func TestRewriteModelsBodyKeepsManualNoPromptModelLiteral(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`)
 	provider := config.ProviderConfig{ManualModels: []string{"gpt-5.5-noprompt"}}
