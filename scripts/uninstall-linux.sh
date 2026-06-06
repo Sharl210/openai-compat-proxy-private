@@ -11,6 +11,7 @@ port=""
 if load_env_if_present; then
   port="$(extract_port "$LISTEN_ADDR")"
 fi
+remove_systemd_service
 stop_managed_service "$port"
 rm -f "$BIN_PATH" "$BACKUP_BIN_PATH" "$TMP_BIN_PATH"
 

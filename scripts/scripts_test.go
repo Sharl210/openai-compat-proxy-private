@@ -163,6 +163,215 @@ func TestDeployDoesNotCreateLegacyProxyLog(t *testing.T) {
 	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
+func TestDeployInstallsAndEnablesSystemdService(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	systemctlPath, systemctlLog := mustWriteFakeSystemctl(t, repoDir)
+	unitDir := filepath.Join(repoDir, "systemd")
+
+	result := runScriptWithEnv(t, repoDir, "deploy-linux.sh", map[string]string{
+		"SYSTEMCTL_BIN":    systemctlPath,
+		"SYSTEMCTL_LOG":    systemctlLog,
+		"SYSTEMD_UNIT_DIR": unitDir,
+		"SERVICE_NAME":     "test-proxy.service",
+	})
+	if result.err != nil {
+		t.Fatalf("expected deploy to install and enable systemd service, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+
+	unitText := mustReadFile(t, filepath.Join(unitDir, "test-proxy.service"))
+	for _, want := range []string{
+		"Description=OpenAI Compatibility Proxy",
+		"WorkingDirectory=" + repoDir,
+		"source \"$2\"",
+		"exec \"$4\"",
+		"\"" + filepath.Join(repoDir, ".env") + "\"",
+		"\"" + filepath.Join(repoDir, "bin", "openai-compat-proxy") + "\"",
+		"Restart=always",
+		"WantedBy=multi-user.target",
+	} {
+		if !strings.Contains(unitText, want) {
+			t.Fatalf("expected unit file to contain %q, got %s", want, unitText)
+		}
+	}
+	systemctlCalls := mustReadFile(t, systemctlLog)
+	for _, want := range []string{
+		"daemon-reload",
+		"enable test-proxy.service",
+	} {
+		if !strings.Contains(systemctlCalls, want) {
+			t.Fatalf("expected systemctl calls to contain %q, got %s", want, systemctlCalls)
+		}
+	}
+
+	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	newPID, err := strconv.Atoi(newPIDText)
+	if err != nil {
+		t.Fatalf("parse new pid: %v text=%q", err, newPIDText)
+	}
+	stopPID(t, newPID)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
+func TestDeployStopsExistingSystemdServiceBeforeReplacingBinary(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	systemctlPath, systemctlLog := mustWriteFakeSystemctl(t, repoDir)
+	unitDir := filepath.Join(repoDir, "systemd")
+	mustWriteFile(t, filepath.Join(unitDir, "test-proxy.service"), "old unit\n")
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+
+	result := runScriptWithEnv(t, repoDir, "deploy-linux.sh", map[string]string{
+		"SYSTEMCTL_BIN":    systemctlPath,
+		"SYSTEMCTL_LOG":    systemctlLog,
+		"SYSTEMD_UNIT_DIR": unitDir,
+		"SERVICE_NAME":     "test-proxy.service",
+	})
+	if result.err != nil {
+		t.Fatalf("expected deploy to stop existing systemd service before replacing binary, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	systemctlCalls := strings.Split(strings.TrimSpace(mustReadFile(t, systemctlLog)), "\n")
+	if len(systemctlCalls) == 0 || systemctlCalls[0] != "stop test-proxy.service" {
+		t.Fatalf("expected first systemctl call to stop existing service, got %q", systemctlCalls)
+	}
+	newPIDText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	newPID, err := strconv.Atoi(newPIDText)
+	if err != nil {
+		t.Fatalf("parse new pid: %v text=%q", err, newPIDText)
+	}
+	stopPID(t, newPID)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+	_, _ = oldCmd.Process.Wait()
+}
+
+func TestDeployRemovesSystemdServiceWhenInitialStartFails(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\nLOG_ENABLE=fail_health\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	systemctlPath, systemctlLog := mustWriteFakeSystemctl(t, repoDir)
+	unitDir := filepath.Join(repoDir, "systemd")
+
+	result := runScriptWithEnv(t, repoDir, "deploy-linux.sh", map[string]string{
+		"SYSTEMCTL_BIN":    systemctlPath,
+		"SYSTEMCTL_LOG":    systemctlLog,
+		"SYSTEMD_UNIT_DIR": unitDir,
+		"SERVICE_NAME":     "test-proxy.service",
+	})
+	if result.err == nil {
+		t.Fatalf("expected deploy to fail when service never becomes healthy, stdout=%s stderr=%s", result.stdout, result.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(unitDir, "test-proxy.service")); !os.IsNotExist(err) {
+		t.Fatalf("expected failed initial deploy to remove systemd unit, got err=%v", err)
+	}
+	systemctlCalls := mustReadFile(t, systemctlLog)
+	for _, want := range []string{
+		"enable test-proxy.service",
+		"disable test-proxy.service",
+		"reset-failed test-proxy.service",
+	} {
+		if !strings.Contains(systemctlCalls, want) {
+			t.Fatalf("expected systemctl calls to contain %q, got %s", want, systemctlCalls)
+		}
+	}
+}
+
+func TestStopLinuxDisablesSystemdAutostart(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	systemctlPath, systemctlLog := mustWriteFakeSystemctl(t, repoDir)
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+
+	result := runScriptWithEnv(t, repoDir, "stop-linux.sh", map[string]string{
+		"SYSTEMCTL_BIN": systemctlPath,
+		"SYSTEMCTL_LOG": systemctlLog,
+		"SERVICE_NAME":  "test-proxy.service",
+	})
+	if result.err != nil {
+		t.Fatalf("expected stop to disable systemd service, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if processAlive(oldPID) {
+		t.Fatalf("expected old process %d to be fully stopped", oldPID)
+	}
+	systemctlCalls := mustReadFile(t, systemctlLog)
+	if !strings.Contains(systemctlCalls, "disable test-proxy.service") {
+		t.Fatalf("expected stop to disable service autostart, got %s", systemctlCalls)
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
+func TestUninstallRemovesSystemdServiceUnit(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustBuildFakeProxy(t, repoDir)
+	systemctlPath, systemctlLog := mustWriteFakeSystemctl(t, repoDir)
+	unitDir := filepath.Join(repoDir, "systemd")
+	mustWriteFile(t, filepath.Join(unitDir, "test-proxy.service"), "old unit\n")
+	oldCmd := startFakeProxy(t, repoDir, map[string]string{
+		"LISTEN_ADDR":   fmt.Sprintf("127.0.0.1:%d", port),
+		"PROVIDERS_DIR": providersDir,
+		"IGNORE_TERM":   "1",
+	})
+	oldPID := oldCmd.Process.Pid
+	mustWriteFile(t, filepath.Join(repoDir, ".proxy.pid"), strconv.Itoa(oldPID)+"\n")
+	mustWaitHealth(t, port)
+
+	result := runScriptWithEnv(t, repoDir, "uninstall-linux.sh", map[string]string{
+		"SYSTEMCTL_BIN":    systemctlPath,
+		"SYSTEMCTL_LOG":    systemctlLog,
+		"SYSTEMD_UNIT_DIR": unitDir,
+		"SERVICE_NAME":     "test-proxy.service",
+	})
+	if result.err != nil {
+		t.Fatalf("expected uninstall to remove systemd service, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(unitDir, "test-proxy.service")); !os.IsNotExist(err) {
+		t.Fatalf("expected systemd unit removed, got err=%v", err)
+	}
+	systemctlCalls := mustReadFile(t, systemctlLog)
+	for _, want := range []string{
+		"disable test-proxy.service",
+		"daemon-reload",
+		"reset-failed test-proxy.service",
+	} {
+		if !strings.Contains(systemctlCalls, want) {
+			t.Fatalf("expected systemctl calls to contain %q, got %s", want, systemctlCalls)
+		}
+	}
+	_, _ = oldCmd.Process.Wait()
+}
+
 func TestRuntimeScriptDoesNotReferenceLegacyLogVariables(t *testing.T) {
 	repoDir := newScriptTestRepo(t)
 	runtimeScript := mustReadFile(t, filepath.Join(repoDir, "scripts", "lib", "runtime.sh"))
@@ -531,9 +740,17 @@ type scriptResult struct {
 
 func runScript(t *testing.T, repoDir string, scriptName string) scriptResult {
 	t.Helper()
+	return runScriptWithEnv(t, repoDir, scriptName, nil)
+}
+
+func runScriptWithEnv(t *testing.T, repoDir string, scriptName string, env map[string]string) scriptResult {
+	t.Helper()
 	cmd := exec.Command("bash", filepath.Join(repoDir, "scripts", scriptName))
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), "PATH="+os.Getenv("PATH"))
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -695,6 +912,14 @@ func mustWriteFile(t *testing.T, path string, content string) {
 	}
 }
 
+func mustWriteFakeSystemctl(t *testing.T, repoDir string) (string, string) {
+	t.Helper()
+	logPath := filepath.Join(repoDir, ".systemctl.log")
+	scriptPath := filepath.Join(repoDir, "fake-bin", "systemctl")
+	mustWriteFile(t, scriptPath, "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\nexit 0\n")
+	return scriptPath, logPath
+}
+
 func mustCopyDir(t *testing.T, src string, dst string) {
 	t.Helper()
 	if err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
@@ -781,6 +1006,10 @@ func main() {
 	_ = os.WriteFile(filepath.Join(".seen.env"), []byte(strings.Join(lines, "\n")), 0o644)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if os.Getenv("LOG_ENABLE") == "fail_health" {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte("{\"status\":\"ok\"}"))
 	})

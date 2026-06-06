@@ -11,6 +11,11 @@ BACKUP_BIN_PATH="${BACKUP_BIN_PATH:-$BIN_DIR/openai-compat-proxy.bak}"
 PID_FILE="${PID_FILE:-$ROOT_DIR/.proxy.pid}"
 LOCK_DIR="${LOCK_DIR:-$ROOT_DIR/.proxy.lock}"
 GO_PROFILE_FILE="${GO_PROFILE_FILE:-/etc/profile.d/go.sh}"
+SYSTEMCTL_BIN_CONFIGURED="${SYSTEMCTL_BIN+x}"
+SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+SERVICE_NAME="${SERVICE_NAME:-openai-compat-proxy.service}"
+SERVICE_UNIT_PATH="$SYSTEMD_UNIT_DIR/$SERVICE_NAME"
 
 GO_BIN="${GO_BIN:-}"
 LOCK_ACQUIRED=0
@@ -59,6 +64,22 @@ release_lock() {
 
 command_missing() {
   ! command -v "$1" >/dev/null 2>&1
+}
+
+systemctl_available() {
+  command -v "$SYSTEMCTL_BIN" >/dev/null 2>&1
+}
+
+should_manage_systemd() {
+  [[ "${DISABLE_SYSTEMD:-}" == "1" ]] && return 1
+  systemctl_available || return 1
+  [[ -n "$SYSTEMCTL_BIN_CONFIGURED" || "${EUID:-$(id -u)}" == "0" ]]
+}
+
+should_start_with_systemd() {
+  should_manage_systemd || return 1
+  [[ "${EUID:-$(id -u)}" == "0" ]] || return 1
+  [[ -z "$SYSTEMCTL_BIN_CONFIGURED" || "${SYSTEMD_START_WITH_SYSTEMD:-}" == "1" ]]
 }
 
 ensure_packages_available() {
@@ -446,6 +467,67 @@ install_candidate_binary() {
   chmod +x "$BIN_PATH"
 }
 
+write_systemd_unit() {
+  should_manage_systemd || return 0
+  mkdir -p "$SYSTEMD_UNIT_DIR"
+  local normalized_listen_addr
+  normalized_listen_addr="$(normalize_listen_addr "$LISTEN_ADDR")"
+  cat > "$SERVICE_UNIT_PATH" <<EOF
+[Unit]
+Description=OpenAI Compatibility Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$ROOT_DIR
+ExecStart=/usr/bin/env bash -c 'cd "\$1"; set -a; source "\$2"; set +a; export LISTEN_ADDR="\$3"; exec "\$4"' bash "$ROOT_DIR" "$ENV_FILE" "$normalized_listen_addr" "$BIN_PATH"
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+enable_systemd_service() {
+  should_manage_systemd || return 0
+  "$SYSTEMCTL_BIN" daemon-reload
+  "$SYSTEMCTL_BIN" enable "$SERVICE_NAME"
+  log "systemd enabled: $SERVICE_NAME"
+}
+
+install_systemd_service() {
+  write_systemd_unit
+  enable_systemd_service
+}
+
+disable_systemd_service() {
+  should_manage_systemd || return 0
+  "$SYSTEMCTL_BIN" disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+}
+
+stop_systemd_service() {
+  should_start_with_systemd || return 0
+  "$SYSTEMCTL_BIN" stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+  rm -f "$PID_FILE"
+}
+
+stop_existing_systemd_service() {
+  should_manage_systemd || return 0
+  [[ -f "$SERVICE_UNIT_PATH" ]] || return 0
+  "$SYSTEMCTL_BIN" stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+}
+
+remove_systemd_service() {
+  should_manage_systemd || return 0
+  disable_systemd_service
+  stop_systemd_service
+  rm -f "$SERVICE_UNIT_PATH"
+  "$SYSTEMCTL_BIN" daemon-reload
+  "$SYSTEMCTL_BIN" reset-failed "$SERVICE_NAME" >/dev/null 2>&1 || true
+}
+
 health_url() {
   local port="$1"
   local host
@@ -462,6 +544,10 @@ health_url() {
 
 start_service() {
   local port="$1"
+  if should_start_with_systemd && [[ -f "$SERVICE_UNIT_PATH" ]]; then
+    start_service_with_systemd "$port"
+    return $?
+  fi
   local normalized_listen_addr
   normalized_listen_addr="$(normalize_listen_addr "$LISTEN_ADDR")"
   nohup env \
@@ -506,6 +592,32 @@ start_service() {
   return 1
 }
 
+start_service_with_systemd() {
+  local port="$1"
+  "$SYSTEMCTL_BIN" restart "$SERVICE_NAME"
+  local deadline=$((SECONDS + 15))
+  local url
+  url="$(health_url "$port")"
+  while (( SECONDS < deadline )); do
+    if curl -fsS --max-time 2 "$url" >/dev/null; then
+      local main_pid=""
+      main_pid="$($SYSTEMCTL_BIN show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || true)"
+      if [[ -n "$main_pid" && "$main_pid" != "0" ]]; then
+        echo "$main_pid" > "$PID_FILE"
+        log "pid: $main_pid"
+      else
+        rm -f "$PID_FILE"
+      fi
+      log "deployed: $BIN_PATH"
+      log "systemd: $SERVICE_NAME"
+      log "health: $url"
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 rollback_binary() {
   if [[ -f "$BACKUP_BIN_PATH" ]]; then
     mv "$BACKUP_BIN_PATH" "$BIN_PATH"
@@ -521,8 +633,10 @@ deploy_service() {
   if port_has_service_listener "$port" || ([[ -f "$PID_FILE" ]] && pid_matches_service "$(tr -d '[:space:]' < "$PID_FILE" 2>/dev/null || true)"); then
     had_running_service=1
   fi
+  stop_existing_systemd_service
   stop_managed_service "$port"
   install_candidate_binary
+  install_systemd_service
   if start_service "$port"; then
     rm -f "$BACKUP_BIN_PATH"
     return 0
@@ -533,6 +647,9 @@ deploy_service() {
       fail "new deployment failed; rolled back to previous binary"
     fi
   fi
+  if [[ "$had_running_service" != "1" ]]; then
+    remove_systemd_service
+  fi
   fail "deployment failed; service did not become healthy"
 }
 
@@ -541,8 +658,10 @@ restart_service() {
   local port
   port="$(extract_port "$LISTEN_ADDR")"
   build_candidate_binary
+  stop_existing_systemd_service
   stop_managed_service "$port"
   install_candidate_binary
+  install_systemd_service
   if start_service "$port"; then
     rm -f "$BACKUP_BIN_PATH"
     return 0
@@ -560,6 +679,8 @@ stop_service_entry() {
   if load_env_if_present; then
     port="$(extract_port "$LISTEN_ADDR")"
   fi
+  disable_systemd_service
+  stop_systemd_service
   stop_managed_service "$port"
   log "service stopped"
 }
