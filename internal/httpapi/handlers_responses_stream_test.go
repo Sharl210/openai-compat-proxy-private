@@ -128,7 +128,7 @@ func TestResponsesStreamFromResponsesJSONUpstreamInjectsPlaceholderAndText(t *te
 	}
 }
 
-func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
+func TestResponsesStreamSuppressesRealReasoningItemLifecycle(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
 			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
@@ -157,21 +157,55 @@ func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 
 	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
 	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
-	realAddedIdx := strings.Index(body, `{"item":{"id":"rs_1","summary":[],"type":"reasoning"},"type":"response.output_item.added"}`)
-	realDeltaIdx := strings.Index(body, `{"delta":"alpha","item_id":"rs_1","summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
-	realDoneIdx := strings.LastIndex(body, `{"item":{"id":"rs_1","summary":[{"text":"alpha","type":"summary_text"}],"type":"reasoning"},"type":"response.output_item.done"}`)
 
 	if proxyAddedIdx == -1 || proxyDoneIdx == -1 {
 		t.Fatalf("expected proxy fallback reasoning item to open and close, got %s", body)
 	}
-	if realAddedIdx == -1 || realDeltaIdx == -1 || realDoneIdx == -1 {
-		t.Fatalf("expected real reasoning item lifecycle and summary delta to be forwarded, got %s", body)
+	if strings.Contains(body, `"id":"rs_1"`) || strings.Contains(body, `"delta":"alpha"`) {
+		t.Fatalf("expected real upstream reasoning lifecycle and summary text to be suppressed, got %s", body)
 	}
-	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < realAddedIdx && realAddedIdx < realDeltaIdx && realDeltaIdx < realDoneIdx) {
-		t.Fatalf("expected fallback reasoning to finish before real reasoning lifecycle begins, got %s", body)
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event to remain after suppressing real reasoning, got %s", body)
 	}
 	if strings.Contains(body, `{"item":{"id":"rs_proxy","summary":[{"text":"alpha"`) {
-		t.Fatalf("expected real reasoning content to stay on real item instead of being merged into rs_proxy, got %s", body)
+		t.Fatalf("expected real reasoning content not to be merged into rs_proxy, got %s", body)
+	}
+}
+
+func TestResponsesStreamSuppressesRealUpstreamReasoningText(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"secret upstream reasoning\"}\n\n",
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"final answer\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if strings.Contains(body, `secret upstream reasoning`) {
+		t.Fatalf("expected real upstream reasoning to be suppressed, got %s", body)
+	}
+	if !strings.Contains(body, `"delta":"final answer"`) {
+		t.Fatalf("expected final answer to remain in stream, got %s", body)
+	}
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event to remain, got %s", body)
+	}
+	if !strings.Contains(body, `"id":"rs_proxy"`) || !strings.Contains(body, `代理层占位`) {
+		t.Fatalf("expected synthetic rs_proxy placeholder lifecycle to remain, got %s", body)
 	}
 }
 
@@ -250,18 +284,15 @@ func TestResponsesWriterChatReasoningDeltaStartsReasoningLifecycleWithoutSynthet
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	addedIdx := strings.Index(body, `"type":"response.output_item.added"`)
-	deltaIdx := strings.Index(body, `"type":"response.reasoning_summary_text.delta"`)
-	doneIdx := strings.Index(body, `{"item":{"id":"rs_chat_reasoning","summary":[{"text":"alpha","type":"summary_text"}],"type":"reasoning"},"type":"response.output_item.done"}`)
 	completedIdx := strings.Index(body, `event: response.completed`)
-	if addedIdx == -1 || deltaIdx == -1 || doneIdx == -1 || completedIdx == -1 {
-		t.Fatalf("expected reasoning added/delta/done lifecycle and completed event, got %s", body)
+	if completedIdx == -1 {
+		t.Fatalf("expected completed event, got %s", body)
 	}
-	if !(addedIdx < deltaIdx && deltaIdx < doneIdx && doneIdx < completedIdx) {
-		t.Fatalf("expected reasoning lifecycle added -> delta -> done -> completed, got %s", body)
+	if strings.Contains(body, `"id":"rs_chat_reasoning"`) || strings.Contains(body, `"delta":"alpha"`) {
+		t.Fatalf("expected real chat reasoning to be suppressed in responses downstream, got %s", body)
 	}
 	if strings.Contains(body, `"id":"rs_proxy"`) {
-		t.Fatalf("expected real reasoning lifecycle without synthetic rs_proxy, got %s", body)
+		t.Fatalf("expected no synthetic rs_proxy prelude in this path, got %s", body)
 	}
 }
 
@@ -273,15 +304,12 @@ func TestResponsesWriterClosesChatReasoningLifecycleBeforeText(t *testing.T) {
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	addedIdx := strings.Index(body, `"type":"response.output_item.added"`)
-	deltaIdx := strings.Index(body, `"type":"response.reasoning_summary_text.delta"`)
-	doneIdx := strings.Index(body, `{"item":{"id":"rs_chat_reasoning","summary":[{"text":"alpha","type":"summary_text"}],"type":"reasoning"},"type":"response.output_item.done"}`)
 	textIdx := strings.Index(body, `"type":"response.output_text.delta"`)
-	if addedIdx == -1 || deltaIdx == -1 || doneIdx == -1 || textIdx == -1 {
-		t.Fatalf("expected reasoning lifecycle and text event, got %s", body)
+	if textIdx == -1 {
+		t.Fatalf("expected text event, got %s", body)
 	}
-	if !(addedIdx < deltaIdx && deltaIdx < doneIdx && doneIdx < textIdx) {
-		t.Fatalf("expected reasoning lifecycle to close before output text, got %s", body)
+	if strings.Contains(body, `"id":"rs_chat_reasoning"`) || strings.Contains(body, `"delta":"alpha"`) {
+		t.Fatalf("expected real chat reasoning to be suppressed before text in responses downstream, got %s", body)
 	}
 }
 

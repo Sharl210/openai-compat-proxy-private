@@ -181,7 +181,7 @@ func handleResponses() http.HandlerFunc {
 		responsesState := newResponsesStreamState(canon.RequestID, providerCfg.UpstreamEndpointType)
 		for _, evt := range events {
 			if evt.Event == "response.output_text.delta" && shouldInjectSyntheticResponsesReasoningBeforeText(providerCfg.UpstreamEndpointType, responsesState, evt) {
-				collector.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": syntheticReasoningPrelude()}})
+				collector.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": syntheticReasoningPrelude(), aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}})
 				responsesState.syntheticInjected = true
 			}
 			collector.Accept(evt)

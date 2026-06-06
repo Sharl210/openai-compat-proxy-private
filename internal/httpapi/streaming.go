@@ -350,7 +350,7 @@ func (h *responseEventWriterHelper) closeSyntheticReasoning() {
 		"id":      "rs_proxy",
 		"type":    "reasoning",
 		"summary": summary,
-	}})
+	}, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic})
 	h.reasoningClosed = true
 }
 
@@ -389,7 +389,7 @@ func (h *responseEventWriterHelper) closeRealReasoningLifecycle() {
 		"id":      h.realReasoningItemID,
 		"type":    "reasoning",
 		"summary": summary,
-	}})
+	}, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream})
 	h.reasoningClosed = true
 }
 
@@ -445,7 +445,17 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.output_item.added", "response.output_item.done":
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" {
+			if h.downstreamType == "responses" {
+				if _, ok := evt.Data[aggregate.InternalReasoningSourceKey]; !ok {
+					evt.Data[aggregate.InternalReasoningSourceKey] = aggregate.ReasoningSourceUpstream
+				}
+			}
 			h.markRealReasoningSeen()
+			if h.downstreamType == "responses" {
+				if source, _ := evt.Data[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
+					result.skipWrite = true
+				}
+			}
 			break
 		}
 		if itemType == "compaction" && h.downstreamType == "responses" {
@@ -490,6 +500,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
+		if h.downstreamType == "responses" {
+			if _, ok := evt.Data[aggregate.InternalReasoningSourceKey]; !ok {
+				evt.Data[aggregate.InternalReasoningSourceKey] = aggregate.ReasoningSourceUpstream
+			}
+		}
 		if h.shouldMergeChatReasoningIntoSynthetic() && evt.Event == "response.reasoning.delta" {
 			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
 				if h.syntheticSummary != nil {
@@ -498,7 +513,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 						h.syntheticSummary.WriteString("\n")
 					}
 				}
-				converted := map[string]any{"delta": summary}
+				converted := map[string]any{"delta": summary, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}
 				if blocks, ok := evt.Data["blocks"]; ok {
 					converted["blocks"] = blocks
 				}
@@ -508,6 +523,12 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			break
 		}
 		h.markRealReasoningSeen()
+		if h.downstreamType == "responses" {
+			if source, _ := evt.Data[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
+				result.skipWrite = true
+				break
+			}
+		}
 		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
 		if evt.Event == "response.reasoning.delta" {
 			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
@@ -515,7 +536,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				if h.realReasoningSummary != nil && h.realReasoningItemID != "" {
 					h.realReasoningSummary.WriteString(summary)
 				}
-				converted := map[string]any{"delta": summary}
+				converted := map[string]any{"delta": summary, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}
 				if blocks, ok := evt.Data["blocks"]; ok {
 					converted["blocks"] = blocks
 				}
@@ -1111,6 +1132,7 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 				"type":    "reasoning",
 				"summary": []any{},
 			},
+			aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic,
 		})
 		if err != nil {
 			return err
@@ -1137,7 +1159,7 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 	if state != nil {
 		state.syntheticSummary.WriteString(text)
 	}
-	payload := map[string]any{"type": "response.reasoning.delta", "summary": text}
+	payload := map[string]any{"type": "response.reasoning.delta", "summary": text, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -1151,7 +1173,7 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 	if flusher != nil {
 		flusher.Flush()
 	}
-	summaryPayload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": text}
+	summaryPayload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": text, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}
 	encodedSummary, err := json.Marshal(summaryPayload)
 	if err != nil {
 		return err
@@ -1192,6 +1214,9 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	}
 	clone := make(map[string]any, len(data)+1)
 	for k, v := range data {
+		if k == aggregate.InternalReasoningSourceKey {
+			continue
+		}
 		clone[k] = v
 	}
 	if _, ok := clone["type"]; !ok {
