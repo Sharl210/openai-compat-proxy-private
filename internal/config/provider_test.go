@@ -247,6 +247,40 @@ func TestHiddenReasonSuffixSelectorHidesOnlyRequestedEffort(t *testing.T) {
 	}
 }
 
+func TestHiddenReasonSuffixSelectorOverridesGlobalSuffixExposure(t *testing.T) {
+	p := ProviderConfig{
+		ModelMap:                    []ModelMapEntry{NewModelMapEntry("gpt-5.5", "upstream-gpt-5.5")},
+		EnableReasoningEffortSuffix: true,
+		ExposeReasoningSuffixModels: true,
+		HiddenModels:                []string{"#reason_suffix:-minimal", "gpt-5.5-high"},
+	}
+
+	ids := p.VisibleModelIDs()
+	for _, hidden := range []string{"gpt-5.5-minimal", "gpt-5.5-high"} {
+		if containsString(ids, hidden) {
+			t.Fatalf("expected hidden suffix %q to override global suffix exposure, got %v", hidden, ids)
+		}
+	}
+	for _, visible := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-xhigh"} {
+		if !containsString(ids, visible) {
+			t.Fatalf("expected non-hidden suffix %q to remain visible, got %v", visible, ids)
+		}
+	}
+}
+
+func TestHiddenReasonSuffixFamilyOverridesGlobalSuffixExposure(t *testing.T) {
+	p := ProviderConfig{
+		ModelMap:                    []ModelMapEntry{NewModelMapEntry("gpt-5.5", "upstream-gpt-5.5")},
+		EnableReasoningEffortSuffix: true,
+		ExposeReasoningSuffixModels: true,
+		HiddenModels:                []string{"#reason_suffix:gpt-5.5"},
+	}
+
+	if ids := p.VisibleModelIDs(); len(ids) != 0 {
+		t.Fatalf("expected hidden suffix family to override global suffix exposure, got %v", ids)
+	}
+}
+
 func TestManualReasonSuffixSelectorAllowsSpecificHiddenVariant(t *testing.T) {
 	p := ProviderConfig{ManualModels: []string{"#reason_suffix:-minimal"}, HiddenModels: []string{"gpt-5.5-minimal"}}
 

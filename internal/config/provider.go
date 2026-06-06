@@ -1043,6 +1043,9 @@ func (p ProviderConfig) HidesModel(model string) bool {
 		if baseModel, _, ok := reasoning.SplitSuffix(model); ok && modelPatternMatches(manualModel, baseModel) {
 			for _, pattern := range p.HiddenModels {
 				pattern = strings.TrimSpace(pattern)
+				if manualReasonSuffixPatternMatches(pattern, model) {
+					return true
+				}
 				if modelPatternMatches(pattern, model) {
 					return true
 				}

@@ -442,6 +442,47 @@ func TestExplicitProviderResponsesRouteFollowsReasoningSuffixVisibleModels(t *te
 	}
 }
 
+func TestExplicitProviderResponsesRouteHiddenEffortSelectorOverridesGlobalReasoningSuffix(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "alpha",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "alpha",
+			Enabled:                     true,
+			UpstreamBaseURL:             alpha.URL,
+			UpstreamAPIKey:              "alpha-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			ManualModels:                []string{"visible-reasoning"},
+			EnableReasoningEffortSuffix: true,
+			ExposeReasoningSuffixModels: true,
+			HiddenModels:                []string{"#reason_suffix:-minimal"},
+		}},
+	})
+
+	allowedReq := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"visible-reasoning-low","input":"hello"}`))
+	allowedReq.Header.Set("Content-Type", "application/json")
+	allowedReq.Header.Set("Authorization", "Bearer alpha-key")
+	allowedRec := httptest.NewRecorder()
+	server.ServeHTTP(allowedRec, allowedReq)
+	if allowedRec.Code != http.StatusOK {
+		t.Fatalf("expected non-hidden global reasoning suffix model to succeed, got %d body=%s", allowedRec.Code, allowedRec.Body.String())
+	}
+
+	rejectedReq := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"visible-reasoning-minimal","input":"hello"}`))
+	rejectedReq.Header.Set("Content-Type", "application/json")
+	rejectedReq.Header.Set("Authorization", "Bearer alpha-key")
+	rejectedRec := httptest.NewRecorder()
+	server.ServeHTTP(rejectedRec, rejectedReq)
+	if rejectedRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected hidden effort selector to override global reasoning suffix request, got %d body=%s", rejectedRec.Code, rejectedRec.Body.String())
+	}
+}
+
 func TestExplicitProviderResponsesRouteAllowsReasoningSuffixWhenNotExposedInModelsList(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
