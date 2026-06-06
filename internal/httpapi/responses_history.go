@@ -158,7 +158,7 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 		if len(block) == 0 {
 			continue
 		}
-		if isSyntheticResponsesReasoningBlock(block) {
+		if isSyntheticReasoningBlock(block) {
 			continue
 		}
 		copied := make(map[string]any, len(block))
@@ -173,6 +173,10 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 	return cloned
 }
 
+func filterSyntheticReasoningBlocks(blocks []map[string]any) []map[string]any {
+	return cloneReasoningBlocks(blocks)
+}
+
 func isSyntheticResponsesReasoningBlock(block map[string]any) bool {
 	if stringValue(block["id"]) != "rs_proxy" {
 		return false
@@ -181,6 +185,45 @@ func isSyntheticResponsesReasoningBlock(block map[string]any) bool {
 		return false
 	}
 	return true
+}
+
+func isSyntheticReasoningBlock(block map[string]any) bool {
+	if isSyntheticResponsesReasoningBlock(block) {
+		return true
+	}
+	if isSyntheticReasoningSummary(stringValue(block["thinking"])) {
+		return true
+	}
+	if isSyntheticReasoningSummary(stringValue(block["text"])) {
+		return true
+	}
+	var summaries []any
+	switch typed := block["summary"].(type) {
+	case []any:
+		summaries = typed
+	case []map[string]any:
+		for _, item := range typed {
+			summaries = append(summaries, item)
+		}
+	}
+	for _, raw := range summaries {
+		item, _ := raw.(map[string]any)
+		if len(item) == 0 {
+			continue
+		}
+		if isSyntheticReasoningSummary(stringValue(item["text"])) {
+			return true
+		}
+		if isSyntheticReasoningSummary(stringValue(item["summary_text"])) {
+			return true
+		}
+		if nested, _ := item["summary_text"].(map[string]any); len(nested) > 0 {
+			if isSyntheticReasoningSummary(stringValue(nested["text"])) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isSyntheticReasoningSummary(summary string) bool {
