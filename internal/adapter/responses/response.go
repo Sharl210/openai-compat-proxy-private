@@ -6,13 +6,17 @@ import (
 )
 
 func BuildResponse(result aggregate.Result) map[string]any {
+	suppressUpstreamReasoning := false
+	if source, _ := result.Reasoning[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
+		suppressUpstreamReasoning = true
+	}
 	var output []map[string]any
 	if len(result.ResponseOutputItems) > 0 {
-		output = append(output, cloneOutputItems(result.ResponseOutputItems)...)
+		output = append(output, filterResponseOutputItems(result.ResponseOutputItems, result.Reasoning)...)
 	}
 	if len(output) == 0 {
 		content := result.ResponseMessageContent
-		if len(content) == 0 && (result.Text != "" || len(result.ToolCalls) == 0) {
+		if len(content) == 0 && (result.Text != "" || (len(result.ToolCalls) == 0 && !suppressUpstreamReasoning)) {
 			content = []map[string]any{{
 				"type": "output_text",
 				"text": result.Text,
@@ -48,7 +52,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		"object":             "response",
 		"status":             responsesStatus(result),
 		"output":             output,
-		"reasoning":          result.Reasoning,
+		"reasoning":          outwardReasoning(result.Reasoning),
 		"usage":              cloneMap(result.Usage),
 		"incomplete_details": responsesIncompleteDetails(result),
 	}
@@ -56,6 +60,43 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		response["service_tier"] = result.ServiceTier
 	}
 	return response
+}
+
+func outwardReasoning(reasoning map[string]any) map[string]any {
+	if len(reasoning) == 0 {
+		return nil
+	}
+	if source, _ := reasoning[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
+		return nil
+	}
+	cloned := cloneMap(reasoning)
+	delete(cloned, aggregate.InternalReasoningSourceKey)
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func filterResponseOutputItems(items []map[string]any, reasoning map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	filterUpstreamReasoning := false
+	if source, _ := reasoning[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
+		filterUpstreamReasoning = true
+	}
+	cloned := cloneOutputItems(items)
+	if !filterUpstreamReasoning {
+		return cloned
+	}
+	filtered := make([]map[string]any, 0, len(cloned))
+	for _, item := range cloned {
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func responsesStatus(result aggregate.Result) string {

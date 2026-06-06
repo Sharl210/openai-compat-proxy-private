@@ -147,3 +147,34 @@ func TestBuildResponseWithMixedContent(t *testing.T) {
 		t.Errorf("output[0].id = %q, want msg_pre", output[0]["id"])
 	}
 }
+
+func TestBuildResponseSuppressesUpstreamReasoning(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		ResponseID: "resp_123",
+		Text:       "final answer",
+		Usage: map[string]any{
+			"input_tokens":  1,
+			"output_tokens": 2,
+			"total_tokens":  3,
+		},
+		Reasoning: map[string]any{
+			"_proxy_reasoning_source": "upstream",
+			"summary":                 "secret upstream reasoning",
+		},
+	})
+
+	if reasoning, ok := resp["reasoning"].(map[string]any); ok && len(reasoning) > 0 {
+		t.Fatalf("expected upstream reasoning to be suppressed, got %#v", reasoning)
+	}
+	if got, _ := resp["id"].(string); got != "resp_123" {
+		t.Fatalf("expected response id preserved, got %#v", resp["id"])
+	}
+	output := resp["output"].([]map[string]any)
+	if len(output) == 0 {
+		t.Fatalf("expected output preserved, got %#v", resp)
+	}
+	content, _ := output[0]["content"].([]map[string]any)
+	if len(content) == 0 || content[0]["text"] != "final answer" {
+		t.Fatalf("expected final answer preserved, got %#v", output)
+	}
+}
