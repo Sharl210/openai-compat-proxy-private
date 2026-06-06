@@ -1736,12 +1736,78 @@ func cloneAnySliceOfMaps(blocks []map[string]any) []any {
 		if len(block) == 0 {
 			continue
 		}
-		out = append(out, cloneMap(block))
+		out = append(out, normalizeAnthropicReasoningBlock(block))
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func normalizeAnthropicReasoningBlock(block map[string]any) map[string]any {
+	cloned := cloneMap(block)
+	if len(cloned) == 0 {
+		return cloned
+	}
+	if stringValue(cloned["type"]) != "reasoning" {
+		return cloned
+	}
+	normalized := map[string]any{"type": "thinking"}
+	if text := reasoningTextFromResponsesBlock(cloned); text != "" {
+		normalized["thinking"] = text
+	}
+	if signature := stringValue(cloned["encrypted_content"]); signature != "" {
+		normalized["signature"] = signature
+	}
+	if len(normalized) == 1 {
+		return cloned
+	}
+	return normalized
+}
+
+func reasoningTextFromResponsesBlock(block map[string]any) string {
+	if text := stringValue(block["thinking"]); text != "" {
+		return text
+	}
+	if text := stringValue(block["text"]); text != "" {
+		return text
+	}
+	var rawSummary []any
+	switch typed := block["summary"].(type) {
+	case []any:
+		rawSummary = typed
+	case []map[string]any:
+		for _, item := range typed {
+			rawSummary = append(rawSummary, item)
+		}
+	}
+	var builder strings.Builder
+	for _, raw := range rawSummary {
+		item, _ := raw.(map[string]any)
+		if len(item) == 0 {
+			continue
+		}
+		if stringValue(item["type"]) == "summary_text" {
+			if text := stringValue(item["text"]); text != "" {
+				builder.WriteString(text)
+				continue
+			}
+		}
+		if text := stringValue(item["text"]); text != "" {
+			builder.WriteString(text)
+			continue
+		}
+		if text := stringValue(item["summary_text"]); text != "" {
+			builder.WriteString(text)
+			continue
+		}
+		if nested, _ := item["summary_text"].(map[string]any); len(nested) > 0 {
+			if text := stringValue(nested["text"]); text != "" {
+				builder.WriteString(text)
+			}
+		}
+	}
+	return builder.String()
 }
 
 func firstReasoningBlock(data map[string]any) map[string]any {

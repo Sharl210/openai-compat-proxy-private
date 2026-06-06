@@ -1543,6 +1543,41 @@ func TestBuildAnthropicMessagesPreservesAssistantReasoningContentAsThinkingBlock
 	}
 }
 
+func TestBuildAnthropicMessagesNormalizesResponsesReasoningBlocksToThinkingBlocks(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":              "reasoning",
+			"id":                "rs_123",
+			"summary":           []map[string]any{{"type": "summary_text", "text": "先想一下"}},
+			"encrypted_content": "enc_123",
+		}},
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one anthropic assistant message, got %#v", messages)
+	}
+	assistantMsg, _ := messages[0].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected normalized thinking block plus text block, got %#v", assistantMsg)
+	}
+	thinking, _ := content[0].(map[string]any)
+	if got, _ := thinking["type"].(string); got != "thinking" {
+		t.Fatalf("expected responses reasoning block normalized to thinking, got %#v", thinking)
+	}
+	if got, _ := thinking["thinking"].(string); got != "先想一下" {
+		t.Fatalf("expected summary text hoisted into thinking field, got %#v", thinking)
+	}
+	if got, _ := thinking["signature"].(string); got != "enc_123" {
+		t.Fatalf("expected encrypted_content preserved as signature for anthropic replay, got %#v", thinking)
+	}
+	if _, exists := thinking["summary"]; exists {
+		t.Fatalf("expected raw responses summary removed from anthropic block, got %#v", thinking)
+	}
+}
+
 func TestParseSSEAcceptsLargeEventPayload(t *testing.T) {
 	large := strings.Repeat("x", 128*1024)
 	resp := &http.Response{
