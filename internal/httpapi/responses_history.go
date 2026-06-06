@@ -34,7 +34,11 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 	}
 	cloned := make([]model.CanonicalMessage, 0, len(messages))
 	for _, msg := range messages {
-		clone := model.CanonicalMessage{Role: msg.Role, ToolCallID: msg.ToolCallID, ReasoningContent: msg.ReasoningContent}
+		reasoningContent := msg.ReasoningContent
+		if isSyntheticReasoningSummary(reasoningContent) {
+			reasoningContent = ""
+		}
+		clone := model.CanonicalMessage{Role: msg.Role, ToolCallID: msg.ToolCallID, ReasoningContent: reasoningContent}
 		if len(msg.Parts) > 0 {
 			clone.Parts = append([]model.CanonicalContentPart(nil), msg.Parts...)
 		}

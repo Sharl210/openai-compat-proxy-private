@@ -81,7 +81,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			delete(canon.PreservedTopLevelFields, "metadata")
 		}
 		applyProviderSystemPrompt(&canon, provider)
-		applyProviderMaxOutputTokens(&canon, provider)
+		applyProviderMaxOutputTokens(&canon, provider, clientModel)
 		normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
 		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {

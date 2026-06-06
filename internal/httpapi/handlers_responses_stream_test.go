@@ -1039,6 +1039,38 @@ func TestProviderResponsesRouteStreamsMetadataAddedAndSingleArgumentsDoneForRikk
 	}
 }
 
+func TestResponsesCompatibilityStreamFlushesConsecutiveToolCallsWithoutTextBridge(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "call_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "call_1", "delta": `{"query":"2026年6月 热门新闻"}`}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "call_2", "type": "function_call", "call_id": "call_2", "name": "search_web"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "call_2", "delta": `{"query":"科技 最新 热点 2026"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}, "stop_reason": "tool_use"}},
+	)
+
+	call1Done := `{"item":{"arguments":"{\"query\":\"2026年6月 热门新闻\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"2026年6月 热门新闻"},"type":"function_call"},"type":"response.output_item.done"}`
+	call2Done := `{"item":{"arguments":"{\"query\":\"科技 最新 热点 2026\"}","call_id":"call_2","id":"call_2","name":"search_web","parameters":{"query":"科技 最新 热点 2026"},"type":"function_call"},"type":"response.output_item.done"}`
+	call1ArgsDone := `{"arguments":"{\"query\":\"2026年6月 热门新闻\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`
+	call2ArgsDone := `{"arguments":"{\"query\":\"科技 最新 热点 2026\"}","item_id":"call_2","type":"response.function_call_arguments.done"}`
+
+	if !strings.Contains(body, call1Done) || !strings.Contains(body, call2Done) {
+		t.Fatalf("expected both consecutive tool calls to emit done events, got %s", body)
+	}
+	if !strings.Contains(body, call1ArgsDone) || !strings.Contains(body, call2ArgsDone) {
+		t.Fatalf("expected both consecutive tool calls to emit arguments.done events, got %s", body)
+	}
+	call1DoneIdx := strings.Index(body, call1Done)
+	call1ArgsDoneIdx := strings.Index(body, call1ArgsDone)
+	call2DoneIdx := strings.Index(body, call2Done)
+	call2ArgsDoneIdx := strings.Index(body, call2ArgsDone)
+	if !(call1DoneIdx != -1 && call1ArgsDoneIdx != -1 && call2DoneIdx != -1 && call2ArgsDoneIdx != -1) {
+		t.Fatalf("expected all indices present, got %s", body)
+	}
+	if !(call1DoneIdx < call1ArgsDoneIdx && call1ArgsDoneIdx < call2DoneIdx && call2DoneIdx < call2ArgsDoneIdx) {
+		t.Fatalf("expected consecutive tool completions to preserve order, got %s", body)
+	}
+}
+
 func TestProviderResponsesRouteRepairsMalformedFunctionArgumentsDoneForChatUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

@@ -191,6 +191,9 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	providerCfg.UpstreamBaseURL = provider.UpstreamBaseURL
 	providerCfg.UpstreamAPIKey = provider.UpstreamAPIKey
 	providerCfg.UpstreamEndpointType = provider.UpstreamEndpointType
+	providerCfg.UpstreamMaxOutputTokens = provider.UpstreamMaxOutputTokens
+	providerCfg.UpstreamMaxOutputTokenRules = provider.UpstreamMaxOutputTokenRules
+	providerCfg.ForceUpstreamMaxOutputTokens = provider.ForceUpstreamMaxOutputTokens
 	providerCfg.ResponsesToolCompatMode = provider.ResponsesToolCompatMode
 	providerCfg.AnthropicVersion = provider.AnthropicVersion
 	providerCfg.DownstreamNonStreamStrategy = provider.EffectiveDownstreamNonStreamStrategy(snapshot.Config.DownstreamNonStreamStrategy)

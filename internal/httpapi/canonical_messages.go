@@ -54,6 +54,9 @@ func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.Canonic
 	}
 	filtered := make([]model.CanonicalMessage, 0, len(messages))
 	for _, msg := range messages {
+		if isSyntheticReasoningSummary(msg.ReasoningContent) {
+			msg.ReasoningContent = ""
+		}
 		if shouldDropToolMessageFromHistory(msg) {
 			continue
 		}

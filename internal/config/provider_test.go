@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1011,6 +1012,54 @@ func TestLoadProviderFileRejectsInvalidForceUpstreamMaxOutputTokens(t *testing.T
 	}
 	if err.Error() != "invalid FORCE_UPSTREAM_MAX_OUTPUT_TOKENS in "+providerEnvPath+": \"maybe\"" {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileParsesScopedUpstreamMaxOutputTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000,gpt-5.5:128000,#re:.*gpt-.*:100000\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamMaxOutputTokens != 64000 {
+		t.Fatalf("expected default upstream max output tokens 64000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if len(provider.UpstreamMaxOutputTokenRules) != 2 {
+		t.Fatalf("expected 2 scoped max output rules, got %#v", provider.UpstreamMaxOutputTokenRules)
+	}
+	if provider.UpstreamMaxOutputTokenRules[0].Pattern != "gpt-5.5" || provider.UpstreamMaxOutputTokenRules[0].Tokens != 128000 {
+		t.Fatalf("expected exact model rule first, got %#v", provider.UpstreamMaxOutputTokenRules)
+	}
+	if provider.UpstreamMaxOutputTokenRules[1].Pattern != "#re:.*gpt-.*" || provider.UpstreamMaxOutputTokenRules[1].Tokens != 100000 {
+		t.Fatalf("expected regex rule second, got %#v", provider.UpstreamMaxOutputTokenRules)
+	}
+}
+
+func TestResolveUpstreamMaxOutputTokensPrefersExactThenRegexThenDefault(t *testing.T) {
+	provider := ProviderConfig{
+		UpstreamMaxOutputTokens: 64000,
+		UpstreamMaxOutputTokenRules: []ScopedIntRule{
+			{Pattern: "gpt-5.5", Tokens: 128000, IsExact: true},
+			{Pattern: "#re:.*gpt-.*", Tokens: 100000, PatternRE: regexp.MustCompile("^(?:.*gpt-.*)$")},
+		},
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5"); got != 128000 {
+		t.Fatalf("expected exact match 128000, got %d", got)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.4-mini"); got != 100000 {
+		t.Fatalf("expected regex match 100000, got %d", got)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5-high-noprompt"); got != 100000 {
+		t.Fatalf("expected literal exact rule not to strip suffixes, got %d", got)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("claude-sonnet-4-5"); got != 64000 {
+		t.Fatalf("expected default 64000, got %d", got)
 	}
 }
 

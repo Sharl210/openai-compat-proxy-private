@@ -143,11 +143,19 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	}
 }
 
-func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig) {
-	if canon == nil || provider.UpstreamMaxOutputTokens == 0 {
+func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, clientModel string) {
+	if canon == nil {
 		return
 	}
-	if provider.UpstreamMaxOutputTokens == -1 {
+	matchModel := strings.TrimSpace(clientModel)
+	if matchModel == "" {
+		matchModel = canon.Model
+	}
+	resolved := provider.ResolveUpstreamMaxOutputTokens(matchModel)
+	if resolved == 0 {
+		return
+	}
+	if resolved == -1 {
 		if canon.MaxOutputTokens == nil || provider.ForceUpstreamMaxOutputTokens {
 			canon.MaxOutputTokens = nil
 			canon.OmitMaxOutputTokens = true
@@ -157,7 +165,7 @@ func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider con
 	if canon.MaxOutputTokens != nil && !provider.ForceUpstreamMaxOutputTokens {
 		return
 	}
-	maxOutputTokens := provider.UpstreamMaxOutputTokens
+	maxOutputTokens := resolved
 	canon.MaxOutputTokens = &maxOutputTokens
 	canon.OmitMaxOutputTokens = false
 }

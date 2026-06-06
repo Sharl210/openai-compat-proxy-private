@@ -72,7 +72,7 @@ func handleChat() http.HandlerFunc {
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
-			applyProviderMaxOutputTokens(&canon, provider)
+			applyProviderMaxOutputTokens(&canon, provider, clientModel)
 			normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		}

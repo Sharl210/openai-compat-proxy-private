@@ -22,6 +22,7 @@ type ProviderConfig struct {
 	UpstreamAPIKey                         string
 	OpenAIServiceTier                      string
 	UpstreamMaxOutputTokens                int
+	UpstreamMaxOutputTokenRules            []ScopedIntRule
 	ForceUpstreamMaxOutputTokens           bool
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
@@ -67,6 +68,13 @@ type ModelMapEntry struct {
 	Pattern           *regexp.Regexp
 	IsStaticKey       bool
 	TargetHasCaptures bool
+}
+
+type ScopedIntRule struct {
+	Pattern   string
+	Tokens    int
+	IsExact   bool
+	PatternRE *regexp.Regexp
 }
 
 const (
@@ -189,11 +197,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.OpenAIServiceTier = normalized
 		case "UPSTREAM_MAX_OUTPUT_TOKENS":
-			parsed, err := parseProviderPositiveInt(value, key, path)
+			parsed, rules, err := parseScopedUpstreamMaxOutputTokens(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
 			provider.UpstreamMaxOutputTokens = parsed
+			provider.UpstreamMaxOutputTokenRules = rules
 		case "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS":
 			provider.ForceUpstreamMaxOutputTokens, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
@@ -574,6 +583,72 @@ func parseProviderPositiveInt(value string, key string, path string) (int, error
 		return 0, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
 	}
 	return parsed, nil
+}
+
+func parseScopedUpstreamMaxOutputTokens(raw string, key string, path string) (int, []ScopedIntRule, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, nil, nil
+	}
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool { return r == ',' })
+	defaultValue := 0
+	rules := make([]ScopedIntRule, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if !strings.Contains(part, ":") {
+			parsed, err := parseProviderPositiveInt(part, key, path)
+			if err != nil {
+				return 0, nil, err
+			}
+			defaultValue = parsed
+			continue
+		}
+		pattern, value, ok := splitModelMapEntry(part)
+		if !ok {
+			return 0, nil, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, raw))
+		}
+		pattern = strings.TrimSpace(pattern)
+		value = strings.TrimSpace(value)
+		if pattern == "" || value == "" {
+			return 0, nil, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, raw))
+		}
+		parsed, err := parseProviderPositiveInt(value, key, path)
+		if err != nil {
+			return 0, nil, err
+		}
+		rule := ScopedIntRule{Pattern: pattern, Tokens: parsed}
+		if strings.HasPrefix(pattern, "#re:") {
+			re, err := compileModelPatternStrict(pattern)
+			if err != nil {
+				return 0, nil, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, raw))
+			}
+			rule.PatternRE = re
+		} else {
+			rule.IsExact = true
+		}
+		rules = append(rules, rule)
+	}
+	if defaultValue == 0 && len(rules) == 0 {
+		return 0, nil, nil
+	}
+	return defaultValue, rules, nil
+}
+
+func (p ProviderConfig) ResolveUpstreamMaxOutputTokens(model string) int {
+	for _, rule := range p.UpstreamMaxOutputTokenRules {
+		if rule.IsExact && model == rule.Pattern {
+			return rule.Tokens
+		}
+	}
+	for _, rule := range p.UpstreamMaxOutputTokenRules {
+		if rule.PatternRE != nil && rule.PatternRE.MatchString(model) {
+			return rule.Tokens
+		}
+	}
+	return p.UpstreamMaxOutputTokens
 }
 
 func normalizeProviderRetryCount(value int) int {

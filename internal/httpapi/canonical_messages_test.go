@@ -202,3 +202,22 @@ func TestPrepareCanonicalMessagesDropsAssistantToolCallsWhenResultIsNotImmediate
 		}
 	}
 }
+
+func TestPrepareCanonicalMessagesDropsSyntheticReasoningContent(t *testing.T) {
+	messages := []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
+		Parts:            []model.CanonicalContentPart{{Type: "text", Text: "answer"}},
+	}}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 1 {
+		t.Fatalf("expected one assistant message kept, got %#v", prepared)
+	}
+	if prepared[0].ReasoningContent != "" {
+		t.Fatalf("expected synthetic reasoning content dropped before upstream replay, got %#v", prepared[0])
+	}
+	if len(prepared[0].Parts) != 1 || prepared[0].Parts[0].Text != "answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", prepared[0])
+	}
+}

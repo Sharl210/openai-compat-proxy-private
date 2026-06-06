@@ -60,6 +60,26 @@ func TestResponsesHistoryLoadReturnsClone(t *testing.T) {
 	}
 }
 
+func TestResponsesHistorySaveDropsSyntheticReasoningContentFromStoredMessages(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 2}
+	store.Save("openai", "resp-1", []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
+		Parts:            []model.CanonicalContentPart{{Type: "text", Text: "answer"}},
+	}})
+
+	loaded := store.Load("openai", "resp-1")
+	if len(loaded) != 1 {
+		t.Fatalf("expected one loaded message, got %#v", loaded)
+	}
+	if loaded[0].ReasoningContent != "" {
+		t.Fatalf("expected synthetic reasoning content to be dropped from stored history, got %#v", loaded[0])
+	}
+	if len(loaded[0].Parts) != 1 || loaded[0].Parts[0].Text != "answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", loaded[0])
+	}
+}
+
 func TestBuildResponsesHistorySnapshotKeepsOnlyFollowUpRelevantMessages(t *testing.T) {
 	base := []model.CanonicalMessage{
 		{Role: "developer", Parts: []model.CanonicalContentPart{{Type: "text", Text: "tool registry and developer prompt"}}},

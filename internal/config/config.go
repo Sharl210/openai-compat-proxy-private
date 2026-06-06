@@ -18,6 +18,9 @@ type Config struct {
 	UpstreamEndpointType              string
 	ResponsesToolCompatMode           string
 	AnthropicVersion                  string
+	UpstreamMaxOutputTokens           int
+	UpstreamMaxOutputTokenRules       []ScopedIntRule
+	ForceUpstreamMaxOutputTokens      bool
 	UpstreamUserAgent                 string
 	MasqueradeTarget                  string
 	InjectClaudeCodeMetadataUserID    bool

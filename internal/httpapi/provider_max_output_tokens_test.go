@@ -5,11 +5,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	modelpkg "openai-compat-proxy/internal/model"
 )
+
+func exactScopedRule(pattern string, tokens int) config.ScopedIntRule {
+	return config.ScopedIntRule{Pattern: pattern, Tokens: tokens, IsExact: true}
+}
+
+func regexScopedRule(pattern string, tokens int) config.ScopedIntRule {
+	return config.ScopedIntRule{Pattern: pattern, Tokens: tokens, PatternRE: regexp.MustCompile("^(?:" + strings.TrimPrefix(pattern, "#re:") + ")$")}
+}
 
 func TestProviderMaxOutputTokensFillsMissingClientLimitForAnthropicUpstream(t *testing.T) {
 	for _, tc := range providerMaxOutputTokensRouteCases(0) {
@@ -168,6 +178,129 @@ func TestProviderMaxOutputTokensFeedsAnthropicThinkingBudget(t *testing.T) {
 	}
 }
 
+func TestApplyProviderMaxOutputTokensScopedRulesUseClientModel(t *testing.T) {
+	canon := modelpkg.CanonicalRequest{Model: "claude-sonnet-4-5"}
+	provider := config.ProviderConfig{
+		UpstreamMaxOutputTokens: 64000,
+		UpstreamMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("gpt-5.5", 128000),
+			regexScopedRule("#re:.*gpt-.*", 100000),
+		},
+	}
+	applyProviderMaxOutputTokens(&canon, provider, "gpt-5.5")
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 128000 {
+		t.Fatalf("expected client model exact rule to set 128000, got %#v", canon.MaxOutputTokens)
+	}
+}
+
+func TestProviderScopedMaxOutputRulesApplyBeforeResolvedModelRewrite(t *testing.T) {
+	canon := modelpkg.CanonicalRequest{Model: "gpt-5.5"}
+	provider := config.ProviderConfig{
+		ModelMap:                []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
+		UpstreamMaxOutputTokens: 64000,
+		UpstreamMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("gpt-5.5", 128000),
+			regexScopedRule("#re:.*gpt-.*", 100000),
+		},
+	}
+	clientModel := canon.Model
+	canon.Model = provider.ResolveModel(canon.Model, true)
+	applyProviderMaxOutputTokens(&canon, provider, clientModel)
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 128000 {
+		t.Fatalf("expected scoped rule to use original client model before resolved model rewrite, got %#v model=%q", canon.MaxOutputTokens, canon.Model)
+	}
+}
+
+func TestProviderMaxOutputTokensScopedRulesPreferSpecificMatch(t *testing.T) {
+	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+		path:                        "/v1/responses",
+		body:                        `{"model":"gpt-5.5","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens:     64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+	})
+	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "128000" {
+		t.Fatalf("expected %s 128000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	}
+	if got := numericJSONValue(payload["max_tokens"]); got != 128000 {
+		t.Fatalf("expected exact model rule to win with 128000, got %#v payload=%#v", payload["max_tokens"], payload)
+	}
+}
+
+func TestProviderMaxOutputTokensScopedRulesFallbackToRegexThenDefault(t *testing.T) {
+	regexPayload, regexRec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+		path:                        "/v1/responses",
+		body:                        `{"model":"gpt-5.4-mini","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens:     64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+	})
+	if got := regexRec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "100000" {
+		t.Fatalf("expected %s 100000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	}
+	if got := numericJSONValue(regexPayload["max_tokens"]); got != 100000 {
+		t.Fatalf("expected regex rule to apply with 100000, got %#v payload=%#v", regexPayload["max_tokens"], regexPayload)
+	}
+
+	defaultPayload, defaultRec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+		path:                        "/v1/responses",
+		body:                        `{"model":"claude-sonnet-4-5","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens:     64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+	})
+	if got := defaultRec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "64000" {
+		t.Fatalf("expected %s 64000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	}
+	if got := numericJSONValue(defaultPayload["max_tokens"]); got != 64000 {
+		t.Fatalf("expected default limit 64000 when no scoped rule matches, got %#v payload=%#v", defaultPayload["max_tokens"], defaultPayload)
+	}
+}
+
+func TestProviderMaxOutputTokensScopedRulesTreatModelNameAsLiteral(t *testing.T) {
+	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+		path:                        "/v1/responses",
+		body:                        `{"model":"gpt-5.5-high-noprompt","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens:     64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+	})
+	if got := numericJSONValue(payload["max_tokens"]); got != 100000 {
+		t.Fatalf("expected literal exact rule not to strip suffixes, so regex rule should win with 100000, got %#v payload=%#v", payload["max_tokens"], payload)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "100000" {
+		t.Fatalf("expected %s 100000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	}
+}
+
+func TestDecodeAndResolveResponsesRequestKeepsClientModelAndScopedRules(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                       "openai",
+			Enabled:                  true,
+			SupportsResponses:        true,
+			UpstreamBaseURL:          "https://example.com",
+			UpstreamAPIKey:           "test-key",
+			UpstreamEndpointType:     config.UpstreamEndpointTypeAnthropic,
+			UpstreamMaxOutputTokens:  64000,
+			UpstreamMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+			ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
+	rec := httptest.NewRecorder()
+	initial, ok := decodeAndResolveResponsesRequest(rec, req)
+	if !ok || initial == nil {
+		t.Fatalf("expected decodeAndResolveResponsesRequest success, body=%s", rec.Body.String())
+	}
+	if initial.clientModel != "gpt-5.5" {
+		t.Fatalf("expected client model gpt-5.5, got %q", initial.clientModel)
+	}
+	if len(initial.provider.UpstreamMaxOutputTokenRules) != 2 {
+		t.Fatalf("expected provider scoped rules preserved, got %#v", initial.provider.UpstreamMaxOutputTokenRules)
+	}
+}
+
 type providerMaxOutputTokensRouteCase struct {
 	name             string
 	path             string
@@ -209,6 +342,7 @@ type providerMaxOutputTokensScenario struct {
 	body                         string
 	anthropicVersion             string
 	providerMaxOutputTokens      int
+	providerMaxOutputTokenRules  []config.ScopedIntRule
 	forceProviderMaxOutputTokens bool
 }
 
@@ -246,8 +380,15 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 			EnableReasoningEffortSuffix:           true,
 			MapReasoningSuffixToAnthropicThinking: true,
 			UpstreamMaxOutputTokens:               scenario.providerMaxOutputTokens,
+			UpstreamMaxOutputTokenRules:           scenario.providerMaxOutputTokenRules,
 			ForceUpstreamMaxOutputTokens:          scenario.forceProviderMaxOutputTokens,
-			ModelMap:                              []config.ModelMapEntry{config.NewModelMapEntry("gpt-5", "claude-sonnet-4-5")},
+			ModelMap: []config.ModelMapEntry{
+				config.NewModelMapEntry("gpt-5", "claude-sonnet-4-5"),
+				config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5"),
+				config.NewModelMapEntry("gpt-5.4-mini", "claude-sonnet-4-5"),
+				config.NewModelMapEntry("gpt-5.5-high-noprompt", "claude-sonnet-4-5"),
+				config.NewModelMapEntry("claude-sonnet-4-5", "claude-sonnet-4-5"),
+			},
 		}},
 	})
 

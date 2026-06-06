@@ -402,11 +402,19 @@ UPSTREAM_ENDPOINT_TYPE=responses
 每个 provider 可通过 `UPSTREAM_MAX_OUTPUT_TOKENS` 设置发往上游的默认最大输出 token 数：
 
 - 留空：代理不设置 provider 默认值，继续使用客户端请求里的 `max_tokens` / `max_output_tokens`，或协议构造层自己的默认值
-- 正整数：当客户端没有携带输出上限时，代理自动补这个值
+- 单个正整数：当客户端没有携带输出上限时，代理自动补这个值
+- 默认值 + scoped 覆写：支持写成 `64000,gpt-5.5:128000,#re:.*gpt-.*:100000`
 - `-1`：客户端没有携带输出上限时，代理会主动省略最大输出 token 字段；如果强制开关开启，也会忽略客户端传值并省略该字段
 - `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用 provider 配置值；配置值为 `-1` 时表示强制不携带该字段
 
-这两个字段支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，provider 配置会直接校验失败。
+scoped 覆写的匹配规则：
+
+- 按客户端输入的**完整模型名**做字面量/正则匹配，不会自动剥离 reasoning suffix 或 `-noprompt` 后缀
+- 精确模型匹配优先于正则匹配
+- 没有任何 scoped 规则命中时，回落到默认值
+- 如果只写 scoped 规则、不写默认值，则未命中任何规则时视为“不设置 provider 默认值”
+
+这两个字段支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，provider 配置会直接校验失败。
 
 ### 4. 模型映射与 reasoning suffix
 
