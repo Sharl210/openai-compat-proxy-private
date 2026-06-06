@@ -152,6 +152,9 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 		if len(block) == 0 {
 			continue
 		}
+		if isSyntheticResponsesReasoningBlock(block) {
+			continue
+		}
 		copied := make(map[string]any, len(block))
 		for k, v := range block {
 			copied[k] = v
@@ -162,6 +165,16 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 		return nil
 	}
 	return cloned
+}
+
+func isSyntheticResponsesReasoningBlock(block map[string]any) bool {
+	if stringValue(block["id"]) != "rs_proxy" {
+		return false
+	}
+	if stringValue(block["type"]) != "reasoning" {
+		return false
+	}
+	return true
 }
 
 func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {

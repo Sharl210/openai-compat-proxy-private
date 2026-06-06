@@ -127,6 +127,60 @@ func TestBuildResponsesHistorySnapshotKeepsSuccessfulToolOutputs(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesHistorySnapshotDropsSyntheticReasoningPlaceholder(t *testing.T) {
+	base := []model.CanonicalMessage{{
+		Role: "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":    "reasoning",
+			"id":      "rs_proxy",
+			"summary": []map[string]any{{"type": "summary_text", "text": "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"}},
+		}},
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}
+
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+	if len(snapshot) != 2 {
+		t.Fatalf("expected user + assistant output only, got %#v", snapshot)
+	}
+	if len(snapshot[1].ReasoningBlocks) != 0 {
+		t.Fatalf("expected synthetic rs_proxy reasoning to be excluded from history snapshot, got %#v", snapshot[1])
+	}
+	if snapshot[1].Parts[0].Text != "final answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", snapshot[1])
+	}
+}
+
+func TestBuildResponsesHistorySnapshotKeepsRealReasoningBlocks(t *testing.T) {
+	base := []model.CanonicalMessage{{
+		Role: "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":      "thinking",
+			"thinking":  "真实推理",
+			"signature": "sig_123",
+		}},
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}
+
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+	if len(snapshot) != 2 {
+		t.Fatalf("expected user + assistant output, got %#v", snapshot)
+	}
+	if len(snapshot[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real reasoning block to remain in history snapshot, got %#v", snapshot[1])
+	}
+	if got, _ := snapshot[1].ReasoningBlocks[0]["type"].(string); got != "thinking" {
+		t.Fatalf("expected real thinking block preserved, got %#v", snapshot[1].ReasoningBlocks)
+	}
+}
+
 func TestShouldRestorePreviousConversationAllowsNewUserTurnWithoutClientHistory(t *testing.T) {
 	messages := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "follow up"}}}}
 	if !shouldRestorePreviousConversation(messages) {
