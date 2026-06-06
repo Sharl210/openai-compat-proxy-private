@@ -148,6 +148,19 @@ func TestManualReasonSuffixFamilyAllowsHiddenModelVariant(t *testing.T) {
 	}
 }
 
+func TestManualReasonSuffixFamilyAllowsHiddenEffortSelector(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}, HiddenModels: []string{"#reason_suffix:-minimal"}}
+
+	if !p.HidesModel("gpt-5.5-minimal") {
+		t.Fatalf("expected hidden effort selector to remove one generated family effort")
+	}
+	for _, model := range []string{"gpt-5.5", "gpt-5.5-none", "gpt-5.5-low", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-xhigh"} {
+		if p.HidesModel(model) {
+			t.Fatalf("expected hidden effort selector not to remove %q", model)
+		}
+	}
+}
+
 func TestManualNarrowReasonSuffixVariantOverridesHiddenFamily(t *testing.T) {
 	p := ProviderConfig{ManualModels: []string{"gpt-5.5-minimal"}, HiddenModels: []string{"#reason_suffix:gpt-5.5"}}
 
@@ -231,6 +244,17 @@ func TestHiddenReasonSuffixSelectorHidesOnlyRequestedEffort(t *testing.T) {
 	}
 	if p.HidesModel("gpt-5.5-low") || p.HidesModel("gpt-5.5") {
 		t.Fatalf("expected suffix selector not to hide other efforts or base model")
+	}
+}
+
+func TestManualReasonSuffixSelectorAllowsSpecificHiddenVariant(t *testing.T) {
+	p := ProviderConfig{ManualModels: []string{"#reason_suffix:-minimal"}, HiddenModels: []string{"gpt-5.5-minimal"}}
+
+	if !p.HidesModel("gpt-5.5-minimal") {
+		t.Fatalf("expected specific hidden model to override broad manual effort selector")
+	}
+	if p.HidesModel("gpt-4.1-minimal") {
+		t.Fatalf("expected broad manual effort selector to keep other minimal variants visible")
 	}
 }
 

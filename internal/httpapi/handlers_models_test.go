@@ -190,10 +190,38 @@ func TestRewriteModelsBodyExpandsManualReasonSuffixRegexFamily(t *testing.T) {
 				t.Fatalf("expected %q to expose %q, got %#v", manual, want, ids)
 			}
 		}
+		if contains(ids, "gpt-4.1") {
+			t.Fatalf("expected %q to filter unmatched upstream base gpt-4.1, got %#v", manual, ids)
+		}
 		if contains(ids, "gpt-4.1-low") {
 			t.Fatalf("expected %q not to expand unmatched gpt-4.1 family, got %#v", manual, ids)
 		}
 	})
+}
+
+func TestRewriteModelsBodyReasonSuffixRegexUsesOnlyUpstreamModels(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"upstream-a","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		ModelMap:       []config.ModelMapEntry{config.NewModelMapEntry("proxy-alias", "upstream-a")},
+		ManualModels:   []string{"#reason_suffix:#re:proxy-.*", "manual-static"},
+		HiddenModels:   nil,
+		SupportsModels: true,
+	}
+
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if contains(ids, "proxy-alias-low") || contains(ids, "manual-static-low") {
+		t.Fatalf("expected reason suffix regex to match only upstream /models data, got %#v", ids)
+	}
 }
 
 func TestRewriteModelsBodyExpandsManualReasonSuffixSelector(t *testing.T) {

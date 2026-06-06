@@ -984,6 +984,16 @@ func manualReasonSuffixPatternMatches(pattern string, model string) bool {
 	return false
 }
 
+func ManualReasonSuffixBasePatternMatches(pattern string, model string) bool {
+	manualSpec, ok := manualReasonSuffixSpecFromValue(pattern)
+	return ok && manualSpec.pattern != "" && modelPatternMatches(manualSpec.pattern, model)
+}
+
+func IsManualReasonSuffixRegexPattern(pattern string) bool {
+	manualSpec, ok := manualReasonSuffixSpecFromValue(pattern)
+	return ok && strings.HasPrefix(manualSpec.pattern, "#re:")
+}
+
 func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
 	if p.ModelMap == nil {
 		return ""
@@ -1015,6 +1025,9 @@ func (p ProviderConfig) HidesModel(model string) bool {
 					pattern = strings.TrimSpace(pattern)
 					if manualReasonSuffixPatternsEqual(pattern, manualModel) {
 						continue
+					}
+					if manualReasonSuffixPatternMatches(pattern, model) {
+						return true
 					}
 					if modelPatternMatches(pattern, model) {
 						return true
@@ -1085,13 +1098,6 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 			continue
 		}
 		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		base = append(base, id)
-	}
-	for _, id := range p.ManualReasonSuffixModelIDsFrom(base) {
-		if _, ok := seen[id]; ok || p.HidesModel(id) {
 			continue
 		}
 		seen[id] = struct{}{}

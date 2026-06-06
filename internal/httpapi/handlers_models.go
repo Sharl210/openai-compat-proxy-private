@@ -206,6 +206,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	mapLen := len(provider.ModelMap)
 	manualLen := len(provider.ManualModels)
 	baseIDs := make([]string, 0, len(data)+mapLen+manualLen)
+	upstreamBaseIDs := make([]string, 0, len(data))
 	seenIDs := make(map[string]struct{}, len(data)+mapLen+manualLen)
 	entriesByID := map[string]map[string]any{}
 	for _, item := range data {
@@ -215,6 +216,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 			if provider.HidesModel(id) || !modelSelectedByManualPatterns(provider, id) {
 				continue
 			}
+			upstreamBaseIDs = append(upstreamBaseIDs, id)
 			if _, exists := seenIDs[id]; !exists {
 				baseIDs = append(baseIDs, id)
 				seenIDs[id] = struct{}{}
@@ -252,7 +254,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 			seenIDs[manualModel] = struct{}{}
 		}
 	}
-	for _, id := range provider.ManualReasonSuffixModelIDsFrom(baseIDs) {
+	for _, id := range provider.ManualReasonSuffixModelIDsFrom(upstreamBaseIDs) {
 		if strings.TrimSpace(id) == "" || provider.HidesModel(id) {
 			continue
 		}
@@ -365,6 +367,9 @@ func modelSelectedByManualPatterns(provider config.ProviderConfig, modelID strin
 		return true
 	}
 	for _, pattern := range provider.ManualModels {
+		if config.ManualReasonSuffixBasePatternMatches(pattern, modelID) {
+			return true
+		}
 		if config.ModelPatternMatches(pattern, modelID) {
 			return true
 		}
@@ -375,7 +380,7 @@ func modelSelectedByManualPatterns(provider config.ProviderConfig, modelID strin
 func hasRegexManualModelPattern(provider config.ProviderConfig) bool {
 	for _, pattern := range provider.ManualModels {
 		pattern = strings.TrimSpace(pattern)
-		if pattern != "" && !config.IsStaticModelPattern(pattern) {
+		if pattern != "" && (!config.IsStaticModelPattern(pattern) || config.IsManualReasonSuffixRegexPattern(pattern)) {
 			return true
 		}
 	}
