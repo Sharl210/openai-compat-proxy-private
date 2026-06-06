@@ -2184,6 +2184,119 @@ func TestBuildResponsesRequestBodyPreservesClientPromptCacheKey(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesRequestBodyAddsCodexReasoningIncludeOnlyForCodexMasquerade(t *testing.T) {
+	req := model.CanonicalRequest{
+		Model: "gpt-5.5",
+		Reasoning: &model.CanonicalReasoning{
+			Effort: "high",
+		},
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}
+
+	body, err := buildRequestBodyForEndpoint(req, config.UpstreamEndpointTypeResponses, config.MasqueradeTargetCodex, false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal codex payload: %v", err)
+	}
+	include, _ := payload["include"].([]any)
+	if !containsAnyString(include, "reasoning.encrypted_content") {
+		t.Fatalf("expected codex masquerade responses payload to include reasoning.encrypted_content, got %#v", payload)
+	}
+
+	plainBody, err := buildRequestBodyForEndpoint(req, config.UpstreamEndpointTypeResponses, config.MasqueradeTargetNone, false, false)
+	if err != nil {
+		t.Fatalf("build plain responses body: %v", err)
+	}
+	var plainPayload map[string]any
+	if err := json.Unmarshal(plainBody, &plainPayload); err != nil {
+		t.Fatalf("unmarshal plain payload: %v", err)
+	}
+	plainInclude, _ := plainPayload["include"].([]any)
+	if containsAnyString(plainInclude, "reasoning.encrypted_content") {
+		t.Fatalf("expected non-codex responses payload not to add reasoning.encrypted_content, got %#v", plainPayload)
+	}
+	if got, _ := plainPayload["reasoning"].(map[string]any)["effort"]; got != "high" {
+		t.Fatalf("expected default reasoning payload preserved, got %#v", plainPayload)
+	}
+}
+
+func TestApplyUpstreamHeadersClaudeMasqueradeUsesLatestFingerprint(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/messages", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeAnthropic, "Bearer key", "", "", "", config.MasqueradeTargetClaude)
+
+	if got := req.Header.Get("User-Agent"); got != "claude-cli/2.1.167 (external, cli)" {
+		t.Fatalf("expected latest claude UA, got %q", got)
+	}
+	for _, want := range []string{
+		"claude-code-20250219",
+		"oauth-2025-04-20",
+		"interleaved-thinking-2025-05-14",
+		"prompt-caching-scope-2026-01-05",
+		"effort-2025-11-24",
+		"context-management-2025-06-27",
+		"extended-cache-ttl-2025-04-11",
+	} {
+		if !strings.Contains(req.Header.Get("anthropic-beta"), want) {
+			t.Fatalf("expected anthropic-beta to contain %q, got %q", want, req.Header.Get("anthropic-beta"))
+		}
+	}
+	if got := req.Header.Get("X-Stainless-Package-Version"); got != "0.94.0" {
+		t.Fatalf("expected latest claude stainless package version, got %q", got)
+	}
+	if got := req.Header.Get("Anthropic-Dangerous-Direct-Browser-Access"); got != "true" {
+		t.Fatalf("expected dangerous direct browser access header, got %q", got)
+	}
+}
+
+func TestApplyUpstreamHeadersOpenCodeMasqueradeUsesLatestFingerprint(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "", config.MasqueradeTargetOpenCode)
+	if got := req.Header.Get("User-Agent"); got != "opencode/1.16.2 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14" {
+		t.Fatalf("expected latest opencode UA, got %q", got)
+	}
+	if got := req.Header.Get("originator"); got != "opencode" {
+		t.Fatalf("expected opencode originator, got %q", got)
+	}
+}
+
+func TestApplyUpstreamHeadersCodexMasqueradeUsesLatestFingerprint(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "", config.MasqueradeTargetCodex)
+	if got := req.Header.Get("User-Agent"); got != "codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app" {
+		t.Fatalf("expected latest codex UA, got %q", got)
+	}
+	if got := req.Header.Get("originator"); got != "codex_cli_rs" {
+		t.Fatalf("expected codex originator, got %q", got)
+	}
+	if got := req.Header.Get("x-openai-internal-codex-residency"); got != "us" {
+		t.Fatalf("expected codex residency header, got %q", got)
+	}
+}
+
+func containsAnyString(items []any, want string) bool {
+	for _, item := range items {
+		if got, ok := item.(string); ok && got == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBuildRequestBodyForAllEndpointTypesIgnoresStaleResponsesItemsWhenCanonicalMessagesExist(t *testing.T) {
 	req := model.CanonicalRequest{
 		Model: "gpt-5",
@@ -2924,8 +3037,51 @@ func TestBuildAnthropicRequestBodyInjectsClaudeSystemPrompt(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if got, _ := payload["system"].(string); got != claudeCodeSystemPrompt {
-		t.Fatalf("expected claude system prompt injection, got %#v", payload)
+	system, _ := payload["system"].([]any)
+	if len(system) != 1 {
+		t.Fatalf("expected one injected claude system block, got %#v", payload["system"])
+	}
+	block, _ := system[0].(map[string]any)
+	if got, _ := block["text"].(string); got != claudeCodeSystemPrompt {
+		t.Fatalf("expected injected claude system prompt text, got %#v", payload)
+	}
+	if got, _ := block["type"].(string); got != "text" {
+		t.Fatalf("expected injected claude system prompt block type text, got %#v", payload)
+	}
+	if _, exists := payload["metadata"]; exists {
+		t.Fatalf("expected system prompt injection not to mutate metadata by itself, got %#v", payload)
+	}
+}
+
+func TestBuildAnthropicRequestBodyClaudeSystemPromptPreservesExistingInstructions(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		Instructions:    "project-specific system",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, false, true)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	system, _ := payload["system"].([]any)
+	if len(system) != 2 {
+		t.Fatalf("expected injected claude prompt plus preserved instructions, got %#v", payload["system"])
+	}
+	first, _ := system[0].(map[string]any)
+	second, _ := system[1].(map[string]any)
+	if got, _ := first["text"].(string); got != claudeCodeSystemPrompt {
+		t.Fatalf("expected first system block to be claude prompt, got %#v", payload["system"])
+	}
+	if got, _ := second["text"].(string); got != "project-specific system" {
+		t.Fatalf("expected second system block to preserve existing instructions, got %#v", payload["system"])
 	}
 }
 

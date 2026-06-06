@@ -21,17 +21,17 @@ const (
 	// opencode 伪装：来自 @ai-sdk/provider-utils 的真实 User-Agent 格式
 	// 格式：opencode/{version} ai-sdk/provider-utils/{version} runtime/{runtime}/{version}
 	// 验证来源：issue #8444 (anomalyco/opencode), issue #12799/PR #12800 (vercel/ai)
-	opencodeUserAgent  = "opencode/1.15.13 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"
+	opencodeUserAgent  = "opencode/1.16.2 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"
 	opencodeOriginator = "opencode"
 
 	// claude 伪装：必须用 claude-cli/ 格式才能通过 sub2api 的 isClaudeCodeClient 检测
 	// sub2api 的检测 regex：^claude-cli/\d+\.\d+\.\d+（需同时有 metadata.user_id）
 	// 真实 Claude Code CLI 发的是 claude-code/（不匹配），但 sub2api 接受 claude-cli/ 作为有效标识
 	// 来源：sub2api gateway_service.go 的 claudeCliUserAgentRe + DefaultHeaders (constants.go)
-	claudeCodeUserAgent = "claude-cli/2.1.163 (external, cli)"
+	claudeCodeUserAgent = "claude-cli/2.1.167 (external, cli)"
 	claudeCodeXApp      = "cli"
-	// beta header：与 sub2api 的 DefaultBetaHeader 对齐
-	claudeCodeBeta         = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14"
+	// beta header：与 sub2api 的 FullClaudeCodeMimicryBetas/当前 CLI 抓包对齐
+	claudeCodeBeta         = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
 	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
 
 	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
@@ -97,7 +97,7 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 		httpReq.Header.Set("X-App", claudeCodeXApp)
 		httpReq.Header.Set("anthropic-beta", claudeCodeBeta)
 		httpReq.Header.Set("X-Stainless-Lang", "js")
-		httpReq.Header.Set("X-Stainless-Package-Version", "0.75.0")
+		httpReq.Header.Set("X-Stainless-Package-Version", "0.94.0")
 		httpReq.Header.Set("X-Stainless-OS", "Linux")
 		httpReq.Header.Set("X-Stainless-Arch", "arm64")
 		httpReq.Header.Set("X-Stainless-Runtime", "node")
@@ -106,7 +106,7 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 		httpReq.Header.Set("X-Stainless-Retry-Count", "0")
 		httpReq.Header.Set("Accept", "application/json")
 		httpReq.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
-		// 注意：Anthropic-Dangerous-Direct-Browser-Access 在 HTTP/2 时不发送
+		httpReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
 	case config.MasqueradeTargetCodex:
 		httpReq.Header.Set("User-Agent", codexUserAgent)
 		httpReq.Header.Set("originator", "codex_cli_rs")
@@ -196,7 +196,7 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 	case config.UpstreamEndpointTypeAnthropic:
 		return buildAnthropicRequestBody(req, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
 	default:
-		return buildRequestBody(req)
+		return buildResponsesRequestBodyWithMasquerade(req, config.ResponsesToolCompatModePreserve, masqueradeTarget)
 	}
 }
 
@@ -1562,7 +1562,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		payload["max_tokens"] = 1024
 	}
 	if injectSystemPrompt && masqueradeTarget == config.MasqueradeTargetClaude {
-		payload["system"] = claudeCodeSystemPrompt
+		payload["system"] = buildClaudeMasqueradeSystemParts(req)
 	} else if systemParts := buildAnthropicSystemParts(req); len(systemParts) > 0 {
 		payload["system"] = systemParts
 	} else if system := buildAnthropicSystemPrompt(req); system != "" {
@@ -1782,6 +1782,17 @@ func buildAnthropicSystemParts(req model.CanonicalRequest) []any {
 			continue
 		}
 		content = append(content, buildAnthropicContentParts(msg.Parts)...)
+	}
+	return content
+}
+
+func buildClaudeMasqueradeSystemParts(req model.CanonicalRequest) []any {
+	content := []any{map[string]any{"type": "text", "text": claudeCodeSystemPrompt}}
+	if systemParts := buildAnthropicSystemParts(req); len(systemParts) > 0 {
+		return append(content, systemParts...)
+	}
+	if system := buildAnthropicSystemPrompt(req); system != "" {
+		return append(content, map[string]any{"type": "text", "text": system})
 	}
 	return content
 }

@@ -228,7 +228,7 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointType string, stream bool) ([]byte, error) {
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses {
 		req.Stream = stream
-		return buildResponsesRequestBody(req, c.responsesToolCompatMode)
+		return buildResponsesRequestBodyWithMasquerade(req, c.responsesToolCompatMode, c.masqueradeTarget)
 	}
 	if stream {
 		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
@@ -994,10 +994,14 @@ func formatRetrySeconds(delay time.Duration) string {
 }
 
 func buildRequestBody(req model.CanonicalRequest) ([]byte, error) {
-	return buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	return buildResponsesRequestBodyWithMasquerade(req, config.ResponsesToolCompatModePreserve, config.MasqueradeTargetNone)
 }
 
 func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([]byte, error) {
+	return buildResponsesRequestBodyWithMasquerade(req, compatMode, config.MasqueradeTargetNone)
+}
+
+func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatMode string, masqueradeTarget string) ([]byte, error) {
 	if err := validateRequestForEndpoint(req, config.UpstreamEndpointTypeResponses); err != nil {
 		return nil, err
 	}
@@ -1150,8 +1154,39 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 			}
 		}
 	}
+	if masqueradeTarget == config.MasqueradeTargetCodex {
+		ensureCodexReasoningInclude(payload)
+	}
 	ensureResponsesPromptCacheKey(payload)
 	return json.Marshal(payload)
+}
+
+func ensureCodexReasoningInclude(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	if _, ok := payload["reasoning"].(map[string]any); !ok {
+		return
+	}
+	const encrypted = "reasoning.encrypted_content"
+	switch existing := payload["include"].(type) {
+	case nil:
+		payload["include"] = []string{encrypted}
+	case []string:
+		for _, item := range existing {
+			if item == encrypted {
+				return
+			}
+		}
+		payload["include"] = append(existing, encrypted)
+	case []any:
+		for _, item := range existing {
+			if text, _ := item.(string); text == encrypted {
+				return
+			}
+		}
+		payload["include"] = append(existing, encrypted)
+	}
 }
 
 func ensureResponsesPromptCacheKey(payload map[string]any) {
