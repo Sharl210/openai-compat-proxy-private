@@ -1185,10 +1185,15 @@ button { cursor: pointer; }
 
 .env-card {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .env-body {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .code-editor-highlight {
@@ -1217,6 +1222,11 @@ button { cursor: pointer; }
   padding-right: 1ch;
 }
 .env-comment-block {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin: 6px 0 0;
   padding: 8px 10px;
   border-radius: 12px;
@@ -1231,6 +1241,8 @@ button { cursor: pointer; }
   overflow-wrap: normal;
   overflow-x: auto;
   overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   font-variant-ligatures: none;

@@ -123,10 +123,15 @@ func TestAdminUICSSShowsEnvCommentBlocksAsScrollableCode(t *testing.T) {
 		t.Fatalf("expected env comment block styles, got %s", body)
 	}
 	for _, want := range []string{
+		"box-sizing: border-box;",
+		"width: 100%;",
+		"max-width: 100%;",
+		"min-width: 0;",
 		"white-space: pre;",
 		"word-break: normal;",
 		"overflow-wrap: normal;",
 		"overflow-x: auto;",
+		"-webkit-overflow-scrolling: touch;",
 		"font-size: calc(13px * var(--env-comment-zoom, 1));",
 	} {
 		if !strings.Contains(body, want) {
