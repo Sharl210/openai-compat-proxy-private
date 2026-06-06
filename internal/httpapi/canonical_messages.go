@@ -57,6 +57,9 @@ func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.Canonic
 		if isSyntheticReasoningSummary(msg.ReasoningContent) {
 			msg.ReasoningContent = ""
 		}
+		if len(msg.ReasoningBlocks) > 0 {
+			msg.ReasoningBlocks = filterSyntheticReasoningBlocks(msg.ReasoningBlocks)
+		}
 		if shouldDropToolMessageFromHistory(msg) {
 			continue
 		}

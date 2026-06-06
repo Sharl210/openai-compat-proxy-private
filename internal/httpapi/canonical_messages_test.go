@@ -221,3 +221,25 @@ func TestPrepareCanonicalMessagesDropsSyntheticReasoningContent(t *testing.T) {
 		t.Fatalf("expected assistant text preserved, got %#v", prepared[0])
 	}
 }
+
+func TestPrepareCanonicalMessagesDropsSyntheticNativeThinkingBlocks(t *testing.T) {
+	messages := []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":     "thinking",
+			"thinking": "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
+		}},
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "answer"}},
+	}}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 1 {
+		t.Fatalf("expected one assistant message kept, got %#v", prepared)
+	}
+	if len(prepared[0].ReasoningBlocks) != 0 {
+		t.Fatalf("expected synthetic native thinking block dropped before upstream replay, got %#v", prepared[0])
+	}
+	if len(prepared[0].Parts) != 1 || prepared[0].Parts[0].Text != "answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", prepared[0])
+	}
+}
