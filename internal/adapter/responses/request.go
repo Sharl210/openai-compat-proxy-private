@@ -227,9 +227,12 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 		if err != nil {
 			return nil, model.CanonicalMessage{}, false, err
 		}
+		var rawContent []map[string]any
+		_ = json.Unmarshal(msg.Content, &rawContent)
 		parts := make([]model.CanonicalContentPart, 0, len(decodedContent))
 		normalizedContent := make([]map[string]any, 0, len(decodedContent))
-		for _, part := range decodedContent {
+		reasoningBlocks := make([]map[string]any, 0, len(decodedContent))
+		for idx, part := range decodedContent {
 			switch part.Type {
 			case "input_text", "output_text", "text":
 				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: part.Text})
@@ -266,6 +269,14 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 				}
 				parts = append(parts, model.CanonicalContentPart{Type: "input_audio", Raw: map[string]any{"input_audio": rawAudio}})
 				normalizedContent = append(normalizedContent, map[string]any{"type": "input_audio", "input_audio": rawAudio})
+			case "reasoning":
+				if idx < len(rawContent) {
+					block := cloneMapAny(rawContent[idx])
+					if len(block) > 0 {
+						reasoningBlocks = append(reasoningBlocks, block)
+						normalizedContent = append(normalizedContent, cloneMapAny(block))
+					}
+				}
 			default:
 				return nil, model.CanonicalMessage{}, false, fmt.Errorf("unsupported content type: %s", part.Type)
 			}
@@ -292,7 +303,7 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			preserved["tool_calls"] = rawMap["tool_calls"]
 		}
 
-		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID}, true, nil
+		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID, ReasoningBlocks: reasoningBlocks}, true, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, nil
 }

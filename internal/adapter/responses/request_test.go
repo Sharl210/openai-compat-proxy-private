@@ -224,6 +224,46 @@ func TestDecodeRequestPreservesAssistantStructuredMessagesAsOutputText(t *testin
 	}
 }
 
+func TestDecodeRequestPreservesAssistantReasoningBlocksWhenContentAlsoHasToolUse(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"assistant","content":[
+				{"type":"reasoning","id":"rs_123","summary":[{"type":"summary_text","text":"internal reasoning"}],"encrypted_content":"enc_123"},
+				{"type":"output_text","text":"我先搜一下"}
+			],"tool_calls":[{"id":"call_123","type":"function","function":{"name":"search_web","arguments":"{\"query\":\"weather\"}"}}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one canonical assistant message, got %#v", canon.Messages)
+	}
+	msg := canon.Messages[0]
+	if msg.Role != "assistant" {
+		t.Fatalf("expected assistant role, got %#v", msg)
+	}
+	if len(msg.ReasoningBlocks) != 1 {
+		t.Fatalf("expected reasoning block preserved alongside tool call, got %#v", msg)
+	}
+	if got, _ := msg.ReasoningBlocks[0]["type"].(string); got != "reasoning" {
+		t.Fatalf("expected reasoning block type preserved, got %#v", msg.ReasoningBlocks)
+	}
+	if got, _ := msg.ReasoningBlocks[0]["encrypted_content"].(string); got != "enc_123" {
+		t.Fatalf("expected encrypted_content preserved, got %#v", msg.ReasoningBlocks)
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ID != "call_123" {
+		t.Fatalf("expected tool call preserved, got %#v", msg)
+	}
+	if len(msg.Parts) != 1 || msg.Parts[0].Text != "我先搜一下" {
+		t.Fatalf("expected assistant text preserved, got %#v", msg)
+	}
+}
+
 func TestDecodeRequestExtractsInstructionInputMessages(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
