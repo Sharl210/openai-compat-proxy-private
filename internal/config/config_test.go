@@ -595,7 +595,7 @@ func TestBuildDefaultOverlayModelIndexHiddenModelsFilterReasoningSuffixVariants(
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
-	if want := []string{"reason-model", "reason-model-minimal", "reason-model-xhigh", "reason-model-medium", "reason-model-none"}; !reflect.DeepEqual(visible, want) {
+	if want := []string{"reason-model", "reason-model-minimal", "reason-model-xhigh", "reason-model-medium", "reason-model-none", "reason-model-max"}; !reflect.DeepEqual(visible, want) {
 		t.Fatalf("expected explicitly hidden suffix variants to stay hidden while the manual model hierarchy remains visible, want %v got %v", want, visible)
 	}
 }

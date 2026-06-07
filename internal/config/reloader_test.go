@@ -299,6 +299,54 @@ func TestBuildRuntimeSnapshotProviderTokenFieldsOverrideRoot(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeSnapshotProviderAnthropicMaxThinkingBudgetInheritsRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers: %v", err)
+	}
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nANTHROPIC_MAX_THINKING_BUDGET=40000\n", time.Date(2026, 3, 26, 10, 22, 10, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 22, 20, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	if provider.AnthropicMaxThinkingBudget != 40000 {
+		t.Fatalf("expected provider to inherit root anthropic max thinking budget 40000, got %d", provider.AnthropicMaxThinkingBudget)
+	}
+}
+
+func TestBuildRuntimeSnapshotProviderAnthropicMaxThinkingBudgetOverridesRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers: %v", err)
+	}
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nANTHROPIC_MAX_THINKING_BUDGET=40000\n", time.Date(2026, 3, 26, 10, 22, 30, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nANTHROPIC_MAX_THINKING_BUDGET=50000\n", time.Date(2026, 3, 26, 10, 22, 40, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	if provider.AnthropicMaxThinkingBudget != 50000 {
+		t.Fatalf("expected provider override anthropic max thinking budget 50000, got %d", provider.AnthropicMaxThinkingBudget)
+	}
+}
+
 func TestBuildRuntimeSnapshotBlankProviderTokenFieldsInheritRoot(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

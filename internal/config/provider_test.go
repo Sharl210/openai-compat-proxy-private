@@ -69,6 +69,18 @@ func TestResolveModelAndEffortSupportsMinimalSuffix(t *testing.T) {
 	}
 }
 
+func TestResolveModelAndEffortSupportsMaxSuffix(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5"}}}
+
+	model, effort := p.ResolveModelAndEffort("gpt-5-max", true)
+	if model != "claude-sonnet-4-5" {
+		t.Fatalf("expected mapped model without suffix, got %q", model)
+	}
+	if effort != "max" {
+		t.Fatalf("expected request suffix max to win, got %q", effort)
+	}
+}
+
 func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -239,7 +251,7 @@ func TestVisibleModelIDsExpandsManualReasonSuffixFamilyIndependentOfSuffixFlags(
 	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}}
 
 	got := p.VisibleModelIDs()
-	want := []string{"gpt-5.5", "gpt-5.5-minimal", "gpt-5.5-xhigh", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-low", "gpt-5.5-none"}
+	want := []string{"gpt-5.5", "gpt-5.5-minimal", "gpt-5.5-xhigh", "gpt-5.5-medium", "gpt-5.5-high", "gpt-5.5-low", "gpt-5.5-none", "gpt-5.5-max"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("expected manual reason suffix family expansion, want %v got %v", want, got)
 	}
@@ -1082,6 +1094,47 @@ func TestLoadProviderFileParsesUpstreamMaxOutputTokens(t *testing.T) {
 	}
 	if !provider.ForceUpstreamMaxOutputTokensSet {
 		t.Fatalf("expected force upstream max output tokens to be marked as explicitly set")
+	}
+}
+
+func TestLoadProviderFileParsesAnthropicMaxThinkingBudget(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nANTHROPIC_MAX_THINKING_BUDGET=40000\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.AnthropicMaxThinkingBudget != 40000 {
+		t.Fatalf("expected anthropic max thinking budget 40000, got %d", provider.AnthropicMaxThinkingBudget)
+	}
+	if !provider.AnthropicMaxThinkingBudgetSet {
+		t.Fatalf("expected anthropic max thinking budget to be marked as explicitly set")
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidAnthropicMaxThinkingBudget(t *testing.T) {
+	for _, value := range []string{"0", "1023", "bad"} {
+		t.Run(value, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nANTHROPIC_MAX_THINKING_BUDGET=" + value + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			_, err := loadProviderFile(providerEnvPath)
+			if err == nil {
+				t.Fatalf("expected invalid anthropic max thinking budget to fail validation")
+			}
+			if err.Error() != "invalid ANTHROPIC_MAX_THINKING_BUDGET in "+providerEnvPath+": \""+value+"\"" {
+				t.Fatalf("unexpected error message: %v", err)
+			}
+		})
 	}
 }
 
