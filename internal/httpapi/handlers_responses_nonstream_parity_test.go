@@ -167,7 +167,7 @@ func TestResponsesUpstreamNonStreamPreservesUpstreamServiceTier(t *testing.T) {
 	}
 }
 
-func TestResponsesNonStreamSuppressesRealUpstreamReasoning(t *testing.T) {
+func TestResponsesNonStreamPreservesRealUpstreamReasoning(t *testing.T) {
 	semanticPayload := map[string]any{
 		"id":     "resp_123",
 		"object": "response",
@@ -239,8 +239,8 @@ func TestResponsesNonStreamSuppressesRealUpstreamReasoning(t *testing.T) {
 			t.Fatalf("marshal payload for strategy %s: %v", strategy, err)
 		}
 		body := string(encoded)
-		if strings.Contains(body, "secret upstream reasoning") {
-			t.Fatalf("expected strategy %s to suppress real upstream reasoning, got %s", strategy, body)
+		if !strings.Contains(body, "secret upstream reasoning") {
+			t.Fatalf("expected strategy %s to preserve real upstream reasoning, got %s", strategy, body)
 		}
 		if !strings.Contains(body, "hello") {
 			t.Fatalf("expected strategy %s to preserve final answer, got %s", strategy, body)

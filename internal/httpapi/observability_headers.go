@@ -139,8 +139,45 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	canon.Model = mappedModel
 	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking, canon.Model, canon.MaxOutputTokens)
+		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking && canEnableAnthropicThinkingForMessages(canon.Messages), canon.Model, canon.MaxOutputTokens)
 	}
+}
+
+func canEnableAnthropicThinkingForMessages(messages []modelpkg.CanonicalMessage) bool {
+	if !hasAnthropicReplayHistory(messages) {
+		return true
+	}
+	return hasRealAnthropicThinkingHistory(messages)
+}
+
+func hasAnthropicReplayHistory(messages []modelpkg.CanonicalMessage) bool {
+	for _, msg := range messages {
+		if msg.Role == "assistant" || msg.Role == "tool" || msg.ToolCallID != "" || len(msg.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRealAnthropicThinkingHistory(messages []modelpkg.CanonicalMessage) bool {
+	for _, msg := range messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		if strings.TrimSpace(msg.ReasoningContent) != "" && !isSyntheticReasoningSummary(msg.ReasoningContent) {
+			return true
+		}
+		for _, block := range msg.ReasoningBlocks {
+			if len(block) == 0 || isSyntheticReasoningBlock(block) {
+				continue
+			}
+			blockType := strings.TrimSpace(stringValue(block["type"]))
+			if blockType == "thinking" || blockType == "redacted_thinking" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, clientModel string) {

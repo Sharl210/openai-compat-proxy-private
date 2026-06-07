@@ -148,7 +148,7 @@ func TestBuildResponseWithMixedContent(t *testing.T) {
 	}
 }
 
-func TestBuildResponseSuppressesUpstreamReasoning(t *testing.T) {
+func TestBuildResponsePreservesUpstreamReasoning(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
 		ResponseID: "resp_123",
 		Text:       "final answer",
@@ -163,8 +163,9 @@ func TestBuildResponseSuppressesUpstreamReasoning(t *testing.T) {
 		},
 	})
 
-	if reasoning, ok := resp["reasoning"].(map[string]any); ok && len(reasoning) > 0 {
-		t.Fatalf("expected upstream reasoning to be suppressed, got %#v", reasoning)
+	reasoning, _ := resp["reasoning"].(map[string]any)
+	if got, _ := reasoning["summary"].(string); got != "secret upstream reasoning" {
+		t.Fatalf("expected upstream reasoning summary preserved, got %#v", resp["reasoning"])
 	}
 	if got, _ := resp["id"].(string); got != "resp_123" {
 		t.Fatalf("expected response id preserved, got %#v", resp["id"])

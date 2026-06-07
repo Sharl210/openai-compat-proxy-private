@@ -451,11 +451,6 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 			}
 			h.markRealReasoningSeen()
-			if h.downstreamType == "responses" {
-				if source, _ := evt.Data[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
-					result.skipWrite = true
-				}
-			}
 			break
 		}
 		if itemType == "compaction" && h.downstreamType == "responses" {
@@ -523,12 +518,6 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			break
 		}
 		h.markRealReasoningSeen()
-		if h.downstreamType == "responses" {
-			if source, _ := evt.Data[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
-				result.skipWrite = true
-				break
-			}
-		}
 		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
 		if evt.Event == "response.reasoning.delta" {
 			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
