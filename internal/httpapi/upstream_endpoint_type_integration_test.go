@@ -1985,11 +1985,11 @@ func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *te
 	if strings.Contains(upstreamBody, `"effort":"high"`) || strings.Contains(upstreamBody, `"summary":"auto"`) {
 		t.Fatalf("expected OpenAI-style reasoning controls to stay out of anthropic replay without real thinking history, got %s", upstreamBody)
 	}
-	if !strings.Contains(upstreamBody, `"type":"tool_use"`) || !strings.Contains(upstreamBody, `"id":"call_1"`) {
-		t.Fatalf("expected function_call to remain as anthropic tool_use, got %s", upstreamBody)
+	if strings.Contains(upstreamBody, `"type":"tool_use"`) || strings.Contains(upstreamBody, `"type":"tool_result"`) {
+		t.Fatalf("expected synthetic-only replay to avoid native anthropic tool history without real thinking, got %s", upstreamBody)
 	}
-	if !strings.Contains(upstreamBody, `"type":"tool_result"`) || !strings.Contains(upstreamBody, `"tool_use_id":"call_1"`) {
-		t.Fatalf("expected function_call_output to remain as anthropic tool_result, got %s", upstreamBody)
+	if !strings.Contains(upstreamBody, `search_web`) || !strings.Contains(upstreamBody, `call_1`) || !strings.Contains(upstreamBody, `ok`) || !strings.Contains(upstreamBody, `true`) {
+		t.Fatalf("expected downgraded synthetic-only replay to preserve tool context as text, got %s", upstreamBody)
 	}
 }
 

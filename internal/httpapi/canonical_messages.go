@@ -1,6 +1,11 @@
 package httpapi
 
-import "openai-compat-proxy/internal/model"
+import (
+	"fmt"
+	"strings"
+
+	"openai-compat-proxy/internal/model"
+)
 
 func stripAnthropicCacheControl(req *model.CanonicalRequest) {
 	if req == nil {
@@ -88,6 +93,69 @@ func prepareCanonicalMessages(messages []model.CanonicalMessage) []model.Canonic
 		result = append(result, msg)
 	}
 	return result
+}
+
+func downgradeSyntheticOnlyAnthropicToolReplay(messages []model.CanonicalMessage) []model.CanonicalMessage {
+	if !hasAnthropicReplayHistory(messages) || hasRealAnthropicThinkingHistory(messages) {
+		return messages
+	}
+	downgraded := make([]model.CanonicalMessage, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			text := anthropicToolReplayText(msg)
+			if text != "" {
+				downgraded = append(downgraded, model.CanonicalMessage{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: text}}})
+			}
+			continue
+		}
+		if msg.Role == "tool" {
+			text := anthropicToolResultReplayText(msg)
+			if text != "" {
+				downgraded = append(downgraded, model.CanonicalMessage{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: text}}})
+			}
+			continue
+		}
+		downgraded = append(downgraded, msg)
+	}
+	return downgraded
+}
+
+func anthropicToolReplayText(msg model.CanonicalMessage) string {
+	var lines []string
+	for _, call := range msg.ToolCalls {
+		name := strings.TrimSpace(call.Name)
+		if name == "" {
+			continue
+		}
+		callID := strings.TrimSpace(call.ID)
+		if callID == "" {
+			callID = name
+		}
+		arguments := strings.TrimSpace(call.Arguments)
+		if arguments == "" {
+			arguments = "{}"
+		}
+		lines = append(lines, fmt.Sprintf("工具调用 %s (%s): %s", name, callID, arguments))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func anthropicToolResultReplayText(msg model.CanonicalMessage) string {
+	var parts []string
+	for _, part := range msg.Parts {
+		text := strings.TrimSpace(part.Text)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	toolCallID := strings.TrimSpace(msg.ToolCallID)
+	if toolCallID == "" {
+		toolCallID = "unknown"
+	}
+	return fmt.Sprintf("工具结果 %s: %s", toolCallID, strings.Join(parts, "\n"))
 }
 
 func immediateToolResultIDs(messages []model.CanonicalMessage) map[string]struct{} {

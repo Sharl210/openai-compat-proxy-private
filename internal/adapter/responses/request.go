@@ -157,9 +157,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if len(rawItem) == 0 {
 			continue
 		}
-		preserved, msg, ok, err := decodeInputItem(rawItem)
+		preserved, msg, ok, syntheticReasoningReplay, err := decodeInputItem(rawItem)
 		if err != nil {
 			return model.CanonicalRequest{}, err
+		}
+		if syntheticReasoningReplay {
+			canon.HasSyntheticReasoningReplay = true
 		}
 		if len(preserved) > 0 {
 			if instructionText := extractInstructionTextFromInputItem(preserved); instructionText != "" {
@@ -182,24 +185,24 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	return canon, nil
 }
 
-func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, error) {
+func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, bool, error) {
 	var rawMap map[string]any
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
-		return nil, model.CanonicalMessage{}, false, err
+		return nil, model.CanonicalMessage{}, false, false, err
 	}
 	itemType, _ := rawMap["type"].(string)
 	if itemType == "reasoning" {
 		if isSyntheticResponsesReasoningInputItem(rawMap) {
-			return nil, model.CanonicalMessage{}, false, nil
+			return nil, model.CanonicalMessage{}, false, true, nil
 		}
-		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, nil
+		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, false, nil
 	}
 	if itemType == "function_call_output" {
 		msg, ok, err := decodeFunctionCallOutput(rawMap)
 		if err != nil {
-			return nil, model.CanonicalMessage{}, false, err
+			return nil, model.CanonicalMessage{}, false, false, err
 		}
-		return cloneMapAny(rawMap), msg, ok, nil
+		return cloneMapAny(rawMap), msg, ok, false, nil
 	}
 	// Handle type: "function_call" - extract tool call from top-level fields
 	if itemType == "function_call" {
@@ -219,16 +222,16 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			toolCalls = []model.CanonicalToolCall{{ID: callID, Type: "function", Name: name, Arguments: arguments}}
 		}
 		preserved := cloneMapAny(rawMap)
-		return preserved, model.CanonicalMessage{Role: role, Parts: parts, ToolCalls: toolCalls}, true, nil
+		return preserved, model.CanonicalMessage{Role: role, Parts: parts, ToolCalls: toolCalls}, true, false, nil
 	}
 	if role, _ := rawMap["role"].(string); role != "" {
 		var msg message
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			return nil, model.CanonicalMessage{}, false, err
+			return nil, model.CanonicalMessage{}, false, false, err
 		}
 		decodedContent, err := decodeMessageContent(msg.Content)
 		if err != nil {
-			return nil, model.CanonicalMessage{}, false, err
+			return nil, model.CanonicalMessage{}, false, false, err
 		}
 		var rawContent []map[string]any
 		_ = json.Unmarshal(msg.Content, &rawContent)
@@ -254,21 +257,21 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			case "input_image", "image_url":
 				imagePart, normalizedImage, err := decodeResponsesInputImage(part.ImageURL)
 				if err != nil {
-					return nil, model.CanonicalMessage{}, false, err
+					return nil, model.CanonicalMessage{}, false, false, err
 				}
 				parts = append(parts, imagePart)
 				normalizedContent = append(normalizedContent, map[string]any{"type": "input_image", "image_url": normalizedImage})
 			case "input_file":
 				var rawFile map[string]any
 				if err := json.Unmarshal(part.InputFile, &rawFile); err != nil {
-					return nil, model.CanonicalMessage{}, false, err
+					return nil, model.CanonicalMessage{}, false, false, err
 				}
 				parts = append(parts, model.CanonicalContentPart{Type: "input_file", Raw: map[string]any{"input_file": rawFile}})
 				normalizedContent = append(normalizedContent, map[string]any{"type": "input_file", "input_file": rawFile})
 			case "input_audio":
 				var rawAudio map[string]any
 				if err := json.Unmarshal(part.InputAudio, &rawAudio); err != nil {
-					return nil, model.CanonicalMessage{}, false, err
+					return nil, model.CanonicalMessage{}, false, false, err
 				}
 				parts = append(parts, model.CanonicalContentPart{Type: "input_audio", Raw: map[string]any{"input_audio": rawAudio}})
 				normalizedContent = append(normalizedContent, map[string]any{"type": "input_audio", "input_audio": rawAudio})
@@ -281,7 +284,7 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 					}
 				}
 			default:
-				return nil, model.CanonicalMessage{}, false, fmt.Errorf("unsupported content type: %s", part.Type)
+				return nil, model.CanonicalMessage{}, false, false, fmt.Errorf("unsupported content type: %s", part.Type)
 			}
 		}
 
@@ -306,9 +309,9 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			preserved["tool_calls"] = rawMap["tool_calls"]
 		}
 
-		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID, ReasoningBlocks: reasoningBlocks}, true, nil
+		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID, ReasoningBlocks: reasoningBlocks}, true, false, nil
 	}
-	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, nil
+	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, false, nil
 }
 
 func extractInstructionTextFromInputItem(item map[string]any) string {

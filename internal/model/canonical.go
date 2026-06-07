@@ -22,6 +22,7 @@ type CanonicalRequest struct {
 	RequestID                string
 	AuthMode                 string
 	SkipProviderSystemPrompt bool
+	HasSyntheticReasoningReplay bool
 }
 
 type CanonicalMessage struct {

@@ -402,6 +402,9 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	canon.Messages = prepareCanonicalMessages(canon.Messages)
+	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && canon.HasSyntheticReasoningReplay {
+		canon.Messages = downgradeSyntheticOnlyAnthropicToolReplay(canon.Messages)
+	}
 	applyProviderSystemPrompt(&canon, provider)
 	applyProviderMaxOutputTokens(&canon, provider, clientModel)
 	normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
