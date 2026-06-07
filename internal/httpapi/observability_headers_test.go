@@ -180,7 +180,7 @@ func TestMessagesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 		}},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5-high","max_tokens":128,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5-high","max_tokens":4096,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
@@ -193,11 +193,11 @@ func TestMessagesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	assertDirectionalObservabilityHeaders(t, rec, directionalHeaderExpectation{
 		clientModel:               "gpt-5-high",
 		clientServiceTier:         "",
-		clientReasoningParameters: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}},
+		clientReasoningParameters: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(4095)}},
 		clientReasoningEffort:     "high",
 		proxyUpstreamModel:        "claude-sonnet-4-5",
 		proxyUpstreamServiceTier:  "",
-		proxyReasoningPayload:     map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(128)}},
+		proxyReasoningPayload:     map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(4095)}},
 	})
 }
 
@@ -296,8 +296,8 @@ func TestMessagesRouteDirectThinkingInfersClientReasoningEffortHeader(t *testing
 	if got := rec.Header().Get(headerClientToProxyModel); got != "claude-sonnet-4-5" {
 		t.Fatalf("expected %s claude-sonnet-4-5, got %q", headerClientToProxyModel, got)
 	}
-	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "medium" {
-		t.Fatalf("expected %s medium for direct thinking without explicit effort, got %q", headerClientToProxyReasoningEffort, got)
+	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "minimal" {
+		t.Fatalf("expected %s minimal for direct thinking without explicit effort, got %q", headerClientToProxyReasoningEffort, got)
 	}
 	assertJSONHeaderEquals(t, rec.Header().Get(headerClientToProxyReasoningParameters), map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(2048)}})
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "claude-sonnet-4-5" {
@@ -357,7 +357,7 @@ func TestMessagesRouteReasoningSuffixOverridesDisabledThinkingHeaders(t *testing
 	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "low" {
 		t.Fatalf("expected %s low, got %q", headerClientToProxyReasoningEffort, got)
 	}
-	expected := map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(1024)}}
+	expected := map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(4000)}}
 	assertJSONHeaderEquals(t, rec.Header().Get(headerClientToProxyReasoningParameters), expected)
 	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), expected)
 	if strings.Contains(gotBody, `"thinking":{"type":"disabled"}`) {

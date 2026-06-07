@@ -89,7 +89,7 @@ func TestApplyResolvedReasoningEffortNoneDisablesReasoning(t *testing.T) {
 func TestMapResolvedReasoningEffortToAnthropicThinkingDisabledByDefault(t *testing.T) {
 	reasoning := &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}}
 
-	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, false, "claude-opus-4-6", nil)
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, false, "claude-opus-4-6", nil, 32000)
 
 	if updated == nil {
 		t.Fatalf("expected reasoning to remain present")
@@ -102,7 +102,7 @@ func TestMapResolvedReasoningEffortToAnthropicThinkingDisabledByDefault(t *testi
 func TestMapResolvedReasoningEffortToAnthropicThinkingUsesAdaptiveOnSupportedModels(t *testing.T) {
 	reasoning := &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}}
 
-	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-opus-4-6", nil)
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-opus-4-6", nil, 32000)
 
 	if updated == nil {
 		t.Fatalf("expected reasoning to remain present")
@@ -127,14 +127,41 @@ func TestMapResolvedReasoningEffortToAnthropicThinkingUsesBudgetProfileOnLegacyM
 	maxTokens := 20000
 	reasoning := &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}}
 
-	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", &maxTokens)
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", &maxTokens, 32000)
 
 	thinking, _ := updated.Raw["thinking"].(map[string]any)
 	if got := thinking["type"]; got != "enabled" {
 		t.Fatalf("expected legacy thinking type enabled, got %#v", updated.Raw)
 	}
-	if got := thinking["budget_tokens"]; got != 12000 {
-		t.Fatalf("expected high effort budget 12000, got %#v", updated.Raw)
+	if got := thinking["budget_tokens"]; got != 16000 {
+		t.Fatalf("expected high effort to use half of default max budget, got %#v", updated.Raw)
+	}
+}
+
+func TestMapResolvedReasoningEffortToAnthropicThinkingUsesConfiguredMaxBudget(t *testing.T) {
+	maxTokens := 50000
+	reasoning := &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}}
+
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", &maxTokens, 40000)
+
+	thinking, _ := updated.Raw["thinking"].(map[string]any)
+	if got := thinking["budget_tokens"]; got != 20000 {
+		t.Fatalf("expected high effort to use half of configured max budget, got %#v", updated.Raw)
+	}
+}
+
+func TestMapResolvedReasoningEffortToAnthropicAdaptivePreservesNativeMax(t *testing.T) {
+	reasoning := &modelpkg.CanonicalReasoning{Effort: "max", Summary: "auto", Raw: map[string]any{"effort": "max", "summary": "auto"}}
+
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-opus-4-8", nil, 32000)
+
+	thinking, _ := updated.Raw["thinking"].(map[string]any)
+	if got := thinking["type"]; got != "adaptive" {
+		t.Fatalf("expected adaptive thinking for native max effort, got %#v", updated.Raw)
+	}
+	outputConfig, _ := updated.Raw["output_config"].(map[string]any)
+	if got := outputConfig["effort"]; got != "max" {
+		t.Fatalf("expected Claude adaptive effort max to be preserved, got %#v", updated.Raw)
 	}
 }
 
@@ -142,13 +169,13 @@ func TestMapResolvedReasoningEffortToAnthropicThinkingOverridesDisabledThinking(
 	maxTokens := 4096
 	reasoning := &modelpkg.CanonicalReasoning{Effort: "low", Summary: "auto", Raw: map[string]any{"effort": "low", "summary": "auto", "thinking": map[string]any{"type": "disabled"}, "output_config": map[string]any{"effort": "high"}}}
 
-	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", &maxTokens)
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", &maxTokens, 32000)
 
 	thinking, _ := updated.Raw["thinking"].(map[string]any)
 	if got := thinking["type"]; got != "enabled" {
 		t.Fatalf("expected suffix effort to override disabled thinking, got %#v", updated.Raw)
 	}
-	if got := thinking["budget_tokens"]; got != 1024 {
+	if got := thinking["budget_tokens"]; got != 4000 {
 		t.Fatalf("expected low suffix thinking budget, got %#v", updated.Raw)
 	}
 	if _, ok := updated.Raw["output_config"]; ok {
@@ -231,7 +258,7 @@ func TestNormalizeCanonicalModelMapSourceSuffixWorksWhenClientSuffixDisabled(t *
 func TestMapResolvedReasoningEffortNoneToAnthropicDisabledThinking(t *testing.T) {
 	reasoning := &modelpkg.CanonicalReasoning{Effort: "none", Summary: "auto", Raw: map[string]any{"effort": "none", "summary": "auto"}}
 
-	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", nil)
+	updated := applyAnthropicThinkingFromResolvedEffort(reasoning, true, "claude-sonnet-4-5", nil, 32000)
 
 	thinking, _ := updated.Raw["thinking"].(map[string]any)
 	if got := thinking["type"]; got != "disabled" {

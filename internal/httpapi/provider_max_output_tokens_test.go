@@ -158,11 +158,12 @@ func TestForceProviderMaxOutputTokensDoesNothingWhenProviderLimitUnset(t *testin
 	}
 }
 
-func TestProviderMaxOutputTokensFeedsAnthropicThinkingBudget(t *testing.T) {
+func TestProviderMaxOutputTokensClampsAnthropicThinkingBudget(t *testing.T) {
 	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
 		path:                         "/v1/responses",
 		body:                         `{"model":"gpt-5-xhigh","input":[{"role":"user","content":"hello"}]}`,
 		providerMaxOutputTokens:      20000,
+		anthropicMaxThinkingBudget:   32000,
 		forceProviderMaxOutputTokens: true,
 	})
 
@@ -170,8 +171,8 @@ func TestProviderMaxOutputTokensFeedsAnthropicThinkingBudget(t *testing.T) {
 		t.Fatalf("expected provider max_tokens 20000, got %#v payload=%#v", payload["max_tokens"], payload)
 	}
 	thinking, _ := payload["thinking"].(map[string]any)
-	if got := numericJSONValue(thinking["budget_tokens"]); got != 16000 {
-		t.Fatalf("expected provider max output tokens to feed thinking budget 16000, got %#v payload=%#v", thinking["budget_tokens"], payload)
+	if got := numericJSONValue(thinking["budget_tokens"]); got != 19999 {
+		t.Fatalf("expected provider max output tokens to clamp thinking budget below max_tokens, got %#v payload=%#v", thinking["budget_tokens"], payload)
 	}
 	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "20000" {
 		t.Fatalf("expected %s 20000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
@@ -274,15 +275,15 @@ func TestDecodeAndResolveResponsesRequestKeepsClientModelAndScopedRules(t *testi
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:                       "openai",
-			Enabled:                  true,
-			SupportsResponses:        true,
-			UpstreamBaseURL:          "https://example.com",
-			UpstreamAPIKey:           "test-key",
-			UpstreamEndpointType:     config.UpstreamEndpointTypeAnthropic,
-			UpstreamMaxOutputTokens:  64000,
+			ID:                          "openai",
+			Enabled:                     true,
+			SupportsResponses:           true,
+			UpstreamBaseURL:             "https://example.com",
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeAnthropic,
+			UpstreamMaxOutputTokens:     64000,
 			UpstreamMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
-			ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
+			ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
 		}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":[{"role":"user","content":"hello"}]}`))
@@ -343,11 +344,16 @@ type providerMaxOutputTokensScenario struct {
 	anthropicVersion             string
 	providerMaxOutputTokens      int
 	providerMaxOutputTokenRules  []config.ScopedIntRule
+	anthropicMaxThinkingBudget   int
 	forceProviderMaxOutputTokens bool
 }
 
 func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutputTokensScenario) (map[string]any, *httptest.ResponseRecorder) {
 	t.Helper()
+	anthropicMaxThinkingBudget := scenario.anthropicMaxThinkingBudget
+	if anthropicMaxThinkingBudget == 0 {
+		anthropicMaxThinkingBudget = 32000
+	}
 
 	var upstreamPayload map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +372,7 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		AnthropicMaxThinkingBudget:  32000,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
@@ -379,6 +386,7 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 			SupportsAnthropicMessages:             true,
 			EnableReasoningEffortSuffix:           true,
 			MapReasoningSuffixToAnthropicThinking: true,
+			AnthropicMaxThinkingBudget:            anthropicMaxThinkingBudget,
 			UpstreamMaxOutputTokens:               scenario.providerMaxOutputTokens,
 			UpstreamMaxOutputTokenRules:           scenario.providerMaxOutputTokenRules,
 			ForceUpstreamMaxOutputTokens:          scenario.forceProviderMaxOutputTokens,

@@ -2769,7 +2769,7 @@ func TestBuildRequestBodyMapsAnthropicThinkingToResponsesReasoning(t *testing.T)
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	reasoning, _ := payload["reasoning"].(map[string]any)
-	if got := reasoning["effort"]; got != "medium" {
+	if got := reasoning["effort"]; got != "minimal" {
 		t.Fatalf("expected anthropic thinking to map to medium effort, got %#v", payload)
 	}
 	if got := reasoning["summary"]; got != "auto" {
@@ -2777,6 +2777,44 @@ func TestBuildRequestBodyMapsAnthropicThinkingToResponsesReasoning(t *testing.T)
 	}
 	if _, exists := reasoning["thinking"]; exists {
 		t.Fatalf("expected responses upstream reasoning to avoid anthropic thinking field, got %#v", payload)
+	}
+}
+
+func TestBuildRequestBodyMapsAnthropicBudgetBelowFirstStepToMinimalReasoning(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 4999}}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "minimal" {
+		t.Fatalf("expected 4999 budget to stay below the first configured step, got %#v", payload)
+	}
+}
+
+func TestBuildRequestBodyMapsAnthropicOutputConfigMaxToResponsesXHighReasoning(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"output_config": map[string]any{"effort": "max"}}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["effort"]; got != "xhigh" {
+		t.Fatalf("expected Claude max effort to map to OpenAI xhigh, got %#v", payload)
 	}
 }
 
@@ -2794,7 +2832,7 @@ func TestBuildChatRequestBodyMapsAnthropicThinkingToChatReasoning(t *testing.T) 
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	reasoning, _ := payload["reasoning"].(map[string]any)
-	if got := reasoning["effort"]; got != "medium" {
+	if got := reasoning["effort"]; got != "minimal" {
 		t.Fatalf("expected anthropic thinking to map to medium effort, got %#v", payload)
 	}
 	if got := reasoning["summary"]; got != "auto" {

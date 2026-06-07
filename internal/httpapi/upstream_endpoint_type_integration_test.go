@@ -1494,7 +1494,7 @@ func TestAnthropicRouteMapsThinkingConfigToResponsesReasoningWhenUpstreamIsRespo
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(gotBody, `"reasoning":{"effort":"medium","summary":"auto"}`) {
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"minimal","summary":"auto"}`) {
 		t.Fatalf("expected anthropic thinking config to map into responses reasoning payload, got %s", gotBody)
 	}
 	if strings.Contains(gotBody, `"thinking":`) {
@@ -1549,7 +1549,7 @@ func TestAnthropicRouteMapsThinkingConfigToChatReasoningWhenUpstreamIsChat(t *te
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(gotBody, `"reasoning":{"effort":"medium","summary":"auto"}`) {
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"minimal","summary":"auto"}`) {
 		t.Fatalf("expected anthropic thinking config to map into chat reasoning payload, got %s", gotBody)
 	}
 	if strings.Contains(gotBody, `"thinking":`) {
