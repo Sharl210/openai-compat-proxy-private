@@ -310,7 +310,8 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Proxy-To-Upstream-Service-Tier` | 代理最终实际发给上游的服务层级；如果 provider 配置覆写了该值，这里会显示覆写后的结果；没有值时为空字符串 | `priority` |
 | `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
 | `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前客户端模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
-| `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
+| `X-Proxy-To-Upstream-Reasoning-Effort` | 代理最终实际发给上游的推理强度摘要；响应头常驻，没有实际发给上游时为空字符串 | `high` |
+| `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串；响应头常驻，没有实际发给上游时为空字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
 | `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
 | `X-Provider-Version` | 当前 provider 配置的热加载版本戳 | `2026-03-25T11:04:00.222Z` |
@@ -321,13 +322,14 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 - 这组透明度响应头**不需要额外配置变量**，默认直接返回。
 - `X-Client-To-Proxy-*` 关注的是**客户端 → 代理**这段链路。
 - `X-Proxy-To-Upstream-*` 关注的是**代理 → 上游**这段链路。
-- 服务层级响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置服务层级”。
+- 服务层级和 reasoning 透明度响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置对应链路参数”。
 - `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
 - `X-Client-To-Proxy-Reasoning-Effort` 是客户端侧的**摘要值**；如果同一请求里模型 suffix 和请求体参数同时存在，代理会按本地优先级先决出最终强度，再把这个摘要值写进来。
 - `X-SYSTEM-PROMPT-ATTACH` 是本次请求的提示词附加透明度字段：正常注入 provider prompt 时显示 `prepend:prompt.md` 或 `append:...`；当 `-noprompt` 真正生效且 `X-Client-To-Proxy-NoPrompt=true` 时，这个 header 仍会存在但值为空，表示本次已明确跳过 provider prompt 注入；如果 `-noprompt` 没有生效，则继续按实际注入状态显示文件串。
 - 模型名里的 reasoning suffix 优先于客户端请求体里的任何 reasoning / thinking 设置；例如 `model-low` 会覆盖客户端传入的 `thinking: {"type":"disabled"}`，`model-none` 会强制关闭推理；当上游是 Anthropic 协议时会发送 `thinking: {"type":"disabled"}`，当上游是 OpenAI 风格协议时会显式携带 `none`。
 - `X-Proxy-To-Upstream-Max-Output-Tokens` 展示的是 canonical 请求里最终决定的输出上限；它会体现 `UPSTREAM_MAX_OUTPUT_TOKENS` 和 `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` 的处理结果。最终不携带输出上限时，这个响应头为空。
 - `X-Proxy-Model-Limit-Context-Tokens` 展示的是代理层用于模拟上下文超限的当前命中值；`-1` 表示代理不主动限制，但真实上游仍可能返回自己的上下文超限错误。
+- `X-Proxy-To-Upstream-Reasoning-Effort` 是代理到上游侧的**摘要值**；它展示代理实际写进上游请求体的推理强度。比如客户端传了 `reasoning.effort=xhigh`，但 provider 是 Anthropic 上游且 `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=false`，代理不会转换成 Anthropic `thinking/output_config`，而是把原始 `reasoning` 透传给上游；此时 `X-Proxy-To-Upstream-Reasoning-Effort=xhigh`，`X-Proxy-To-Upstream-Reasoning-Parameters` 会显示原始 OpenAI 风格 reasoning 字段。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
   - `responses/chat` 常见为 `{"reasoning":{...}}`
   - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
@@ -451,13 +453,21 @@ scoped 覆写的匹配规则：
 
 这些变量的实际含义：
 
-- `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。source 和 target 的 reasoning suffix 要分开看：source suffix 负责匹配请求入口，target suffix 负责给上游模型附带默认 effort。请求体里显式的 effort 与模型名 suffix 等效，只用于 MODEL_MAP 匹配：`MODEL_MAP=client-gpt-high:upstream-gpt` 既能匹配 `model=client-gpt-high`，也能匹配 `model=client-gpt` + `reasoning.effort=high` / `reasoning_effort=high` / Anthropic `thinking/output_config` 表达的 high。显式请求参数优先于 target suffix，例如 `MODEL_MAP=client-gpt-high:upstream-gpt-low` 遇到 `model=client-gpt` + `reasoning.effort=high` 时，最终发往 `upstream-gpt`，effort 保持 `high`。这些配置层 suffix 语义不受 `ENABLE_REASONING_EFFORT_SUFFIX` 限制。
+- `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。这一项里“冒号左侧为原始模型”和“冒号右侧为原始模型”要分开看：
+  - 左侧 source 是原始模型 base 时，表示这条 base source 锁定整个客户端推理家族集合。例如 `MODEL_MAP=client-gpt:upstream-gpt` 会覆盖 `model=client-gpt`、`model=client-gpt-high`、`model=client-gpt-low`，也覆盖 `model=client-gpt` + `reasoning.effort=high` / `reasoning_effort=high` / Anthropic `thinking/output_config` 表达的 high；最终发往 `upstream-gpt`，effort 按客户端 suffix 或请求体参数保留。
+  - 左侧 source 带 suffix 时，表示定向匹配某个推理档位，base 请求携带同档请求体参数也能反向锁定这条规则。例如 `MODEL_MAP=client-gpt-high:upstream-priority` 既匹配 `model=client-gpt-high`，也匹配 `model=client-gpt` + `reasoning.effort=high`，用于把 high 档定向转到 `upstream-priority`。这个等效匹配只作用于 MODEL_MAP，不会把 `client-gpt-high` 自动加入 `/models`。
+  - 右侧 target 是原始上游模型 base 时，表示发给上游的 `model` 不带默认 reasoning suffix，只做模型名映射；最终 effort 继续来自客户端 suffix、请求体显式参数或左侧 source suffix。例如 `MODEL_MAP=client-gpt-high:upstream-gpt` 遇到 `model=client-gpt` + `reasoning.effort=high` 时，会发往 `upstream-gpt`，最终 effort 是 `high`。
+  - 如果右侧 target 是原始模型 base，而客户端又显式传了请求体 reasoning 参数，则不信任左侧 source suffix 把自己的档位强灌到结果里。例如 `MODEL_MAP=gpt-5.5-xhigh:gpt-5.5` 且客户端显式传 `reasoning.effort=low` 时，最终发往 `gpt-5.5`，effort 仍是 `low`，不会被左侧 `xhigh` 覆盖。
+  - 右侧 target 只有写成带 suffix 的模型时，才会提供默认 effort。例如 `MODEL_MAP=client-gpt:upstream-gpt-low` 遇到 `model=client-gpt` 且请求体没有显式 effort 时，会发往 `upstream-gpt`，最终 effort 是 `low`。
+  - 显式请求参数优先于 target suffix。例如 `MODEL_MAP=client-gpt-high:upstream-gpt-low` 遇到 `model=client-gpt` + `reasoning.effort=high` 时，仍会发往 `upstream-gpt`，但最终 effort 保持 `high`，不会被 target 的 `low` 覆盖。这些配置层 suffix 语义不受 `ENABLE_REASONING_EFFORT_SUFFIX` 限制。
+  - 相同 source 多条规则时，越靠后优先级越高；后写的规则覆盖前面同 source 规则。例如 `MODEL_MAP=client-gpt:upstream-a,client-gpt:upstream-b` 最终命中 `upstream-b`。
+  - 不同 source 规则不做链式递归映射，始终只对客户端原始请求模型做一次匹配。例如 `MODEL_MAP=model-a:model-c,model-c:model-d` 时，请求 `model-a` 只会得到 `model-c`，不会继续推出 `model-d`。
 - `MANUAL_MODELS`：模型列表补齐和筛选。静态模型名会作为字面模型暴露；`#re:` 只从上游 `/models` 返回的原始模型列表里扩展；`#reason_suffix:model` 会为 base model 手动生成推理后缀家族。它不参与请求时 MODEL_MAP 等效匹配，所以不会因为请求体带了 `reasoning.effort=high` 就把 `client-gpt` 当作 `client-gpt-high` 加入列表或准入。`MODEL_MAP` alias 要出现在 `/models`，必须在这里显式写出来。
 - `HIDDEN_MODELS`：模型列表隐藏和准入限制。它支持字面量、`#re:` 和 `#reason_suffix` family marker；`#re:` 是普通 Go regexp，不理解 suffix 语义边界。它也不参与请求时 MODEL_MAP 等效匹配，所以 `HIDDEN_MODELS=client-gpt-high` 不会阻止 `model=client-gpt` + `reasoning.effort=high` 命中 `MODEL_MAP=client-gpt-high:upstream-gpt`。
 - `ENABLE_REASONING_EFFORT_SUFFIX`：只控制客户端能不能用 `model-high` 这类模型名后缀表达推理强度；它不限制 `MODEL_MAP` source/target 里的配置层 suffix，也不限制请求体里显式传入的 reasoning effort。
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
 - `ENABLE_NOPROMPT_MODEL_SUFFIX`：允许像 `model-noprompt`、`model-low-noprompt` 这样的请求跳过 provider 级 `SYSTEM_PROMPT_FILES` 注入；根级默认开启，provider 级同名字段留空时继承根配置，显式 `true/false` 时覆盖根配置；`-noprompt` 会先从模型名剥离，不会出现在上游模型名里，也不会自动额外出现在 `/models` 列表里，除非你在 `MANUAL_MODELS` 里把这个字面模型写出来
-- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 自动翻译成 `thinking` / `output_config`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。内部档位是 `none/minimal/low/medium/high/xhigh/max`：`none` 关闭 thinking；旧式 manual thinking 会按 `ANTHROPIC_MAX_THINKING_BUDGET` 动态分配预算，并被 `max_tokens - 1` 夹紧；Claude adaptive thinking 原生支持 `max`，所以 `max` 会保留为 `output_config.effort=max`，而发往 OpenAI 风格上游时会降级成 `xhigh`。
+- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 翻译成 Anthropic 合法请求体字段 `thinking` / `output_config`，默认 `true`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。这个开关为 `false` 时，代理不做 Anthropic 风格转换，而是把客户端侧 `reasoning` / `reasoning_effort` 原样透传给上游；如果上游不兼容，应由上游明确返回错误，代理不会静默丢弃推理参数。内部档位是 `none/minimal/low/medium/high/xhigh/max`：`none` 关闭 thinking；旧式 manual thinking 会按 `ANTHROPIC_MAX_THINKING_BUDGET` 动态分配预算，并被 `max_tokens - 1` 夹紧；Claude adaptive thinking 原生支持 `max`，所以 `max` 会保留为 `output_config.effort=max`，而发往 OpenAI 风格上游时会降级成 `xhigh`。
 - `ANTHROPIC_MAX_THINKING_BUDGET`：控制 manual Anthropic `thinking.budget_tokens` 的最高预算，根级默认 `32000`，provider 留空继承、显式设置覆盖。Anthropic 官方只约束 `budget_tokens >= 1024` 且普通 manual thinking 下必须小于 `max_tokens`，没有公布全局独立最大值；`32000` 是通用工程默认值，不是官方 hard cap。举例：默认 32000 时，`minimal/low/medium/high/xhigh/max` 的 manual 预算分别约为 `2000/4000/8000/16000/32000/32000`，如果请求 `max_tokens=12000`，最终预算会被夹到 `11999`。
 
 当前实现里，**请求准入会遵循代理实际对外返回的 `/models` 列表**：
