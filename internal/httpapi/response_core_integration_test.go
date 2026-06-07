@@ -1056,6 +1056,64 @@ func TestAnthropicStreamingUpstreamToolArgsPreservedInResponsesStream(t *testing
 	}
 }
 
+func TestAnthropicStreamingUpstreamKeepsFinalTextAfterTwoPriorToolRoundsInResponsesStream(t *testing.T) {
+	events := []string{
+		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\"}}\n\n",
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"reasoning after two tools\"}}\n\n",
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"最终答案\"}}\n\n",
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}\n\n",
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+	}
+	upstream := newAnthropicStreamingUpstream(t, events)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"claude-sonnet-4-5",
+		"stream":true,
+		"input":[
+			{"role":"user","content":"请你一口气调用两次搜索同时，随便搜"},
+			{"type":"function_call","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"alpha\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"},
+			{"type":"function_call","call_id":"call_2","name":"search_web","arguments":"{\"query\":\"beta\"}"},
+			{"type":"function_call_output","call_id":"call_2","output":"{\"ok\":true}"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, `"delta":"最终答案"`) {
+		t.Fatalf("expected final text to continue after two prior tool rounds, got %s", body)
+	}
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event after final text, got %s", body)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Streaming: anthropic upstream → anthropic messages downstream
 // ---------------------------------------------------------------------------

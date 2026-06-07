@@ -412,6 +412,63 @@ func TestChatStreamKeepsLaterToolArgumentDeltaAfterReasoningAndText(t *testing.T
 	}
 }
 
+func TestChatStreamKeepsReasoningAndFinalTextAfterTwoToolCalls(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search_web\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"q\\\":\\\"alpha\\\"}\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search_web\",\"arguments\":\"{\\\"q\\\":\\\"alpha\\\"}\"}}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_2\",\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"open_url\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_2\",\"delta\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"fc_2\",\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"open_url\",\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}\n\n",
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"alpha beta\"}\n\n",
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"最终答案\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	tool1Idx := strings.Index(body, `"id":"call_1"`)
+	tool2Idx := strings.Index(body, `"id":"call_2"`)
+	reasoningIdx := strings.Index(body, `"reasoning_content":"alpha beta"`)
+	textIdx := strings.Index(body, `"content":"最终答案"`)
+	if tool1Idx == -1 || tool2Idx == -1 || reasoningIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected two tool calls followed by reasoning and final text, got %s", body)
+	}
+	if !(tool1Idx < tool2Idx && tool2Idx < reasoningIdx && reasoningIdx < textIdx) {
+		t.Fatalf("expected reasoning and final text to continue after two tool calls, got %s", body)
+	}
+}
+
 func TestChatStreamDoesNotEmitEmptyToolArgumentsBeforeDeltaArrives(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
