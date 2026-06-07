@@ -2279,53 +2279,6 @@ func TestResponsesRouteSkipsPreviousHistoryRestoreWhenClientAlreadySendsHistory(
 	}
 }
 
-func TestResponsesRouteDisablesThinkingForClientSuppliedAnthropicToolHistoryWithoutThinkingBlocks(t *testing.T) {
-	var gotBody string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bodyBytes, _ := io.ReadAll(r.Body)
-		gotBody = string(bodyBytes)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
-	}))
-	defer upstream.Close()
-
-	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
-		"model":"gpt-5",
-		"reasoning":{"summary":"auto"},
-		"input":[
-			{"role":"user","content":"请你一口气调用两次搜索同时，随便搜"},
-			{"type":"function_call","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"alpha\"}"},
-			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"},
-			{"type":"function_call","call_id":"call_2","name":"search_web","arguments":"{\"query\":\"beta\"}"},
-			{"type":"function_call_output","call_id":"call_2","output":"{\"ok\":true}"}
-		]
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(gotBody, `"thinking":{"type":"disabled"}`) {
-		t.Fatalf("expected anthropic upstream body to disable thinking when client supplies tool history without thinking blocks, got %s", gotBody)
-	}
-	if strings.Contains(gotBody, `"summary":"auto"`) {
-		t.Fatalf("expected anthropic upstream body to drop residual reasoning summary after disabling thinking fallback, got %s", gotBody)
-	}
-	if strings.Contains(gotBody, `"context_management"`) {
-		t.Fatalf("expected anthropic upstream body to avoid unsupported automatic context_management fallback, got %s", gotBody)
-	}
-	if !strings.Contains(gotBody, `"type":"tool_use"`) || !strings.Contains(gotBody, `"id":"call_1"`) || !strings.Contains(gotBody, `"id":"call_2"`) {
-		t.Fatalf("expected anthropic upstream body to preserve both assistant tool history items, got %s", gotBody)
-	}
-	if !strings.Contains(gotBody, `"type":"tool_result"`) || !strings.Contains(gotBody, `"tool_use_id":"call_1"`) || !strings.Contains(gotBody, `"tool_use_id":"call_2"`) {
-		t.Fatalf("expected anthropic upstream body to preserve both tool results, got %s", gotBody)
-	}
-}
-
 func TestResponsesRouteDedupesDuplicateToolResultsFromClientFollowUp(t *testing.T) {
 	requestCount := 0
 	var secondBody string

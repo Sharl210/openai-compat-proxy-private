@@ -2065,67 +2065,6 @@ func TestResponseUsesAnthropicEndpointAddsContextManagementBetaHeader(t *testing
 	}
 }
 
-func TestStreamUsesAnthropicEndpointAvoidsAutoContextManagementBetaHeader(t *testing.T) {
-	var gotBeta string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotBeta = r.Header.Get("anthropic-beta")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_json","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
-	_, err := client.Stream(context.Background(), model.CanonicalRequest{
-		Model:           "claude-sonnet-4-5",
-		Stream:          true,
-		MaxOutputTokens: intPtrForClientTest(128),
-		Reasoning:       &model.CanonicalReasoning{Summary: "auto", Raw: map[string]any{"summary": "auto"}},
-		Messages: []model.CanonicalMessage{
-			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "请你一口气调用两次搜索同时，随便搜"}}},
-			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"alpha"}`}}},
-			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
-			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_2", Type: "function", Name: "search_web", Arguments: `{"query":"beta"}`}}},
-			{Role: "tool", ToolCallID: "call_2", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
-		},
-	}, "Bearer anthropic-key")
-	if err != nil {
-		t.Fatalf("Stream error: %v", err)
-	}
-	if gotBeta != "" {
-		t.Fatalf("expected automatic thinking disable fallback to avoid anthropic context-management beta header, got %q", gotBeta)
-	}
-}
-
-func TestResponseUsesAnthropicEndpointAvoidsAutoContextManagementBetaHeader(t *testing.T) {
-	var gotBeta string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotBeta = r.Header.Get("anthropic-beta")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`))
-	}))
-	defer server.Close()
-
-	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
-	_, err := client.Response(context.Background(), model.CanonicalRequest{
-		Model:           "claude-sonnet-4-5",
-		MaxOutputTokens: intPtrForClientTest(128),
-		Reasoning:       &model.CanonicalReasoning{Summary: "auto", Raw: map[string]any{"summary": "auto"}},
-		Messages: []model.CanonicalMessage{
-			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "请你一口气调用两次搜索同时，随便搜"}}},
-			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"alpha"}`}}},
-			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
-			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_2", Type: "function", Name: "search_web", Arguments: `{"query":"beta"}`}}},
-			{Role: "tool", ToolCallID: "call_2", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
-		},
-	}, "Bearer anthropic-key")
-	if err != nil {
-		t.Fatalf("Response error: %v", err)
-	}
-	if gotBeta != "" {
-		t.Fatalf("expected automatic thinking disable fallback to avoid anthropic context-management beta header, got %q", gotBeta)
-	}
-}
-
 func TestBuildResponsesRequestBodyDropsContextManagement(t *testing.T) {
 	body, err := buildResponsesRequestBody(model.CanonicalRequest{
 		Model:                   "gpt-5",
@@ -2782,39 +2721,6 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 	}
 	if got := thinking["budget_tokens"]; got != float64(2048) {
 		t.Fatalf("expected thinking.budget_tokens 2048, got %#v", payload)
-	}
-}
-
-func TestBuildAnthropicRequestBodyDisablesThinkingWhenAssistantToolHistoryLacksThinkingBlocks(t *testing.T) {
-	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
-		Model:           "claude-sonnet-4-5",
-		MaxOutputTokens: intPtrForClientTest(128),
-		Reasoning:       &model.CanonicalReasoning{Summary: "auto", Raw: map[string]any{"summary": "auto"}},
-		Messages: []model.CanonicalMessage{
-			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "请你一口气调用两次搜索同时，随便搜"}}},
-			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"alpha"}`}}},
-			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
-			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_2", Type: "function", Name: "search_web", Arguments: `{"query":"beta"}`}}},
-			{Role: "tool", ToolCallID: "call_2", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
-		},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
-	if err != nil {
-		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	thinking, _ := payload["thinking"].(map[string]any)
-	if got, _ := thinking["type"].(string); got != "disabled" {
-		t.Fatalf("expected anthropic payload to disable thinking when assistant tool history lacks thinking blocks, got %#v", payload)
-	}
-	if _, exists := payload["summary"]; exists {
-		t.Fatalf("expected anthropic payload to drop top-level summary after disabling thinking fallback, got %#v", payload)
-	}
-	if _, exists := payload["context_management"]; exists {
-		t.Fatalf("expected anthropic payload to avoid unsupported automatic context_management fallback, got %#v", payload)
 	}
 }
 

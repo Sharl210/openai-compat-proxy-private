@@ -187,9 +187,6 @@ func extractOriginalToolIDs(req model.CanonicalRequest) map[int]string {
 }
 
 func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, xmlToolCallStyle ...string) ([]byte, error) {
-	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
-		ensureAnthropicThinkingHistoryCompatibility(&req)
-	}
 	if err := validateRequestForEndpoint(req, endpointType); err != nil {
 		return nil, err
 	}
@@ -201,42 +198,6 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 	default:
 		return buildResponsesRequestBodyWithMasquerade(req, config.ResponsesToolCompatModePreserve, masqueradeTarget)
 	}
-}
-
-func ensureAnthropicThinkingHistoryCompatibility(req *model.CanonicalRequest) {
-	if req == nil {
-		return
-	}
-	if req.Reasoning != nil {
-		if len(req.Reasoning.Raw) > 0 && anthropicThinkingDisabled(req.Reasoning.Raw) {
-			return
-		}
-		if strings.EqualFold(strings.TrimSpace(req.Reasoning.Effort), "none") {
-			return
-		}
-	}
-	hasAssistantToolHistory := false
-	hasAssistantThinkingBlocks := false
-	for _, msg := range req.Messages {
-		if msg.Role != "assistant" {
-			continue
-		}
-		if len(msg.ToolCalls) > 0 {
-			hasAssistantToolHistory = true
-		}
-		if len(msg.ReasoningBlocks) > 0 || strings.TrimSpace(msg.ReasoningContent) != "" {
-			hasAssistantThinkingBlocks = true
-		}
-	}
-	if !hasAssistantToolHistory || hasAssistantThinkingBlocks {
-		return
-	}
-	if req.Reasoning == nil {
-		req.Reasoning = &model.CanonicalReasoning{}
-	}
-	req.Reasoning.Effort = ""
-	req.Reasoning.Summary = ""
-	req.Reasoning.Raw = map[string]any{"thinking": map[string]any{"type": "disabled"}}
 }
 
 func validateRequestForEndpoint(req model.CanonicalRequest, endpointType string) error {
