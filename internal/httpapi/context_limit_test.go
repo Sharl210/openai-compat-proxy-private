@@ -76,6 +76,43 @@ func TestResponsesContextLimitReturnsOpenAIOverflowShape(t *testing.T) {
 	}
 }
 
+func TestResponsesContextLimitScopedRulesUseClientModelBeforeModelMap(t *testing.T) {
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                      "openai",
+			Enabled:                 true,
+			SupportsResponses:       true,
+			ManualModels:            []string{"client-gpt"},
+			ModelMap:                []config.ModelMapEntry{config.NewModelMapEntry("client-gpt", "upstream-gpt")},
+			ModelLimitContextTokens: -1,
+			ModelLimitContextTokenRules: []config.ScopedIntRule{
+				exactScopedRule("client-gpt", 1),
+				exactScopedRule("upstream-gpt", 999999),
+			},
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			UpstreamBaseURL:      "https://upstream.invalid/v1",
+			UpstreamAPIKey:       "test-key",
+		}},
+	})
+	body := `{"model":"client-gpt","input":[{"role":"user","content":"` + strings.Repeat("hello ", 20) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 context overflow from client-model scoped rule, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "1" {
+		t.Fatalf("expected context limit header from client model rule, got %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), "context_length_exceeded") {
+		t.Fatalf("expected context overflow body, got %s", rec.Body.String())
+	}
+}
+
 func TestChatContextLimitReturnsOpenAIOverflowShape(t *testing.T) {
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",

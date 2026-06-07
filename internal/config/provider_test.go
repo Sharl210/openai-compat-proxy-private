@@ -69,6 +69,78 @@ func TestResolveModelAndEffortSupportsMinimalSuffix(t *testing.T) {
 	}
 }
 
+func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t *testing.T) {
+	tests := []struct {
+		name        string
+		entry       ModelMapEntry
+		request     string
+		wantModel   string
+		wantEffort  string
+		wantNoMatch bool
+	}{
+		{
+			name:       "no suffix on either side",
+			entry:      NewModelMapEntry("client-gpt", "upstream-gpt"),
+			request:    "client-gpt",
+			wantModel:  "upstream-gpt",
+			wantEffort: "",
+		},
+		{
+			name:       "source suffix selects rule while target has no suffix",
+			entry:      NewModelMapEntry("client-gpt-high", "upstream-gpt"),
+			request:    "client-gpt-high",
+			wantModel:  "upstream-gpt",
+			wantEffort: "high",
+		},
+		{
+			name:       "target suffix sets effort when request has none",
+			entry:      NewModelMapEntry("client-gpt", "upstream-gpt-low"),
+			request:    "client-gpt",
+			wantModel:  "upstream-gpt",
+			wantEffort: "low",
+		},
+		{
+			name:       "request suffix wins over target suffix",
+			entry:      NewModelMapEntry("client-gpt-high", "upstream-gpt-low"),
+			request:    "client-gpt-high",
+			wantModel:  "upstream-gpt",
+			wantEffort: "high",
+		},
+		{
+			name:        "source without suffix does not directly match suffixed request",
+			entry:       NewModelMapEntry("client-gpt", "upstream-gpt"),
+			request:     "client-gpt-high",
+			wantNoMatch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := ProviderConfig{ModelMap: []ModelMapEntry{tt.entry}}
+			mapped := p.resolveModel(tt.request, true)
+			if tt.wantNoMatch {
+				if mapped != "" {
+					t.Fatalf("expected direct MODEL_MAP source not to match, got %q", mapped)
+				}
+				return
+			}
+			model, effort := p.ResolveModelAndEffort(tt.request, true)
+			if model != tt.wantModel || effort != tt.wantEffort {
+				t.Fatalf("expected %q/%q, got %q/%q", tt.wantModel, tt.wantEffort, model, effort)
+			}
+		})
+	}
+}
+
+func TestResolveModelAndEffortFallsBackToBaseSourceAfterRequestSuffixParsing(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("client-gpt", "upstream-gpt")}}
+
+	model, effort := p.ResolveModelAndEffort("client-gpt-high", true)
+	if model != "upstream-gpt" || effort != "high" {
+		t.Fatalf("expected base source mapping to preserve request suffix effort, got %q/%q", model, effort)
+	}
+}
+
 func TestResolveModelAndEffortManualReasonSuffixWorksWhenSuffixFlagDisabled(t *testing.T) {
 	p := ProviderConfig{ManualModels: []string{"#reason_suffix:gpt-5.5"}}
 
