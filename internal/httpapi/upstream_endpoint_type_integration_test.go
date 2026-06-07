@@ -1958,6 +1958,7 @@ func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *te
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
 		"model":"gpt-5",
+		"reasoning":{"effort":"high","summary":"auto"},
 		"input":[
 			{"role":"user","content":"hello"},
 			{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"}]},
@@ -1977,6 +1978,9 @@ func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *te
 	}
 	if strings.Contains(upstreamBody, `"type":"thinking"`) {
 		t.Fatalf("expected synthetic rs_proxy reasoning not to become anthropic thinking content, got %s", upstreamBody)
+	}
+	if strings.Contains(upstreamBody, `"effort":"high"`) || strings.Contains(upstreamBody, `"summary":"auto"`) {
+		t.Fatalf("expected OpenAI-style reasoning controls to stay out of anthropic replay without real thinking history, got %s", upstreamBody)
 	}
 	if !strings.Contains(upstreamBody, `"type":"tool_use"`) || !strings.Contains(upstreamBody, `"id":"call_1"`) {
 		t.Fatalf("expected function_call to remain as anthropic tool_use, got %s", upstreamBody)
