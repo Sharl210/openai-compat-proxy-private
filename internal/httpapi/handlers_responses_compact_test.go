@@ -191,6 +191,39 @@ func TestResponsesCompactRelaysUpstream404(t *testing.T) {
 	}
 }
 
+func TestResponsesCompactBypassesProxyContextLimit(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.URL.Path != "/responses/compact" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_compact","object":"response","status":"completed","compact_text":"hello"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses)
+	cfg.Providers[0].SupportsModels = false
+	cfg.Providers[0].ManualModels = []string{"gpt-5"}
+	cfg.Providers[0].ModelLimitContextTokensSet = true
+	cfg.Providers[0].ModelLimitContextTokens = 1
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5","input":"hello hello hello hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected compact route to bypass proxy context limit, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !called {
+		t.Fatal("expected compact route to still call upstream despite proxy context limit")
+	}
+}
+
 func assertErrorResponse(t *testing.T, rec *httptest.ResponseRecorder, statusCode int, code string, message string) {
 	t.Helper()
 	if rec.Code != statusCode {

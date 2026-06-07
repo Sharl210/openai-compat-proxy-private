@@ -412,7 +412,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return nil, false
 	}
-	if writeContextLimitExceededIfNeeded(w, provider, clientModel, canon, clientReasoningProtocolResponses) {
+	if !compact && writeContextLimitExceededIfNeeded(w, provider, clientModel, canon, clientReasoningProtocolResponses) {
 		return nil, false
 	}
 	canon.RequestID = requestID
