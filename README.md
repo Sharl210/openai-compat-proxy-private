@@ -22,7 +22,8 @@
 | 无 /v1 路由别名 | ✅ | `/responses`、`/chat/completions`、`/messages`、`/models`、`/responses/compact` 及其 `/{providerId}/...` 形式均可等效访问对应 `/v1/*` 入口；复用同一套 handler 与鉴权语义 |
 | responses 工具兼容模式 | ✅ | provider 级 `RESPONSES_TOOL_COMPAT_MODE=function_only` 将 `custom` / `web_search` 工具在发往 responses 上游前重写成普通 function 类型，以兼容不完整上游；代价是丢失原生 free-form / grammar 约束（custom）或原生 citations/sources 语义（web_search）；默认 `preserve` |
 | chat 上游 XML 工具调用兼容 | ✅ | provider 级 `UPSTREAM_XML_TOOL_CALL_STYLE=true` 可把完整 XML 工具调用正文恢复成结构化 function call；默认开启 |
-| 模型映射 | ✅ | 支持 `MODEL_MAP` / `V1_MODEL_MAP` 字面量映射、`#re:` 正则 pattern、`$0-$9` 捕获占位符、`MANUAL_MODELS` 正则扩展、`HIDDEN_MODELS` 正则隐藏 |
+| 模型映射 | ✅ | 支持 `MODEL_MAP` / `V1_MODEL_MAP` 字面量映射、`#re:` 正则 pattern、`$0-$9` 捕获占位符、`MANUAL_MODELS` 正则扩展、`HIDDEN_MODELS` 正则隐藏；`MODEL_MAP` 不会自动注入 `/models` |
+| 输出与上下文限制 | ✅ | 支持 root/provider 级 `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` 和 `MODEL_LIMIT_CONTEXT_TOKENS`，均支持 scoped 模型规则 |
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
 | 调试归档 | ✅ | 仅当 `LOG_ENABLE=true` 且 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 非空时写出 `request/raw/canonical/final.ndjson`；保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制（与 `LOG_MAX_REQUESTS` 解耦） |
@@ -308,6 +309,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
 | `X-Proxy-To-Upstream-Service-Tier` | 代理最终实际发给上游的服务层级；如果 provider 配置覆写了该值，这里会显示覆写后的结果；没有值时为空字符串 | `priority` |
 | `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
+| `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前客户端模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
 | `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
 | `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
@@ -325,6 +327,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 - `X-SYSTEM-PROMPT-ATTACH` 是本次请求的提示词附加透明度字段：正常注入 provider prompt 时显示 `prepend:prompt.md` 或 `append:...`；当 `-noprompt` 真正生效且 `X-Client-To-Proxy-NoPrompt=true` 时，这个 header 仍会存在但值为空，表示本次已明确跳过 provider prompt 注入；如果 `-noprompt` 没有生效，则继续按实际注入状态显示文件串。
 - 模型名里的 reasoning suffix 优先于客户端请求体里的任何 reasoning / thinking 设置；例如 `model-low` 会覆盖客户端传入的 `thinking: {"type":"disabled"}`，`model-none` 会强制关闭推理；当上游是 Anthropic 协议时会发送 `thinking: {"type":"disabled"}`，当上游是 OpenAI 风格协议时会显式携带 `none`。
 - `X-Proxy-To-Upstream-Max-Output-Tokens` 展示的是 canonical 请求里最终决定的输出上限；它会体现 `UPSTREAM_MAX_OUTPUT_TOKENS` 和 `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` 的处理结果。最终不携带输出上限时，这个响应头为空。
+- `X-Proxy-Model-Limit-Context-Tokens` 展示的是代理层用于模拟上下文超限的当前命中值；`-1` 表示代理不主动限制，但真实上游仍可能返回自己的上下文超限错误。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
   - `responses/chat` 常见为 `{"reasoning":{...}}`
   - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
@@ -418,6 +421,18 @@ scoped 覆写的匹配规则：
 
 这两个字段在根 `.env` 和 provider `.env` 中都支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，新配置会直接校验失败并保留当前已生效配置。
 
+### 3.7 代理层上下文限制
+
+根 `.env` 和 provider `.env` 都支持 `MODEL_LIMIT_CONTEXT_TOKENS`。provider 留空或不写时继承根配置，显式设置时覆盖根配置。
+
+- `-1`：代理层不主动限制上下文，真实上游自己的上下文窗口仍照常生效
+- 正整数：代理按请求内容估算输入 token，超过该值时直接返回 `context_length_exceeded` / `prompt is too long`
+- scoped 规则：支持写成 `-1,gpt-5.5:400000,#re:.*gpt-.*:256000`
+
+匹配规则与输出上限一致，都是按客户端输入的完整模型名匹配，精确模型优先于正则匹配。例如客户端请求 `gpt-5.5-high` 时，`MODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5-high:200000,gpt-5.5:400000` 会命中带 suffix 的精确规则；如果只写 `gpt-5.5:400000`，它不会自动匹配 `gpt-5.5-high`。
+
+这个限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩。它不是 tokenizer 精确计数，也不会扩大真实上游上下文；真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳，但都会包含 `context_length_exceeded` 和 `prompt is too long`。
+
 ### 4. 模型映射与 reasoning suffix
 
 支持：
@@ -433,8 +448,8 @@ scoped 覆写的匹配规则：
 
 这些变量的实际含义：
 
-- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`；`#re:` 左侧支持 Go regexp 的 `^` / `$` 锚点，它们表示正则开头/结尾，和 target 里的 `$1` 捕获组替换不是一回事
-- `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；静态模型名可以直接写 `gpt-5.5-noprompt` 这类代理层后缀模型，让它作为字面模型出现在 `/models`；`#re:` pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露；`#reason_suffix:gpt-5.5` 会单独为 `gpt-5.5` 生成 `none/minimal/low/medium/high/xhigh` 推理后缀家族，不受 `ENABLE_REASONING_EFFORT_SUFFIX` 和 `EXPOSE_REASONING_SUFFIX_MODELS` 约束
+- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`；`#re:` 左侧支持 Go regexp 的 `^` / `$` 锚点，它们表示正则开头/结尾，和 target 里的 `$1` 捕获组替换不是一回事；`MODEL_MAP` 只影响请求映射，不会自动把 source 或 target 加到 `/models`
+- `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；如果 `MODEL_MAP=client-gpt:gpt-5.5` 里的 `client-gpt` 需要出现在 `/models`，必须同时写 `MANUAL_MODELS=client-gpt`；静态模型名也可以直接写 `gpt-5.5-noprompt` 这类代理层后缀模型，让它作为字面模型出现在 `/models`；`#re:` pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露；`#reason_suffix:gpt-5.5` 会单独为 `gpt-5.5` 生成 `none/minimal/low/medium/high/xhigh` 推理后缀家族，不受 `ENABLE_REASONING_EFFORT_SUFFIX` 和 `EXPOSE_REASONING_SUFFIX_MODELS` 约束
 - `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽；`#re:` 里可以正常使用 `^` / `$` 锚点；它也可以隐藏 `gpt-5.5-noprompt`、`gpt-5.5-low-noprompt` 这类 noprompt 变体，作为禁用某个 noprompt 入口的手段；它还支持 `#reason_suffix:gpt-5.5` 这种 family marker，用来隐藏该 base model 的整组推理后缀家族；但静态 `MANUAL_MODELS=gpt-5.5-noprompt` 这种显式手动添加优先级最高，同一个字面模型即使也被 `HIDDEN_MODELS` 命中，最终仍会显示
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
@@ -446,7 +461,9 @@ scoped 覆写的匹配规则：
 - 默认分组 bare `/v1/*` 只允许请求当前 bare `/v1/models` 里可见的模型
 - 显式 `/{providerId}/v1/*` 也只允许请求该 provider 自己 `/models` 列表里可见的模型
 - 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
+- `MODEL_MAP` 不是 `/models` 展示来源。举例：`MODEL_MAP=client-gpt:gpt-5.5` 只让请求 `client-gpt` 映射到上游 `gpt-5.5`；如果没有 `MANUAL_MODELS=client-gpt` 或上游 `/models` 自己返回 `client-gpt`，默认分组和显式 provider 的 `/models` 都不会显示这个 alias。
 - suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` / `model-none` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
+- `MODEL_MAP` 显式 suffix key 优先于自动 suffix 剥离。举例：`MODEL_MAP=gpt-5.5-high:gpt-5.5-pro,gpt-5.5:gpt-5.5-base` 且客户端请求 `gpt-5.5-high` 时，会先命中 `gpt-5.5-high`，而不是先剥成 `gpt-5.5`。
 - `#reason_suffix:model` 是手动 family 例外：即使 `ENABLE_REASONING_EFFORT_SUFFIX=false` 或 `EXPOSE_REASONING_SUFFIX_MODELS=false`，它仍会把该 base model 的推理后缀家族放进 `/models` 并允许请求；但它生成的是一个批量 family，不等同于每个档位都被静态手动添加，所以 `HIDDEN_MODELS` 仍可以隐藏其中某个具体档位，例如用 `HIDDEN_MODELS=gpt-5.5-minimal` 只取消 `minimal` 这个变体，也可以用 `HIDDEN_MODELS=#reason_suffix:gpt-5.5` 隐藏整组家族；如果 `MANUAL_MODELS` 和 `HIDDEN_MODELS` 同时写了同一个 `#reason_suffix:gpt-5.5`，手动添加优先，最终仍会显示；极端情况下，如果 `ENABLE_REASONING_EFFORT_SUFFIX=false` 且 `MANUAL_MODELS` 同时写了 `#reason_suffix:gpt-5.5` 和字面 `gpt-5.5-low`，字面模型优先，`gpt-5.5-low` 会按 provider 原生模型处理；如果 `ENABLE_REASONING_EFFORT_SUFFIX=true`，同名 suffix 仍按可解析推理后缀处理
 - `HIDDEN_MODELS` 的 `#re:` 是按完整模型名做普通 Go regexp 匹配，不理解“模型名”和“后缀强度”的语义边界；因此 `#re:.*mini.*` 会同时隐藏 `gpt-5.4-mini` 和 `gpt-5.5-minimal`。如果只想隐藏 `mini` 模型而保留 `-minimal` 推理强度，建议写成更精确的规则，例如 `#re:.*(^|-|:)mini($|-|\.).*`，或者直接列出要隐藏的字面模型。
 - `MANUAL_MODELS` 与 `HIDDEN_MODELS` 同时命中时按“粒度优先，其次手动优先”处理：手动大范围 family 遇到隐藏小范围档位时，隐藏小范围优先；手动和隐藏是同一范围时，手动优先；隐藏是大范围 family 而手动是小范围字面模型时，手动小范围优先。例如 `MANUAL_MODELS=#reason_suffix:gpt-5.5` + `HIDDEN_MODELS=gpt-5.5-minimal` 会隐藏 `minimal`；两边都写 `#reason_suffix:gpt-5.5` 时 family 仍显示；`MANUAL_MODELS=gpt-5.5-minimal` + `HIDDEN_MODELS=#reason_suffix:gpt-5.5` 时 `minimal` 仍显示。
@@ -556,7 +573,7 @@ Claude 相关还有两个配套开关：
 |---|---|---|
 | 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`V1_MODEL_MAP`、`ENABLE_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_NOPROMPT_MODEL_SUFFIX`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
 | 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
-| 上游输出上限 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` | ✅ |
+| 输出与上下文限制 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS`、`MODEL_LIMIT_CONTEXT_TOKENS` | ✅ |
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
 | 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`、`OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` | ❌ 修改后需重启 |
@@ -582,10 +599,10 @@ Claude 相关还有两个配套开关：
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、`ENABLE_NOPROMPT_MODEL_SUFFIX` | 注入与模型能力；provider 级 noprompt 留空继承根配置 |
 | 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
 | OpenAI 服务层级 | `OPENAI_SERVICE_TIER` | 仅 OpenAI `responses/chat` 上游生效；留空时沿用下游传参，非空时强制覆写 |
-| 输出上限 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` | 留空继承根配置；显式设置后覆盖根配置 |
+| 输出与上下文限制 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS`、`MODEL_LIMIT_CONTEXT_TOKENS` | 留空继承根配置；显式设置后覆盖根配置 |
 | 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
 
-补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；provider 级 Claude 注入开关和输出上限字段留空都表示继承根配置。
+补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；provider 级 Claude 注入开关、输出上限字段和上下文限制字段留空都表示继承根配置。
 
 ---
 
