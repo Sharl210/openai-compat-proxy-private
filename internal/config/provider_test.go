@@ -926,8 +926,14 @@ func TestLoadProviderFileParsesUpstreamMaxOutputTokens(t *testing.T) {
 	if provider.UpstreamMaxOutputTokens != 64000 {
 		t.Fatalf("expected upstream max output tokens 64000, got %d", provider.UpstreamMaxOutputTokens)
 	}
+	if !provider.UpstreamMaxOutputTokensSet {
+		t.Fatalf("expected upstream max output tokens to be marked as explicitly set")
+	}
 	if !provider.ForceUpstreamMaxOutputTokens {
 		t.Fatalf("expected force upstream max output tokens to be true")
+	}
+	if !provider.ForceUpstreamMaxOutputTokensSet {
+		t.Fatalf("expected force upstream max output tokens to be marked as explicitly set")
 	}
 }
 
@@ -946,8 +952,14 @@ func TestLoadProviderFileTreatsBlankUpstreamMaxOutputTokensAsUnset(t *testing.T)
 	if provider.UpstreamMaxOutputTokens != 0 {
 		t.Fatalf("expected blank upstream max output tokens to stay unset, got %d", provider.UpstreamMaxOutputTokens)
 	}
+	if provider.UpstreamMaxOutputTokensSet {
+		t.Fatalf("expected blank upstream max output tokens not to be marked as explicitly set")
+	}
 	if provider.ForceUpstreamMaxOutputTokens {
 		t.Fatalf("expected blank force upstream max output tokens to be false")
+	}
+	if provider.ForceUpstreamMaxOutputTokensSet {
+		t.Fatalf("expected blank force upstream max output tokens not to be marked as explicitly set")
 	}
 }
 
@@ -966,8 +978,14 @@ func TestLoadProviderFileParsesMinusOneUpstreamMaxOutputTokensAsOmit(t *testing.
 	if provider.UpstreamMaxOutputTokens != -1 {
 		t.Fatalf("expected upstream max output tokens -1, got %d", provider.UpstreamMaxOutputTokens)
 	}
+	if !provider.UpstreamMaxOutputTokensSet {
+		t.Fatalf("expected upstream max output tokens -1 to be marked as explicitly set")
+	}
 	if !provider.ForceUpstreamMaxOutputTokens {
 		t.Fatalf("expected force upstream max output tokens to be true")
+	}
+	if !provider.ForceUpstreamMaxOutputTokensSet {
+		t.Fatalf("expected force upstream max output tokens to be marked as explicitly set")
 	}
 }
 

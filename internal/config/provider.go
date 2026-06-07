@@ -22,8 +22,10 @@ type ProviderConfig struct {
 	UpstreamAPIKey                         string
 	OpenAIServiceTier                      string
 	UpstreamMaxOutputTokens                int
+	UpstreamMaxOutputTokensSet             bool
 	UpstreamMaxOutputTokenRules            []ScopedIntRule
 	ForceUpstreamMaxOutputTokens           bool
+	ForceUpstreamMaxOutputTokensSet        bool
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
@@ -197,17 +199,25 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.OpenAIServiceTier = normalized
 		case "UPSTREAM_MAX_OUTPUT_TOKENS":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
 			parsed, rules, err := parseScopedUpstreamMaxOutputTokens(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+			provider.UpstreamMaxOutputTokensSet = true
 			provider.UpstreamMaxOutputTokens = parsed
 			provider.UpstreamMaxOutputTokenRules = rules
 		case "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
 			provider.ForceUpstreamMaxOutputTokens, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+			provider.ForceUpstreamMaxOutputTokensSet = true
 		case "RESPONSES_TOOL_COMPAT_MODE":
 			normalized, err := normalizeResponsesToolCompatMode(value)
 			if err != nil {
