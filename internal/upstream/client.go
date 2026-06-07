@@ -1535,14 +1535,16 @@ func inferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
 		return ""
 	}
 	switch {
-	case budget >= 8192:
+	case budget >= 30000:
 		return "xhigh"
-	case budget >= 4096:
+	case budget >= 20000:
 		return "high"
-	case budget >= 2048:
+	case budget >= 15000:
 		return "medium"
-	default:
+	case budget >= 5000:
 		return "low"
+	default:
+		return "minimal"
 	}
 }
 
@@ -1558,7 +1560,7 @@ func anthropicOutputEffortToReasoningEffort(raw map[string]any) string {
 	switch effort {
 	case "low", "medium", "high":
 		return effort
-	case "max":
+	case "max", "xhigh":
 		return "xhigh"
 	default:
 		return ""
