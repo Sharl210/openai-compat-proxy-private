@@ -1954,7 +1954,7 @@ func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *te
 	}))
 	defer upstream.Close()
 
-	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyProxyBuffer, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true, EnableReasoningEffortSuffix: true, MapReasoningSuffixToAnthropicThinking: true}}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
 		"model":"gpt-5",
@@ -1978,6 +1978,9 @@ func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *te
 	}
 	if strings.Contains(upstreamBody, `"type":"thinking"`) {
 		t.Fatalf("expected synthetic rs_proxy reasoning not to become anthropic thinking content, got %s", upstreamBody)
+	}
+	if strings.Contains(upstreamBody, `"thinking":`) {
+		t.Fatalf("expected synthetic-only replay not to enable anthropic thinking mode, got %s", upstreamBody)
 	}
 	if strings.Contains(upstreamBody, `"effort":"high"`) || strings.Contains(upstreamBody, `"summary":"auto"`) {
 		t.Fatalf("expected OpenAI-style reasoning controls to stay out of anthropic replay without real thinking history, got %s", upstreamBody)
