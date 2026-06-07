@@ -225,28 +225,34 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
-func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointType string, stream bool) ([]byte, error) {
+func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointType string, stream bool) (model.CanonicalRequest, []byte, error) {
+	preparedReq := req
+	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
+		ensureAnthropicThinkingHistoryCompatibility(&preparedReq)
+	}
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses {
-		req.Stream = stream
-		return buildResponsesRequestBodyWithMasquerade(req, c.responsesToolCompatMode, c.masqueradeTarget)
+		preparedReq.Stream = stream
+		body, err := buildResponsesRequestBodyWithMasquerade(preparedReq, c.responsesToolCompatMode, c.masqueradeTarget)
+		return preparedReq, body, err
 	}
 	if stream {
-		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
+		preparedReq.Stream = true
 	}
-	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
+	body, err := buildRequestBodyForEndpoint(preparedReq, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
+	return preparedReq, body, err
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
 	endpointType := c.endpointType()
-	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
+	preparedReq, body, err := c.buildUpstreamRequestBody(req, endpointType, true)
 	if err != nil {
 		return nil, err
 	}
-	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
+	anthropicBeta, err := anthropicBetaHeaderForRequest(preparedReq)
 	if err != nil {
 		return nil, err
 	}
-	originalToolIDs := extractOriginalToolIDs(req)
+	originalToolIDs := extractOriginalToolIDs(preparedReq)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"model":         req.Model,
@@ -343,15 +349,15 @@ func (c *Client) OpenEventStreamLazy(ctx context.Context, req model.CanonicalReq
 
 func (c *Client) openPreparedEventStream(ctx context.Context, req model.CanonicalRequest, authorization string, primeFirstEvent bool) (*EventStream, error) {
 	endpointType := c.endpointType()
-	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
+	preparedReq, body, err := c.buildUpstreamRequestBody(req, endpointType, true)
 	if err != nil {
 		return nil, err
 	}
-	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
+	anthropicBeta, err := anthropicBetaHeaderForRequest(preparedReq)
 	if err != nil {
 		return nil, err
 	}
-	originalToolIDs := extractOriginalToolIDs(req)
+	originalToolIDs := extractOriginalToolIDs(preparedReq)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
@@ -389,11 +395,11 @@ func (c *Client) Compact(ctx context.Context, req model.CanonicalRequest, author
 
 func (c *Client) response(ctx context.Context, req model.CanonicalRequest, authorization string, compact bool) (map[string]any, error) {
 	endpointType := c.endpointType()
-	body, err := c.buildUpstreamRequestBody(req, endpointType, false)
+	preparedReq, body, err := c.buildUpstreamRequestBody(req, endpointType, false)
 	if err != nil {
 		return nil, err
 	}
-	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
+	anthropicBeta, err := anthropicBetaHeaderForRequest(preparedReq)
 	if err != nil {
 		return nil, err
 	}
