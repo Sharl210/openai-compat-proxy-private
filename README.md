@@ -414,10 +414,12 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 scoped 覆写的匹配规则：
 
-- 按客户端输入的**完整模型名**做字面量/正则匹配，不会自动剥离 reasoning suffix 或 `-noprompt` 后缀
+- 按客户端请求给代理层的**完整模型名**做字面量/正则匹配，不按 `MODEL_MAP` 映射后的上游模型名匹配，也不会自动剥离 reasoning suffix 或 `-noprompt` 后缀
 - 精确模型匹配优先于正则匹配
 - 没有任何 scoped 规则命中时，回落到默认值
 - 如果只写 scoped 规则、不写默认值，则未命中任何规则时视为“不设置 provider 默认值”
+
+例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 会先用 `gpt-5.5` 命中 `UPSTREAM_MAX_OUTPUT_TOKENS=gpt-5.5:128000`，然后才映射成 `claude-sonnet-4-5` 发给上游；如果只写 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000`，这个客户端请求不会命中该 scoped 规则。
 
 这两个字段在根 `.env` 和 provider `.env` 中都支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，新配置会直接校验失败并保留当前已生效配置。
 
@@ -429,9 +431,9 @@ scoped 覆写的匹配规则：
 - 正整数：代理按请求内容估算输入 token，超过该值时直接返回 `context_length_exceeded` / `prompt is too long`
 - scoped 规则：支持写成 `-1,gpt-5.5:400000,#re:.*gpt-.*:256000`
 
-匹配规则与输出上限一致，都是按客户端输入的完整模型名匹配，精确模型优先于正则匹配。例如客户端请求 `gpt-5.5-high` 时，`MODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5-high:200000,gpt-5.5:400000` 会命中带 suffix 的精确规则；如果只写 `gpt-5.5:400000`，它不会自动匹配 `gpt-5.5-high`。
+匹配规则与输出上限一致，都是按客户端请求给代理层的完整模型名匹配，精确模型优先于正则匹配，不按 `MODEL_MAP` 映射后的上游模型名匹配。例如客户端请求 `gpt-5.5-high` 时，`MODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5-high:200000,gpt-5.5:400000` 会命中带 suffix 的精确规则；如果只写 `gpt-5.5:400000`，它不会自动匹配 `gpt-5.5-high`。如果同时写了 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5`，客户端请求 `gpt-5.5` 应写 `MODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5:400000`，而不是写 `claude-sonnet-4-5:400000`。
 
-这个限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩。它不是 tokenizer 精确计数，也不会扩大真实上游上下文；真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳，但都会包含 `context_length_exceeded` 和 `prompt is too long`。
+`MODEL_LIMIT_CONTEXT_TOKENS` 和 `UPSTREAM_MAX_OUTPUT_TOKENS` 是两种不同功能：前者限制的是代理估算的**输入上下文窗口**，用于在请求进上游前模拟超限；后者控制的是发给上游的**输出上限请求参数** `max_tokens` / `max_output_tokens`。两者可以同时配置，互不替代，也不会互相抵消。上下文限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩；它不是 tokenizer 精确计数，也不会扩大真实上游上下文，真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳，但都会包含 `context_length_exceeded` 和 `prompt is too long`。
 
 ### 4. 模型映射与 reasoning suffix
 
@@ -448,7 +450,7 @@ scoped 覆写的匹配规则：
 
 这些变量的实际含义：
 
-- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`；`#re:` 左侧支持 Go regexp 的 `^` / `$` 锚点，它们表示正则开头/结尾，和 target 里的 `$1` 捕获组替换不是一回事；`MODEL_MAP` 只影响请求映射，不会自动把 source 或 target 加到 `/models`
+- `MODEL_MAP`：把下游请求里的模型名重写成上游真正要调用的模型名；无前缀 source 按字面量精确匹配，以 `#re:` 开头才按 Go regexp 全字符串匹配，兜底匹配写成 `#re:.*`；`#re:` 左侧支持 Go regexp 的 `^` / `$` 锚点，它们表示正则开头/结尾，和 target 里的 `$1` 捕获组替换不是一回事；`MODEL_MAP` 只影响请求映射，不会自动把 source 或 target 加到 `/models`。在 `MODEL_MAP=source:target` 里，冒号左侧 source 是“客户端请求给代理层的模型名匹配规则”，冒号右侧 target 是“代理最终准备发给上游的模型名”。两侧的 reasoning suffix 语义要分开看：source 侧 suffix 决定客户端请求怎样命中规则；target 侧 suffix 只在上游模型名解析阶段生效。启用 `ENABLE_REASONING_EFFORT_SUFFIX=true` 时，代理会先尝试用客户端完整模型名命中 source；如果客户端模型带 suffix 且完整 source 没命中，再剥离 suffix 后尝试 base model，并保留客户端 suffix 作为最终 effort。target 侧如果带 suffix，且客户端请求本身没有 suffix，则 target suffix 会成为最终 effort；如果客户端请求已经带 suffix，则客户端 suffix 优先，target suffix 只用于剥出上游 base model。不带 suffix 就表示这一侧不主动表达 reasoning effort。
 - `MANUAL_MODELS`：静态模型名用于手动补齐可展示模型；如果 `MODEL_MAP=client-gpt:gpt-5.5` 里的 `client-gpt` 需要出现在 `/models`，必须同时写 `MANUAL_MODELS=client-gpt`；静态模型名也可以直接写 `gpt-5.5-noprompt` 这类代理层后缀模型，让它作为字面模型出现在 `/models`；`#re:` pattern 只会从可用的上游 `/models` 列表中匹配扩展，不会在上游列表不可用时作为字面 fake model 暴露；`#reason_suffix:gpt-5.5` 会单独为 `gpt-5.5` 生成 `none/minimal/low/medium/high/xhigh` 推理后缀家族，不受 `ENABLE_REASONING_EFFORT_SUFFIX` 和 `EXPOSE_REASONING_SUFFIX_MODELS` 约束
 - `HIDDEN_MODELS`：从当前 provider 的可见模型列表里手动移除模型；无前缀按字面量精确匹配，以 `#re:` 开头时按 Go regexp 全字符串匹配，主要用于 overlay / 标签模式下做精细屏蔽；`#re:` 里可以正常使用 `^` / `$` 锚点；它也可以隐藏 `gpt-5.5-noprompt`、`gpt-5.5-low-noprompt` 这类 noprompt 变体，作为禁用某个 noprompt 入口的手段；它还支持 `#reason_suffix:gpt-5.5` 这种 family marker，用来隐藏该 base model 的整组推理后缀家族；但静态 `MANUAL_MODELS=gpt-5.5-noprompt` 这种显式手动添加优先级最高，同一个字面模型即使也被 `HIDDEN_MODELS` 命中，最终仍会显示
 - `ENABLE_REASONING_EFFORT_SUFFIX`：允许像 `model-high` 这样的模型后缀直接表示推理强度
@@ -464,6 +466,7 @@ scoped 覆写的匹配规则：
 - `MODEL_MAP` 不是 `/models` 展示来源。举例：`MODEL_MAP=client-gpt:gpt-5.5` 只让请求 `client-gpt` 映射到上游 `gpt-5.5`；如果没有 `MANUAL_MODELS=client-gpt` 或上游 `/models` 自己返回 `client-gpt`，默认分组和显式 provider 的 `/models` 都不会显示这个 alias。
 - suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` / `model-none` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
 - `MODEL_MAP` 显式 suffix key 优先于自动 suffix 剥离。举例：`MODEL_MAP=gpt-5.5-high:gpt-5.5-pro,gpt-5.5:gpt-5.5-base` 且客户端请求 `gpt-5.5-high` 时，会先命中 `gpt-5.5-high`，而不是先剥成 `gpt-5.5`。
+- `MODEL_MAP` 左右两侧 suffix 独立的例子：`MODEL_MAP=client-gpt:upstream-gpt` 且客户端请求 `client-gpt` 时，上游模型是 `upstream-gpt`，没有额外 effort；客户端请求 `client-gpt-high` 时，如果 suffix 解析启用，会剥成 `client-gpt` 命中映射，上游模型仍是 `upstream-gpt`，最终 effort 是 `high`。`MODEL_MAP=client-gpt:upstream-gpt-low` 且客户端请求 `client-gpt` 时，上游模型是 `upstream-gpt`，最终 effort 是 `low`；如果客户端请求 `client-gpt-high`，客户端侧 `high` 优先，最终 effort 是 `high`。`MODEL_MAP=client-gpt-high:upstream-gpt` 只让完整请求 `client-gpt-high` 直接命中这条显式 source 规则，target 不带 suffix，所以上游模型是 `upstream-gpt`，最终 effort 来自客户端的 `high`。
 - `#reason_suffix:model` 是手动 family 例外：即使 `ENABLE_REASONING_EFFORT_SUFFIX=false` 或 `EXPOSE_REASONING_SUFFIX_MODELS=false`，它仍会把该 base model 的推理后缀家族放进 `/models` 并允许请求；但它生成的是一个批量 family，不等同于每个档位都被静态手动添加，所以 `HIDDEN_MODELS` 仍可以隐藏其中某个具体档位，例如用 `HIDDEN_MODELS=gpt-5.5-minimal` 只取消 `minimal` 这个变体，也可以用 `HIDDEN_MODELS=#reason_suffix:gpt-5.5` 隐藏整组家族；如果 `MANUAL_MODELS` 和 `HIDDEN_MODELS` 同时写了同一个 `#reason_suffix:gpt-5.5`，手动添加优先，最终仍会显示；极端情况下，如果 `ENABLE_REASONING_EFFORT_SUFFIX=false` 且 `MANUAL_MODELS` 同时写了 `#reason_suffix:gpt-5.5` 和字面 `gpt-5.5-low`，字面模型优先，`gpt-5.5-low` 会按 provider 原生模型处理；如果 `ENABLE_REASONING_EFFORT_SUFFIX=true`，同名 suffix 仍按可解析推理后缀处理
 - `HIDDEN_MODELS` 的 `#re:` 是按完整模型名做普通 Go regexp 匹配，不理解“模型名”和“后缀强度”的语义边界；因此 `#re:.*mini.*` 会同时隐藏 `gpt-5.4-mini` 和 `gpt-5.5-minimal`。如果只想隐藏 `mini` 模型而保留 `-minimal` 推理强度，建议写成更精确的规则，例如 `#re:.*(^|-|:)mini($|-|\.).*`，或者直接列出要隐藏的字面模型。
 - `MANUAL_MODELS` 与 `HIDDEN_MODELS` 同时命中时按“粒度优先，其次手动优先”处理：手动大范围 family 遇到隐藏小范围档位时，隐藏小范围优先；手动和隐藏是同一范围时，手动优先；隐藏是大范围 family 而手动是小范围字面模型时，手动小范围优先。例如 `MANUAL_MODELS=#reason_suffix:gpt-5.5` + `HIDDEN_MODELS=gpt-5.5-minimal` 会隐藏 `minimal`；两边都写 `#reason_suffix:gpt-5.5` 时 family 仍显示；`MANUAL_MODELS=gpt-5.5-minimal` + `HIDDEN_MODELS=#reason_suffix:gpt-5.5` 时 `minimal` 仍显示。
