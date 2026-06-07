@@ -342,7 +342,7 @@ func providerResolvesModel(provider ProviderConfig, model string) bool {
 	if provider.HidesModel(model) {
 		return false
 	}
-	if provider.resolveModel(model, provider.EnableReasoningEffortSuffix) != "" {
+	if provider.resolveModel(model) != "" {
 		return true
 	}
 	if !provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(model) {
@@ -355,7 +355,7 @@ func providerResolvesModel(provider ProviderConfig, model string) bool {
 	if provider.HidesModel(baseModel) {
 		return false
 	}
-	return provider.resolveModel(baseModel, false) != ""
+	return provider.resolveModel(baseModel) != ""
 }
 
 func validateHotReloadableRootEnvValues(values map[string]string) error {

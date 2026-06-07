@@ -136,7 +136,7 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	if canon == nil {
 		return
 	}
-	mappedModel, effort := provider.ResolveModelAndEffort(canon.Model, provider.EnableReasoningEffortSuffix)
+	mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(canon.Model, clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false), provider.EnableReasoningEffortSuffix)
 	canon.Model = mappedModel
 	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {

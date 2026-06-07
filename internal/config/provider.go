@@ -895,31 +895,74 @@ func resolveProviderRelativePaths(providerEnvPath string, raw string) []string {
 }
 
 func (p ProviderConfig) ResolveModel(model string, enableSuffix bool) string {
-	if mapped := p.resolveModel(model, enableSuffix); mapped != "" {
+	if mapped, _ := p.resolveModelEntry(model); mapped != "" {
 		return mapped
 	}
 	return model
 }
 
 func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (string, string) {
-	enableSuffix = enableSuffix || (p.HasManualReasonSuffixForModel(model) && !p.HasLiteralManualModel(model))
+	return p.ResolveModelAndEffortWithRequestEffort(model, "", enableSuffix)
+}
+
+func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, requestEffort string, enableClientSuffix bool) (string, string) {
+	requestEffort = normalizeReasoningEffort(requestEffort)
+	configSuffixEnabled := true
+	enableClientSuffix = enableClientSuffix || (p.HasManualReasonSuffixForModel(model) && !p.HasLiteralManualModel(model))
 	requestedModel := model
 	requestedEffort := ""
-	if enableSuffix {
+	clientModelEffort := false
+	if enableClientSuffix {
 		if base, effort, ok := splitReasoningSuffix(model); ok {
 			requestedModel = base
 			requestedEffort = effort
+			clientModelEffort = true
 		}
 	}
-	if mapped := p.resolveModel(model, enableSuffix); mapped != "" {
-		return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
+	if requestedEffort == "" {
+		requestedEffort = requestEffort
 	}
-	if enableSuffix && requestedModel != model {
-		if mapped := p.resolveModel(requestedModel, false); mapped != "" {
-			return finalizeResolvedModelAndEffort(mapped, requestedEffort, enableSuffix)
+	synthesizedRequestEffort := requestedEffort != "" && requestedEffort == requestEffort
+	if requestedEffort != "" {
+		effectiveModel := requestedModel + "-" + requestedEffort
+		if mapped, _ := p.resolveModelEntry(effectiveModel); mapped != "" {
+			return finalizeResolvedModelAndEffort(mapped, requestedEffort, configSuffixEnabled)
 		}
 	}
-	return finalizeResolvedModelAndEffort(requestedModel, requestedEffort, enableSuffix)
+	if mapped, entry := p.resolveModelEntry(model); mapped != "" {
+		return finalizeResolvedModelAndEffort(mapped, sourceEffortForMatchedModel(entry, synthesizedRequestEffort, requestedEffort), configSuffixEnabled)
+	}
+	if enableClientSuffix && requestedModel != model {
+		if mapped, _ := p.resolveModelEntry(requestedModel); mapped != "" {
+			return finalizeResolvedModelAndEffort(mapped, requestedEffort, configSuffixEnabled)
+		}
+	}
+	if clientModelEffort {
+		return requestedModel, requestedEffort
+	}
+	return requestedModel, ""
+}
+
+func sourceEffortForMatchedModel(entry ModelMapEntry, synthesized bool, fallback string) string {
+	if synthesized {
+		return fallback
+	}
+	if entry.IsStaticKey {
+		if _, effort, ok := splitReasoningSuffix(entry.UnescapedKey); ok {
+			return effort
+		}
+	}
+	return ""
+}
+
+func normalizeReasoningEffort(effort string) string {
+	effort = strings.TrimSpace(effort)
+	switch effort {
+	case "minimal", "xhigh", "medium", "high", "low", "none":
+		return effort
+	default:
+		return ""
+	}
 }
 
 func (p ProviderConfig) HasLiteralManualModel(model string) bool {
@@ -1116,16 +1159,21 @@ func IsManualReasonSuffixRegexPattern(pattern string) bool {
 	return ok && strings.HasPrefix(manualSpec.pattern, "#re:")
 }
 
-func (p ProviderConfig) resolveModel(model string, enableSuffix bool) string {
+func (p ProviderConfig) resolveModel(model string) string {
+	mapped, _ := p.resolveModelEntry(model)
+	return mapped
+}
+
+func (p ProviderConfig) resolveModelEntry(model string) (string, ModelMapEntry) {
 	if p.ModelMap == nil {
-		return ""
+		return "", ModelMapEntry{}
 	}
 	for _, entry := range p.ModelMap {
 		if matchModelPattern(model, entry) {
-			return applyCaptureReplacement(model, entry)
+			return applyCaptureReplacement(model, entry), entry
 		}
 	}
-	return ""
+	return "", ModelMapEntry{}
 }
 
 func (p ProviderConfig) HidesModel(model string) bool {
