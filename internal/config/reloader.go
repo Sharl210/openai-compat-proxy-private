@@ -53,10 +53,16 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 	if cfg.ModelLimitContextTokens == 0 && len(cfg.ModelLimitContextTokenRules) == 0 {
 		cfg.ModelLimitContextTokens = Default().ModelLimitContextTokens
 	}
+	if cfg.AnthropicMaxThinkingBudget == 0 {
+		cfg.AnthropicMaxThinkingBudget = Default().AnthropicMaxThinkingBudget
+	}
 	for i := range cfg.Providers {
 		if !cfg.Providers[i].ModelLimitContextTokensSet && cfg.Providers[i].ModelLimitContextTokens == 0 && len(cfg.Providers[i].ModelLimitContextTokenRules) == 0 {
 			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
 			cfg.Providers[i].ModelLimitContextTokenRules = append([]ScopedIntRule(nil), cfg.ModelLimitContextTokenRules...)
+		}
+		if cfg.Providers[i].AnthropicMaxThinkingBudget == 0 {
+			cfg.Providers[i].AnthropicMaxThinkingBudget = cfg.AnthropicMaxThinkingBudget
 		}
 	}
 }

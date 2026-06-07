@@ -18,6 +18,7 @@ type Config struct {
 	UpstreamEndpointType              string
 	ResponsesToolCompatMode           string
 	AnthropicVersion                  string
+	AnthropicMaxThinkingBudget        int
 	UpstreamMaxOutputTokens           int
 	UpstreamMaxOutputTokenRules       []ScopedIntRule
 	ForceUpstreamMaxOutputTokens      bool
@@ -68,6 +69,7 @@ func Default() Config {
 		TotalTimeout:                time.Hour,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		ResponsesToolCompatMode:     ResponsesToolCompatModePreserve,
+		AnthropicMaxThinkingBudget:  32000,
 		UpstreamThinkingTagStyle:    UpstreamThinkingTagStyleOff,
 		UpstreamXMLToolCallStyle:    UpstreamXMLToolCallStyleLegacy,
 		EnableNoPromptModelSuffix:   true,
@@ -135,6 +137,11 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 		if parsed, rules, err := parseScopedUpstreamMaxOutputTokens(value, "UPSTREAM_MAX_OUTPUT_TOKENS", "root env UPSTREAM_MAX_OUTPUT_TOKENS"); err == nil {
 			cfg.UpstreamMaxOutputTokens = parsed
 			cfg.UpstreamMaxOutputTokenRules = rules
+		}
+	}
+	if value, ok := lookup("ANTHROPIC_MAX_THINKING_BUDGET"); ok && value != "" {
+		if parsed, err := parseMinInt(value, 1024); err == nil {
+			cfg.AnthropicMaxThinkingBudget = parsed
 		}
 	}
 	if value, ok := lookup("MODEL_LIMIT_CONTEXT_TOKENS"); ok && value != "" {
@@ -228,6 +235,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateRootUpstreamMaxOutputTokens(values, "UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
+		return err
+	}
+	if err := validateMinInt(values, "ANTHROPIC_MAX_THINKING_BUDGET", 1024); err != nil {
 		return err
 	}
 	if err := validateRootModelLimitContextTokens(values, "MODEL_LIMIT_CONTEXT_TOKENS"); err != nil {
@@ -414,6 +424,17 @@ func validateMinInt(values map[string]string, key string, min int) error {
 	return nil
 }
 
+func parseMinInt(value string, min int) (int, error) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0, err
+	}
+	if parsed < min {
+		return 0, fmt.Errorf("value must be greater than or equal to %d", min)
+	}
+	return parsed, nil
+}
+
 func validateMinFloat(values map[string]string, key string, min float64) error {
 	value := strings.TrimSpace(values[key])
 	if value == "" {
@@ -556,6 +577,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.ProvidersDir == other.ProvidersDir &&
 		c.DefaultProvider == other.DefaultProvider &&
 		modelMapEntriesEqual(c.V1ModelMap, other.V1ModelMap) &&
+		c.AnthropicMaxThinkingBudget == other.AnthropicMaxThinkingBudget &&
 		c.UpstreamMaxOutputTokens == other.UpstreamMaxOutputTokens &&
 		scopedIntRulesEqual(c.UpstreamMaxOutputTokenRules, other.UpstreamMaxOutputTokenRules) &&
 		c.ForceUpstreamMaxOutputTokens == other.ForceUpstreamMaxOutputTokens &&

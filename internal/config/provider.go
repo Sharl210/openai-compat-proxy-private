@@ -21,6 +21,8 @@ type ProviderConfig struct {
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
 	OpenAIServiceTier                      string
+	AnthropicMaxThinkingBudget             int
+	AnthropicMaxThinkingBudgetSet          bool
 	UpstreamMaxOutputTokens                int
 	UpstreamMaxOutputTokensSet             bool
 	UpstreamMaxOutputTokenRules            []ScopedIntRule
@@ -201,6 +203,16 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid OPENAI_SERVICE_TIER in %s: %q (allowed: auto, default, flex, priority)", path, value))
 			}
 			provider.OpenAIServiceTier = normalized
+		case "ANTHROPIC_MAX_THINKING_BUDGET":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			parsed, err := parseProviderMinInt(value, key, path, 1024)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.AnthropicMaxThinkingBudgetSet = true
+			provider.AnthropicMaxThinkingBudget = parsed
 		case "UPSTREAM_MAX_OUTPUT_TOKENS":
 			if strings.TrimSpace(value) == "" {
 				break
@@ -609,6 +621,18 @@ func parseProviderPositiveInt(value string, key string, path string) (int, error
 	return parsed, nil
 }
 
+func parseProviderMinInt(value string, key string, path string, min int) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil || parsed < min {
+		return 0, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
+	}
+	return parsed, nil
+}
+
 func parseScopedUpstreamMaxOutputTokens(raw string, key string, path string) (int, []ScopedIntRule, error) {
 	return parseScopedIntRules(raw, key, path)
 }
@@ -958,7 +982,7 @@ func sourceEffortForMatchedModel(entry ModelMapEntry, synthesized bool, fallback
 func normalizeReasoningEffort(effort string) string {
 	effort = strings.TrimSpace(effort)
 	switch effort {
-	case "minimal", "xhigh", "medium", "high", "low", "none":
+	case "minimal", "xhigh", "medium", "high", "low", "none", "max":
 		return effort
 	default:
 		return ""
@@ -1100,7 +1124,7 @@ func manualReasonSuffixSelector(value string) string {
 	}
 	suffix := strings.TrimPrefix(value, "-")
 	switch suffix {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
 		return suffix
 	default:
 		return ""
@@ -1416,7 +1440,7 @@ func finalizeResolvedModelAndEffort(model string, requestedEffort string, enable
 }
 
 func splitReasoningSuffix(modelName string) (string, string, bool) {
-	supportedSuffixes := []string{"-minimal", "-xhigh", "-medium", "-high", "-low", "-none"}
+	supportedSuffixes := []string{"-minimal", "-xhigh", "-medium", "-high", "-low", "-none", "-max"}
 	for _, suffix := range supportedSuffixes {
 		if len(modelName) > len(suffix) && modelName[len(modelName)-len(suffix):] == suffix {
 			return modelName[:len(modelName)-len(suffix)], suffix[1:], true

@@ -140,6 +140,9 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 			cfg.Providers[i].UpstreamMaxOutputTokens = cfg.UpstreamMaxOutputTokens
 			cfg.Providers[i].UpstreamMaxOutputTokenRules = append([]ScopedIntRule(nil), cfg.UpstreamMaxOutputTokenRules...)
 		}
+		if !cfg.Providers[i].AnthropicMaxThinkingBudgetSet {
+			cfg.Providers[i].AnthropicMaxThinkingBudget = cfg.AnthropicMaxThinkingBudget
+		}
 		if !cfg.Providers[i].ModelLimitContextTokensSet {
 			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
 			cfg.Providers[i].ModelLimitContextTokenRules = append([]ScopedIntRule(nil), cfg.ModelLimitContextTokenRules...)
