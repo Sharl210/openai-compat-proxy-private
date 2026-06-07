@@ -88,7 +88,7 @@ func clientToProxyEffectiveReasoning(protocol string, model string, reasoning *m
 		if _, effort, ok := reasoningpkg.SplitSuffix(strings.TrimSpace(model)); ok {
 			effective = applyResolvedReasoningEffort(effective, effort)
 			if protocol == clientReasoningProtocolMessages {
-				effective = applyAnthropicThinkingFromResolvedEffort(effective, true, model, maxOutputTokens)
+				effective = applyAnthropicThinkingFromResolvedEffort(effective, true, model, maxOutputTokens, 32000)
 			}
 		}
 	}
@@ -140,7 +140,7 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	canon.Model = mappedModel
 	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking && canEnableAnthropicThinkingForMessages(canon.Messages), canon.Model, canon.MaxOutputTokens)
+		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking && canEnableAnthropicThinkingForMessages(canon.Messages), canon.Model, canon.MaxOutputTokens, providerCfg.AnthropicMaxThinkingBudget)
 	}
 }
 

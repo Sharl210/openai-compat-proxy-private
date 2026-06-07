@@ -36,7 +36,7 @@ func applyResolvedReasoningEffort(reasoning *modelpkg.CanonicalReasoning, effort
 	return reasoning
 }
 
-func applyAnthropicThinkingFromResolvedEffort(reasoning *modelpkg.CanonicalReasoning, enabled bool, model string, maxOutputTokens *int) *modelpkg.CanonicalReasoning {
+func applyAnthropicThinkingFromResolvedEffort(reasoning *modelpkg.CanonicalReasoning, enabled bool, model string, maxOutputTokens *int, maxThinkingBudget int) *modelpkg.CanonicalReasoning {
 	if !enabled || reasoning == nil || reasoning.Effort == "" {
 		return reasoning
 	}
@@ -58,7 +58,7 @@ func applyAnthropicThinkingFromResolvedEffort(reasoning *modelpkg.CanonicalReaso
 		reasoning.Raw["output_config"] = map[string]any{"effort": anthropicAdaptiveEffortForSuffix(reasoning.Effort)}
 		return reasoning
 	}
-	budget := anthropicThinkingBudgetForEffort(reasoning.Effort, maxOutputTokens)
+	budget := anthropicThinkingBudgetForEffort(reasoning.Effort, maxOutputTokens, maxThinkingBudget)
 	if budget > 0 {
 		reasoning.Raw["thinking"] = map[string]any{
 			"type":          "enabled",
@@ -70,8 +70,10 @@ func applyAnthropicThinkingFromResolvedEffort(reasoning *modelpkg.CanonicalReaso
 
 func anthropicAdaptiveEffortForSuffix(effort string) string {
 	switch effort {
-	case "xhigh":
+	case "max":
 		return "max"
+	case "xhigh":
+		return "xhigh"
 	case "high":
 		return "high"
 	case "medium":
@@ -85,50 +87,50 @@ func anthropicAdaptiveEffortForSuffix(effort string) string {
 	}
 }
 
-func anthropicThinkingBudgetForEffort(effort string, maxOutputTokens *int) int {
-	ratioNum, ratioDen, floor, ceiling := anthropicThinkingBudgetProfile(effort)
-	if ratioDen == 0 {
+func anthropicThinkingBudgetForEffort(effort string, maxOutputTokens *int, maxThinkingBudget int) int {
+	ratioNum, ratioDen := anthropicThinkingBudgetRatio(effort)
+	if ratioDen == 0 || maxThinkingBudget < 1024 {
 		return 0
 	}
-	budget := floor
+	budget := (maxThinkingBudget * ratioNum) / ratioDen
+	if budget < 1024 {
+		budget = 1024
+	}
+	if budget > maxThinkingBudget {
+		budget = maxThinkingBudget
+	}
 	if maxOutputTokens != nil && *maxOutputTokens > 0 {
-		budget = (*maxOutputTokens * ratioNum) / ratioDen
-		if budget <= 0 {
-			budget = 1
+		limit := *maxOutputTokens - 1
+		if limit < 1024 {
+			return 0
 		}
-		if budget < floor {
-			budget = floor
+		if budget > limit {
+			budget = limit
 		}
-		if budget > ceiling {
-			budget = ceiling
-		}
-		if budget > *maxOutputTokens {
-			budget = *maxOutputTokens
-		}
-	} else if budget > ceiling {
-		budget = ceiling
 	}
 	return budget
 }
 
-func anthropicThinkingBudgetProfile(effort string) (ratioNumerator int, ratioDenominator int, floor int, ceiling int) {
+func anthropicThinkingBudgetRatio(effort string) (ratioNumerator int, ratioDenominator int) {
 	switch effort {
 	case "minimal":
-		return 1, 8, 512, 2048
+		return 1, 16
 	case "low":
-		return 1, 4, 1024, 4096
+		return 1, 8
 	case "medium":
-		return 2, 5, 2048, 8192
+		return 1, 4
 	case "high":
-		return 3, 5, 4096, 16384
+		return 1, 2
 	case "xhigh":
-		return 4, 5, 8192, 32768
+		return 1, 1
+	case "max":
+		return 1, 1
 	default:
-		return 0, 0, 0, 0
+		return 0, 0
 	}
 }
 
 func supportsAnthropicAdaptiveThinking(model string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(normalized, "opus-4-6") || strings.Contains(normalized, "opus-4.6")
+	return strings.Contains(normalized, "opus-4-6") || strings.Contains(normalized, "opus-4.6") || strings.Contains(normalized, "opus-4-7") || strings.Contains(normalized, "opus-4.7") || strings.Contains(normalized, "opus-4-8") || strings.Contains(normalized, "opus-4.8")
 }
