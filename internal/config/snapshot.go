@@ -105,6 +105,7 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 		return nil, err
 	}
 	cfg.Providers = providers
+	normalizeRuntimeConfigDefaults(&cfg)
 	applyRootProviderTokenDefaults(&cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -138,6 +139,10 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 		if !cfg.Providers[i].UpstreamMaxOutputTokensSet {
 			cfg.Providers[i].UpstreamMaxOutputTokens = cfg.UpstreamMaxOutputTokens
 			cfg.Providers[i].UpstreamMaxOutputTokenRules = append([]ScopedIntRule(nil), cfg.UpstreamMaxOutputTokenRules...)
+		}
+		if !cfg.Providers[i].ModelLimitContextTokensSet {
+			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
+			cfg.Providers[i].ModelLimitContextTokenRules = append([]ScopedIntRule(nil), cfg.ModelLimitContextTokenRules...)
 		}
 		if !cfg.Providers[i].ForceUpstreamMaxOutputTokensSet {
 			cfg.Providers[i].ForceUpstreamMaxOutputTokens = cfg.ForceUpstreamMaxOutputTokens
@@ -394,6 +399,9 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateRootUpstreamMaxOutputTokens(values, "UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
+		return err
+	}
+	if err := validateRootModelLimitContextTokens(values, "MODEL_LIMIT_CONTEXT_TOKENS"); err != nil {
 		return err
 	}
 	if err := validateStrictBool(values, "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {

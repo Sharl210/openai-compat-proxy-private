@@ -29,6 +29,7 @@ func NewRuntimeStore(rootEnvPath string) (*RuntimeStore, error) {
 
 func NewStaticRuntimeStore(cfg Config) *RuntimeStore {
 	store := &RuntimeStore{}
+	normalizeRuntimeConfigDefaults(&cfg)
 	ids, owners, visible, taggedOwners, taggedVisible, _ := buildDefaultOverlayModelIndex(cfg)
 	store.active.Store(&RuntimeSnapshot{
 		Config:                     cfg,
@@ -43,6 +44,21 @@ func NewStaticRuntimeStore(cfg Config) *RuntimeStore {
 		providerMTimeByID:          map[string]time.Time{},
 	})
 	return store
+}
+
+func normalizeRuntimeConfigDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.ModelLimitContextTokens == 0 && len(cfg.ModelLimitContextTokenRules) == 0 {
+		cfg.ModelLimitContextTokens = Default().ModelLimitContextTokens
+	}
+	for i := range cfg.Providers {
+		if !cfg.Providers[i].ModelLimitContextTokensSet && cfg.Providers[i].ModelLimitContextTokens == 0 && len(cfg.Providers[i].ModelLimitContextTokenRules) == 0 {
+			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
+			cfg.Providers[i].ModelLimitContextTokenRules = append([]ScopedIntRule(nil), cfg.ModelLimitContextTokenRules...)
+		}
+	}
 }
 
 func (s *RuntimeStore) Active() *RuntimeSnapshot {

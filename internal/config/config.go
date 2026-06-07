@@ -21,6 +21,8 @@ type Config struct {
 	UpstreamMaxOutputTokens           int
 	UpstreamMaxOutputTokenRules       []ScopedIntRule
 	ForceUpstreamMaxOutputTokens      bool
+	ModelLimitContextTokens           int
+	ModelLimitContextTokenRules       []ScopedIntRule
 	UpstreamUserAgent                 string
 	MasqueradeTarget                  string
 	InjectClaudeCodeMetadataUserID    bool
@@ -75,6 +77,7 @@ func Default() Config {
 		LogMaxBodySizeMB:            5.0,
 		DebugArchiveRootDir:         "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR",
 		DebugArchiveMaxRequests:     200,
+		ModelLimitContextTokens:     -1,
 	}
 }
 
@@ -132,6 +135,12 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 		if parsed, rules, err := parseScopedUpstreamMaxOutputTokens(value, "UPSTREAM_MAX_OUTPUT_TOKENS", "root env UPSTREAM_MAX_OUTPUT_TOKENS"); err == nil {
 			cfg.UpstreamMaxOutputTokens = parsed
 			cfg.UpstreamMaxOutputTokenRules = rules
+		}
+	}
+	if value, ok := lookup("MODEL_LIMIT_CONTEXT_TOKENS"); ok && value != "" {
+		if parsed, rules, err := parseScopedModelLimitContextTokens(value, "MODEL_LIMIT_CONTEXT_TOKENS", "root env MODEL_LIMIT_CONTEXT_TOKENS"); err == nil {
+			cfg.ModelLimitContextTokens = parsed
+			cfg.ModelLimitContextTokenRules = rules
 		}
 	}
 	if value, ok := lookup("FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); ok && value != "" {
@@ -219,6 +228,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateRootUpstreamMaxOutputTokens(values, "UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
+		return err
+	}
+	if err := validateRootModelLimitContextTokens(values, "MODEL_LIMIT_CONTEXT_TOKENS"); err != nil {
 		return err
 	}
 	if err := validateStrictBool(values, "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
@@ -322,11 +334,24 @@ func validateRootModelMap(values map[string]string, key string) error {
 }
 
 func validateRootUpstreamMaxOutputTokens(values map[string]string, key string) error {
+	return validateRootScopedIntRules(values, key)
+}
+
+func validateRootModelLimitContextTokens(values map[string]string, key string) error {
 	value := strings.TrimSpace(values[key])
 	if value == "" {
 		return nil
 	}
-	_, _, err := parseScopedUpstreamMaxOutputTokens(value, key, "root env "+key)
+	_, _, err := parseScopedModelLimitContextTokens(value, key, "root env "+key)
+	return err
+}
+
+func validateRootScopedIntRules(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	_, _, err := parseScopedIntRules(value, key, "root env "+key)
 	return err
 }
 
@@ -534,6 +559,8 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.UpstreamMaxOutputTokens == other.UpstreamMaxOutputTokens &&
 		scopedIntRulesEqual(c.UpstreamMaxOutputTokenRules, other.UpstreamMaxOutputTokenRules) &&
 		c.ForceUpstreamMaxOutputTokens == other.ForceUpstreamMaxOutputTokens &&
+		c.ModelLimitContextTokens == other.ModelLimitContextTokens &&
+		scopedIntRulesEqual(c.ModelLimitContextTokenRules, other.ModelLimitContextTokenRules) &&
 		c.EnableDefaultProviderModelTags == other.EnableDefaultProviderModelTags &&
 		c.EnableAllDefaultProviderModelTags == other.EnableAllDefaultProviderModelTags &&
 		c.EnableNoPromptModelSuffix == other.EnableNoPromptModelSuffix &&

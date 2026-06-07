@@ -363,6 +363,108 @@ func TestBuildRuntimeSnapshotProviderMinusOneMaxOutputTokensOverridesRoot(t *tes
 	}
 }
 
+func TestBuildRuntimeSnapshotInheritsRootModelLimitContextTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nMODEL_LIMIT_CONTEXT_TOKENS=-1,gpt-5.5:256000,#re:.*gpt-.*:64000\n", time.Date(2026, 3, 26, 10, 24, 0, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 24, 30, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if provider.ModelLimitContextTokens != -1 {
+		t.Fatalf("expected provider to inherit root context limit -1, got %d", provider.ModelLimitContextTokens)
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.5"); got != 256000 {
+		t.Fatalf("expected inherited exact context limit 256000, got %d", got)
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.4-mini"); got != 64000 {
+		t.Fatalf("expected inherited regex context limit 64000, got %d", got)
+	}
+}
+
+func TestBuildRuntimeSnapshotProviderModelLimitContextTokensOverrideRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nMODEL_LIMIT_CONTEXT_TOKENS=400000,gpt-5.5:256000\n", time.Date(2026, 3, 26, 10, 25, 0, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nMODEL_LIMIT_CONTEXT_TOKENS=128000,claude-sonnet-4-5:64000\n", time.Date(2026, 3, 26, 10, 25, 30, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if provider.ModelLimitContextTokens != 128000 {
+		t.Fatalf("expected provider context limit override 128000, got %d", provider.ModelLimitContextTokens)
+	}
+	if got := provider.ResolveModelLimitContextTokens("claude-sonnet-4-5"); got != 64000 {
+		t.Fatalf("expected provider scoped context limit override 64000, got %d", got)
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.5"); got != 128000 {
+		t.Fatalf("expected provider default context limit to override root scoped rules, got %d", got)
+	}
+}
+
+func TestRuntimeStoreRefreshAppliesHotReloadableRootModelLimitContextTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 26, 0, 111000000, time.UTC)
+	updatedRootMTime := time.Date(2026, 3, 26, 10, 27, 0, 222000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nMODEL_LIMIT_CONTEXT_TOKENS=-1\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 26, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nMODEL_LIMIT_CONTEXT_TOKENS=400000,gpt-5.5:256000\n", updatedRootMTime)
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("expected model context limit refresh to succeed, got %v", err)
+	}
+
+	active := store.Active()
+	provider, err := active.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	if provider.ModelLimitContextTokens != 400000 {
+		t.Fatalf("expected provider to inherit refreshed root context limit 400000, got %d", provider.ModelLimitContextTokens)
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.5"); got != 256000 {
+		t.Fatalf("expected refreshed inherited scoped context limit 256000, got %d", got)
+	}
+}
+
 func TestRuntimeStoreRefreshAppliesHotReloadableRootUpstreamMaxOutputTokens(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

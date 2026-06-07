@@ -137,6 +137,49 @@ func TestLoadFromValuesParsesRootUpstreamMaxOutputTokens(t *testing.T) {
 	}
 }
 
+func TestLoadFromValuesParsesRootModelLimitContextTokens(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"MODEL_LIMIT_CONTEXT_TOKENS": "-1,gpt-5.5:256000,#re:.*gpt-.*:64000",
+	})
+
+	if cfg.ModelLimitContextTokens != -1 {
+		t.Fatalf("expected root model limit context tokens -1, got %d", cfg.ModelLimitContextTokens)
+	}
+	if len(cfg.ModelLimitContextTokenRules) != 2 {
+		t.Fatalf("expected 2 root context limit rules, got %#v", cfg.ModelLimitContextTokenRules)
+	}
+	if cfg.ModelLimitContextTokenRules[0].Pattern != "gpt-5.5" || cfg.ModelLimitContextTokenRules[0].Tokens != 256000 {
+		t.Fatalf("expected exact root context limit rule first, got %#v", cfg.ModelLimitContextTokenRules)
+	}
+	if cfg.ModelLimitContextTokenRules[1].Pattern != "#re:.*gpt-.*" || cfg.ModelLimitContextTokenRules[1].Tokens != 64000 {
+		t.Fatalf("expected regex root context limit rule second, got %#v", cfg.ModelLimitContextTokenRules)
+	}
+}
+
+func TestLoadFromValuesTreatsScopedOnlyModelLimitContextTokensDefaultAsUnlimited(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"MODEL_LIMIT_CONTEXT_TOKENS": "gpt-5.5:256000",
+	})
+
+	if cfg.ModelLimitContextTokens != -1 {
+		t.Fatalf("expected scoped-only root context limit default -1, got %d", cfg.ModelLimitContextTokens)
+	}
+	if len(cfg.ModelLimitContextTokenRules) != 1 {
+		t.Fatalf("expected one scoped context limit rule, got %#v", cfg.ModelLimitContextTokenRules)
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidModelLimitContextTokens(t *testing.T) {
+	for _, value := range []string{"0", "-2", "bad"} {
+		t.Run(value, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{"MODEL_LIMIT_CONTEXT_TOKENS": value})
+			if err == nil {
+				t.Fatalf("expected invalid MODEL_LIMIT_CONTEXT_TOKENS=%q to fail validation", value)
+			}
+		})
+	}
+}
+
 func TestValidateRootEnvValuesRejectsInvalidV1ModelMap(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"V1_MODEL_MAP": "missing-target:"})
 	if err == nil {
@@ -420,7 +463,7 @@ func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
 					{Key: "openai-only", Target: "gpt-openai"},
 					{Key: "shared-model", Target: "gpt-shared-openai"},
 				},
-				ManualModels: []string{"openai-manual"},
+				ManualModels: []string{"openai-only", "shared-model", "openai-manual"},
 			},
 			{
 				ID:      "azure",
@@ -429,7 +472,7 @@ func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
 					{Key: "shared-model", Target: "gpt-shared-azure"},
 					{Key: "azure-only", Target: "gpt-azure"},
 				},
-				ManualModels: []string{"azure-manual"},
+				ManualModels: []string{"shared-model", "azure-only", "azure-manual"},
 			},
 		},
 	}
@@ -500,7 +543,7 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 					NewModelMapEntry("gpt-4o", "openai-gpt-4o"),
 					NewModelMapEntry("openai-only", "openai-only-upstream"),
 				},
-				ManualModels: []string{"manual-openai"},
+				ManualModels: []string{"gpt-4o", "openai-only", "manual-openai"},
 				HiddenModels: []string{"#re:gpt-4.*", "manual-openai"},
 			},
 			{
@@ -510,6 +553,7 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 					NewModelMapEntry("gpt-4o", "azure-gpt-4o"),
 					NewModelMapEntry("azure-only", "azure-only-upstream"),
 				},
+				ManualModels: []string{"gpt-4o", "azure-only"},
 			},
 		},
 	}

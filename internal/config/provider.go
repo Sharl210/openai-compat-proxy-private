@@ -26,6 +26,9 @@ type ProviderConfig struct {
 	UpstreamMaxOutputTokenRules            []ScopedIntRule
 	ForceUpstreamMaxOutputTokens           bool
 	ForceUpstreamMaxOutputTokensSet        bool
+	ModelLimitContextTokens                int
+	ModelLimitContextTokensSet             bool
+	ModelLimitContextTokenRules            []ScopedIntRule
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
@@ -209,6 +212,17 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.UpstreamMaxOutputTokensSet = true
 			provider.UpstreamMaxOutputTokens = parsed
 			provider.UpstreamMaxOutputTokenRules = rules
+		case "MODEL_LIMIT_CONTEXT_TOKENS":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			parsed, rules, err := parseScopedModelLimitContextTokens(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.ModelLimitContextTokensSet = true
+			provider.ModelLimitContextTokens = parsed
+			provider.ModelLimitContextTokenRules = rules
 		case "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS":
 			if strings.TrimSpace(value) == "" {
 				break
@@ -596,6 +610,21 @@ func parseProviderPositiveInt(value string, key string, path string) (int, error
 }
 
 func parseScopedUpstreamMaxOutputTokens(raw string, key string, path string) (int, []ScopedIntRule, error) {
+	return parseScopedIntRules(raw, key, path)
+}
+
+func parseScopedModelLimitContextTokens(raw string, key string, path string) (int, []ScopedIntRule, error) {
+	parsed, rules, err := parseScopedIntRules(raw, key, path)
+	if err != nil {
+		return 0, nil, err
+	}
+	if parsed == 0 && len(rules) > 0 {
+		parsed = -1
+	}
+	return parsed, rules, nil
+}
+
+func parseScopedIntRules(raw string, key string, path string) (int, []ScopedIntRule, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return 0, nil, nil
@@ -648,17 +677,25 @@ func parseScopedUpstreamMaxOutputTokens(raw string, key string, path string) (in
 }
 
 func (p ProviderConfig) ResolveUpstreamMaxOutputTokens(model string) int {
-	for _, rule := range p.UpstreamMaxOutputTokenRules {
+	return resolveScopedInt(p.UpstreamMaxOutputTokens, p.UpstreamMaxOutputTokenRules, model)
+}
+
+func (p ProviderConfig) ResolveModelLimitContextTokens(model string) int {
+	return resolveScopedInt(p.ModelLimitContextTokens, p.ModelLimitContextTokenRules, model)
+}
+
+func resolveScopedInt(defaultValue int, rules []ScopedIntRule, model string) int {
+	for _, rule := range rules {
 		if rule.IsExact && model == rule.Pattern {
 			return rule.Tokens
 		}
 	}
-	for _, rule := range p.UpstreamMaxOutputTokenRules {
+	for _, rule := range rules {
 		if rule.PatternRE != nil && rule.PatternRE.MatchString(model) {
 			return rule.Tokens
 		}
 	}
-	return p.UpstreamMaxOutputTokens
+	return defaultValue
 }
 
 func normalizeProviderRetryCount(value int) int {
@@ -1157,19 +1194,8 @@ func (p ProviderConfig) HidesModel(model string) bool {
 }
 
 func (p ProviderConfig) VisibleModelIDs() []string {
-	base := make([]string, 0, len(p.ModelMap)+len(p.ManualModels))
-	seen := make(map[string]struct{}, len(p.ModelMap)+len(p.ManualModels))
-	for _, entry := range p.ModelMap {
-		id := strings.TrimSpace(entry.Key)
-		if shouldHideVisibleModelAlias(id) || p.HidesModel(id) {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		base = append(base, id)
-	}
+	base := make([]string, 0, len(p.ManualModels))
+	seen := make(map[string]struct{}, len(p.ManualModels))
 	for _, manualModel := range p.ManualModels {
 		id := strings.TrimSpace(manualModel)
 		if manualBase, ok := manualReasonSuffixStaticBase(id); ok {
@@ -1194,13 +1220,7 @@ func (p ProviderConfig) VisibleModelIDs() []string {
 	if !(p.ExposeReasoningSuffixModels && p.EnableReasoningEffortSuffix) {
 		return base
 	}
-	keys := make([]string, 0, len(p.ModelMap))
-	for _, entry := range p.ModelMap {
-		if isStaticModelPattern(entry.Key) {
-			keys = append(keys, entry.Key)
-		}
-	}
-	expanded := reasoning.ExpandModelIDs(base, keys, true)
+	expanded := reasoning.ExpandModelIDs(base, nil, true)
 	filtered := make([]string, 0, len(expanded))
 	seen = make(map[string]struct{}, len(expanded))
 	for _, id := range expanded {

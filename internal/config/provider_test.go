@@ -115,6 +115,24 @@ func TestVisibleModelIDsExpandsManualReasonSuffixFamilyIndependentOfSuffixFlags(
 	}
 }
 
+func TestVisibleModelIDsDoesNotExposeModelMapKeysOrTargets(t *testing.T) {
+	p := ProviderConfig{
+		ModelMap:     []ModelMapEntry{{Key: "client-alias", Target: "upstream-real"}},
+		ManualModels: []string{"manual-model"},
+	}
+
+	ids := p.VisibleModelIDs()
+	if containsString(ids, "client-alias") {
+		t.Fatalf("expected MODEL_MAP key to stay out of visible models, got %v", ids)
+	}
+	if containsString(ids, "upstream-real") {
+		t.Fatalf("expected MODEL_MAP target to stay out of visible models, got %v", ids)
+	}
+	if !containsString(ids, "manual-model") {
+		t.Fatalf("expected manual model to stay visible, got %v", ids)
+	}
+}
+
 func TestManualModelOverridesHiddenModel(t *testing.T) {
 	p := ProviderConfig{ManualModels: []string{"gpt-5.5-noprompt"}, HiddenModels: []string{"gpt-5.5-noprompt", "#re:gpt-5\\.5.*"}}
 
@@ -250,7 +268,7 @@ func TestHiddenReasonSuffixSelectorHidesOnlyRequestedEffort(t *testing.T) {
 
 func TestHiddenReasonSuffixSelectorOverridesGlobalSuffixExposure(t *testing.T) {
 	p := ProviderConfig{
-		ModelMap:                    []ModelMapEntry{NewModelMapEntry("gpt-5.5", "upstream-gpt-5.5")},
+		ManualModels:                []string{"gpt-5.5"},
 		EnableReasoningEffortSuffix: true,
 		ExposeReasoningSuffixModels: true,
 		HiddenModels:                []string{"#reason_suffix:-minimal", "gpt-5.5-high"},
@@ -271,14 +289,14 @@ func TestHiddenReasonSuffixSelectorOverridesGlobalSuffixExposure(t *testing.T) {
 
 func TestHiddenReasonSuffixFamilyOverridesGlobalSuffixExposure(t *testing.T) {
 	p := ProviderConfig{
-		ModelMap:                    []ModelMapEntry{NewModelMapEntry("gpt-5.5", "upstream-gpt-5.5")},
+		ManualModels:                []string{"gpt-5.5"},
 		EnableReasoningEffortSuffix: true,
 		ExposeReasoningSuffixModels: true,
 		HiddenModels:                []string{"#reason_suffix:gpt-5.5"},
 	}
 
-	if ids := p.VisibleModelIDs(); len(ids) != 0 {
-		t.Fatalf("expected hidden suffix family to override global suffix exposure, got %v", ids)
+	if ids := p.VisibleModelIDs(); len(ids) != 1 || ids[0] != "gpt-5.5" {
+		t.Fatalf("expected hidden suffix family to hide generated variants while keeping manual base model, got %v", ids)
 	}
 }
 
@@ -1078,6 +1096,121 @@ func TestResolveUpstreamMaxOutputTokensPrefersExactThenRegexThenDefault(t *testi
 	}
 	if got := provider.ResolveUpstreamMaxOutputTokens("claude-sonnet-4-5"); got != 64000 {
 		t.Fatalf("expected default 64000, got %d", got)
+	}
+}
+
+func TestLoadProviderFileParsesModelLimitContextTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nMODEL_LIMIT_CONTEXT_TOKENS=-1,gpt-5.5:256000,#re:.*gpt-.*:64000\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.ModelLimitContextTokens != -1 {
+		t.Fatalf("expected default model context limit -1, got %d", provider.ModelLimitContextTokens)
+	}
+	if !provider.ModelLimitContextTokensSet {
+		t.Fatalf("expected model context limit to be marked as explicitly set")
+	}
+	if len(provider.ModelLimitContextTokenRules) != 2 {
+		t.Fatalf("expected 2 scoped context limit rules, got %#v", provider.ModelLimitContextTokenRules)
+	}
+	if provider.ModelLimitContextTokenRules[0].Pattern != "gpt-5.5" || provider.ModelLimitContextTokenRules[0].Tokens != 256000 {
+		t.Fatalf("expected exact context limit rule first, got %#v", provider.ModelLimitContextTokenRules)
+	}
+	if provider.ModelLimitContextTokenRules[1].Pattern != "#re:.*gpt-.*" || provider.ModelLimitContextTokenRules[1].Tokens != 64000 {
+		t.Fatalf("expected regex context limit rule second, got %#v", provider.ModelLimitContextTokenRules)
+	}
+}
+
+func TestLoadProviderFileTreatsBlankModelLimitContextTokensAsUnset(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nMODEL_LIMIT_CONTEXT_TOKENS=\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.ModelLimitContextTokens != 0 {
+		t.Fatalf("expected blank model context limit to stay unset, got %d", provider.ModelLimitContextTokens)
+	}
+	if provider.ModelLimitContextTokensSet {
+		t.Fatalf("expected blank model context limit not to be marked as explicitly set")
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidModelLimitContextTokens(t *testing.T) {
+	for _, value := range []string{"0", "-2", "bad"} {
+		t.Run(value, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nMODEL_LIMIT_CONTEXT_TOKENS=" + value + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			_, err := loadProviderFile(providerEnvPath)
+			if err == nil {
+				t.Fatalf("expected invalid model context limit to fail validation")
+			}
+			if _, ok := err.(invalidConfigError); !ok {
+				t.Fatalf("expected invalidConfigError for invalid model context limit, got %T", err)
+			}
+			if err.Error() != "invalid MODEL_LIMIT_CONTEXT_TOKENS in "+providerEnvPath+": \""+value+"\"" {
+				t.Fatalf("unexpected error message: %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveModelLimitContextTokensPrefersExactThenRegexThenDefault(t *testing.T) {
+	provider := ProviderConfig{
+		ModelLimitContextTokens: -1,
+		ModelLimitContextTokenRules: []ScopedIntRule{
+			{Pattern: "gpt-5.5", Tokens: 256000, IsExact: true},
+			{Pattern: "#re:.*gpt-.*", Tokens: 64000, PatternRE: regexp.MustCompile("^(?:.*gpt-.*)$")},
+		},
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.5"); got != 256000 {
+		t.Fatalf("expected exact context limit 256000, got %d", got)
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.4-mini"); got != 64000 {
+		t.Fatalf("expected regex context limit 64000, got %d", got)
+	}
+	if got := provider.ResolveModelLimitContextTokens("claude-sonnet-4-5"); got != -1 {
+		t.Fatalf("expected default context limit -1, got %d", got)
+	}
+}
+
+func TestLoadProviderFileTreatsScopedOnlyModelLimitContextTokensDefaultAsUnlimited(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nMODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5:256000\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.ModelLimitContextTokens != -1 {
+		t.Fatalf("expected scoped-only provider context limit default -1, got %d", provider.ModelLimitContextTokens)
+	}
+	if got := provider.ResolveModelLimitContextTokens("claude-sonnet-4-5"); got != -1 {
+		t.Fatalf("expected unmatched scoped-only provider context limit to stay unlimited, got %d", got)
+	}
+	if got := provider.ResolveModelLimitContextTokens("gpt-5.5"); got != 256000 {
+		t.Fatalf("expected scoped provider context limit 256000, got %d", got)
 	}
 }
 
