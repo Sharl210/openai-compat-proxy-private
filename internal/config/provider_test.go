@@ -101,7 +101,7 @@ func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t
 			entry:      NewModelMapEntry("client-gpt-high", "upstream-gpt"),
 			request:    "client-gpt-high",
 			wantModel:  "upstream-gpt",
-			wantEffort: "high",
+			wantEffort: "",
 		},
 		{
 			name:       "target suffix sets effort when request has none",
@@ -166,6 +166,51 @@ func TestResolveModelAndEffortWithRequestEffortPrefersSuffixedSourceOverBaseSour
 	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "high", false)
 	if model != "upstream-priority" || effort != "high" {
 		t.Fatalf("expected explicit effort to prefer suffixed source, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortPrefersLaterRuleForSameSource(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{
+		NewModelMapEntry("client-gpt", "upstream-a"),
+		NewModelMapEntry("client-gpt", "upstream-b"),
+	}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "", false)
+	if model != "upstream-b" || effort != "" {
+		t.Fatalf("expected later rule to win for same source, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortDoesNotInheritSourceSuffixWhenTargetIsBaseModel(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.5-xhigh", "gpt-5.5")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("gpt-5.5-xhigh", "low", true)
+	if model != "gpt-5.5" || effort != "low" {
+		t.Fatalf("expected explicit request effort to win when target is base model, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortDoesNotChainAcrossDifferentSourceRules(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{
+		NewModelMapEntry("model-a", "model-c"),
+		NewModelMapEntry("model-c", "model-d"),
+	}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("model-a", "", false)
+	if model != "model-c" || effort != "" {
+		t.Fatalf("expected single-pass mapping model-a -> model-c without chaining, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortPrefersNarrowSuffixedRuleBeforeFamilyRuleWithoutChaining(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{
+		NewModelMapEntry("gpt-5.4", "gpt-5.5-xhigh"),
+		NewModelMapEntry("gpt-5.4-xhigh", "gpt-5.4"),
+	}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("gpt-5.4-xhigh", "", true)
+	if model != "gpt-5.4" || effort != "" {
+		t.Fatalf("expected narrow suffixed rule to win without chaining into family rule, got %q/%q", model, effort)
 	}
 }
 
@@ -960,6 +1005,23 @@ func TestLoadProviderFileRejectsInvalidThinkingMappingBooleanValue(t *testing.T)
 	}
 	if err.Error() != "invalid MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING in "+providerEnvPath+": \"sometimes\"" {
 		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadProviderFileDefaultsThinkingMappingToEnabled(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if !provider.MapReasoningSuffixToAnthropicThinking {
+		t.Fatalf("expected MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING to default to true")
 	}
 }
 

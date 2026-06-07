@@ -161,11 +161,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 	defer file.Close()
 
 	provider := ProviderConfig{
-		UpstreamRetryCount:       DefaultUpstreamRetryCount,
-		UpstreamRetryDelay:       DefaultUpstreamRetryDelay,
-		UpstreamEndpointType:     UpstreamEndpointTypeResponses,
-		ResponsesToolCompatMode:  ResponsesToolCompatModePreserve,
-		UpstreamXMLToolCallStyle: UpstreamXMLToolCallStyleLegacy,
+		UpstreamRetryCount:                    DefaultUpstreamRetryCount,
+		UpstreamRetryDelay:                    DefaultUpstreamRetryDelay,
+		UpstreamEndpointType:                  UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode:               ResponsesToolCompatModePreserve,
+		UpstreamXMLToolCallStyle:              UpstreamXMLToolCallStyleLegacy,
+		MapReasoningSuffixToAnthropicThinking: true,
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -930,7 +931,7 @@ func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (
 }
 
 func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, requestEffort string, enableClientSuffix bool) (string, string) {
-	requestEffort = normalizeReasoningEffort(requestEffort)
+	explicitRequestEffort := normalizeReasoningEffort(requestEffort)
 	configSuffixEnabled := true
 	enableClientSuffix = enableClientSuffix || (p.HasManualReasonSuffixForModel(model) && !p.HasLiteralManualModel(model))
 	requestedModel := model
@@ -944,20 +945,28 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 		}
 	}
 	if requestedEffort == "" {
-		requestedEffort = requestEffort
+		requestedEffort = explicitRequestEffort
 	}
-	synthesizedRequestEffort := requestedEffort != "" && requestedEffort == requestEffort
+	synthesizedRequestEffort := explicitRequestEffort != "" && requestedEffort == explicitRequestEffort
 	if requestedEffort != "" {
 		effectiveModel := requestedModel + "-" + requestedEffort
-		if mapped, _ := p.resolveModelEntry(effectiveModel); mapped != "" {
-			return finalizeResolvedModelAndEffort(mapped, requestedEffort, configSuffixEnabled)
+		if mapped, entry := p.resolveModelEntryWithOrder(effectiveModel, true); mapped != "" {
+			resolvedEffort := requestedEffort
+			if _, _, ok := splitReasoningSuffix(entry.UnescapedTarget); !ok {
+				if explicitRequestEffort != "" {
+					resolvedEffort = explicitRequestEffort
+				} else {
+					resolvedEffort = ""
+				}
+			}
+			return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
 		}
 	}
-	if mapped, entry := p.resolveModelEntry(model); mapped != "" {
+	if mapped, entry := p.resolveModelEntryWithOrder(model, true); mapped != "" {
 		return finalizeResolvedModelAndEffort(mapped, sourceEffortForMatchedModel(entry, synthesizedRequestEffort, requestedEffort), configSuffixEnabled)
 	}
 	if enableClientSuffix && requestedModel != model {
-		if mapped, _ := p.resolveModelEntry(requestedModel); mapped != "" {
+		if mapped, _ := p.resolveModelEntryWithOrder(requestedModel, true); mapped != "" {
 			return finalizeResolvedModelAndEffort(mapped, requestedEffort, configSuffixEnabled)
 		}
 	}
@@ -970,6 +979,11 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 func sourceEffortForMatchedModel(entry ModelMapEntry, synthesized bool, fallback string) string {
 	if synthesized {
 		return fallback
+	}
+	if fallback != "" {
+		if _, _, ok := splitReasoningSuffix(entry.UnescapedTarget); !ok {
+			return fallback
+		}
 	}
 	if entry.IsStaticKey {
 		if _, effort, ok := splitReasoningSuffix(entry.UnescapedKey); ok {
@@ -1189,7 +1203,20 @@ func (p ProviderConfig) resolveModel(model string) string {
 }
 
 func (p ProviderConfig) resolveModelEntry(model string) (string, ModelMapEntry) {
+	return p.resolveModelEntryWithOrder(model, false)
+}
+
+func (p ProviderConfig) resolveModelEntryWithOrder(model string, reverse bool) (string, ModelMapEntry) {
 	if p.ModelMap == nil {
+		return "", ModelMapEntry{}
+	}
+	if reverse {
+		for i := len(p.ModelMap) - 1; i >= 0; i-- {
+			entry := p.ModelMap[i]
+			if matchModelPattern(model, entry) {
+				return applyCaptureReplacement(model, entry), entry
+			}
+		}
 		return "", ModelMapEntry{}
 	}
 	for _, entry := range p.ModelMap {
