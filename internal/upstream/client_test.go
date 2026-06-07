@@ -2728,7 +2728,7 @@ func TestBuildAnthropicRequestBodyAddsClearThinkingWhenAssistantToolHistoryLacks
 	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
 		Model:           "claude-sonnet-4-5",
 		MaxOutputTokens: intPtrForClientTest(128),
-		Reasoning:       &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
+		Reasoning:       &model.CanonicalReasoning{Summary: "auto", Raw: map[string]any{"summary": "auto"}},
 		Messages: []model.CanonicalMessage{
 			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "请你一口气调用两次搜索同时，随便搜"}}},
 			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"alpha"}`}}},
@@ -2756,6 +2756,12 @@ func TestBuildAnthropicRequestBodyAddsClearThinkingWhenAssistantToolHistoryLacks
 	edit, _ := edits[0].(map[string]any)
 	if got, _ := edit["type"].(string); got != "clear_thinking_20251015" {
 		t.Fatalf("expected clear_thinking_20251015 edit, got %#v", contextManagement)
+	}
+	if _, exists := payload["summary"]; exists {
+		t.Fatalf("expected anthropic payload to drop top-level summary after clear_thinking fallback, got %#v", payload)
+	}
+	if _, exists := payload["thinking"]; exists {
+		t.Fatalf("expected anthropic payload to avoid explicit thinking config after clear_thinking fallback, got %#v", payload)
 	}
 }
 

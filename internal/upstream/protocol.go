@@ -229,6 +229,9 @@ func ensureAnthropicThinkingHistoryCompatibility(req *model.CanonicalRequest) {
 	if !hasAssistantToolHistory || hasAssistantThinkingBlocks {
 		return
 	}
+	req.Reasoning.Effort = ""
+	req.Reasoning.Summary = ""
+	req.Reasoning.Raw = nil
 	if req.PreservedTopLevelFields == nil {
 		req.PreservedTopLevelFields = map[string]any{}
 	}
