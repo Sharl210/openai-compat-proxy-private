@@ -2279,7 +2279,7 @@ func TestResponsesRouteSkipsPreviousHistoryRestoreWhenClientAlreadySendsHistory(
 	}
 }
 
-func TestResponsesRouteAddsClearThinkingForClientSuppliedAnthropicToolHistoryWithoutThinkingBlocks(t *testing.T) {
+func TestResponsesRouteDisablesThinkingForClientSuppliedAnthropicToolHistoryWithoutThinkingBlocks(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, _ := io.ReadAll(r.Body)
@@ -2309,11 +2309,14 @@ func TestResponsesRouteAddsClearThinkingForClientSuppliedAnthropicToolHistoryWit
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(gotBody, `"context_management":{"edits":[{"type":"clear_thinking_20251015"}]}`) {
-		t.Fatalf("expected anthropic upstream body to clear thinking when client supplies tool history without thinking blocks, got %s", gotBody)
+	if !strings.Contains(gotBody, `"thinking":{"type":"disabled"}`) {
+		t.Fatalf("expected anthropic upstream body to disable thinking when client supplies tool history without thinking blocks, got %s", gotBody)
 	}
 	if strings.Contains(gotBody, `"summary":"auto"`) {
-		t.Fatalf("expected anthropic upstream body to drop residual reasoning summary after clear_thinking fallback, got %s", gotBody)
+		t.Fatalf("expected anthropic upstream body to drop residual reasoning summary after disabling thinking fallback, got %s", gotBody)
+	}
+	if strings.Contains(gotBody, `"context_management"`) {
+		t.Fatalf("expected anthropic upstream body to avoid unsupported automatic context_management fallback, got %s", gotBody)
 	}
 	if !strings.Contains(gotBody, `"type":"tool_use"`) || !strings.Contains(gotBody, `"id":"call_1"`) || !strings.Contains(gotBody, `"id":"call_2"`) {
 		t.Fatalf("expected anthropic upstream body to preserve both assistant tool history items, got %s", gotBody)
