@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/reasoning"
 )
 
-func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersRegexAliases(t *testing.T) {
+func TestRewriteModelsBodyPreservesUpstreamFieldsWithoutExposingModelMapAliases(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.4","object":"model","owned_by":"openai"}]}`)
 	provider := config.ProviderConfig{
 		ModelMap: []config.ModelMapEntry{
@@ -25,8 +26,8 @@ func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersRegexAliases(t *testi
 		t.Fatalf("decode rewritten models body: %v", err)
 	}
 	data, _ := payload["data"].([]any)
-	if len(data) != 2 {
-		t.Fatalf("expected upstream id plus public alias, got %#v", data)
+	if len(data) != 1 {
+		t.Fatalf("expected only upstream id, got %#v", data)
 	}
 	entries := map[string]map[string]any{}
 	for _, item := range data {
@@ -39,8 +40,8 @@ func TestRewriteModelsBodyPreservesUpstreamFieldsAndFiltersRegexAliases(t *testi
 	if got := entries["gpt-5.4"]["owned_by"]; got != "openai" {
 		t.Fatalf("expected upstream entry fields to be preserved, got %#v", entries["gpt-5.4"])
 	}
-	if got := entries["public-gpt"]["owned_by"]; got != "openai" {
-		t.Fatalf("expected alias cloned from upstream shape, got %#v", entries["public-gpt"])
+	if _, ok := entries["public-gpt"]; ok {
+		t.Fatalf("expected MODEL_MAP alias to stay hidden from /models, got %#v", entries)
 	}
 }
 
@@ -298,7 +299,7 @@ func TestModelsUpstreamHTTPErrorMarksFailedStatus(t *testing.T) {
 	}
 }
 
-func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
+func TestModelsConfiguredManualSupportWithoutUsableUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -319,6 +320,7 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 				config.NewModelMapEntry("public-gpt", "gpt-5.4"),
 				config.NewModelMapEntry("#re:.*", "gpt-5.4"),
 			},
+			ManualModels: []string{"public-gpt"},
 		}},
 	})
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
@@ -327,7 +329,7 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected configured alias fallback to return 200, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected configured manual fallback to return 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
@@ -335,22 +337,67 @@ func TestModelsConfiguredAliasSupportWithoutUsableUpstream(t *testing.T) {
 	}
 	data, _ := payload["data"].([]any)
 	if len(data) != 1 {
-		t.Fatalf("expected exactly one configured public alias, got %#v", data)
+		t.Fatalf("expected exactly one configured public manual model, got %#v", data)
 	}
 	entry, _ := data[0].(map[string]any)
 	if got, _ := entry["id"].(string); got != "public-gpt" {
-		t.Fatalf("expected fallback alias public-gpt, got %#v", entry)
+		t.Fatalf("expected fallback manual model public-gpt, got %#v", entry)
 	}
 	if _, exists := entry["owned_by"]; exists {
 		t.Fatalf("expected synthetic fallback entry without upstream-only fields, got %#v", entry)
 	}
 }
 
-func TestModelsFallsBackOnGenericNotFoundWhenConfiguredAliasesExist(t *testing.T) {
+func TestModelsFallsBackOnGenericNotFoundWhenManualModelsExist(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":{"message":"route not found upstream"}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         true,
+			UpstreamBaseURL: upstream.URL,
+			UpstreamAPIKey:  "test-key",
+			SupportsModels:  true,
+			ModelMap: []config.ModelMapEntry{
+				{Key: "public-gpt", Target: "gpt-5.4"},
+			},
+			ManualModels: []string{"public-gpt"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected generic upstream 404 to fallback to manual models, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode fallback models response: %v body=%s", err, rec.Body.String())
+	}
+	data, _ := payload["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("expected exactly one configured public manual model, got %#v", data)
+	}
+	entry, _ := data[0].(map[string]any)
+	if got, _ := entry["id"].(string); got != "public-gpt" {
+		t.Fatalf("expected fallback manual model public-gpt, got %#v", entry)
+	}
+}
+
+func TestModelsFallbackDoesNotExposeModelMapOnlyAliases(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"models not found upstream"}}`))
 	}))
 	defer upstream.Close()
 
@@ -373,20 +420,63 @@ func TestModelsFallsBackOnGenericNotFoundWhenConfiguredAliasesExist(t *testing.T
 
 	server.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected model-map-only fallback to keep upstream 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "public-gpt") {
+		t.Fatalf("expected MODEL_MAP key not to be exposed in fallback models, got %s", rec.Body.String())
+	}
+}
+
+func TestModelsRewriteDoesNotExposeModelMapOnlyAliasesFromUpstreamModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"upstream"}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			SupportsModels:              true,
+			EnableReasoningEffortSuffix: true,
+			ExposeReasoningSuffixModels: true,
+			ModelMap: []config.ModelMapEntry{
+				{Key: "client-gpt", Target: "gpt-5.5"},
+			},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected generic upstream 404 to fallback to configured aliases, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected upstream models response 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode fallback models response: %v body=%s", err, rec.Body.String())
+		t.Fatalf("decode models response: %v body=%s", err, rec.Body.String())
 	}
 	data, _ := payload["data"].([]any)
-	if len(data) != 1 {
-		t.Fatalf("expected exactly one configured public alias, got %#v", data)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		id, _ := entry["id"].(string)
+		ids = append(ids, id)
 	}
-	entry, _ := data[0].(map[string]any)
-	if got, _ := entry["id"].(string); got != "public-gpt" {
-		t.Fatalf("expected fallback alias public-gpt, got %#v", entry)
+	for _, hidden := range []string{"client-gpt", "client-gpt-high"} {
+		if contains(ids, hidden) {
+			t.Fatalf("expected MODEL_MAP-only alias %q not to be exposed, got %v", hidden, ids)
+		}
+	}
+	if !contains(ids, "gpt-5.5") || !contains(ids, "gpt-5.5-high") {
+		t.Fatalf("expected upstream base model and its suffix variants to remain visible, got %v", ids)
 	}
 }
 

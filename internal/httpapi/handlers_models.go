@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"sort"
 	"strings"
 
 	"openai-compat-proxy/internal/config"
@@ -203,11 +202,10 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 		return body
 	}
 	data, _ := payload["data"].([]any)
-	mapLen := len(provider.ModelMap)
 	manualLen := len(provider.ManualModels)
-	baseIDs := make([]string, 0, len(data)+mapLen+manualLen)
+	baseIDs := make([]string, 0, len(data)+manualLen)
 	upstreamBaseIDs := make([]string, 0, len(data))
-	seenIDs := make(map[string]struct{}, len(data)+mapLen+manualLen)
+	seenIDs := make(map[string]struct{}, len(data)+manualLen)
 	entriesByID := map[string]map[string]any{}
 	for _, item := range data {
 		entry, _ := item.(map[string]any)
@@ -222,23 +220,6 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 				seenIDs[id] = struct{}{}
 			}
 			entriesByID[id] = cloneModelEntry(entry)
-		}
-	}
-	publicAliases := sortedPublicModelAliases(provider.ModelMap)
-	for _, publicModel := range publicAliases {
-		if provider.HidesModel(publicModel) {
-			continue
-		}
-		if _, exists := entriesByID[publicModel]; exists {
-			continue
-		}
-		if source := cloneSourceModelEntry(provider, publicModel, entriesByID); len(source) > 0 {
-			if _, exists := seenIDs[publicModel]; !exists {
-				baseIDs = append(baseIDs, publicModel)
-				seenIDs[publicModel] = struct{}{}
-			}
-			source["id"] = publicModel
-			entriesByID[publicModel] = source
 		}
 	}
 	for _, manualModel := range provider.ManualModels {
@@ -265,8 +246,7 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	expanded := baseIDs
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
-		modelMapKeys := modelMapKeysFromEntries(provider.ModelMap)
-		expanded = reasoning.ExpandModelIDs(baseIDs, modelMapKeys, true)
+		expanded = reasoning.ExpandModelIDs(baseIDs, nil, true)
 	}
 	filteredExpanded := make([]string, 0, len(expanded))
 	for _, id := range expanded {
@@ -328,40 +308,6 @@ func cloneModelEntry(entry map[string]any) map[string]any {
 	return cloned
 }
 
-func sortedPublicModelAliases(entries []config.ModelMapEntry) []string {
-	aliases := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if shouldHideModelAlias(entry.Key) {
-			continue
-		}
-		aliases = append(aliases, entry.Key)
-	}
-	sort.Strings(aliases)
-	return aliases
-}
-
-func shouldHideModelAlias(id string) bool {
-	id = strings.TrimSpace(id)
-	return id == "" || !config.IsStaticModelPattern(id)
-}
-
-func cloneSourceModelEntry(provider config.ProviderConfig, publicModel string, entriesByID map[string]map[string]any) map[string]any {
-	mapped := resolveModelMapTarget(provider.ModelMap, publicModel)
-	if mapped == "" {
-		return nil
-	}
-	if base, _, ok := reasoning.SplitSuffix(mapped); ok {
-		mapped = base
-	}
-	if entry := cloneModelEntry(entriesByID[mapped]); len(entry) > 0 {
-		return entry
-	}
-	if mapped == publicModel {
-		return cloneModelEntry(entriesByID[publicModel])
-	}
-	return nil
-}
-
 func modelSelectedByManualPatterns(provider config.ProviderConfig, modelID string) bool {
 	if !hasRegexManualModelPattern(provider) {
 		return true
@@ -385,23 +331,4 @@ func hasRegexManualModelPattern(provider config.ProviderConfig) bool {
 		}
 	}
 	return false
-}
-
-func resolveModelMapTarget(entries []config.ModelMapEntry, model string) string {
-	for _, entry := range entries {
-		if config.IsStaticModelPattern(entry.Key) && entry.Key == model {
-			return entry.Resolve(model)
-		}
-	}
-	return ""
-}
-
-func modelMapKeysFromEntries(entries []config.ModelMapEntry) []string {
-	keys := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if config.IsStaticModelPattern(e.Key) {
-			keys = append(keys, e.Key)
-		}
-	}
-	return keys
 }

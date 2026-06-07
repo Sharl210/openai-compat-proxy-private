@@ -24,6 +24,7 @@ func TestModelsOverlayReturnsLastWinsVisibleModels(t *testing.T) {
 					config.NewModelMapEntry("openai-only", "gpt-openai"),
 					config.NewModelMapEntry("shared-model", "gpt-shared-openai"),
 				},
+				ManualModels: []string{"openai-only", "shared-model"},
 			},
 			{
 				ID:              "azure",
@@ -34,6 +35,7 @@ func TestModelsOverlayReturnsLastWinsVisibleModels(t *testing.T) {
 					config.NewModelMapEntry("shared-model", "gpt-shared-azure"),
 					config.NewModelMapEntry("azure-only", "gpt-azure"),
 				},
+				ManualModels: []string{"shared-model", "azure-only"},
 			},
 		},
 	})
@@ -255,6 +257,7 @@ func TestModelsOverlayTaggedModeAddsTaggedAliases(t *testing.T) {
 					config.NewModelMapEntry("shared-model", "gpt-shared-openai"),
 					config.NewModelMapEntry("openai-only", "gpt-openai"),
 				},
+				ManualModels: []string{"shared-model", "openai-only"},
 			},
 			{
 				ID:              "azure",
@@ -265,6 +268,7 @@ func TestModelsOverlayTaggedModeAddsTaggedAliases(t *testing.T) {
 					config.NewModelMapEntry("shared-model", "gpt-shared-azure"),
 					config.NewModelMapEntry("azure-only", "gpt-azure"),
 				},
+				ManualModels: []string{"shared-model", "azure-only"},
 			},
 		},
 	})
@@ -326,6 +330,7 @@ func TestModelsOverlayAllTagModeTagsEveryModel(t *testing.T) {
 					config.NewModelMapEntry("shared-model", "gpt-shared-openai"),
 					config.NewModelMapEntry("openai-only", "gpt-openai"),
 				},
+				ManualModels: []string{"shared-model", "openai-only"},
 			},
 			{
 				ID:              "azure",
@@ -336,6 +341,7 @@ func TestModelsOverlayAllTagModeTagsEveryModel(t *testing.T) {
 					config.NewModelMapEntry("shared-model", "gpt-shared-azure"),
 					config.NewModelMapEntry("azure-only", "gpt-azure"),
 				},
+				ManualModels: []string{"shared-model", "azure-only"},
 			},
 		},
 	})
@@ -392,7 +398,7 @@ func TestModelsOverlayAllTagModeTagsEveryModelForSingleDefaultProvider(t *testin
 				ModelMap: []config.ModelMapEntry{
 					config.NewModelMapEntry("openai-only", "gpt-openai"),
 				},
-				ManualModels:   []string{"manual-only"},
+				ManualModels:   []string{"openai-only", "manual-only"},
 				UpstreamAPIKey: "test-key",
 			},
 		},

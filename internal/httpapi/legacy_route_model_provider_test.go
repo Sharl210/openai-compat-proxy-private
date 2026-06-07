@@ -929,6 +929,7 @@ func testLegacyModelRoutingConfig(alphaURL, betaURL string) config.Config {
 					config.NewModelMapEntry("alpha-message", "alpha-message-upstream"),
 					config.NewModelMapEntry("#re:owned-(.*)", "alpha-$1-upstream"),
 				},
+				ManualModels: []string{"alpha-chat", "alpha-message"},
 			},
 			{
 				ID:                        "beta",

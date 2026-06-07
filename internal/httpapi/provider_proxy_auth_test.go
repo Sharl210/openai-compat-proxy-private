@@ -287,6 +287,7 @@ func TestMultiDefaultLegacyRouteUsesResolvedProvidersOwnUpstreamAuth(t *testing.
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
 			ModelMap:             []config.ModelMapEntry{config.NewModelMapEntry("MiniMax-M2.7", "minimax-upstream-model")},
+			ManualModels:         []string{"MiniMax-M2.7"},
 		}, {
 			ID:                   "codex",
 			Enabled:              true,
@@ -295,6 +296,7 @@ func TestMultiDefaultLegacyRouteUsesResolvedProvidersOwnUpstreamAuth(t *testing.
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
 			ModelMap:             []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.4", "gpt-5.4")},
+			ManualModels:         []string{"gpt-5.4"},
 		}},
 	})
 
