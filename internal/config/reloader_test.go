@@ -229,6 +229,184 @@ func TestRuntimeStoreRefreshAppliesHotReloadableDownstreamNonStreamStrategy(t *t
 	}
 }
 
+func TestBuildRuntimeSnapshotInheritsRootUpstreamMaxOutputTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000,gpt-5.5:128000,#re:.*gpt-.*:100000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n", time.Date(2026, 3, 26, 10, 20, 0, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 20, 30, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if provider.UpstreamMaxOutputTokens != 64000 {
+		t.Fatalf("expected provider to inherit root upstream max output tokens 64000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if len(provider.UpstreamMaxOutputTokenRules) != 2 {
+		t.Fatalf("expected provider to inherit 2 root scoped rules, got %#v", provider.UpstreamMaxOutputTokenRules)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5"); got != 128000 {
+		t.Fatalf("expected inherited exact scoped token rule 128000, got %d", got)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.4-mini"); got != 100000 {
+		t.Fatalf("expected inherited regex scoped token rule 100000, got %d", got)
+	}
+	if !provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected provider to inherit force upstream max output tokens")
+	}
+}
+
+func TestBuildRuntimeSnapshotProviderTokenFieldsOverrideRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000,gpt-5.5:128000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n", time.Date(2026, 3, 26, 10, 21, 0, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nUPSTREAM_MAX_OUTPUT_TOKENS=32000,claude-sonnet-4-5:64000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=false\n", time.Date(2026, 3, 26, 10, 21, 30, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if provider.UpstreamMaxOutputTokens != 32000 {
+		t.Fatalf("expected provider upstream max output tokens override 32000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("claude-sonnet-4-5"); got != 64000 {
+		t.Fatalf("expected provider scoped token override 64000, got %d", got)
+	}
+	if provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected provider force flag false to override root true")
+	}
+}
+
+func TestBuildRuntimeSnapshotBlankProviderTokenFieldsInheritRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000,gpt-5.5:128000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n", time.Date(2026, 3, 26, 10, 21, 40, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nUPSTREAM_MAX_OUTPUT_TOKENS=\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=\n", time.Date(2026, 3, 26, 10, 21, 50, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if provider.UpstreamMaxOutputTokens != 64000 {
+		t.Fatalf("expected blank provider token field to inherit root default 64000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5"); got != 128000 {
+		t.Fatalf("expected blank provider token field to inherit root scoped rule 128000, got %d", got)
+	}
+	if !provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected blank provider force token field to inherit root true")
+	}
+}
+
+func TestBuildRuntimeSnapshotProviderMinusOneMaxOutputTokensOverridesRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000,gpt-5.5:128000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n", time.Date(2026, 3, 26, 10, 21, 55, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nUPSTREAM_MAX_OUTPUT_TOKENS=-1\n", time.Date(2026, 3, 26, 10, 21, 59, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if provider.UpstreamMaxOutputTokens != -1 {
+		t.Fatalf("expected provider -1 max output tokens to override root 64000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5"); got != -1 {
+		t.Fatalf("expected provider -1 max output tokens to override root scoped rules, got %d", got)
+	}
+	if !provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected provider to keep inheriting root force flag when only max output tokens is explicit")
+	}
+}
+
+func TestRuntimeStoreRefreshAppliesHotReloadableRootUpstreamMaxOutputTokens(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 22, 0, 111000000, time.UTC)
+	updatedRootMTime := time.Date(2026, 3, 26, 10, 23, 0, 222000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=64000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=false\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 22, 30, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_MAX_OUTPUT_TOKENS=96000,gpt-5.5:128000\nFORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true\n", updatedRootMTime)
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("expected upstream max output tokens refresh to succeed, got %v", err)
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(updatedRootMTime) {
+		t.Fatalf("expected root version to update to %q, got %q", formatVersionTime(updatedRootMTime), got)
+	}
+	provider, err := active.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	if provider.UpstreamMaxOutputTokens != 96000 {
+		t.Fatalf("expected provider to inherit refreshed root upstream max output tokens 96000, got %d", provider.UpstreamMaxOutputTokens)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5"); got != 128000 {
+		t.Fatalf("expected refreshed inherited scoped token rule 128000, got %d", got)
+	}
+	if !provider.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected provider to inherit refreshed force upstream max output tokens")
+	}
+}
+
 func TestRuntimeStoreRefreshAppliesHotReloadableUpstreamIdentityFields(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

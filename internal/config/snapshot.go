@@ -105,6 +105,7 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 		return nil, err
 	}
 	cfg.Providers = providers
+	applyRootProviderTokenDefaults(&cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -127,6 +128,21 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 		PromptPathsByID:            promptPaths,
 		providerMTimeByID:          providerMTimes,
 	}, nil
+}
+
+func applyRootProviderTokenDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	for i := range cfg.Providers {
+		if !cfg.Providers[i].UpstreamMaxOutputTokensSet {
+			cfg.Providers[i].UpstreamMaxOutputTokens = cfg.UpstreamMaxOutputTokens
+			cfg.Providers[i].UpstreamMaxOutputTokenRules = append([]ScopedIntRule(nil), cfg.UpstreamMaxOutputTokenRules...)
+		}
+		if !cfg.Providers[i].ForceUpstreamMaxOutputTokensSet {
+			cfg.Providers[i].ForceUpstreamMaxOutputTokens = cfg.ForceUpstreamMaxOutputTokens
+		}
+	}
 }
 
 func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []string, map[string]string, []string, error) {
@@ -375,6 +391,12 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateRootModelMap(values, "V1_MODEL_MAP"); err != nil {
+		return err
+	}
+	if err := validateRootUpstreamMaxOutputTokens(values, "UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
 		return err
 	}
 	return nil
