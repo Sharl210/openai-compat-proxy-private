@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/testutil"
 )
 
 var responseCreatedIDPattern = regexp.MustCompile(`event: response\.created\s+data: \{"response":\{"id":"([^"]+)"[^}]*\}`)
@@ -1426,6 +1427,125 @@ func TestResponsesRouteMapsExplicitReasoningEffortToAnthropicThinkingWhenEnabled
 	}
 	if !strings.Contains(gotBody, `"output_config":{"effort":"high"}`) {
 		t.Fatalf("expected explicit responses reasoning.effort to map into anthropic output_config effort, got %s", gotBody)
+	}
+}
+
+func TestChatRouteKeepsUpstreamReasoningVisibleWhenAnthropicMappingDisabled(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_passthrough_1","type":"message","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true, EnableReasoningEffortSuffix: true, MapReasoningSuffixToAnthropicThinking: false}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":128,"reasoning_effort":"high","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"high","summary":"auto"}`) {
+		t.Fatalf("expected disabled mapping to keep reasoning visible in anthropic upstream payload, got %s", gotBody)
+	}
+	if strings.Contains(gotBody, `"thinking":`) || strings.Contains(gotBody, `"output_config":`) {
+		t.Fatalf("expected disabled mapping not to synthesize anthropic thinking fields, got %s", gotBody)
+	}
+}
+
+func TestResponsesRouteKeepsUpstreamReasoningVisibleWhenAnthropicMappingDisabled(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_passthrough_2","type":"message","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true, EnableReasoningEffortSuffix: true, MapReasoningSuffixToAnthropicThinking: false}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-opus-4-6","max_output_tokens":128,"reasoning":{"effort":"high"},"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"high","summary":"auto"}`) {
+		t.Fatalf("expected disabled mapping to keep responses reasoning visible in anthropic upstream payload, got %s", gotBody)
+	}
+	if strings.Contains(gotBody, `"thinking":`) || strings.Contains(gotBody, `"output_config":`) {
+		t.Fatalf("expected disabled mapping not to synthesize anthropic thinking fields, got %s", gotBody)
+	}
+}
+
+func TestChatNonStreamPreservesContextLengthExceededFromUpstreamFailure(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: error\n" +
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\",\"param\":\"input\"},\"sequence_number\":2}\n\n",
+		"event: response.failed\n" +
+			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\",\"param\":\"input\",\"type\":\"invalid_request_error\"}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", SupportsChat: true, SupportsResponses: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `context_length_exceeded`) || !strings.Contains(body, `Your input exceeds the context window of this model`) {
+		t.Fatalf("expected non-stream chat path to preserve upstream context overflow details, got %s", body)
+	}
+	if strings.Contains(body, `invalid_upstream_stream`) {
+		t.Fatalf("expected non-stream chat path not to degrade into invalid_upstream_stream, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"proxy_error"`) {
+		t.Fatalf("expected proxy-stable error envelope in non-stream chat path, got %s", body)
+	}
+}
+
+func TestMessagesNonStreamPreservesContextLengthExceededFromUpstreamFailure(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: error\n" +
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\",\"param\":\"input\"},\"sequence_number\":2}\n\n",
+		"event: response.failed\n" +
+			"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\",\"param\":\"input\",\"type\":\"invalid_request_error\"}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", SupportsAnthropicMessages: true, SupportsResponses: true}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `context_length_exceeded`) || !strings.Contains(body, `Your input exceeds the context window of this model`) {
+		t.Fatalf("expected non-stream messages path to preserve upstream context overflow details, got %s", body)
+	}
+	if strings.Contains(body, `invalid_upstream_stream`) {
+		t.Fatalf("expected non-stream messages path not to degrade into invalid_upstream_stream, got %s", body)
+	}
+	if !strings.Contains(body, `"type":"proxy_error"`) {
+		t.Fatalf("expected proxy-stable error envelope in non-stream messages path, got %s", body)
 	}
 }
 
