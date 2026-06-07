@@ -128,6 +128,15 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 			cfg.DownstreamNonStreamStrategy = normalized
 		}
 	}
+	if value, ok := lookup("UPSTREAM_MAX_OUTPUT_TOKENS"); ok && value != "" {
+		if parsed, rules, err := parseScopedUpstreamMaxOutputTokens(value, "UPSTREAM_MAX_OUTPUT_TOKENS", "root env UPSTREAM_MAX_OUTPUT_TOKENS"); err == nil {
+			cfg.UpstreamMaxOutputTokens = parsed
+			cfg.UpstreamMaxOutputTokenRules = rules
+		}
+	}
+	if value, ok := lookup("FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); ok && value != "" {
+		cfg.ForceUpstreamMaxOutputTokens = parseRootBool(value)
+	}
 	if value, ok := lookup("LOG_ENABLE"); ok && value != "" {
 		cfg.LogEnable = parseRootBool(value)
 	}
@@ -207,6 +216,12 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateRootModelMap(values, "V1_MODEL_MAP"); err != nil {
+		return err
+	}
+	if err := validateRootUpstreamMaxOutputTokens(values, "UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
 		return err
 	}
 	if err := validateStrictBool(values, "ENABLE_LEGACY_V1_ROUTES"); err != nil {
@@ -306,12 +321,33 @@ func validateRootModelMap(values map[string]string, key string) error {
 	return err
 }
 
+func validateRootUpstreamMaxOutputTokens(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	_, _, err := parseScopedUpstreamMaxOutputTokens(value, key, "root env "+key)
+	return err
+}
+
 func modelMapEntriesEqual(a, b []ModelMapEntry) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
 		if a[i].Key != b[i].Key || a[i].Target != b[i].Target {
+			return false
+		}
+	}
+	return true
+}
+
+func scopedIntRulesEqual(a, b []ScopedIntRule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Pattern != b[i].Pattern || a[i].Tokens != b[i].Tokens || a[i].IsExact != b[i].IsExact {
 			return false
 		}
 	}
@@ -495,6 +531,9 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.ProvidersDir == other.ProvidersDir &&
 		c.DefaultProvider == other.DefaultProvider &&
 		modelMapEntriesEqual(c.V1ModelMap, other.V1ModelMap) &&
+		c.UpstreamMaxOutputTokens == other.UpstreamMaxOutputTokens &&
+		scopedIntRulesEqual(c.UpstreamMaxOutputTokenRules, other.UpstreamMaxOutputTokenRules) &&
+		c.ForceUpstreamMaxOutputTokens == other.ForceUpstreamMaxOutputTokens &&
 		c.EnableDefaultProviderModelTags == other.EnableDefaultProviderModelTags &&
 		c.EnableAllDefaultProviderModelTags == other.EnableAllDefaultProviderModelTags &&
 		c.EnableNoPromptModelSuffix == other.EnableNoPromptModelSuffix &&

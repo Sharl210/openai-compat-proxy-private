@@ -114,10 +114,51 @@ func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
 	}
 }
 
+func TestLoadFromValuesParsesRootUpstreamMaxOutputTokens(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"UPSTREAM_MAX_OUTPUT_TOKENS":       "64000,gpt-5.5:128000,#re:.*gpt-.*:100000",
+		"FORCE_UPSTREAM_MAX_OUTPUT_TOKENS": "true",
+	})
+
+	if cfg.UpstreamMaxOutputTokens != 64000 {
+		t.Fatalf("expected root upstream max output tokens 64000, got %d", cfg.UpstreamMaxOutputTokens)
+	}
+	if len(cfg.UpstreamMaxOutputTokenRules) != 2 {
+		t.Fatalf("expected 2 root scoped max output rules, got %#v", cfg.UpstreamMaxOutputTokenRules)
+	}
+	if cfg.UpstreamMaxOutputTokenRules[0].Pattern != "gpt-5.5" || cfg.UpstreamMaxOutputTokenRules[0].Tokens != 128000 {
+		t.Fatalf("expected exact root token rule first, got %#v", cfg.UpstreamMaxOutputTokenRules)
+	}
+	if cfg.UpstreamMaxOutputTokenRules[1].Pattern != "#re:.*gpt-.*" || cfg.UpstreamMaxOutputTokenRules[1].Tokens != 100000 {
+		t.Fatalf("expected regex root token rule second, got %#v", cfg.UpstreamMaxOutputTokenRules)
+	}
+	if !cfg.ForceUpstreamMaxOutputTokens {
+		t.Fatalf("expected root force upstream max output tokens to be true")
+	}
+}
+
 func TestValidateRootEnvValuesRejectsInvalidV1ModelMap(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"V1_MODEL_MAP": "missing-target:"})
 	if err == nil {
 		t.Fatalf("expected invalid V1_MODEL_MAP to fail validation")
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidRootUpstreamMaxOutputTokens(t *testing.T) {
+	for _, value := range []string{"0", "-2", "bad"} {
+		t.Run(value, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{"UPSTREAM_MAX_OUTPUT_TOKENS": value})
+			if err == nil {
+				t.Fatalf("expected invalid UPSTREAM_MAX_OUTPUT_TOKENS=%q to fail validation", value)
+			}
+		})
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidRootForceUpstreamMaxOutputTokens(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"FORCE_UPSTREAM_MAX_OUTPUT_TOKENS": "maybe"})
+	if err == nil {
+		t.Fatalf("expected invalid FORCE_UPSTREAM_MAX_OUTPUT_TOKENS to fail validation")
 	}
 }
 
