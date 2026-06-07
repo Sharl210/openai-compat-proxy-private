@@ -397,15 +397,17 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - `Fast` 模式对应的就是 `priority`
 - 写成非法值时，provider 配置会直接校验失败，不会静默回退
 
-### 3.6 provider 级输出上限
+### 3.6 根级 / provider 级输出上限
 
-每个 provider 可通过 `UPSTREAM_MAX_OUTPUT_TOKENS` 设置发往上游的默认最大输出 token 数：
+根 `.env` 可通过 `UPSTREAM_MAX_OUTPUT_TOKENS` 设置所有 provider 的默认最大输出 token 数；provider `.env` 里的同名字段留空或不写时继承根配置，显式设置时覆盖根配置：
 
-- 留空：代理不设置 provider 默认值，继续使用客户端请求里的 `max_tokens` / `max_output_tokens`，或协议构造层自己的默认值
+- 根级留空且 provider 也留空：代理不设置默认值，继续使用客户端请求里的 `max_tokens` / `max_output_tokens`，或协议构造层自己的默认值
+- provider 留空：继承根级 `UPSTREAM_MAX_OUTPUT_TOKENS`
+- provider 显式设置：覆盖根级默认值
 - 单个正整数：当客户端没有携带输出上限时，代理自动补这个值
 - 默认值 + scoped 覆写：支持写成 `64000,gpt-5.5:128000,#re:.*gpt-.*:100000`
 - `-1`：客户端没有携带输出上限时，代理会主动省略最大输出 token 字段；如果强制开关开启，也会忽略客户端传值并省略该字段
-- `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用 provider 配置值；配置值为 `-1` 时表示强制不携带该字段
+- `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要最终继承或覆盖后的 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用配置值；配置值为 `-1` 时表示强制不携带该字段
 
 scoped 覆写的匹配规则：
 
@@ -414,7 +416,7 @@ scoped 覆写的匹配规则：
 - 没有任何 scoped 规则命中时，回落到默认值
 - 如果只写 scoped 规则、不写默认值，则未命中任何规则时视为“不设置 provider 默认值”
 
-这两个字段支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，provider 配置会直接校验失败。
+这两个字段在根 `.env` 和 provider `.env` 中都支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，新配置会直接校验失败并保留当前已生效配置。
 
 ### 4. 模型映射与 reasoning suffix
 
@@ -554,6 +556,7 @@ Claude 相关还有两个配套开关：
 |---|---|---|
 | 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`V1_MODEL_MAP`、`ENABLE_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_NOPROMPT_MODEL_SUFFIX`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
 | 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
+| 上游输出上限 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` | ✅ |
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
 | 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`、`OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` | ❌ 修改后需重启 |
@@ -579,10 +582,10 @@ Claude 相关还有两个配套开关：
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、`ENABLE_NOPROMPT_MODEL_SUFFIX` | 注入与模型能力；provider 级 noprompt 留空继承根配置 |
 | 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
 | OpenAI 服务层级 | `OPENAI_SERVICE_TIER` | 仅 OpenAI `responses/chat` 上游生效；留空时沿用下游传参，非空时强制覆写 |
-| 输出上限 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` | 未传输出上限时补 provider 默认值；强制开关开启后覆盖客户端值 |
+| 输出上限 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` | 留空继承根配置；显式设置后覆盖根配置 |
 | 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
 
-补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；而 provider 级 Claude 注入开关留空则表示继承根配置。
+补充：`PROXY_API_KEY_OVERRIDE=empty` 表示这个 provider 的显式分组路由不做代理鉴权；provider 级 Claude 注入开关和输出上限字段留空都表示继承根配置。
 
 ---
 
