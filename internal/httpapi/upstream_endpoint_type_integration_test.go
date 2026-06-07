@@ -1944,6 +1944,48 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	}
 }
 
+func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		upstreamBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"}]},
+			{"type":"function_call","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if strings.Contains(upstreamBody, "代理层占位") || strings.Contains(upstreamBody, `"id":"rs_proxy"`) {
+		t.Fatalf("expected synthetic rs_proxy reasoning to stay out of anthropic upstream payload, got %s", upstreamBody)
+	}
+	if strings.Contains(upstreamBody, `"type":"thinking"`) {
+		t.Fatalf("expected synthetic rs_proxy reasoning not to become anthropic thinking content, got %s", upstreamBody)
+	}
+	if !strings.Contains(upstreamBody, `"type":"tool_use"`) || !strings.Contains(upstreamBody, `"id":"call_1"`) {
+		t.Fatalf("expected function_call to remain as anthropic tool_use, got %s", upstreamBody)
+	}
+	if !strings.Contains(upstreamBody, `"type":"tool_result"`) || !strings.Contains(upstreamBody, `"tool_use_id":"call_1"`) {
+		t.Fatalf("expected function_call_output to remain as anthropic tool_result, got %s", upstreamBody)
+	}
+}
+
 func TestResponsesRouteRestoresAnthropicThinkingBlocksAcrossMultipleToolFollowUps(t *testing.T) {
 	requestCount := 0
 	var secondBody string

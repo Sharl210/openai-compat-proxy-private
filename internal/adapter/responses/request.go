@@ -189,6 +189,9 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 	}
 	itemType, _ := rawMap["type"].(string)
 	if itemType == "reasoning" {
+		if isSyntheticResponsesReasoningInputItem(rawMap) {
+			return nil, model.CanonicalMessage{}, false, nil
+		}
 		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, nil
 	}
 	if itemType == "function_call_output" {
@@ -314,6 +317,20 @@ func extractInstructionTextFromInputItem(item map[string]any) string {
 		return ""
 	}
 	return strings.TrimSpace(extractTextFromResponsesContent(item["content"]))
+}
+
+func isSyntheticResponsesReasoningInputItem(item map[string]any) bool {
+	if stringMapValue(item, "id") == "rs_proxy" {
+		return true
+	}
+	summary, _ := item["summary"].([]any)
+	for _, raw := range summary {
+		entry, _ := raw.(map[string]any)
+		if strings.Contains(strings.TrimSpace(stringMapValue(entry, "text")), "代理层占位") {
+			return true
+		}
+	}
+	return false
 }
 
 func extractTextFromResponsesContent(content any) string {
