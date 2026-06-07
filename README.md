@@ -444,7 +444,7 @@ scoped 覆写的匹配规则：
 - `$0-$9` 占位符替换（仅对 `#re:` 的 Go regexp 子匹配有捕获意义；`$10` 及以上保留字面值以避免歧义）
 - `MANUAL_MODELS` 手动补模型，也支持从上游 `/models` 列表按 `#re:` 正则匹配扩展，或用 `#reason_suffix:model` 单独生成推理后缀家族
 - `HIDDEN_MODELS` 手动隐藏模型（支持 `#re:` 正则）
-- `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-none/-minimal/-low/-medium/-high/-xhigh`
+- `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-none/-minimal/-low/-medium/-high/-xhigh/-max`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
 - `ENABLE_NOPROMPT_MODEL_SUFFIX=true` 后解析 `-noprompt` 代理层标记，用来跳过 provider prompt 注入
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix 或请求体里解析出的 effort 自动映射到 Anthropic thinking
@@ -457,7 +457,8 @@ scoped 覆写的匹配规则：
 - `ENABLE_REASONING_EFFORT_SUFFIX`：只控制客户端能不能用 `model-high` 这类模型名后缀表达推理强度；它不限制 `MODEL_MAP` source/target 里的配置层 suffix，也不限制请求体里显式传入的 reasoning effort。
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
 - `ENABLE_NOPROMPT_MODEL_SUFFIX`：允许像 `model-noprompt`、`model-low-noprompt` 这样的请求跳过 provider 级 `SYSTEM_PROMPT_FILES` 注入；根级默认开启，provider 级同名字段留空时继承根配置，显式 `true/false` 时覆盖根配置；`-noprompt` 会先从模型名剥离，不会出现在上游模型名里，也不会自动额外出现在 `/models` 列表里，除非你在 `MANUAL_MODELS` 里把这个字面模型写出来
-- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 自动翻译成 `thinking` / `output_config`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。
+- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 自动翻译成 `thinking` / `output_config`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。内部档位是 `none/minimal/low/medium/high/xhigh/max`：`none` 关闭 thinking；旧式 manual thinking 会按 `ANTHROPIC_MAX_THINKING_BUDGET` 动态分配预算，并被 `max_tokens - 1` 夹紧；Claude adaptive thinking 原生支持 `max`，所以 `max` 会保留为 `output_config.effort=max`，而发往 OpenAI 风格上游时会降级成 `xhigh`。
+- `ANTHROPIC_MAX_THINKING_BUDGET`：控制 manual Anthropic `thinking.budget_tokens` 的最高预算，根级默认 `32000`，provider 留空继承、显式设置覆盖。Anthropic 官方只约束 `budget_tokens >= 1024` 且普通 manual thinking 下必须小于 `max_tokens`，没有公布全局独立最大值；`32000` 是通用工程默认值，不是官方 hard cap。举例：默认 32000 时，`minimal/low/medium/high/xhigh/max` 的 manual 预算分别约为 `2000/4000/8000/16000/32000/32000`，如果请求 `max_tokens=12000`，最终预算会被夹到 `11999`。
 
 当前实现里，**请求准入会遵循代理实际对外返回的 `/models` 列表**：
 
@@ -479,7 +480,7 @@ scoped 覆写的匹配规则：
 
 - `/v1/responses` 请求体 `reasoning.effort`
 - `/v1/chat/completions` 请求体 `reasoning_effort` 或 `reasoning.effort`
-- 模型名 suffix：`-none / -minimal / -low / -medium / -high / -xhigh`
+- 模型名 suffix：`-none / -minimal / -low / -medium / -high / -xhigh / -max`
 - `/v1/messages` 请求体 `thinking` 直传
 
 ### 5. provider 级系统提示词
@@ -577,7 +578,7 @@ Claude 相关还有两个配套开关：
 |---|---|---|
 | 路由与鉴权 | `PROXY_API_KEY`、`DEFAULT_PROVIDER`、`V1_MODEL_MAP`、`ENABLE_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_ALL_DEFAULT_PROVIDER_MODEL_TAGS`、`ENABLE_NOPROMPT_MODEL_SUFFIX`、`ENABLE_LEGACY_V1_ROUTES` | ✅ |
 | 下游策略与超时 | `DOWNSTREAM_NON_STREAM_STRATEGY`、`CONNECT_TIMEOUT`、`FIRST_BYTE_TIMEOUT`、`IDLE_TIMEOUT`、`TOTAL_TIMEOUT` | ✅ |
-| 输出与上下文限制 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS`、`MODEL_LIMIT_CONTEXT_TOKENS` | ✅ |
+| 输出、上下文与 Anthropic thinking 预算 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS`、`MODEL_LIMIT_CONTEXT_TOKENS`、`ANTHROPIC_MAX_THINKING_BUDGET` | ✅ |
 | 上游伪装相关 | `UPSTREAM_USER_AGENT`、`UPSTREAM_MASQUERADE_TARGET`、`UPSTREAM_INJECT_METADATA_USER_ID`、`UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT` | ✅ |
 | provider 目录 | `PROVIDERS_DIR` | ⚠️ 部分；provider 监听会切换，但 Cache_Info 落盘目录需重启 |
 | 启动期字段 | `LISTEN_ADDR`、`CACHE_INFO_TIMEZONE`、`LOG_*`、`OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`、`OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` | ❌ 修改后需重启 |
@@ -597,11 +598,11 @@ Claude 相关还有两个配套开关：
 | 字段组 | 例子 | 说明 |
 |---|---|---|
 | 上游连接 | `UPSTREAM_BASE_URL`、`UPSTREAM_API_KEY`、`UPSTREAM_ENDPOINT_TYPE` | 当前 provider 如何连上游 |
-| Anthropic / thinking | `ANTHROPIC_VERSION`、`UPSTREAM_THINKING_TAG_STYLE`、`UPSTREAM_XML_TOOL_CALL_STYLE` | Anthropic 上游版本、chat 上游 thinking 标签策略与 XML 工具调用兼容 |
+| Anthropic / thinking | `ANTHROPIC_VERSION`、`ANTHROPIC_MAX_THINKING_BUDGET`、`UPSTREAM_THINKING_TAG_STYLE`、`UPSTREAM_XML_TOOL_CALL_STYLE` | Anthropic 上游版本、manual thinking 预算上限、chat 上游 thinking 标签策略与 XML 工具调用兼容 |
 | 能力开关 | `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES` | 控制公开端口是否开放 |
 | 非流 / timeout / retry | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`、`UPSTREAM_FIRST_BYTE_TIMEOUT`、`UPSTREAM_RETRY_COUNT`、`UPSTREAM_RETRY_DELAY` | provider 级运行时策略 |
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、`ENABLE_NOPROMPT_MODEL_SUFFIX` | 注入与模型能力；provider 级 noprompt 留空继承根配置 |
-| 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关 |
+| 推理强度 | `ENABLE_REASONING_EFFORT_SUFFIX`、`EXPOSE_REASONING_SUFFIX_MODELS`、`MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING` | suffix / thinking 相关，包含 `max` 档互转 |
 | OpenAI 服务层级 | `OPENAI_SERVICE_TIER` | 仅 OpenAI `responses/chat` 上游生效；留空时沿用下游传参，非空时强制覆写 |
 | 输出与上下文限制 | `UPSTREAM_MAX_OUTPUT_TOKENS`、`FORCE_UPSTREAM_MAX_OUTPUT_TOKENS`、`MODEL_LIMIT_CONTEXT_TOKENS` | 留空继承根配置；显式设置后覆盖根配置 |
 | 鉴权与伪装 | `PROXY_API_KEY_OVERRIDE`、`UPSTREAM_USER_AGENT`、`MASQUERADE_TARGET`、`INJECT_CLAUDE_CODE_*` | provider 级覆写 |
