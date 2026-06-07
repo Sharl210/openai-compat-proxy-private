@@ -2065,7 +2065,7 @@ func TestResponseUsesAnthropicEndpointAddsContextManagementBetaHeader(t *testing
 	}
 }
 
-func TestStreamUsesAnthropicEndpointAddsAutoClearThinkingBetaHeader(t *testing.T) {
+func TestStreamUsesAnthropicEndpointAvoidsAutoContextManagementBetaHeader(t *testing.T) {
 	var gotBeta string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBeta = r.Header.Get("anthropic-beta")
@@ -2091,12 +2091,12 @@ func TestStreamUsesAnthropicEndpointAddsAutoClearThinkingBetaHeader(t *testing.T
 	if err != nil {
 		t.Fatalf("Stream error: %v", err)
 	}
-	if !strings.Contains(gotBeta, anthropicBetaContextManagement20250627) {
-		t.Fatalf("expected auto clear_thinking fallback to enable anthropic context-management beta header, got %q", gotBeta)
+	if gotBeta != "" {
+		t.Fatalf("expected automatic thinking disable fallback to avoid anthropic context-management beta header, got %q", gotBeta)
 	}
 }
 
-func TestResponseUsesAnthropicEndpointAddsAutoClearThinkingBetaHeader(t *testing.T) {
+func TestResponseUsesAnthropicEndpointAvoidsAutoContextManagementBetaHeader(t *testing.T) {
 	var gotBeta string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBeta = r.Header.Get("anthropic-beta")
@@ -2121,8 +2121,8 @@ func TestResponseUsesAnthropicEndpointAddsAutoClearThinkingBetaHeader(t *testing
 	if err != nil {
 		t.Fatalf("Response error: %v", err)
 	}
-	if !strings.Contains(gotBeta, anthropicBetaContextManagement20250627) {
-		t.Fatalf("expected auto clear_thinking fallback to enable anthropic context-management beta header, got %q", gotBeta)
+	if gotBeta != "" {
+		t.Fatalf("expected automatic thinking disable fallback to avoid anthropic context-management beta header, got %q", gotBeta)
 	}
 }
 
@@ -2785,7 +2785,7 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 	}
 }
 
-func TestBuildAnthropicRequestBodyAddsClearThinkingWhenAssistantToolHistoryLacksThinkingBlocks(t *testing.T) {
+func TestBuildAnthropicRequestBodyDisablesThinkingWhenAssistantToolHistoryLacksThinkingBlocks(t *testing.T) {
 	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
 		Model:           "claude-sonnet-4-5",
 		MaxOutputTokens: intPtrForClientTest(128),
@@ -2806,23 +2806,15 @@ func TestBuildAnthropicRequestBodyAddsClearThinkingWhenAssistantToolHistoryLacks
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	contextManagement, _ := payload["context_management"].(map[string]any)
-	if len(contextManagement) == 0 {
-		t.Fatalf("expected anthropic thinking follow-up with incomplete assistant tool history to add context_management clear_thinking, got %#v", payload)
-	}
-	edits, _ := contextManagement["edits"].([]any)
-	if len(edits) == 0 {
-		t.Fatalf("expected clear_thinking edit, got %#v", contextManagement)
-	}
-	edit, _ := edits[0].(map[string]any)
-	if got, _ := edit["type"].(string); got != "clear_thinking_20251015" {
-		t.Fatalf("expected clear_thinking_20251015 edit, got %#v", contextManagement)
+	thinking, _ := payload["thinking"].(map[string]any)
+	if got, _ := thinking["type"].(string); got != "disabled" {
+		t.Fatalf("expected anthropic payload to disable thinking when assistant tool history lacks thinking blocks, got %#v", payload)
 	}
 	if _, exists := payload["summary"]; exists {
-		t.Fatalf("expected anthropic payload to drop top-level summary after clear_thinking fallback, got %#v", payload)
+		t.Fatalf("expected anthropic payload to drop top-level summary after disabling thinking fallback, got %#v", payload)
 	}
-	if _, exists := payload["thinking"]; exists {
-		t.Fatalf("expected anthropic payload to avoid explicit thinking config after clear_thinking fallback, got %#v", payload)
+	if _, exists := payload["context_management"]; exists {
+		t.Fatalf("expected anthropic payload to avoid unsupported automatic context_management fallback, got %#v", payload)
 	}
 }
 

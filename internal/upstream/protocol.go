@@ -204,14 +204,16 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 }
 
 func ensureAnthropicThinkingHistoryCompatibility(req *model.CanonicalRequest) {
-	if req == nil || req.Reasoning == nil {
+	if req == nil {
 		return
 	}
-	if len(req.Reasoning.Raw) > 0 && anthropicThinkingDisabled(req.Reasoning.Raw) {
-		return
-	}
-	if strings.EqualFold(strings.TrimSpace(req.Reasoning.Effort), "none") {
-		return
+	if req.Reasoning != nil {
+		if len(req.Reasoning.Raw) > 0 && anthropicThinkingDisabled(req.Reasoning.Raw) {
+			return
+		}
+		if strings.EqualFold(strings.TrimSpace(req.Reasoning.Effort), "none") {
+			return
+		}
 	}
 	hasAssistantToolHistory := false
 	hasAssistantThinkingBlocks := false
@@ -229,33 +231,12 @@ func ensureAnthropicThinkingHistoryCompatibility(req *model.CanonicalRequest) {
 	if !hasAssistantToolHistory || hasAssistantThinkingBlocks {
 		return
 	}
+	if req.Reasoning == nil {
+		req.Reasoning = &model.CanonicalReasoning{}
+	}
 	req.Reasoning.Effort = ""
 	req.Reasoning.Summary = ""
-	req.Reasoning.Raw = nil
-	if req.PreservedTopLevelFields == nil {
-		req.PreservedTopLevelFields = map[string]any{}
-	}
-	raw, ok := req.PreservedTopLevelFields["context_management"]
-	if !ok {
-		req.PreservedTopLevelFields["context_management"] = map[string]any{"edits": []any{map[string]any{"type": "clear_thinking_20251015"}}}
-		return
-	}
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return
-	}
-	edits, ok := obj["edits"].([]any)
-	if !ok {
-		obj["edits"] = []any{map[string]any{"type": "clear_thinking_20251015"}}
-		return
-	}
-	for _, rawEdit := range edits {
-		edit, _ := rawEdit.(map[string]any)
-		if stringValue(edit["type"]) == "clear_thinking_20251015" {
-			return
-		}
-	}
-	obj["edits"] = append(edits, map[string]any{"type": "clear_thinking_20251015"})
+	req.Reasoning.Raw = map[string]any{"thinking": map[string]any{"type": "disabled"}}
 }
 
 func validateRequestForEndpoint(req model.CanonicalRequest, endpointType string) error {
