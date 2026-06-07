@@ -91,6 +91,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
+		if writeContextLimitExceededIfNeeded(w, provider, clientModel, canon, clientReasoningProtocolMessages) {
+			return
+		}
 		canon.RequestID = requestID
 		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType)
 		ctx := r.Context()
