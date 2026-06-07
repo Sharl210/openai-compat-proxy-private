@@ -6,45 +6,47 @@ import (
 )
 
 func BuildResponse(result aggregate.Result) map[string]any {
-	suppressUpstreamReasoning := false
-	if source, _ := result.Reasoning[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
-		suppressUpstreamReasoning = true
-	}
 	var output []map[string]any
 	if len(result.ResponseOutputItems) > 0 {
-		output = append(output, filterResponseOutputItems(result.ResponseOutputItems, result.Reasoning)...)
+		output = append(output, filterResponseOutputItems(result.ResponseOutputItems)...)
 	}
-	if len(output) == 0 {
-		content := result.ResponseMessageContent
-		if len(content) == 0 && (result.Text != "" || (len(result.ToolCalls) == 0 && !suppressUpstreamReasoning)) {
-			content = []map[string]any{{
-				"type": "output_text",
-				"text": result.Text,
-			}}
+	content := result.ResponseMessageContent
+	if len(content) == 0 && result.Text != "" {
+		content = []map[string]any{{
+			"type": "output_text",
+			"text": result.Text,
+		}}
+	} else if len(content) == 0 && len(output) == 0 && len(result.ToolCalls) == 0 {
+		content = []map[string]any{{
+			"type": "output_text",
+			"text": result.Text,
+		}}
+	}
+	if len(content) > 0 && !hasResponsesOutputItemType(output, "message") {
+		output = append(output, map[string]any{
+			"id":      buildOutputItemID(result),
+			"type":    "message",
+			"status":  "completed",
+			"role":    "assistant",
+			"content": content,
+		})
+	}
+	for _, call := range result.ToolCalls {
+		if hasResponsesFunctionCall(output, call) {
+			continue
 		}
-		if len(content) > 0 {
-			output = append(output, map[string]any{
-				"id":      buildOutputItemID(result),
-				"type":    "message",
-				"status":  "completed",
-				"role":    "assistant",
-				"content": content,
-			})
+		item := map[string]any{
+			"id":        call.ID,
+			"type":      "function_call",
+			"status":    "completed",
+			"call_id":   call.CallID,
+			"name":      call.Name,
+			"arguments": call.Arguments,
 		}
-		for _, call := range result.ToolCalls {
-			item := map[string]any{
-				"id":        call.ID,
-				"type":      "function_call",
-				"status":    "completed",
-				"call_id":   call.CallID,
-				"name":      call.Name,
-				"arguments": call.Arguments,
-			}
-			if parsed := parseToolParameters(call.Arguments); len(parsed) > 0 {
-				item["parameters"] = parsed
-			}
-			output = append(output, item)
+		if parsed := parseToolParameters(call.Arguments); len(parsed) > 0 {
+			item["parameters"] = parsed
 		}
+		output = append(output, item)
 	}
 
 	response := map[string]any{
@@ -66,9 +68,6 @@ func outwardReasoning(reasoning map[string]any) map[string]any {
 	if len(reasoning) == 0 {
 		return nil
 	}
-	if source, _ := reasoning[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
-		return nil
-	}
 	cloned := cloneMap(reasoning)
 	delete(cloned, aggregate.InternalReasoningSourceKey)
 	if len(cloned) == 0 {
@@ -77,26 +76,36 @@ func outwardReasoning(reasoning map[string]any) map[string]any {
 	return cloned
 }
 
-func filterResponseOutputItems(items []map[string]any, reasoning map[string]any) []map[string]any {
+func filterResponseOutputItems(items []map[string]any) []map[string]any {
 	if len(items) == 0 {
 		return nil
 	}
-	filterUpstreamReasoning := false
-	if source, _ := reasoning[aggregate.InternalReasoningSourceKey].(string); source == aggregate.ReasoningSourceUpstream {
-		filterUpstreamReasoning = true
-	}
 	cloned := cloneOutputItems(items)
-	if !filterUpstreamReasoning {
-		return cloned
+	return cloned
+}
+
+func hasResponsesOutputItemType(items []map[string]any, itemType string) bool {
+	for _, item := range items {
+		if stringValue(item["type"]) == itemType {
+			return true
+		}
 	}
-	filtered := make([]map[string]any, 0, len(cloned))
-	for _, item := range cloned {
-		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+	return false
+}
+
+func hasResponsesFunctionCall(items []map[string]any, call aggregate.ToolCall) bool {
+	for _, item := range items {
+		if stringValue(item["type"]) != "function_call" {
 			continue
 		}
-		filtered = append(filtered, item)
+		if call.ID != "" && stringValue(item["id"]) == call.ID {
+			return true
+		}
+		if call.CallID != "" && stringValue(item["call_id"]) == call.CallID {
+			return true
+		}
 	}
-	return filtered
+	return false
 }
 
 func responsesStatus(result aggregate.Result) string {
