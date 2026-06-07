@@ -192,6 +192,11 @@ func handleAnthropicMessages() http.HandlerFunc {
 		}
 		result, err := collector.Result()
 		if err != nil {
+			var terminalFailure *aggregate.TerminalFailureError
+			if errors.As(err, &terminalFailure) {
+				writeTerminalFailureError(w, terminalFailure)
+				return
+			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
 			return
 		}

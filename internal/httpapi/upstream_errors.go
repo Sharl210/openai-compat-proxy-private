@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -34,6 +35,53 @@ func writeRequestValidationError(w http.ResponseWriter, err error) bool {
 	}
 	errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", validationErr.Error())
 	return true
+}
+
+func writeTerminalFailureError(w http.ResponseWriter, terminalFailure *aggregate.TerminalFailureError) bool {
+	if terminalFailure == nil {
+		return false
+	}
+	if isContextLengthExceededTerminalFailure(terminalFailure) {
+		writeProxyContextOverflowFromTerminalFailure(w, terminalFailure)
+		return true
+	}
+	statusCode := http.StatusBadGateway
+	if terminalFailure.HealthFlag == "upstream_timeout" {
+		statusCode = http.StatusGatewayTimeout
+	}
+	errorsx.WriteJSON(w, statusCode, terminalFailure.HealthFlag, terminalFailure.Message)
+	return true
+}
+
+func isContextLengthExceededTerminalFailure(terminalFailure *aggregate.TerminalFailureError) bool {
+	if terminalFailure == nil {
+		return false
+	}
+	if terminalFailure.HealthFlag == "context_length_exceeded" {
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(terminalFailure.Message))
+	if strings.Contains(message, "context_length_exceeded") || strings.Contains(message, "context window") || strings.Contains(message, "prompt is too long") || strings.Contains(message, "maximum context length") {
+		return true
+	}
+	if len(terminalFailure.UpstreamError) == 0 {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(stringValue(terminalFailure.UpstreamError["code"])))
+	msg := strings.ToLower(strings.TrimSpace(stringValue(terminalFailure.UpstreamError["message"])))
+	return code == "context_length_exceeded" || strings.Contains(msg, "context window") || strings.Contains(msg, "prompt is too long") || strings.Contains(msg, "maximum context length")
+}
+
+func writeProxyContextOverflowFromTerminalFailure(w http.ResponseWriter, terminalFailure *aggregate.TerminalFailureError) {
+	message := contextOverflowMessage
+	if terminalFailure != nil {
+		if upstreamMessage := strings.TrimSpace(stringValue(terminalFailure.UpstreamError["message"])); upstreamMessage != "" {
+			message = upstreamMessage
+		} else if text := strings.TrimSpace(terminalFailure.Message); text != "" {
+			message = text
+		}
+	}
+	errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", message)
 }
 
 func detectRawErrorContentType(body []byte) string {

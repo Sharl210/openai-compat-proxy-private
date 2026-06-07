@@ -31,8 +31,9 @@ type Result struct {
 }
 
 type TerminalFailureError struct {
-	HealthFlag string
-	Message    string
+	HealthFlag    string
+	Message       string
+	UpstreamError map[string]any
 }
 
 func (e *TerminalFailureError) Error() string {
@@ -207,13 +208,49 @@ func (c *Collector) Accept(evt upstream.Event) {
 	case "response.incomplete":
 		healthFlag, _ := evt.Data["health_flag"].(string)
 		message, _ := evt.Data["message"].(string)
+		var upstreamError map[string]any
+		if errObj, _ := evt.Data["error"].(map[string]any); len(errObj) > 0 {
+			upstreamError = cloneOutputItem(errObj)
+		} else if response, _ := evt.Data["response"].(map[string]any); len(response) > 0 {
+			if errObj, _ := response["error"].(map[string]any); len(errObj) > 0 {
+				upstreamError = cloneOutputItem(errObj)
+			}
+		}
 		if healthFlag == "" {
 			healthFlag = "upstreamStreamBroken"
 		}
 		if message == "" {
 			message = "upstream response incomplete"
 		}
-		c.terminalFailure = &TerminalFailureError{HealthFlag: healthFlag, Message: message}
+		c.terminalFailure = &TerminalFailureError{HealthFlag: healthFlag, Message: message, UpstreamError: upstreamError}
+		c.completed = true
+	case "error", "response.failed":
+		healthFlag, _ := evt.Data["health_flag"].(string)
+		message, _ := evt.Data["message"].(string)
+		var upstreamError map[string]any
+		if errObj, _ := evt.Data["error"].(map[string]any); len(errObj) > 0 {
+			upstreamError = cloneOutputItem(errObj)
+		} else if response, _ := evt.Data["response"].(map[string]any); len(response) > 0 {
+			if errObj, _ := response["error"].(map[string]any); len(errObj) > 0 {
+				upstreamError = cloneOutputItem(errObj)
+			}
+		}
+		if healthFlag == "" && len(upstreamError) > 0 {
+			healthFlag = stringValue(upstreamError["code"])
+			if healthFlag == "" {
+				healthFlag = stringValue(upstreamError["type"])
+			}
+		}
+		if message == "" && len(upstreamError) > 0 {
+			message = stringValue(upstreamError["message"])
+		}
+		if healthFlag == "" {
+			healthFlag = "upstreamStreamBroken"
+		}
+		if message == "" {
+			message = "upstream response incomplete"
+		}
+		c.terminalFailure = &TerminalFailureError{HealthFlag: healthFlag, Message: message, UpstreamError: upstreamError}
 		c.completed = true
 	case "response.reasoning.delta":
 		if c.reasoning == nil {

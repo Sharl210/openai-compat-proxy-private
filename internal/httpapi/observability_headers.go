@@ -23,6 +23,7 @@ const (
 	headerProxyModelLimitContextTokens       = "X-Proxy-Model-Limit-Context-Tokens"
 	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
 	headerProxyToUpstreamMaxOutputTokens     = "X-Proxy-To-Upstream-Max-Output-Tokens"
+	headerProxyToUpstreamReasoningEffort     = "X-Proxy-To-Upstream-Reasoning-Effort"
 	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
 )
 
@@ -140,6 +141,7 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	canon.Model = mappedModel
 	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+		canon.PassThroughRawReasoning = !provider.MapReasoningSuffixToAnthropicThinking
 		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking && canEnableAnthropicThinkingForMessages(canon.Messages), canon.Model, canon.MaxOutputTokens, providerCfg.AnthropicMaxThinkingBudget)
 	}
 }
@@ -262,31 +264,41 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, provider config.P
 		return err
 	}
 	setProviderSystemPromptAttachHeader(w, provider, canon)
-	if value := strings.TrimSpace(clientModel); value != "" {
-		w.Header().Set(headerClientToProxyModel, value)
-	}
+	w.Header().Set(headerClientToProxyModel, strings.TrimSpace(clientModel))
 	w.Header().Set(headerClientToProxyServiceTier, strings.TrimSpace(clientServiceTier))
-	if value := strings.TrimSpace(clientReasoningParameters); value != "" {
-		w.Header().Set(headerClientToProxyReasoningParameters, value)
-	}
-	if value := strings.TrimSpace(clientReasoningEffort); value != "" {
-		w.Header().Set(headerClientToProxyReasoningEffort, value)
-	}
+	w.Header().Set(headerClientToProxyReasoningParameters, strings.TrimSpace(clientReasoningParameters))
+	w.Header().Set(headerClientToProxyReasoningEffort, strings.TrimSpace(clientReasoningEffort))
 	if canon.SkipProviderSystemPrompt {
 		w.Header().Set(headerClientToProxyNoPrompt, "true")
+	} else {
+		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
-	if value := strings.TrimSpace(preview.UpstreamModel); value != "" {
-		w.Header().Set(headerProxyToUpstreamModel, value)
-	}
+	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
 	setProxyModelLimitContextHeader(w, provider, clientModel)
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {
 		w.Header().Set(headerProxyToUpstreamMaxOutputTokens, strconv.Itoa(*canon.MaxOutputTokens))
+	} else {
+		w.Header().Set(headerProxyToUpstreamMaxOutputTokens, "")
 	}
-	if value := strings.TrimSpace(preview.ReasoningParameters); value != "" {
-		w.Header().Set(headerProxyToUpstreamReasoningParameters, value)
-	}
+	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(canon, preview)))
+	w.Header().Set(headerProxyToUpstreamReasoningParameters, strings.TrimSpace(preview.ReasoningParameters))
 	return nil
+}
+
+func proxyToUpstreamReasoningEffort(canon modelpkg.CanonicalRequest, preview upstream.RequestObservabilityPreview) string {
+	if strings.TrimSpace(preview.ReasoningParameters) == "" {
+		return ""
+	}
+	if canon.Reasoning != nil {
+		if effort := strings.TrimSpace(canon.Reasoning.Effort); effort != "" {
+			return effort
+		}
+		if inferred := upstream.InferReasoningEffortFromAnthropicRaw(canon.Reasoning.Raw); inferred != "" {
+			return inferred
+		}
+	}
+	return ""
 }
 
 func setProviderSystemPromptAttachHeader(w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest) {
@@ -317,6 +329,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerProxyModelLimitContextTokens,
 		headerProxyToUpstreamServiceTier,
 		headerProxyToUpstreamMaxOutputTokens,
+		headerProxyToUpstreamReasoningEffort,
 		headerProxyToUpstreamReasoningParameters,
 	} {
 		w.Header().Del(header)

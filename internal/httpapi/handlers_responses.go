@@ -197,11 +197,7 @@ func handleResponses() http.HandlerFunc {
 		if err != nil {
 			var terminalFailure *aggregate.TerminalFailureError
 			if errors.As(err, &terminalFailure) {
-				statusCode := http.StatusBadGateway
-				if terminalFailure.HealthFlag == "upstream_timeout" {
-					statusCode = http.StatusGatewayTimeout
-				}
-				errorsx.WriteJSON(w, statusCode, terminalFailure.HealthFlag, terminalFailure.Message)
+				writeTerminalFailureError(w, terminalFailure)
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
