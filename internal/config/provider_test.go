@@ -71,12 +71,11 @@ func TestResolveModelAndEffortSupportsMinimalSuffix(t *testing.T) {
 
 func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t *testing.T) {
 	tests := []struct {
-		name        string
-		entry       ModelMapEntry
-		request     string
-		wantModel   string
-		wantEffort  string
-		wantNoMatch bool
+		name       string
+		entry      ModelMapEntry
+		request    string
+		wantModel  string
+		wantEffort string
 	}{
 		{
 			name:       "no suffix on either side",
@@ -106,29 +105,25 @@ func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t
 			wantModel:  "upstream-gpt",
 			wantEffort: "high",
 		},
-		{
-			name:        "source without suffix does not directly match suffixed request",
-			entry:       NewModelMapEntry("client-gpt", "upstream-gpt"),
-			request:     "client-gpt-high",
-			wantNoMatch: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := ProviderConfig{ModelMap: []ModelMapEntry{tt.entry}}
-			mapped := p.resolveModel(tt.request, true)
-			if tt.wantNoMatch {
-				if mapped != "" {
-					t.Fatalf("expected direct MODEL_MAP source not to match, got %q", mapped)
-				}
-				return
-			}
 			model, effort := p.ResolveModelAndEffort(tt.request, true)
 			if model != tt.wantModel || effort != tt.wantEffort {
 				t.Fatalf("expected %q/%q, got %q/%q", tt.wantModel, tt.wantEffort, model, effort)
 			}
 		})
+	}
+}
+
+func TestResolveModelDoesNotDirectlyMatchBaseSourceForSuffixedRequest(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("client-gpt", "upstream-gpt")}}
+
+	mapped := p.resolveModel("client-gpt-high", true)
+	if mapped != "" {
+		t.Fatalf("expected direct MODEL_MAP source not to match before suffix fallback, got %q", mapped)
 	}
 }
 
