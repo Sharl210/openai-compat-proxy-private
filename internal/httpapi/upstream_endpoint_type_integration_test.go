@@ -1944,6 +1944,83 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	}
 }
 
+func TestResponsesRouteRestoresAnthropicThinkingBlocksAcrossMultipleToolFollowUps(t *testing.T) {
+	requestCount := 0
+	var secondBody string
+	var thirdBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		bodyText := string(bodyBytes)
+		switch requestCount {
+		case 1:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"step one reasoning","signature":"sig_1"},{"type":"tool_use","id":"call_1","name":"search_web","input":{"query":"one"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
+		case 2:
+			secondBody = bodyText
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"step two reasoning","signature":"sig_2"},{"type":"tool_use","id":"call_2","name":"search_web","input":{"query":"two"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
+		default:
+			thirdBody = bodyText
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_3","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+		}
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstResp map[string]any
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("unmarshal first response: %v", err)
+	}
+	firstResponseID, _ := firstResp["id"].(string)
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+firstResponseID+`","input":[{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	var secondResp map[string]any
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondResp); err != nil {
+		t.Fatalf("unmarshal second response: %v", err)
+	}
+	secondResponseID, _ := secondResp["id"].(string)
+
+	thirdReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+secondResponseID+`","input":[{"type":"function_call_output","call_id":"call_2","output":"{\"ok\":true}"}]}`))
+	thirdReq.Header.Set("Content-Type", "application/json")
+	thirdRec := httptest.NewRecorder()
+	server.ServeHTTP(thirdRec, thirdReq)
+	if thirdRec.Code != http.StatusOK {
+		t.Fatalf("expected third status 200, got %d body=%s", thirdRec.Code, thirdRec.Body.String())
+	}
+
+	if !strings.Contains(secondBody, `"thinking":"step one reasoning"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected second request to restore first anthropic thinking block, got %s", secondBody)
+	}
+	if !strings.Contains(thirdBody, `"thinking":"step one reasoning"`) || !strings.Contains(thirdBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected third request to keep first anthropic thinking block across multiple tool follow-ups, got %s", thirdBody)
+	}
+	if !strings.Contains(thirdBody, `"thinking":"step two reasoning"`) || !strings.Contains(thirdBody, `"signature":"sig_2"`) {
+		t.Fatalf("expected third request to keep second anthropic thinking block across multiple tool follow-ups, got %s", thirdBody)
+	}
+	if !strings.Contains(thirdBody, `"id":"call_1"`) || !strings.Contains(thirdBody, `"id":"call_2"`) {
+		t.Fatalf("expected third request to keep both previous tool_use blocks, got %s", thirdBody)
+	}
+	if strings.Count(thirdBody, `"type":"tool_result"`) != 2 {
+		t.Fatalf("expected third request to contain both prior tool results in history, got %s", thirdBody)
+	}
+}
+
 func TestResponsesRouteRestoresPreviousConversationForAnthropicNewUserTurn(t *testing.T) {
 	requestCount := 0
 	var secondBody string

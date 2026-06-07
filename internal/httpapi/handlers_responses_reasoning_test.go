@@ -40,12 +40,28 @@ func TestResponsesNonStreamPreservesReasoningOutputItems(t *testing.T) {
 		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
 	}
 
-	if payload["reasoning"] != nil {
-		t.Fatalf("expected top-level reasoning to be suppressed, got %#v", payload["reasoning"])
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got, _ := reasoning["summary"].(string); got != "thinking" {
+		t.Fatalf("expected top-level reasoning summary preserved, got %#v", payload["reasoning"])
 	}
 	output, _ := payload["output"].([]any)
-	if len(output) != 0 {
-		t.Fatalf("expected real upstream reasoning output items to be suppressed, got %#v", payload["output"])
+	if len(output) != 1 {
+		t.Fatalf("expected real upstream reasoning output item preserved, got %#v", payload["output"])
+	}
+	item, _ := output[0].(map[string]any)
+	if got, _ := item["type"].(string); got != "reasoning" {
+		t.Fatalf("expected reasoning output item preserved, got %#v", item)
+	}
+	itemID, _ := item["id"].(string)
+	if itemID == "" {
+		t.Fatalf("expected reasoning output item id preserved, got %#v", item)
+	}
+	if got, _ := item["type"].(string); got != "reasoning" {
+		t.Fatalf("expected reasoning output item preserved, got %#v", item)
+	}
+	content, _ := item["content"].([]any)
+	if len(content) != 0 {
+		t.Fatalf("expected preserved reasoning item to stay separate from assistant message content, got %#v", item)
 	}
 }
 
