@@ -1575,6 +1575,13 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		if value, exists := req.Reasoning.Raw["output_config"]; exists {
 			payload["output_config"] = value
 		}
+		if _, exists := payload["thinking"]; !exists && req.PassThroughRawReasoning {
+			if reasoning := normalizeOpenAIReasoningPayload(req.Reasoning); len(reasoning) > 0 {
+				payload["reasoning"] = reasoning
+			} else if strings.TrimSpace(req.Reasoning.Effort) != "" {
+				payload["reasoning_effort"] = req.Reasoning.Effort
+			}
+		}
 	}
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
