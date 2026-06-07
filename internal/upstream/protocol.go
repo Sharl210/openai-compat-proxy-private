@@ -204,11 +204,13 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 }
 
 func ensureAnthropicThinkingHistoryCompatibility(req *model.CanonicalRequest) {
-	if req == nil || req.Reasoning == nil || len(req.Reasoning.Raw) == 0 {
+	if req == nil || req.Reasoning == nil {
 		return
 	}
-	thinking, _ := req.Reasoning.Raw["thinking"].(map[string]any)
-	if len(thinking) == 0 || stringValue(thinking["type"]) == "disabled" {
+	if len(req.Reasoning.Raw) > 0 && anthropicThinkingDisabled(req.Reasoning.Raw) {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(req.Reasoning.Effort), "none") {
 		return
 	}
 	hasAssistantToolHistory := false
