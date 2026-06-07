@@ -21,15 +21,15 @@ func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T)
 	}
 }
 
-func TestResolveModelAndEffortDoesNotParseSuffixWhenDisabled(t *testing.T) {
+func TestResolveModelAndEffortParsesMappedSuffixWhenClientSuffixDisabled(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:.*", "claude-sonnet-4-5-low")}}
 
 	model, effort := p.ResolveModelAndEffort("gpt-5-high", false)
-	if model != "claude-sonnet-4-5-low" {
-		t.Fatalf("expected mapped model to remain untouched when disabled, got %q", model)
+	if model != "claude-sonnet-4-5" {
+		t.Fatalf("expected mapped target suffix to be stripped even when client suffix is disabled, got %q", model)
 	}
-	if effort != "" {
-		t.Fatalf("expected no effort override when disabled, got %q", effort)
+	if effort != "low" {
+		t.Fatalf("expected mapped target suffix effort low, got %q", effort)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t
 func TestResolveModelDoesNotDirectlyMatchBaseSourceForSuffixedRequest(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("client-gpt", "upstream-gpt")}}
 
-	mapped := p.resolveModel("client-gpt-high", true)
+	mapped := p.resolveModel("client-gpt-high")
 	if mapped != "" {
 		t.Fatalf("expected direct MODEL_MAP source not to match before suffix fallback, got %q", mapped)
 	}
@@ -133,6 +133,69 @@ func TestResolveModelAndEffortFallsBackToBaseSourceAfterRequestSuffixParsing(t *
 	model, effort := p.ResolveModelAndEffort("client-gpt-high", true)
 	if model != "upstream-gpt" || effort != "high" {
 		t.Fatalf("expected base source mapping to preserve request suffix effort, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortMatchesSuffixedSource(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("client-gpt-high", "upstream-gpt")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "high", false)
+	if model != "upstream-gpt" || effort != "high" {
+		t.Fatalf("expected explicit effort to match suffixed source, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortPrefersSuffixedSourceOverBaseSource(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{
+		NewModelMapEntry("client-gpt-high", "upstream-priority"),
+		NewModelMapEntry("client-gpt", "upstream-base"),
+	}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "high", false)
+	if model != "upstream-priority" || effort != "high" {
+		t.Fatalf("expected explicit effort to prefer suffixed source, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortMatchesRegexSuffixedSource(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:client-(.*)-high", "upstream-$1")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "high", false)
+	if model != "upstream-gpt" || effort != "high" {
+		t.Fatalf("expected explicit effort to match regex suffixed source, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortIgnoresUnknownEffort(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("client-gpt-fast", "upstream-gpt")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "fast", false)
+	if model != "client-gpt" || effort != "" {
+		t.Fatalf("expected unknown effort not to synthesize MODEL_MAP source, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortDoesNotAffectManualOrHiddenModelLists(t *testing.T) {
+	p := ProviderConfig{
+		ManualModels: []string{"client-gpt"},
+		HiddenModels: []string{"client-gpt-high"},
+	}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt", "high", false)
+	if model != "client-gpt" || effort != "" {
+		t.Fatalf("expected request effort not to change model list controls or create override without MODEL_MAP, got %q/%q", model, effort)
+	}
+	if p.HidesModel("client-gpt") {
+		t.Fatalf("expected hidden suffixed model not to hide base model")
+	}
+}
+
+func TestResolveModelAndEffortKeepsUnmappedSuffixedClientModelWhenSuffixDisabled(t *testing.T) {
+	p := ProviderConfig{}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("client-gpt-high", "", false)
+	if model != "client-gpt-high" || effort != "" {
+		t.Fatalf("expected disabled client suffix to remain a literal model without inferred effort, got %q/%q", model, effort)
 	}
 }
 

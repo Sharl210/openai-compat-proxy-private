@@ -3,6 +3,7 @@ package httpapi
 import (
 	"testing"
 
+	"openai-compat-proxy/internal/config"
 	modelpkg "openai-compat-proxy/internal/model"
 )
 
@@ -152,6 +153,78 @@ func TestMapResolvedReasoningEffortToAnthropicThinkingOverridesDisabledThinking(
 	}
 	if _, ok := updated.Raw["output_config"]; ok {
 		t.Fatalf("expected legacy model budget profile to replace stale output_config, got %#v", updated.Raw)
+	}
+}
+
+func TestNormalizeCanonicalModelUsesExplicitReasoningEffortForModelMapSourceSuffix(t *testing.T) {
+	provider := config.ProviderConfig{
+		ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("client-gpt-high", "upstream-gpt")},
+		EnableReasoningEffortSuffix: false,
+	}
+	canon := &modelpkg.CanonicalRequest{
+		Model:     "client-gpt",
+		Reasoning: &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
+	}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+
+	if canon.Model != "upstream-gpt" {
+		t.Fatalf("expected explicit reasoning effort to match suffixed MODEL_MAP source, got %q", canon.Model)
+	}
+	if canon.Reasoning == nil || canon.Reasoning.Effort != "high" {
+		t.Fatalf("expected explicit effort high to remain, got %#v", canon.Reasoning)
+	}
+}
+
+func TestNormalizeCanonicalModelHiddenSuffixDoesNotBlockExplicitReasoningModelMap(t *testing.T) {
+	provider := config.ProviderConfig{
+		ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("client-gpt-high", "upstream-gpt")},
+		HiddenModels:                []string{"client-gpt-high"},
+		EnableReasoningEffortSuffix: false,
+	}
+	canon := &modelpkg.CanonicalRequest{
+		Model:     "client-gpt",
+		Reasoning: &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
+	}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+
+	if canon.Model != "upstream-gpt" {
+		t.Fatalf("expected MODEL_MAP to use explicit effort even when hidden suffix controls model list, got %q", canon.Model)
+	}
+}
+
+func TestNormalizeCanonicalModelTargetSuffixWorksWhenClientSuffixDisabled(t *testing.T) {
+	provider := config.ProviderConfig{
+		ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("client-gpt", "upstream-gpt-low")},
+		EnableReasoningEffortSuffix: false,
+	}
+	canon := &modelpkg.CanonicalRequest{Model: "client-gpt"}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+
+	if canon.Model != "upstream-gpt" {
+		t.Fatalf("expected target suffix to be stripped from upstream model, got %q", canon.Model)
+	}
+	if canon.Reasoning == nil || canon.Reasoning.Effort != "low" {
+		t.Fatalf("expected target suffix to set effort low, got %#v", canon.Reasoning)
+	}
+}
+
+func TestNormalizeCanonicalModelMapSourceSuffixWorksWhenClientSuffixDisabled(t *testing.T) {
+	provider := config.ProviderConfig{
+		ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("client-gpt-high", "upstream-gpt")},
+		EnableReasoningEffortSuffix: false,
+	}
+	canon := &modelpkg.CanonicalRequest{Model: "client-gpt-high"}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+
+	if canon.Model != "upstream-gpt" {
+		t.Fatalf("expected explicit MODEL_MAP suffix source to match, got %q", canon.Model)
+	}
+	if canon.Reasoning == nil || canon.Reasoning.Effort != "high" {
+		t.Fatalf("expected explicit MODEL_MAP suffix source to set effort high, got %#v", canon.Reasoning)
 	}
 }
 
