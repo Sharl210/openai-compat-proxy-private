@@ -2724,6 +2724,41 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicRequestBodyAddsClearThinkingWhenAssistantToolHistoryLacksThinkingBlocks(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Reasoning:       &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "请你一口气调用两次搜索同时，随便搜"}}},
+			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"alpha"}`}}},
+			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+			{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_2", Type: "function", Name: "search_web", Arguments: `{"query":"beta"}`}}},
+			{Role: "tool", ToolCallID: "call_2", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+		},
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	contextManagement, _ := payload["context_management"].(map[string]any)
+	if len(contextManagement) == 0 {
+		t.Fatalf("expected anthropic thinking follow-up with incomplete assistant tool history to add context_management clear_thinking, got %#v", payload)
+	}
+	edits, _ := contextManagement["edits"].([]any)
+	if len(edits) == 0 {
+		t.Fatalf("expected clear_thinking edit, got %#v", contextManagement)
+	}
+	edit, _ := edits[0].(map[string]any)
+	if got, _ := edit["type"].(string); got != "clear_thinking_20251015" {
+		t.Fatalf("expected clear_thinking_20251015 edit, got %#v", contextManagement)
+	}
+}
+
 func TestBuildAnthropicRequestBodyPreservesCacheControlOnContentBlocks(t *testing.T) {
 	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
 		Model:           "claude-sonnet-4-5",

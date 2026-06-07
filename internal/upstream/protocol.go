@@ -187,6 +187,9 @@ func extractOriginalToolIDs(req model.CanonicalRequest) map[int]string {
 }
 
 func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, xmlToolCallStyle ...string) ([]byte, error) {
+	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
+		ensureAnthropicThinkingHistoryCompatibility(&req)
+	}
 	if err := validateRequestForEndpoint(req, endpointType); err != nil {
 		return nil, err
 	}
@@ -198,6 +201,56 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 	default:
 		return buildResponsesRequestBodyWithMasquerade(req, config.ResponsesToolCompatModePreserve, masqueradeTarget)
 	}
+}
+
+func ensureAnthropicThinkingHistoryCompatibility(req *model.CanonicalRequest) {
+	if req == nil || req.Reasoning == nil || len(req.Reasoning.Raw) == 0 {
+		return
+	}
+	thinking, _ := req.Reasoning.Raw["thinking"].(map[string]any)
+	if len(thinking) == 0 || stringValue(thinking["type"]) == "disabled" {
+		return
+	}
+	hasAssistantToolHistory := false
+	hasAssistantThinkingBlocks := false
+	for _, msg := range req.Messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		if len(msg.ToolCalls) > 0 {
+			hasAssistantToolHistory = true
+		}
+		if len(msg.ReasoningBlocks) > 0 || strings.TrimSpace(msg.ReasoningContent) != "" {
+			hasAssistantThinkingBlocks = true
+		}
+	}
+	if !hasAssistantToolHistory || hasAssistantThinkingBlocks {
+		return
+	}
+	if req.PreservedTopLevelFields == nil {
+		req.PreservedTopLevelFields = map[string]any{}
+	}
+	raw, ok := req.PreservedTopLevelFields["context_management"]
+	if !ok {
+		req.PreservedTopLevelFields["context_management"] = map[string]any{"edits": []any{map[string]any{"type": "clear_thinking_20251015"}}}
+		return
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	edits, ok := obj["edits"].([]any)
+	if !ok {
+		obj["edits"] = []any{map[string]any{"type": "clear_thinking_20251015"}}
+		return
+	}
+	for _, rawEdit := range edits {
+		edit, _ := rawEdit.(map[string]any)
+		if stringValue(edit["type"]) == "clear_thinking_20251015" {
+			return
+		}
+	}
+	obj["edits"] = append(edits, map[string]any{"type": "clear_thinking_20251015"})
 }
 
 func validateRequestForEndpoint(req model.CanonicalRequest, endpointType string) error {
