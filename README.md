@@ -422,7 +422,7 @@ scoped 覆写的匹配规则：
 - 没有任何 scoped 规则命中时，回落到默认值
 - 如果只写 scoped 规则、不写默认值，则未命中任何规则时视为“不设置 provider 默认值”
 
-例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000`；如果客户端请求 `gpt-5.5-high`，则 `claude-sonnet-4-5:128000` 会作为整一个推理家族的 base 规则命中，`claude-sonnet-4-5-high:160000` 这类更具体的成员规则会优先覆盖它。
+例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000`；如果客户端请求 `gpt-5.5-high`，则 `claude-sonnet-4-5:128000` 会作为整一个推理家族的 base 规则命中，`claude-sonnet-4-5-high:160000` 这类更具体的成员规则会优先覆盖它。`-noprompt` 只是代理层跳过 provider prompt 注入的标记，不算独立模型，所以 `gpt-5.5-high-noprompt` 这类请求在这两个限制字段上也会继续命中 `claude-sonnet-4-5-high` / `claude-sonnet-4-5` 这类不带 `-noprompt` 的同一模型规则。
 
 这两个字段在根 `.env` 和 provider `.env` 中都支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，新配置会直接校验失败并保留当前已生效配置。
 
@@ -434,7 +434,7 @@ scoped 覆写的匹配规则：
 - 正整数：代理按请求内容估算输入 token，超过该值时直接返回 `context_length_exceeded` / `prompt is too long`
 - scoped 规则：支持写成 `-1,claude-sonnet-4-5:400000,#re:.*claude-.*:256000`
 
-匹配规则与输出上限一致，都是按**最终真正发给上游的模型**匹配；字面量 base 模型名默认代表整一个推理家族，精确成员优先于家族 base。例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `MODEL_LIMIT_CONTEXT_TOKENS=claude-sonnet-4-5:400000`；客户端请求 `gpt-5.5-high` 时，这条 base 规则也会命中，但如果你同时写了 `claude-sonnet-4-5-high:200000`，则 high 成员规则优先。
+匹配规则与输出上限一致，都是按**最终真正发给上游的模型**匹配；字面量 base 模型名默认代表整一个推理家族，精确成员优先于家族 base。例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `MODEL_LIMIT_CONTEXT_TOKENS=claude-sonnet-4-5:400000`；客户端请求 `gpt-5.5-high` 时，这条 base 规则也会命中，但如果你同时写了 `claude-sonnet-4-5-high:200000`，则 high 成员规则优先。`-noprompt` 不参与这两个限制字段的模型计数，带这个标记的请求会直接复用去掉标记后的同一模型规则。
 
 `MODEL_LIMIT_CONTEXT_TOKENS` 和 `UPSTREAM_MAX_OUTPUT_TOKENS` 是两种不同功能：前者限制的是代理估算的**输入上下文窗口**，用于在请求进上游前模拟超限；后者控制的是发给上游的**输出上限请求参数** `max_tokens` / `max_output_tokens`。两者可以同时配置，互不替代，也不会互相抵消。上下文限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩；它不是 tokenizer 精确计数，也不会扩大真实上游上下文，真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳；当前代理层会保留 `context_length_exceeded` / `prompt is too long` 这些关键词，并在 message 里附带 `estimated input tokens <current> exceed maximum <limit>`，以便 OpenCode / OMO 更稳定地识别为 token-limit 触发源。
 
