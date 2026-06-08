@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/testutil"
 )
 
@@ -18,8 +19,8 @@ func TestResponsesSuccessSetsModelLimitContextHeader(t *testing.T) {
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		DefaultProvider:      "openai",
-		EnableLegacyV1Routes: true,
+		DefaultProvider:           "openai",
+		EnableLegacyV1Routes:      true,
 		EnableNoPromptModelSuffix: true,
 		Providers: []config.ProviderConfig{{
 			ID:                      "openai",
@@ -184,5 +185,58 @@ func TestAnthropicContextLimitReturnsAnthropicOverflowShape(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "estimated input tokens") || !strings.Contains(rec.Body.String(), "exceed maximum 1") {
 		t.Fatalf("expected context overflow body to expose estimated token signal, got %s", rec.Body.String())
+	}
+}
+
+func TestEstimateCanonicalInputTokensDoesNotDoubleCountProjectedResponsesItems(t *testing.T) {
+	message := modelpkg.CanonicalMessage{
+		Role:  "user",
+		Parts: []modelpkg.CanonicalContentPart{{Type: "text", Text: "hello world"}},
+	}
+	canonFromMessages := modelpkg.CanonicalRequest{
+		Model:    "gpt-5.5",
+		Messages: []modelpkg.CanonicalMessage{message},
+	}
+	canonWithDuplicateResponsesItem := modelpkg.CanonicalRequest{
+		Model:    "gpt-5.5",
+		Messages: []modelpkg.CanonicalMessage{message},
+		ResponseInputItems: []map[string]any{{
+			"role": "user",
+			"content": []map[string]any{{
+				"type": "input_text",
+				"text": "hello world",
+			}},
+		}},
+	}
+
+	gotMessages := estimateCanonicalInputTokens(canonFromMessages)
+	gotWithDuplicate := estimateCanonicalInputTokens(canonWithDuplicateResponsesItem)
+	if gotWithDuplicate != gotMessages {
+		t.Fatalf("expected preserved responses item projected into canonical messages to not change estimate, got messages=%d with_duplicate=%d", gotMessages, gotWithDuplicate)
+	}
+}
+
+func TestEstimateCanonicalInputTokensDoesNotDoubleCountAnthropicOrderedContent(t *testing.T) {
+	part := modelpkg.CanonicalContentPart{Type: "text", Text: "hello world"}
+	canonOrderedOnly := modelpkg.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Messages: []modelpkg.CanonicalMessage{{
+			Role:           "user",
+			OrderedContent: []modelpkg.CanonicalContentBlock{{Type: "content", Part: part}},
+		}},
+	}
+	canonWithDuplicateParts := modelpkg.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Messages: []modelpkg.CanonicalMessage{{
+			Role:           "user",
+			OrderedContent: []modelpkg.CanonicalContentBlock{{Type: "content", Part: part}},
+			Parts:          []modelpkg.CanonicalContentPart{part},
+		}},
+	}
+
+	gotOrderedOnly := estimateCanonicalInputTokens(canonOrderedOnly)
+	gotWithDuplicate := estimateCanonicalInputTokens(canonWithDuplicateParts)
+	if gotWithDuplicate != gotOrderedOnly {
+		t.Fatalf("expected ordered anthropic content to be counted once, got ordered_only=%d with_duplicate=%d", gotOrderedOnly, gotWithDuplicate)
 	}
 }

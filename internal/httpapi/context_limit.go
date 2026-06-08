@@ -77,26 +77,31 @@ func estimateCanonicalInputTokens(canon modelpkg.CanonicalRequest) int {
 		chars += utf8.RuneCountInString(msg.Role)
 		chars += utf8.RuneCountInString(msg.ToolCallID)
 		chars += utf8.RuneCountInString(msg.ReasoningContent)
+		if len(msg.OrderedContent) > 0 {
+			for _, block := range msg.OrderedContent {
+				chars += estimateContentPartChars(block.Part)
+				chars += utf8.RuneCountInString(block.ToolCall.Name)
+				chars += utf8.RuneCountInString(block.ToolCall.Arguments)
+				chars += utf8.RuneCountInString(block.ToolCallID)
+				for _, part := range block.ToolResultParts {
+					chars += estimateContentPartChars(part)
+				}
+			}
+			continue
+		}
 		for _, part := range msg.Parts {
 			chars += estimateContentPartChars(part)
-		}
-		for _, block := range msg.OrderedContent {
-			chars += estimateContentPartChars(block.Part)
-			chars += utf8.RuneCountInString(block.ToolCall.Name)
-			chars += utf8.RuneCountInString(block.ToolCall.Arguments)
-			chars += utf8.RuneCountInString(block.ToolCallID)
-			for _, part := range block.ToolResultParts {
-				chars += estimateContentPartChars(part)
-			}
 		}
 		for _, toolCall := range msg.ToolCalls {
 			chars += utf8.RuneCountInString(toolCall.Name)
 			chars += utf8.RuneCountInString(toolCall.Arguments)
 		}
 	}
-	for _, item := range canon.ResponseInputItems {
-		if encoded, err := json.Marshal(item); err == nil {
-			chars += utf8.RuneCount(encoded)
+	if len(canon.Messages) == 0 {
+		for _, item := range canon.ResponseInputItems {
+			if encoded, err := json.Marshal(item); err == nil {
+				chars += utf8.RuneCount(encoded)
+			}
 		}
 	}
 	for _, tool := range canon.Tools {
