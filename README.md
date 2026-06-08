@@ -410,19 +410,19 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - provider 留空：继承根级 `UPSTREAM_MAX_OUTPUT_TOKENS`
 - provider 显式设置：覆盖根级默认值
 - 单个正整数：当客户端没有携带输出上限时，代理自动补这个值
-- 默认值 + scoped 覆写：支持写成 `64000,gpt-5.5:128000,#re:.*gpt-.*:100000`
+- 默认值 + scoped 覆写：支持写成 `64000,claude-sonnet-4-5:128000,#re:.*claude-.*:100000`
 - `-1`：客户端没有携带输出上限时，代理会主动省略最大输出 token 字段；如果强制开关开启，也会忽略客户端传值并省略该字段
 - `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS=true`：只要最终继承或覆盖后的 `UPSTREAM_MAX_OUTPUT_TOKENS` 已设置，就忽略客户端请求里的输出上限，强制使用配置值；配置值为 `-1` 时表示强制不携带该字段
 
 scoped 覆写的匹配规则：
 
-- 按客户端请求给代理层的**完整模型名**做字面量/正则匹配，不按 `MODEL_MAP` 映射后的上游模型名匹配，也不会自动剥离 reasoning suffix 或 `-noprompt` 后缀
-- 这里的完整模型名只看客户端 `model` 字段，不读取请求体里的 `reasoning.effort`、`reasoning_effort`、`thinking` 或 `output_config`
+- 按**最终真正发给上游的模型**做字面量/正则匹配，而不是按客户端原始模型名匹配
+- 字面量 base 模型名默认代表整一个推理家族，不仅覆盖显式 suffix 成员，也覆盖“模型名本身不带 suffix、但请求体显式带推理参数”的等效成员
 - 精确模型匹配优先于正则匹配
 - 没有任何 scoped 规则命中时，回落到默认值
 - 如果只写 scoped 规则、不写默认值，则未命中任何规则时视为“不设置 provider 默认值”
 
-例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 会先用 `gpt-5.5` 命中 `UPSTREAM_MAX_OUTPUT_TOKENS=gpt-5.5:128000`，然后才映射成 `claude-sonnet-4-5` 发给上游；如果只写 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000`，这个客户端请求不会命中该 scoped 规则。
+例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000`；如果客户端请求 `gpt-5.5-high`，则 `claude-sonnet-4-5:128000` 会作为整一个推理家族的 base 规则命中，`claude-sonnet-4-5-high:160000` 这类更具体的成员规则会优先覆盖它。
 
 这两个字段在根 `.env` 和 provider `.env` 中都支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，新配置会直接校验失败并保留当前已生效配置。
 
@@ -430,13 +430,13 @@ scoped 覆写的匹配规则：
 
 根 `.env` 和 provider `.env` 都支持 `MODEL_LIMIT_CONTEXT_TOKENS`。provider 留空或不写时继承根配置，显式设置时覆盖根配置。
 
-- `-1`：代理层不主动限制上下文，真实上游自己的上下文窗口仍照常生效
+- `-1`：代理层不主动限制上下文，真实上游自己的上下文窗口仍照常生效；这不是“自动探测真实上游最大值”，而是“不由代理层限制”
 - 正整数：代理按请求内容估算输入 token，超过该值时直接返回 `context_length_exceeded` / `prompt is too long`
-- scoped 规则：支持写成 `-1,gpt-5.5:400000,#re:.*gpt-.*:256000`
+- scoped 规则：支持写成 `-1,claude-sonnet-4-5:400000,#re:.*claude-.*:256000`
 
-匹配规则与输出上限一致，都是按客户端请求给代理层的完整模型名匹配，精确模型优先于正则匹配，不按 `MODEL_MAP` 映射后的上游模型名匹配，也不读取请求体 reasoning 参数。例如客户端请求 `gpt-5.5-high` 时，`MODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5-high:200000,gpt-5.5:400000` 会命中带 suffix 的精确规则；如果只写 `gpt-5.5:400000`，它不会自动匹配 `gpt-5.5-high`。如果同时写了 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5`，客户端请求 `gpt-5.5` 应写 `MODEL_LIMIT_CONTEXT_TOKENS=gpt-5.5:400000`，而不是写 `claude-sonnet-4-5:400000`。
+匹配规则与输出上限一致，都是按**最终真正发给上游的模型**匹配；字面量 base 模型名默认代表整一个推理家族，精确成员优先于家族 base。例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `MODEL_LIMIT_CONTEXT_TOKENS=claude-sonnet-4-5:400000`；客户端请求 `gpt-5.5-high` 时，这条 base 规则也会命中，但如果你同时写了 `claude-sonnet-4-5-high:200000`，则 high 成员规则优先。
 
-`MODEL_LIMIT_CONTEXT_TOKENS` 和 `UPSTREAM_MAX_OUTPUT_TOKENS` 是两种不同功能：前者限制的是代理估算的**输入上下文窗口**，用于在请求进上游前模拟超限；后者控制的是发给上游的**输出上限请求参数** `max_tokens` / `max_output_tokens`。两者可以同时配置，互不替代，也不会互相抵消。上下文限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩；它不是 tokenizer 精确计数，也不会扩大真实上游上下文，真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳，但都会包含 `context_length_exceeded` 和 `prompt is too long`。
+`MODEL_LIMIT_CONTEXT_TOKENS` 和 `UPSTREAM_MAX_OUTPUT_TOKENS` 是两种不同功能：前者限制的是代理估算的**输入上下文窗口**，用于在请求进上游前模拟超限；后者控制的是发给上游的**输出上限请求参数** `max_tokens` / `max_output_tokens`。两者可以同时配置，互不替代，也不会互相抵消。上下文限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩；它不是 tokenizer 精确计数，也不会扩大真实上游上下文，真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳；当前代理层会保留 `context_length_exceeded` / `prompt is too long` 这些关键词，并在 message 里附带 `estimated input tokens <current> exceed maximum <limit>`，以便 OpenCode / OMO 更稳定地识别为 token-limit 触发源。
 
 ### 4. 模型映射与 reasoning suffix
 
