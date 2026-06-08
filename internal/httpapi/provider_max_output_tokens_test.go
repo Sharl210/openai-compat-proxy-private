@@ -179,45 +179,61 @@ func TestProviderMaxOutputTokensClampsAnthropicThinkingBudget(t *testing.T) {
 	}
 }
 
-func TestApplyProviderMaxOutputTokensScopedRulesUseClientModel(t *testing.T) {
+func TestApplyProviderMaxOutputTokensScopedRulesUseFinalUpstreamModel(t *testing.T) {
 	canon := modelpkg.CanonicalRequest{Model: "claude-sonnet-4-5"}
 	provider := config.ProviderConfig{
 		UpstreamMaxOutputTokens: 64000,
 		UpstreamMaxOutputTokenRules: []config.ScopedIntRule{
 			exactScopedRule("gpt-5.5", 128000),
-			regexScopedRule("#re:.*gpt-.*", 100000),
+			exactScopedRule("claude-sonnet-4-5", 256000),
 		},
 	}
-	applyProviderMaxOutputTokens(&canon, provider, "gpt-5.5")
-	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 128000 {
-		t.Fatalf("expected client model exact rule to set 128000, got %#v", canon.MaxOutputTokens)
+	applyProviderMaxOutputTokens(&canon, provider)
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 256000 {
+		t.Fatalf("expected final upstream model exact rule to set 256000, got %#v", canon.MaxOutputTokens)
 	}
 }
 
-func TestProviderScopedMaxOutputRulesApplyBeforeResolvedModelRewrite(t *testing.T) {
-	canon := modelpkg.CanonicalRequest{Model: "gpt-5.5"}
+func TestProviderScopedMaxOutputRulesUseResolvedModelFamily(t *testing.T) {
+	canon := modelpkg.CanonicalRequest{Model: "claude-sonnet-4-5", Reasoning: &modelpkg.CanonicalReasoning{Effort: "high"}}
 	provider := config.ProviderConfig{
 		ModelMap:                []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
 		UpstreamMaxOutputTokens: 64000,
 		UpstreamMaxOutputTokenRules: []config.ScopedIntRule{
 			exactScopedRule("gpt-5.5", 128000),
-			regexScopedRule("#re:.*gpt-.*", 100000),
+			exactScopedRule("claude-sonnet-4-5", 192000),
 		},
 	}
-	clientModel := canon.Model
-	canon.Model = provider.ResolveModel(canon.Model, true)
-	applyProviderMaxOutputTokens(&canon, provider, clientModel)
-	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 128000 {
-		t.Fatalf("expected scoped rule to use original client model before resolved model rewrite, got %#v model=%q", canon.MaxOutputTokens, canon.Model)
+	applyProviderMaxOutputTokens(&canon, provider)
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 192000 {
+		t.Fatalf("expected scoped rule to use resolved upstream model family, got %#v model=%q", canon.MaxOutputTokens, canon.Model)
+	}
+}
+
+func TestProviderScopedMaxOutputRulesTreatLiteralBaseAsReasoningFamily(t *testing.T) {
+	canon := modelpkg.CanonicalRequest{Model: "claude-sonnet-4-5", Reasoning: &modelpkg.CanonicalReasoning{Effort: "high"}}
+	provider := config.ProviderConfig{
+		UpstreamMaxOutputTokens: 64000,
+		UpstreamMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("claude-sonnet-4-5", 256000),
+			exactScopedRule("claude-sonnet-4-5-high", 320000),
+		},
+	}
+	applyProviderMaxOutputTokens(&canon, provider)
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 320000 {
+		t.Fatalf("expected narrow reasoning family member to override base family rule, got %#v", canon.MaxOutputTokens)
 	}
 }
 
 func TestProviderMaxOutputTokensScopedRulesPreferSpecificMatch(t *testing.T) {
 	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
-		path:                        "/v1/responses",
-		body:                        `{"model":"gpt-5.5","input":[{"role":"user","content":"hello"}]}`,
-		providerMaxOutputTokens:     64000,
-		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+		path:                    "/v1/responses",
+		body:                    `{"model":"gpt-5.5","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens: 64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("claude-sonnet-4-5", 128000),
+			regexScopedRule("#re:.*claude-.*", 100000),
+		},
 	})
 	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "128000" {
 		t.Fatalf("expected %s 128000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
@@ -229,10 +245,14 @@ func TestProviderMaxOutputTokensScopedRulesPreferSpecificMatch(t *testing.T) {
 
 func TestProviderMaxOutputTokensScopedRulesFallbackToRegexThenDefault(t *testing.T) {
 	regexPayload, regexRec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
-		path:                        "/v1/responses",
-		body:                        `{"model":"gpt-5.4-mini","input":[{"role":"user","content":"hello"}]}`,
-		providerMaxOutputTokens:     64000,
-		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+		path:                    "/v1/responses",
+		body:                    `{"model":"gpt-5.4-mini","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens: 64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("claude-sonnet-4-5", 128000),
+			regexScopedRule("#re:.*claude-.*", 100000),
+		},
+		modelMap: []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.4-mini", "claude-haiku-4")},
 	})
 	if got := regexRec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "100000" {
 		t.Fatalf("expected %s 100000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
@@ -242,10 +262,14 @@ func TestProviderMaxOutputTokensScopedRulesFallbackToRegexThenDefault(t *testing
 	}
 
 	defaultPayload, defaultRec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
-		path:                        "/v1/responses",
-		body:                        `{"model":"claude-sonnet-4-5","input":[{"role":"user","content":"hello"}]}`,
-		providerMaxOutputTokens:     64000,
-		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+		path:                    "/v1/responses",
+		body:                    `{"model":"gpt-5.5","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens: 64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("claude-sonnet-4-5", 128000),
+			regexScopedRule("#re:.*claude-haiku-.*", 100000),
+		},
+		modelMap: []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "gemini-2.5-pro")},
 	})
 	if got := defaultRec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "64000" {
 		t.Fatalf("expected %s 64000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
@@ -255,18 +279,22 @@ func TestProviderMaxOutputTokensScopedRulesFallbackToRegexThenDefault(t *testing
 	}
 }
 
-func TestProviderMaxOutputTokensScopedRulesTreatModelNameAsLiteral(t *testing.T) {
+func TestProviderMaxOutputTokensScopedRulesTreatLiteralBaseAsReasoningFamily(t *testing.T) {
 	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
-		path:                        "/v1/responses",
-		body:                        `{"model":"gpt-5.5-high-noprompt","input":[{"role":"user","content":"hello"}]}`,
-		providerMaxOutputTokens:     64000,
-		providerMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("gpt-5.5", 128000), regexScopedRule("#re:.*gpt-.*", 100000)},
+		path:                    "/v1/responses",
+		body:                    `{"model":"gpt-5.5-high","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens: 64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("claude-sonnet-4-5", 128000),
+			exactScopedRule("claude-sonnet-4-5-high", 160000),
+		},
+		modelMap: []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
 	})
-	if got := numericJSONValue(payload["max_tokens"]); got != 100000 {
-		t.Fatalf("expected literal exact rule not to strip suffixes, so regex rule should win with 100000, got %#v payload=%#v", payload["max_tokens"], payload)
+	if got := numericJSONValue(payload["max_tokens"]); got != 160000 {
+		t.Fatalf("expected resolved upstream reasoning family member rule to win with 160000, got %#v payload=%#v", payload["max_tokens"], payload)
 	}
-	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "100000" {
-		t.Fatalf("expected %s 100000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "160000" {
+		t.Fatalf("expected %s 160000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
 	}
 }
 
@@ -346,6 +374,7 @@ type providerMaxOutputTokensScenario struct {
 	providerMaxOutputTokenRules  []config.ScopedIntRule
 	anthropicMaxThinkingBudget   int
 	forceProviderMaxOutputTokens bool
+	modelMap                     []config.ModelMapEntry
 }
 
 func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutputTokensScenario) (map[string]any, *httptest.ResponseRecorder) {
@@ -353,6 +382,16 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 	anthropicMaxThinkingBudget := scenario.anthropicMaxThinkingBudget
 	if anthropicMaxThinkingBudget == 0 {
 		anthropicMaxThinkingBudget = 32000
+	}
+	modelMap := scenario.modelMap
+	if len(modelMap) == 0 {
+		modelMap = []config.ModelMapEntry{
+			config.NewModelMapEntry("gpt-5", "claude-sonnet-4-5"),
+			config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5"),
+			config.NewModelMapEntry("gpt-5.4-mini", "claude-sonnet-4-5"),
+			config.NewModelMapEntry("gpt-5.5-high-noprompt", "claude-sonnet-4-5"),
+			config.NewModelMapEntry("claude-sonnet-4-5", "claude-sonnet-4-5"),
+		}
 	}
 
 	var upstreamPayload map[string]any
@@ -390,13 +429,7 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 			UpstreamMaxOutputTokens:               scenario.providerMaxOutputTokens,
 			UpstreamMaxOutputTokenRules:           scenario.providerMaxOutputTokenRules,
 			ForceUpstreamMaxOutputTokens:          scenario.forceProviderMaxOutputTokens,
-			ModelMap: []config.ModelMapEntry{
-				config.NewModelMapEntry("gpt-5", "claude-sonnet-4-5"),
-				config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5"),
-				config.NewModelMapEntry("gpt-5.4-mini", "claude-sonnet-4-5"),
-				config.NewModelMapEntry("gpt-5.5-high-noprompt", "claude-sonnet-4-5"),
-				config.NewModelMapEntry("claude-sonnet-4-5", "claude-sonnet-4-5"),
-			},
+			ModelMap: modelMap,
 		}},
 	})
 

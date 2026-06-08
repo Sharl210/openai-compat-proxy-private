@@ -74,9 +74,12 @@ func TestResponsesContextLimitReturnsOpenAIOverflowShape(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "context_length_exceeded") || !strings.Contains(rec.Body.String(), "prompt is too long") {
 		t.Fatalf("expected opencode-compatible context overflow body, got %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "estimated input tokens") || !strings.Contains(rec.Body.String(), "exceed maximum 1") {
+		t.Fatalf("expected context overflow body to expose estimated token signal, got %s", rec.Body.String())
+	}
 }
 
-func TestResponsesContextLimitScopedRulesUseClientModelBeforeModelMap(t *testing.T) {
+func TestResponsesContextLimitScopedRulesUseFinalUpstreamModelAfterModelMap(t *testing.T) {
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
@@ -88,7 +91,6 @@ func TestResponsesContextLimitScopedRulesUseClientModelBeforeModelMap(t *testing
 			ModelMap:                []config.ModelMapEntry{config.NewModelMapEntry("client-gpt", "upstream-gpt")},
 			ModelLimitContextTokens: -1,
 			ModelLimitContextTokenRules: []config.ScopedIntRule{
-				exactScopedRule("client-gpt", 1),
 				exactScopedRule("upstream-gpt", 999999),
 			},
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
@@ -102,14 +104,14 @@ func TestResponsesContextLimitScopedRulesUseClientModelBeforeModelMap(t *testing
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 context overflow from client-model scoped rule, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected request to pass proxy context limit and fail later on unreachable upstream, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "1" {
-		t.Fatalf("expected context limit header from client model rule, got %q", got)
+	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "999999" {
+		t.Fatalf("expected context limit header from final upstream model rule, got %q", got)
 	}
-	if !strings.Contains(rec.Body.String(), "context_length_exceeded") {
-		t.Fatalf("expected context overflow body, got %s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "context_length_exceeded") {
+		t.Fatalf("expected final upstream model rule to avoid proxy context overflow, got %s", rec.Body.String())
 	}
 }
 
@@ -143,6 +145,9 @@ func TestChatContextLimitReturnsOpenAIOverflowShape(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "context_length_exceeded") || !strings.Contains(rec.Body.String(), "prompt is too long") {
 		t.Fatalf("expected opencode-compatible context overflow body, got %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "estimated input tokens") || !strings.Contains(rec.Body.String(), "exceed maximum 1") {
+		t.Fatalf("expected context overflow body to expose estimated token signal, got %s", rec.Body.String())
+	}
 }
 
 func TestAnthropicContextLimitReturnsAnthropicOverflowShape(t *testing.T) {
@@ -175,5 +180,8 @@ func TestAnthropicContextLimitReturnsAnthropicOverflowShape(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "context_length_exceeded") || !strings.Contains(rec.Body.String(), "prompt is too long") {
 		t.Fatalf("expected opencode-compatible context overflow body, got %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "estimated input tokens") || !strings.Contains(rec.Body.String(), "exceed maximum 1") {
+		t.Fatalf("expected context overflow body to expose estimated token signal, got %s", rec.Body.String())
 	}
 }

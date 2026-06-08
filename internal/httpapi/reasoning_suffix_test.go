@@ -193,7 +193,7 @@ func TestNormalizeCanonicalModelUsesExplicitReasoningEffortForModelMapSourceSuff
 		Reasoning: &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
 	}
 
-	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "high", provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
 
 	if canon.Model != "upstream-gpt" {
 		t.Fatalf("expected explicit reasoning effort to match suffixed MODEL_MAP source, got %q", canon.Model)
@@ -214,7 +214,7 @@ func TestNormalizeCanonicalModelHiddenSuffixDoesNotBlockExplicitReasoningModelMa
 		Reasoning: &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}},
 	}
 
-	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "high", provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
 
 	if canon.Model != "upstream-gpt" {
 		t.Fatalf("expected MODEL_MAP to use explicit effort even when hidden suffix controls model list, got %q", canon.Model)
@@ -228,7 +228,7 @@ func TestNormalizeCanonicalModelTargetSuffixWorksWhenClientSuffixDisabled(t *tes
 	}
 	canon := &modelpkg.CanonicalRequest{Model: "client-gpt"}
 
-	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "", provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
 
 	if canon.Model != "upstream-gpt" {
 		t.Fatalf("expected target suffix to be stripped from upstream model, got %q", canon.Model)
@@ -245,7 +245,7 @@ func TestNormalizeCanonicalModelMapSourceSuffixWorksWhenClientSuffixDisabled(t *
 	}
 	canon := &modelpkg.CanonicalRequest{Model: "client-gpt-high"}
 
-	normalizeCanonicalModelAndReasoningForProvider(canon, provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "", provider, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeResponses})
 
 	if canon.Model != "upstream-gpt" {
 		t.Fatalf("expected explicit MODEL_MAP suffix source to match, got %q", canon.Model)
