@@ -133,17 +133,33 @@ func cloneCanonicalReasoning(reasoning *modelpkg.CanonicalReasoning) *modelpkg.C
 	return cloned
 }
 
-func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) {
+func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalRequest, sourceModel string, requestEffort string, provider config.ProviderConfig, providerCfg config.Config) {
 	if canon == nil {
 		return
 	}
-	mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(canon.Model, clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false), provider.EnableReasoningEffortSuffix)
+	if strings.TrimSpace(sourceModel) == "" {
+		sourceModel = canon.Model
+	}
+	mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(sourceModel, requestEffort, provider.EnableReasoningEffortSuffix)
 	canon.Model = mappedModel
 	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
-	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-		canon.PassThroughRawReasoning = !provider.MapReasoningSuffixToAnthropicThinking
-		canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, provider.MapReasoningSuffixToAnthropicThinking && canEnableAnthropicThinkingForMessages(canon.Messages), canon.Model, canon.MaxOutputTokens, providerCfg.AnthropicMaxThinkingBudget)
+	canon.PassThroughRawReasoning = providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !provider.MapReasoningSuffixToAnthropicThinking
+}
+
+func finalizeAnthropicReasoningForUpstream(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) {
+	if canon == nil {
+		return
 	}
+	if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeAnthropic {
+		canon.PassThroughRawReasoning = false
+		return
+	}
+	if !provider.MapReasoningSuffixToAnthropicThinking {
+		canon.PassThroughRawReasoning = true
+		return
+	}
+	canon.Reasoning = applyAnthropicThinkingFromResolvedEffort(canon.Reasoning, canEnableAnthropicThinkingForMessages(canon.Messages), canon.Model, canon.MaxOutputTokens, providerCfg.AnthropicMaxThinkingBudget)
+	canon.PassThroughRawReasoning = false
 }
 
 func canEnableAnthropicThinkingForMessages(messages []modelpkg.CanonicalMessage) bool {
@@ -183,15 +199,15 @@ func hasRealAnthropicThinkingHistory(messages []modelpkg.CanonicalMessage) bool 
 	return false
 }
 
-func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, clientModel string) {
+func applyProviderMaxOutputTokens(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig) {
 	if canon == nil {
 		return
 	}
-	matchModel := strings.TrimSpace(clientModel)
-	if matchModel == "" {
-		matchModel = canon.Model
+	effort := ""
+	if canon.Reasoning != nil {
+		effort = strings.TrimSpace(canon.Reasoning.Effort)
 	}
-	resolved := provider.ResolveUpstreamMaxOutputTokens(matchModel)
+	resolved := provider.ResolveUpstreamMaxOutputTokensForReasoning(strings.TrimSpace(canon.Model), effort)
 	if resolved == 0 {
 		return
 	}
@@ -274,7 +290,7 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, provider config.P
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
 	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
-	setProxyModelLimitContextHeader(w, provider, clientModel)
+	setProxyModelLimitContextHeader(w, provider, canon)
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {
 		w.Header().Set(headerProxyToUpstreamMaxOutputTokens, strconv.Itoa(*canon.MaxOutputTokens))

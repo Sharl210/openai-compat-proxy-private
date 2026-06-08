@@ -81,8 +81,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 			delete(canon.PreservedTopLevelFields, "metadata")
 		}
 		applyProviderSystemPrompt(&canon, provider)
-		applyProviderMaxOutputTokens(&canon, provider, clientModel)
-		normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
+		normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+		applyProviderMaxOutputTokens(&canon, provider)
+		finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			if writeRequestValidationError(w, err) {
@@ -91,7 +92,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-		if writeContextLimitExceededIfNeeded(w, provider, clientModel, canon, clientReasoningProtocolMessages) {
+		if writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolMessages) {
 			return
 		}
 		canon.RequestID = requestID

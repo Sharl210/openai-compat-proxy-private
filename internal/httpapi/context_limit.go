@@ -14,41 +14,54 @@ import (
 
 const contextOverflowMessage = "prompt is too long: context_length_exceeded by proxy model limit"
 
-func setProxyModelLimitContextHeader(w http.ResponseWriter, provider config.ProviderConfig, clientModel string) int {
-	limit := provider.ResolveModelLimitContextTokens(strings.TrimSpace(clientModel))
+func setProxyModelLimitContextHeader(w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest) int {
+	effort := ""
+	if canon.Reasoning != nil {
+		effort = strings.TrimSpace(canon.Reasoning.Effort)
+	}
+	limit := provider.ResolveModelLimitContextTokensForReasoning(strings.TrimSpace(canon.Model), effort)
 	w.Header().Set(headerProxyModelLimitContextTokens, strconv.Itoa(limit))
 	return limit
 }
 
-func writeContextLimitExceededIfNeeded(w http.ResponseWriter, provider config.ProviderConfig, clientModel string, canon modelpkg.CanonicalRequest, protocol string) bool {
-	limit := setProxyModelLimitContextHeader(w, provider, clientModel)
+func writeContextLimitExceededIfNeeded(w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest, protocol string) bool {
+	limit := setProxyModelLimitContextHeader(w, provider, canon)
 	if limit < 0 {
 		return false
 	}
-	if estimateCanonicalInputTokens(canon) <= limit {
+	estimatedTokens := estimateCanonicalInputTokens(canon)
+	if estimatedTokens <= limit {
 		return false
 	}
+	message := buildContextLimitExceededMessage(estimatedTokens, limit)
 	switch protocol {
 	case clientReasoningProtocolMessages:
-		writeAnthropicContextLimitExceeded(w)
+		writeAnthropicContextLimitExceeded(w, message)
 	default:
-		errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", contextOverflowMessage)
+		errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", message)
 	}
 	return true
 }
 
-func writeAnthropicContextLimitExceeded(w http.ResponseWriter) {
+func buildContextLimitExceededMessage(estimatedTokens int, limit int) string {
+	if estimatedTokens <= 0 || limit <= 0 {
+		return contextOverflowMessage
+	}
+	return contextOverflowMessage + ": estimated input tokens " + strconv.Itoa(estimatedTokens) + " exceed maximum " + strconv.Itoa(limit)
+}
+
+func writeAnthropicContextLimitExceeded(w http.ResponseWriter, message string) {
 	payload := map[string]any{
 		"type": "error",
 		"error": map[string]any{
 			"type":    "invalid_request_error",
-			"message": contextOverflowMessage,
+			"message": message,
 			"code":    "context_length_exceeded",
 		},
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", contextOverflowMessage)
+		errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", message)
 		return
 	}
 	errorsx.WriteRawJSON(w, http.StatusBadRequest, encoded)

@@ -72,8 +72,9 @@ func handleChat() http.HandlerFunc {
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
-			applyProviderMaxOutputTokens(&canon, provider, clientModel)
-			normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
+			normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+			applyProviderMaxOutputTokens(&canon, provider)
+			finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		}
 		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
@@ -83,7 +84,7 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-		if writeContextLimitExceededIfNeeded(w, provider, clientModel, canon, clientReasoningProtocolChat) {
+		if writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolChat) {
 			return
 		}
 		canon.RequestID = requestID

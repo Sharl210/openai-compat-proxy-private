@@ -398,13 +398,14 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	canon.Messages = prepareCanonicalMessages(canon.Messages)
-	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && canon.HasSyntheticReasoningReplay {
-		canon.Messages = downgradeSyntheticOnlyAnthropicToolReplay(canon.Messages)
-	}
-	applyProviderSystemPrompt(&canon, provider)
-	applyProviderMaxOutputTokens(&canon, provider, clientModel)
-	normalizeCanonicalModelAndReasoningForProvider(&canon, provider, providerCfg)
-	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && canon.HasSyntheticReasoningReplay {
+			canon.Messages = downgradeSyntheticOnlyAnthropicToolReplay(canon.Messages)
+		}
+		applyProviderSystemPrompt(&canon, provider)
+		normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+		applyProviderMaxOutputTokens(&canon, provider)
+		finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
+		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 	if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 		if writeRequestValidationError(w, err) {
 			return nil, false
@@ -412,7 +413,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return nil, false
 	}
-	if !compact && writeContextLimitExceededIfNeeded(w, provider, clientModel, canon, clientReasoningProtocolResponses) {
+	if !compact && writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolResponses) {
 		return nil, false
 	}
 	canon.RequestID = requestID
