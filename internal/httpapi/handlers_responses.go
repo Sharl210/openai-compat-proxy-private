@@ -29,13 +29,14 @@ type preparedResponsesRequest struct {
 }
 
 type initialResponsesRequest struct {
-	canon         model.CanonicalRequest
-	provider      config.ProviderConfig
-	providerCfg   config.Config
-	providerID    string
-	clientModel   string
-	resolvedModel string
-	requestID     string
+	canon          model.CanonicalRequest
+	provider       config.ProviderConfig
+	providerCfg    config.Config
+	providerID     string
+	rawClientModel string
+	clientModel    string
+	resolvedModel  string
+	requestID      string
 }
 
 func handleResponses() http.HandlerFunc {
@@ -334,24 +335,27 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support responses")
 		return nil, false
 	}
+	rawClientModel := canon.Model
+	clientModel := canon.Model
 	if !provider.HidesModel(canon.Model) {
 		applyNoPromptModelSuffix(&canon, providerCfg)
+		clientModel = canon.Model
 	}
 	if hasNoPromptModelSuffix(canon.Model) {
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
-	clientModel := canon.Model
 	if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {
 		*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 	}
 	return &initialResponsesRequest{
-		canon:         canon,
-		provider:      provider,
-		providerCfg:   providerCfg,
-		providerID:    providerID,
-		clientModel:   clientModel,
-		resolvedModel: resolvedModel,
-		requestID:     requestID,
+		canon:          canon,
+		provider:       provider,
+		providerCfg:    providerCfg,
+		providerID:     providerID,
+		rawClientModel: rawClientModel,
+		clientModel:    clientModel,
+		resolvedModel:  resolvedModel,
+		requestID:      requestID,
 	}, true
 }
 
@@ -363,6 +367,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	provider := initial.provider
 	providerCfg := initial.providerCfg
 	providerID := initial.providerID
+	rawClientModel := initial.rawClientModel
 	clientModel := initial.clientModel
 	resolvedModel := initial.resolvedModel
 	requestID := initial.requestID
@@ -396,15 +401,15 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	canon.Messages = prepareCanonicalMessages(canon.Messages)
-		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && canon.HasSyntheticReasoningReplay {
-			canon.Messages = downgradeSyntheticOnlyAnthropicToolReplay(canon.Messages)
-		}
-		applyProviderSystemPrompt(&canon, provider)
-		normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
-		applyProviderMaxOutputTokens(&canon, provider)
-		finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
-		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
-	if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && canon.HasSyntheticReasoningReplay {
+		canon.Messages = downgradeSyntheticOnlyAnthropicToolReplay(canon.Messages)
+	}
+	applyProviderSystemPrompt(&canon, provider)
+	normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+	applyProviderMaxOutputTokens(&canon, provider)
+	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
+	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+	if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 		if writeRequestValidationError(w, err) {
 			return nil, false
 		}

@@ -25,6 +25,7 @@ func TestResponsesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		EnableNoPromptModelSuffix:   true,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
@@ -78,6 +79,7 @@ func TestResponsesRouteClientReasoningEffortPrefersSuffixOverRequestBodyParamete
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		EnableNoPromptModelSuffix:   true,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
@@ -108,6 +110,61 @@ func TestResponsesRouteClientReasoningEffortPrefersSuffixOverRequestBodyParamete
 	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "high" {
 		t.Fatalf("expected %s high, got %q", headerProxyToUpstreamReasoningEffort, got)
 	}
+}
+
+func TestResponsesRouteDirectionalHeadersPreserveClientModelAndFinalUpstreamState(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_2b","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableNoPromptModelSuffix:   true,
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsChat:                true,
+			EnableReasoningEffortSuffix: true,
+			SystemPromptText:            "provider system",
+			SystemPromptPosition:        config.SystemPromptPositionAppend,
+			ModelMap: []config.ModelMapEntry{
+				config.NewModelMapEntry("gpt-5.4-mini-minimal", "gpt-5.4-mini-low"),
+			},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4-mini-minimal-noprompt","reasoning":{"effort":"none","summary":"auto"},"input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertDirectionalObservabilityHeaders(t, rec, directionalHeaderExpectation{
+		clientModel:               "gpt-5.4-mini-minimal-noprompt",
+		clientNoPrompt:            "true",
+		clientServiceTier:         "",
+		clientReasoningParameters: map[string]any{"reasoning": map[string]any{"effort": "minimal", "summary": "auto"}},
+		clientReasoningEffort:     "minimal",
+		proxyUpstreamModel:        "gpt-5.4-mini",
+		proxyUpstreamServiceTier:  "",
+		proxyReasoningEffort:      "low",
+		proxyReasoningPayload:     map[string]any{"reasoning": map[string]any{"effort": "low", "summary": "auto"}},
+	})
 }
 
 func TestChatStreamExposesDirectionalObservabilityHeaders(t *testing.T) {
@@ -516,8 +573,8 @@ func TestMessagesRouteReasoningSuffixOverridesDisabledThinkingHeaders(t *testing
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(headerClientToProxyModel); got != "claude-sonnet-4-5-low" {
-		t.Fatalf("expected %s claude-sonnet-4-5-low, got %q", headerClientToProxyModel, got)
+	if got := rec.Header().Get(headerClientToProxyModel); got != "claude-sonnet-4-5-low-noprompt" {
+		t.Fatalf("expected %s claude-sonnet-4-5-low-noprompt, got %q", headerClientToProxyModel, got)
 	}
 	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
 		t.Fatalf("expected %s true, got %q", headerClientToProxyNoPrompt, got)

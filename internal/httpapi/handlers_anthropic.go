@@ -43,13 +43,15 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
 			return
 		}
-	if !provider.HidesModel(canon.Model) {
-		applyNoPromptModelSuffix(&canon, providerCfg)
-	}
-	if hasNoPromptModelSuffix(canon.Model) {
-		w.Header().Set(headerClientToProxyNoPrompt, "false")
-	}
-	clientModel := canon.Model
+		rawClientModel := canon.Model
+		clientModel := canon.Model
+		if !provider.HidesModel(canon.Model) {
+			applyNoPromptModelSuffix(&canon, providerCfg)
+			clientModel = canon.Model
+		}
+		if hasNoPromptModelSuffix(canon.Model) {
+			w.Header().Set(headerClientToProxyNoPrompt, "false")
+		}
 		if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {
 			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 		}
@@ -83,7 +85,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		applyProviderMaxOutputTokens(&canon, provider)
 		finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
-		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			if writeRequestValidationError(w, err) {
 				return
 			}

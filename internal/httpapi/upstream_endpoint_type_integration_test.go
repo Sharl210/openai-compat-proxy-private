@@ -870,8 +870,8 @@ func TestResponsesRouteNoPromptSuffixSkipsProviderPromptAndKeepsReasoningSuffix(
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
 		t.Fatalf("expected noprompt suffix to be stripped before upstream model resolution, got %q", got)
 	}
-	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5-low" {
-		t.Fatalf("expected client model observability header to show effective client model without noprompt marker, got %q", got)
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5-low-noprompt" {
+		t.Fatalf("expected client model observability header to preserve raw client model, got %q", got)
 	}
 	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
 		t.Fatalf("expected noprompt observability header true, got %q", got)
@@ -928,8 +928,8 @@ func TestResponsesRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
 		t.Fatalf("expected noprompt suffix to be stripped before upstream model resolution, got %q", got)
 	}
-	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5" {
-		t.Fatalf("expected client model observability header to show effective client model without noprompt marker, got %q", got)
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5-noprompt" {
+		t.Fatalf("expected client model observability header to preserve raw client model, got %q", got)
 	}
 	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
 		t.Fatalf("expected noprompt observability header true, got %q", got)
@@ -988,8 +988,8 @@ func TestExplicitResponsesRouteManualNoPromptModelStillActsAsProxySuffix(t *test
 	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
 		t.Fatalf("expected manual noprompt model to still set noprompt header true, got %q", got)
 	}
-	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5" {
-		t.Fatalf("expected client model header to show stripped model, got %q", got)
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5-noprompt" {
+		t.Fatalf("expected client model header to preserve raw client model, got %q", got)
 	}
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
 		t.Fatalf("expected upstream model to strip noprompt suffix, got %q", got)
