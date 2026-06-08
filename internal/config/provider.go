@@ -702,25 +702,49 @@ func parseScopedIntRules(raw string, key string, path string) (int, []ScopedIntR
 }
 
 func (p ProviderConfig) ResolveUpstreamMaxOutputTokens(model string) int {
-	return resolveScopedInt(p.UpstreamMaxOutputTokens, p.UpstreamMaxOutputTokenRules, model)
+	return p.ResolveUpstreamMaxOutputTokensForReasoning(model, "")
+}
+
+func (p ProviderConfig) ResolveUpstreamMaxOutputTokensForReasoning(model string, effort string) int {
+	return resolveScopedInt(p.UpstreamMaxOutputTokens, p.UpstreamMaxOutputTokenRules, model, effort)
 }
 
 func (p ProviderConfig) ResolveModelLimitContextTokens(model string) int {
-	return resolveScopedInt(p.ModelLimitContextTokens, p.ModelLimitContextTokenRules, model)
+	return p.ResolveModelLimitContextTokensForReasoning(model, "")
 }
 
-func resolveScopedInt(defaultValue int, rules []ScopedIntRule, model string) int {
-	for _, rule := range rules {
-		if rule.IsExact && model == rule.Pattern {
-			return rule.Tokens
+func (p ProviderConfig) ResolveModelLimitContextTokensForReasoning(model string, effort string) int {
+	return resolveScopedInt(p.ModelLimitContextTokens, p.ModelLimitContextTokenRules, model, effort)
+}
+
+func resolveScopedInt(defaultValue int, rules []ScopedIntRule, model string, effort string) int {
+	for _, candidate := range scopedRuleModelCandidates(model, effort) {
+		for _, rule := range rules {
+			if rule.IsExact && candidate == rule.Pattern {
+				return rule.Tokens
+			}
 		}
 	}
-	for _, rule := range rules {
-		if rule.PatternRE != nil && rule.PatternRE.MatchString(model) {
-			return rule.Tokens
+	for _, candidate := range scopedRuleModelCandidates(model, effort) {
+		for _, rule := range rules {
+			if rule.PatternRE != nil && rule.PatternRE.MatchString(candidate) {
+				return rule.Tokens
+			}
 		}
 	}
 	return defaultValue
+}
+
+func scopedRuleModelCandidates(model string, effort string) []string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	effort = normalizeReasoningEffort(effort)
+	if effort == "" {
+		return []string{model}
+	}
+	return []string{model + "-" + effort, model}
 }
 
 func normalizeProviderRetryCount(value int) int {
