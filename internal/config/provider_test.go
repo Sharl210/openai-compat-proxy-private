@@ -1336,8 +1336,11 @@ func TestResolveUpstreamMaxOutputTokensPrefersExactThenRegexThenDefault(t *testi
 	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.4-mini"); got != 100000 {
 		t.Fatalf("expected regex match 100000, got %d", got)
 	}
-	if got := provider.ResolveUpstreamMaxOutputTokens("gpt-5.5-high-noprompt"); got != 100000 {
-		t.Fatalf("expected literal exact rule not to strip suffixes, got %d", got)
+	if got := provider.ResolveUpstreamMaxOutputTokensForReasoning("gpt-5.5", "high"); got != 128000 {
+		t.Fatalf("expected base family rule to apply when noprompt marker is ignored, got %d", got)
+	}
+	if got := provider.ResolveUpstreamMaxOutputTokensForReasoning("gpt-5.5-high-noprompt", ""); got != 100000 {
+		t.Fatalf("expected raw helper without normalized model to keep literal fallback behavior, got %d", got)
 	}
 	if got := provider.ResolveUpstreamMaxOutputTokens("claude-sonnet-4-5"); got != 64000 {
 		t.Fatalf("expected default 64000, got %d", got)
@@ -1370,6 +1373,19 @@ func TestLoadProviderFileParsesModelLimitContextTokens(t *testing.T) {
 	}
 	if provider.ModelLimitContextTokenRules[1].Pattern != "#re:.*gpt-.*" || provider.ModelLimitContextTokenRules[1].Tokens != 64000 {
 		t.Fatalf("expected regex context limit rule second, got %#v", provider.ModelLimitContextTokenRules)
+	}
+}
+
+func TestResolveModelLimitContextTokensTreatsNoPromptAsProxyMarkerAfterNormalization(t *testing.T) {
+	provider := ProviderConfig{
+		ModelLimitContextTokens: -1,
+		ModelLimitContextTokenRules: []ScopedIntRule{
+			{Pattern: "claude-sonnet-4-5", Tokens: 400000, IsExact: true},
+			{Pattern: "claude-sonnet-4-5-high", Tokens: 200000, IsExact: true},
+		},
+	}
+	if got := provider.ResolveModelLimitContextTokensForReasoning("claude-sonnet-4-5", "high"); got != 200000 {
+		t.Fatalf("expected reasoning family member rule to win after noprompt normalization, got %d", got)
 	}
 }
 

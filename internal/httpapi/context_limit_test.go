@@ -20,6 +20,7 @@ func TestResponsesSuccessSetsModelLimitContextHeader(t *testing.T) {
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
+		EnableNoPromptModelSuffix: true,
 		Providers: []config.ProviderConfig{{
 			ID:                      "openai",
 			Enabled:                 true,

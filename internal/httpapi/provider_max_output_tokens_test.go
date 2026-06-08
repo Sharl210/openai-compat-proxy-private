@@ -298,6 +298,25 @@ func TestProviderMaxOutputTokensScopedRulesTreatLiteralBaseAsReasoningFamily(t *
 	}
 }
 
+func TestProviderMaxOutputTokensScopedRulesIgnoreNoPromptMarker(t *testing.T) {
+	payload, rec := serveProviderMaxOutputTokensRequest(t, providerMaxOutputTokensScenario{
+		path:                    "/v1/responses",
+		body:                    `{"model":"gpt-5.5-high-noprompt","input":[{"role":"user","content":"hello"}]}`,
+		providerMaxOutputTokens: 64000,
+		providerMaxOutputTokenRules: []config.ScopedIntRule{
+			exactScopedRule("claude-sonnet-4-5", 128000),
+			exactScopedRule("claude-sonnet-4-5-high", 160000),
+		},
+		modelMap: []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
+	})
+	if got := numericJSONValue(payload["max_tokens"]); got != 160000 {
+		t.Fatalf("expected noprompt marker to reuse same reasoning family rule, got %#v payload=%#v", payload["max_tokens"], payload)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamMaxOutputTokens); got != "160000" {
+		t.Fatalf("expected %s 160000, got %q", headerProxyToUpstreamMaxOutputTokens, got)
+	}
+}
+
 func TestDecodeAndResolveResponsesRequestKeepsClientModelAndScopedRules(t *testing.T) {
 	store := config.NewStaticRuntimeStore(config.Config{
 		DefaultProvider:      "openai",
@@ -389,7 +408,6 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 			config.NewModelMapEntry("gpt-5", "claude-sonnet-4-5"),
 			config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5"),
 			config.NewModelMapEntry("gpt-5.4-mini", "claude-sonnet-4-5"),
-			config.NewModelMapEntry("gpt-5.5-high-noprompt", "claude-sonnet-4-5"),
 			config.NewModelMapEntry("claude-sonnet-4-5", "claude-sonnet-4-5"),
 		}
 	}

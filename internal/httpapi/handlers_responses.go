@@ -339,8 +339,6 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 	}
 	if hasNoPromptModelSuffix(canon.Model) {
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
-	} else if canon.SkipProviderSystemPrompt {
-		resolvedModel = canon.Model
 	}
 	clientModel := canon.Model
 	if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {

@@ -43,15 +43,13 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
 			return
 		}
-		if !provider.HidesModel(canon.Model) {
-			applyNoPromptModelSuffix(&canon, providerCfg)
-		}
-		if hasNoPromptModelSuffix(canon.Model) {
-			w.Header().Set(headerClientToProxyNoPrompt, "false")
-		} else if canon.SkipProviderSystemPrompt {
-			resolvedModel = canon.Model
-		}
-		clientModel := canon.Model
+	if !provider.HidesModel(canon.Model) {
+		applyNoPromptModelSuffix(&canon, providerCfg)
+	}
+	if hasNoPromptModelSuffix(canon.Model) {
+		w.Header().Set(headerClientToProxyNoPrompt, "false")
+	}
+	clientModel := canon.Model
 		if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {
 			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 		}

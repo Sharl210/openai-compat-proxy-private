@@ -957,6 +957,9 @@ func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (
 func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, requestEffort string, enableClientSuffix bool) (string, string) {
 	explicitRequestEffort := normalizeReasoningEffort(requestEffort)
 	configSuffixEnabled := true
+	if strippedModel, stripped := stripProviderNoPromptModelSuffix(model); stripped {
+		model = strippedModel
+	}
 	enableClientSuffix = enableClientSuffix || (p.HasManualReasonSuffixForModel(model) && !p.HasLiteralManualModel(model))
 	requestedModel := model
 	requestedEffort := ""
@@ -998,6 +1001,15 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 		return requestedModel, requestedEffort
 	}
 	return requestedModel, ""
+}
+
+func stripProviderNoPromptModelSuffix(model string) (string, bool) {
+	const suffix = "-noprompt"
+	trimmed := strings.TrimSpace(model)
+	if len(trimmed) <= len(suffix) || !strings.HasSuffix(trimmed, suffix) {
+		return model, false
+	}
+	return strings.TrimSuffix(trimmed, suffix), true
 }
 
 func sourceEffortForMatchedModel(entry ModelMapEntry, synthesized bool, fallback string) string {

@@ -311,7 +311,7 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 		if baseModel, ok := stripNoPromptModelSuffix(model); ok {
 			if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
 				provider, err := s.Config.ProviderByID(owner)
-				if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(model) {
+				if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(baseModel) {
 					return owner, resolvedModel, true
 				}
 			}
@@ -324,7 +324,7 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 	if baseModel, ok := stripNoPromptModelSuffix(model); ok {
 		if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
 			provider, err := s.Config.ProviderByID(owner)
-			if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(model) {
+			if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(baseModel) {
 				return owner, resolvedModel, true
 			}
 		}
