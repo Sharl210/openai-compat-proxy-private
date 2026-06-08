@@ -979,18 +979,22 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 		effectiveModel := requestedModel + "-" + requestedEffort
 		if mapped, entry := p.resolveModelEntryWithOrder(effectiveModel, true); mapped != "" {
 			resolvedEffort := requestedEffort
-			if _, _, ok := splitReasoningSuffix(entry.UnescapedTarget); !ok {
-				if explicitRequestEffort != "" {
-					resolvedEffort = explicitRequestEffort
-				} else {
-					resolvedEffort = ""
-				}
+			if _, mappedEffort, ok := splitReasoningSuffix(entry.UnescapedTarget); ok {
+				resolvedEffort = mappedEffort
+			} else if explicitRequestEffort != "" {
+				resolvedEffort = explicitRequestEffort
+			} else {
+				resolvedEffort = ""
 			}
 			return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
 		}
 	}
 	if mapped, entry := p.resolveModelEntryWithOrder(model, true); mapped != "" {
-		return finalizeResolvedModelAndEffort(mapped, sourceEffortForMatchedModel(entry, synthesizedRequestEffort, requestedEffort), configSuffixEnabled)
+		resolvedEffort := sourceEffortForMatchedModel(entry, synthesizedRequestEffort, requestedEffort)
+		if _, mappedEffort, ok := splitReasoningSuffix(entry.UnescapedTarget); ok {
+			resolvedEffort = mappedEffort
+		}
+		return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
 	}
 	if enableClientSuffix && requestedModel != model {
 		if mapped, _ := p.resolveModelEntryWithOrder(requestedModel, true); mapped != "" {

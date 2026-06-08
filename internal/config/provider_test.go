@@ -111,11 +111,11 @@ func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t
 			wantEffort: "low",
 		},
 		{
-			name:       "request suffix wins over target suffix",
+			name:       "target suffix wins over request suffix",
 			entry:      NewModelMapEntry("client-gpt-high", "upstream-gpt-low"),
 			request:    "client-gpt-high",
 			wantModel:  "upstream-gpt",
-			wantEffort: "high",
+			wantEffort: "low",
 		},
 	}
 
@@ -187,6 +187,24 @@ func TestResolveModelAndEffortWithRequestEffortDoesNotInheritSourceSuffixWhenTar
 	model, effort := p.ResolveModelAndEffortWithRequestEffort("gpt-5.5-xhigh", "low", true)
 	if model != "gpt-5.5" || effort != "low" {
 		t.Fatalf("expected explicit request effort to win when target is base model, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortPrefersMappedTargetSuffixOverExplicitRequestEffort(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.4-mini-minimal", "gpt-5.4-mini-low")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("gpt-5.4-mini-minimal-noprompt", "none", true)
+	if model != "gpt-5.4-mini" || effort != "low" {
+		t.Fatalf("expected mapped target suffix to win over explicit request effort, got %q/%q", model, effort)
+	}
+}
+
+func TestResolveModelAndEffortWithRequestEffortPrefersMappedTargetSuffixForBaseSourceRule(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.4", "gpt-5.4-xhigh")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("gpt-5.4", "none", true)
+	if model != "gpt-5.4" || effort != "xhigh" {
+		t.Fatalf("expected mapped target suffix to win for base source rule, got %q/%q", model, effort)
 	}
 }
 
