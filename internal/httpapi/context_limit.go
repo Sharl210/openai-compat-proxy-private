@@ -68,53 +68,11 @@ func writeAnthropicContextLimitExceeded(w http.ResponseWriter, message string) {
 }
 
 func estimateCanonicalInputTokens(canon modelpkg.CanonicalRequest) int {
-	chars := utf8.RuneCountInString(canon.Model)
-	chars += utf8.RuneCountInString(canon.Instructions)
-	for _, part := range canon.InstructionParts {
-		chars += estimateContentPartChars(part)
-	}
-	for _, msg := range canon.Messages {
-		chars += utf8.RuneCountInString(msg.Role)
-		chars += utf8.RuneCountInString(msg.ToolCallID)
-		chars += utf8.RuneCountInString(msg.ReasoningContent)
-		if len(msg.OrderedContent) > 0 {
-			for _, block := range msg.OrderedContent {
-				chars += estimateContentPartChars(block.Part)
-				chars += utf8.RuneCountInString(block.ToolCall.Name)
-				chars += utf8.RuneCountInString(block.ToolCall.Arguments)
-				chars += utf8.RuneCountInString(block.ToolCallID)
-				for _, part := range block.ToolResultParts {
-					chars += estimateContentPartChars(part)
-				}
-			}
-			continue
-		}
-		for _, part := range msg.Parts {
-			chars += estimateContentPartChars(part)
-		}
-		for _, toolCall := range msg.ToolCalls {
-			chars += utf8.RuneCountInString(toolCall.Name)
-			chars += utf8.RuneCountInString(toolCall.Arguments)
-		}
-	}
-	if len(canon.Messages) == 0 {
-		for _, item := range canon.ResponseInputItems {
-			if encoded, err := json.Marshal(item); err == nil {
-				chars += utf8.RuneCount(encoded)
-			}
-		}
-	}
-	for _, tool := range canon.Tools {
-		chars += utf8.RuneCountInString(tool.Name)
-		chars += utf8.RuneCountInString(tool.Description)
-		if encoded, err := json.Marshal(tool.Parameters); err == nil {
-			chars += utf8.RuneCount(encoded)
-		}
-	}
-	if chars <= 0 {
+	snap := buildEstimatorSnapshot(canon)
+	if snap.BaseEstimate <= 0 {
 		return 0
 	}
-	return (chars + 3) / 4
+	return int(snap.BaseEstimate)
 }
 
 func estimateContentPartChars(part modelpkg.CanonicalContentPart) int {
