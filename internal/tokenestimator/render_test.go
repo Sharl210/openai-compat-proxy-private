@@ -122,7 +122,7 @@ func TestRenderBucketStateExplainsLearnedFeaturesAndFormula(t *testing.T) {
 		RollingTotalCorrection:    1.31,
 		RollingUncachedCorrection: 0.29,
 	})
-	for _, needle := range []string{"学到的请求特征", "当前估算规则", "可信度判断", "文本字符", "输入项数量", "推理项数量", "工具调用数量", "平均总修正系数"} {
+	for _, needle := range []string{"学到的请求特征", "当前估算规则", "可信度判断", "文本字符", "输入项数量", "推理项数量", "工具调用数量", "平均总修正系数", "字符数 ÷ 4", "真实输入 token ÷ 基础估算 token"} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("expected user-readable learning summary %q in %s", needle, text)
 		}
