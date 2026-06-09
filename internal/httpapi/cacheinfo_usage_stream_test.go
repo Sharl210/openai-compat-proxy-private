@@ -42,7 +42,7 @@ func TestChatStreamRecordsUsageToCacheInfoWithoutIncludeUsage(t *testing.T) {
 			SupportsChat:      true,
 			SupportsResponses: true,
 		}},
-	}), manager)
+	}), manager, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
 		"model":"gpt-5",

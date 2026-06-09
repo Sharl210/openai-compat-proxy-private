@@ -52,7 +52,7 @@ func TestNewServerWithStoreAcceptsCacheManager(t *testing.T) {
 	}
 	store := config.NewStaticRuntimeStore(cfg)
 	manager := &cacheinfo.Manager{}
-	server := NewServerWithStore(store, manager)
+	server := NewServerWithStore(store, manager, nil)
 	if server.CacheInfo != manager {
 		t.Fatalf("expected cache manager to be stored on server")
 	}

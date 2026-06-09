@@ -38,7 +38,7 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	first := performResponsesRequest(t, server)
 	if got := first.Header().Get("X-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
@@ -113,7 +113,7 @@ func TestVersionHeadersUseConfiguredTimezone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		t.Fatalf("LoadLocation returned error: %v", err)
@@ -154,7 +154,7 @@ func TestVersionHeadersIgnoreStartupOnlyRootConfigChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	first := performResponsesRequest(t, server)
 	if got := first.Header().Get("X-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
@@ -206,7 +206,7 @@ func TestSystemPromptAttachHeaderPresentOnlyWhenProviderPromptActuallyInjected(t
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	first := performResponsesRequest(t, server)
 	if got := first.Header().Get("X-SYSTEM-PROMPT-ATTACH"); got != "prepend:prompt.md, prompts/extra.md" {
@@ -248,7 +248,7 @@ func TestSystemPromptAttachHeaderPresentButEmptyWhenNoPromptSkipsProviderPrompt(
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-noprompt","input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -297,7 +297,7 @@ func TestProviderVersionHeaderUpdatesAfterPromptOnlyRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	first := performResponsesRequest(t, server)
 	if got := first.Header().Get("X-Provider-Version"); got != config.FormatVersionTime(initialPromptMTime) {
@@ -340,7 +340,7 @@ func TestProviderScopedResponsesRequestExposesVersionAndStatusHeadersTogether(t 
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -388,7 +388,7 @@ func TestUnauthorizedRequestDoesNotExposeVersionHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -422,7 +422,7 @@ func TestEarlyLocalErrorsDoNotExposeTransparencyHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntimeStore returned error: %v", err)
 	}
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	tests := []struct {
 		name       string

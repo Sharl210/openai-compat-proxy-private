@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthzReturnsServiceUnavailableWhenStoreNil(t *testing.T) {
-	server := NewServerWithStore(nil, nil)
+	server := NewServerWithStore(nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
@@ -36,7 +36,7 @@ func TestHealthzReturnsServiceUnavailableWhenStoreNil(t *testing.T) {
 }
 
 func TestHealthzReturnsServiceUnavailableWhenSnapshotNil(t *testing.T) {
-	server := NewServerWithStore(&config.RuntimeStore{}, nil)
+	server := NewServerWithStore(&config.RuntimeStore{}, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 

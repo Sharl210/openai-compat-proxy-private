@@ -589,7 +589,7 @@ func TestNewEndpointsDoNotRecordCacheInfoUsage(t *testing.T) {
 					UpstreamAPIKey:  "provider-upstream-key",
 					ManualModels:    []string{"gpt-image-2", "text-embedding-3-small", "rerank-1"},
 				}},
-			}), manager)
+			}), manager, nil)
 
 			req := httptest.NewRequest(http.MethodPost, route.path, strings.NewReader(route.body)).WithContext(withCacheInfoManager(context.Background(), manager))
 			req.Header.Set("Authorization", "Bearer root-secret")

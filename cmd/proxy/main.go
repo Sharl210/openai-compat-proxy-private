@@ -11,6 +11,7 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/httpapi"
 	"openai-compat-proxy/internal/logging"
+	"openai-compat-proxy/internal/tokenestimator"
 )
 
 func main() {
@@ -29,6 +30,7 @@ func main() {
 	}
 
 	var cacheMgr *cacheinfo.Manager
+	var estimatorMgr *tokenestimator.Manager
 	location, err := cfg.CacheInfoLocation()
 	if err != nil {
 		log.Printf("warning: failed to load cache info timezone %q, falling back to local: %v", cfg.CacheInfoTimezone, err)
@@ -70,7 +72,26 @@ func main() {
 		}
 	}
 
-	if err := http.ListenAndServe(cfg.ListenAddr, httpapi.NewServerWithStore(store, cacheMgr)); err != nil {
+	if cfg.ProvidersDir != "" {
+		estimatorMgr = tokenestimator.NewManager(cfg.ProvidersDir, location, func() []string {
+			snapshot := store.Active()
+			if snapshot == nil {
+				return nil
+			}
+			ids := make([]string, 0, len(snapshot.Config.Providers))
+			for _, provider := range snapshot.Config.Providers {
+				if provider.Enabled {
+					ids = append(ids, provider.ID)
+				}
+			}
+			return ids
+		})
+		defer func() {
+			_ = estimatorMgr.Flush(context.Background())
+		}()
+	}
+
+	if err := http.ListenAndServe(cfg.ListenAddr, httpapi.NewServerWithStore(store, cacheMgr, estimatorMgr)); err != nil {
 		log.Fatal(err)
 	}
 }

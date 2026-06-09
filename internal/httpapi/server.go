@@ -8,6 +8,7 @@ import (
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
+	"openai-compat-proxy/internal/tokenestimator"
 )
 
 type Server struct {
@@ -16,17 +17,19 @@ type Server struct {
 	handler http.Handler
 	admin   *adminUI
 
-	CacheInfo *cacheinfo.Manager
+	CacheInfo      *cacheinfo.Manager
+	TokenEstimator *tokenestimator.Manager
 }
 
 func NewServer(cfg config.Config) *Server {
-	return NewServerWithStore(config.NewStaticRuntimeStore(cfg), nil)
+	return NewServerWithStore(config.NewStaticRuntimeStore(cfg), nil, nil)
 }
 
-func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *Server {
+func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager, tokenEstimatorMgr *tokenestimator.Manager) *Server {
 	srv := &Server{
-		store:     store,
-		CacheInfo: cacheMgr,
+		store:          store,
+		CacheInfo:      cacheMgr,
+		TokenEstimator: tokenEstimatorMgr,
 	}
 	if imageArtifactRootDirOverride != "" {
 		ensureImageArtifactsReadyForRoot(imageArtifactRootDirOverride)
@@ -121,6 +124,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		if s.CacheInfo != nil {
 			ctx = withCacheInfoManager(ctx, s.CacheInfo)
+		}
+		if s.TokenEstimator != nil {
+			ctx = withTokenEstimatorManager(ctx, s.TokenEstimator)
 		}
 		ctx = withRuntimeStore(ctx, s.store)
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))

@@ -10,6 +10,7 @@ import (
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/reasoning"
+	"openai-compat-proxy/internal/tokenestimator"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -26,6 +27,7 @@ type routeContextKey string
 const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
+const tokenEstimatorManagerKey routeContextKey = "token-estimator-manager"
 const runtimeStoreKey routeContextKey = "runtime-store"
 const legacyRoutingModelKey routeContextKey = "legacy-routing-model"
 
@@ -98,6 +100,18 @@ func withCacheInfoManager(ctx context.Context, manager *cacheinfo.Manager) conte
 
 func cacheInfoManagerFromRequest(r *http.Request) *cacheinfo.Manager {
 	manager, _ := r.Context().Value(cacheInfoManagerKey).(*cacheinfo.Manager)
+	return manager
+}
+
+func withTokenEstimatorManager(ctx context.Context, manager *tokenestimator.Manager) context.Context {
+	if manager == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, tokenEstimatorManagerKey, manager)
+}
+
+func tokenEstimatorManagerFromRequest(r *http.Request) *tokenestimator.Manager {
+	manager, _ := r.Context().Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
 	return manager
 }
 

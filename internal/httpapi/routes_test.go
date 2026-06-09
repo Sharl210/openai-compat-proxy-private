@@ -257,7 +257,7 @@ func TestLegacyImageRouteRefreshesDefaultProviderSelectionAfterModelChange(t *te
 			ManualModels:   []string{"model-b"},
 		}},
 	})
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 	store.Active().Config.Providers[0].ManualModels = []string{"model-a", "model-new"}
 	refreshDefaultProviderOverlayCache(store, time.Now())
 
@@ -288,7 +288,7 @@ func TestProviderSelectionForLegacyModelMapAliasRequiresVisibleModel(t *testing.
 			SupportsModels: true,
 		}},
 	})
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	if containsString(store.Active().DefaultVisibleModels, "client-alias") {
 		t.Fatalf("expected MODEL_MAP alias to stay out of default visible models, got %v", store.Active().DefaultVisibleModels)
@@ -318,7 +318,7 @@ func TestProviderSelectionForTaggedLegacyModelMapAliasRequiresVisibleModel(t *te
 			ManualModels: []string{"listed-model"},
 		}},
 	})
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	if containsString(store.Active().DefaultTaggedVisibleModels, "[openai]client-alias") {
 		t.Fatalf("expected MODEL_MAP alias to stay out of tagged visible models, got %v", store.Active().DefaultTaggedVisibleModels)
@@ -348,7 +348,7 @@ func TestProviderSelectionForLegacyNoPromptReasoningSuffix(t *testing.T) {
 			EnableReasoningEffortSuffix: true,
 		}},
 	})
-	server := NewServerWithStore(store, nil)
+	server := NewServerWithStore(store, nil, nil)
 
 	req := httptest.NewRequest("POST", "/v1/responses", nil)
 	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/tokenestimator"
 )
 
 func TestAdminUIRootServesHTMLShell(t *testing.T) {
@@ -1496,7 +1498,7 @@ func newAdminUITestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("new runtime store: %v", err)
 	}
-	return NewServerWithStore(store, nil)
+	return NewServerWithStore(store, nil, nil)
 }
 
 func adminLogin(t *testing.T, server *Server) (*http.Cookie, string) {
@@ -1552,4 +1554,28 @@ func decodeAdminJSON(t *testing.T, payload []byte) map[string]any {
 		t.Fatalf("decode json: %v payload=%s", err, string(payload))
 	}
 	return data
+}
+
+func TestWithTokenEstimatorManagerRoundTrip(t *testing.T) {
+	mgr := tokenestimator.NewManager(t.TempDir(), time.UTC, func() []string { return []string{"openai"} })
+	ctx := withTokenEstimatorManager(context.Background(), mgr)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil).WithContext(ctx)
+	if got := tokenEstimatorManagerFromRequest(req); got == nil {
+		t.Fatal("expected token estimator manager from request")
+	}
+}
+
+func TestAdminUIAllowsDeletingTokenEstimatorFiles(t *testing.T) {
+	server := newAdminUITestServer(t)
+	providersDir := server.store.Active().Config.ProvidersDir
+	key := tokenestimator.BucketKey{ProviderID: "openai", EndpointType: "responses", Model: "gpt-5.4"}
+	state := &tokenestimator.BucketState{SchemaVersion: 1, EstimatorVersion: 1, ProviderID: key.ProviderID, EndpointType: key.EndpointType, FinalUpstreamRawModel: key.Model, SafeModelName: tokenestimator.SafeModelName(key.Model)}
+	if err := tokenestimator.SaveBucketState(providersDir, key, state); err != nil {
+		t.Fatalf("SaveBucketState error: %v", err)
+	}
+	jsonPath, _ := tokenestimator.BucketPaths(providersDir, key)
+	adminPath := "/providers/Token_Estimator/SYSTEM_JSON_FILES/openai/responses/" + filepath.Base(jsonPath)
+	if err := server.admin.deleteAdminFile(adminPath); err != nil {
+		t.Fatalf("deleteAdminFile error: %v", err)
+	}
 }
