@@ -27,6 +27,7 @@
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
 | 调试归档 | ✅ | 仅当 `LOG_ENABLE=true` 且 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 非空时写出 `request/raw/canonical/final.ndjson`；保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制（与 `LOG_MAX_REQUESTS` 解耦） |
+| 动态 token estimator（phase-1） | ✅ | 基于 `provider + upstream_endpoint_type + 最终上游模型` 持久化记录真实 usage，生成 JSON/TXT 观测状态与建议修正；当前只做学习与展示，不直接参与上下文拦截准入 |
 | 健康检查与 Linux 部署脚本 | ✅ | 自带 `healthz`、deploy / restart / stop / uninstall |
 | 内置 Web 管理台 | ✅ | 裸根路径 `/` 提供 Material 3 风格管理界面：文件浏览 / 文件编辑 / 运行状态 |
 
@@ -602,6 +603,21 @@ Claude 相关还有两个配套开关：
 - `v1默认分组统计.txt`
 
 其中 `v1默认分组统计.txt` 只汇总当前 `DEFAULT_PROVIDER` 列表里、并且仍处于启用状态的 provider。无论默认分组当前走的是 overlay 模式还是标签模式，这个聚合文件都会按默认分组实际参与的 provider 集合统计。
+
+### Token_Estimator 观测目录
+
+phase-1 动态 token estimator 会在 `<PROVIDERS_DIR>/Token_Estimator/` 下即时落盘两类文件：
+
+- `SYSTEM_JSON_FILES/<provider>/<endpoint>/<safe-model>.json`
+- `<provider>/<endpoint>/<safe-model>.txt`
+
+这里的分桶键固定是：
+
+- `provider_id`
+- `upstream_endpoint_type`
+- `最终真正发给上游的模型名`
+
+当前阶段只做学习、观测和建议修正，不直接反向修改 `MODEL_LIMIT_CONTEXT_TOKENS` 的准入判断。TXT 摘要里会展示样本数、置信度、`runtime_ready`、平均 input/cached/uncached token，以及建议修正系数。用户如果在管理台删除某个 provider 目录、某个 endpoint 目录、或某个模型对应文件，代理会把它当成冷启动重新学习。
 
 ### provider `.env`
 
