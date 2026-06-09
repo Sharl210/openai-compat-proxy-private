@@ -67,7 +67,7 @@ func TestRenderBucketStateIncludesCoreFields(t *testing.T) {
 		RollingUncachedCorrection: 1.42,
 	}
 	text := RenderBucketState(state)
-	for _, needle := range []string{"codex-2", "responses", "gpt-5.4", "sample_count", "suggested_uncached_correction"} {
+	for _, needle := range []string{"codex-2", "responses", "gpt-5.4", "样本总数", "建议未缓存修正系数"} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("expected %q in render output: %s", needle, text)
 		}
@@ -88,5 +88,15 @@ func TestDeleteBucketDirectoryAllowsColdStartRebuild(t *testing.T) {
 	}
 	if err := SaveBucketState(root, key, state); err != nil {
 		t.Fatalf("expected cold-start rebuild after delete, got %v", err)
+	}
+}
+
+
+func TestRenderBucketStateUsesChineseLabels(t *testing.T) {
+	text := RenderBucketState(BucketState{ProviderID: "codex", EndpointType: "responses", FinalUpstreamRawModel: "gpt-5.4", SampleCount: 3, AvgInputTokens: 120, AvgCachedTokens: 20, AvgUncachedInputTokens: 100, RuntimeReady: true})
+	for _, needle := range []string{"提供商", "上游端点类型", "最终上游模型", "样本总数", "建议未缓存修正系数"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("expected Chinese label %q in %s", needle, text)
+		}
 	}
 }

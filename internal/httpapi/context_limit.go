@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	modelpkg "openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/tokenestimator"
 )
 
 const contextOverflowMessage = "prompt is too long: context_length_exceeded by proxy model limit"
@@ -24,16 +26,20 @@ func setProxyModelLimitContextHeader(w http.ResponseWriter, provider config.Prov
 	return limit
 }
 
-func writeContextLimitExceededIfNeeded(w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest, protocol string) bool {
+func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest, protocol string) bool {
 	limit := setProxyModelLimitContextHeader(w, provider, canon)
 	if limit < 0 {
 		return false
 	}
 	estimatedTokens := estimateCanonicalInputTokens(canon)
-	if estimatedTokens <= limit {
+	effectiveLimit := limit
+	if ctx != nil {
+		effectiveLimit = conservativeContextAdmissionLimit(ctx, limit, canon)
+	}
+	if estimatedTokens <= effectiveLimit {
 		return false
 	}
-	message := buildContextLimitExceededMessage(estimatedTokens, limit)
+	message := buildContextLimitExceededMessage(estimatedTokens, effectiveLimit)
 	switch protocol {
 	case clientReasoningProtocolMessages:
 		writeAnthropicContextLimitExceeded(w, message)
@@ -42,6 +48,28 @@ func writeContextLimitExceededIfNeeded(w http.ResponseWriter, provider config.Pr
 	}
 	return true
 }
+
+
+func conservativeContextAdmissionLimit(ctx context.Context, configuredLimit int, canon modelpkg.CanonicalRequest) int {
+	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
+	if mgr == nil {
+		return configuredLimit
+	}
+	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
+	if input.ProviderID == "" || input.EndpointType == "" || input.FinalUpstreamModel == "" {
+		return configuredLimit
+	}
+	key := tokenestimator.BucketKey{
+		ProviderID:   strings.TrimSpace(input.ProviderID),
+		EndpointType: strings.TrimSpace(input.EndpointType),
+		Model:        strings.TrimSpace(input.FinalUpstreamModel),
+	}
+	if tightened, ok := mgr.ConservativeAdmissionLimit(key, configuredLimit); ok {
+		return tightened
+	}
+	return configuredLimit
+}
+
 
 func buildContextLimitExceededMessage(estimatedTokens int, limit int) string {
 	if estimatedTokens <= 0 || limit <= 0 {

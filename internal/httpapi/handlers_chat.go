@@ -77,6 +77,14 @@ func handleChat() http.HandlerFunc {
 			finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 		}
+		baseEstimate := int64(estimateCanonicalInputTokens(canon))
+		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
+			ProviderID:         providerID,
+			EndpointType:       providerCfg.UpstreamEndpointType,
+			FinalUpstreamModel: canon.Model,
+			BaseEstimate:       baseEstimate,
+			Canon:              canon,
+		}))
 		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			if writeRequestValidationError(w, err) {
 				return
@@ -84,8 +92,7 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-		baseEstimate := int64(estimateCanonicalInputTokens(canon))
-		if writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolChat) {
+		if writeContextLimitExceededIfNeeded(r.Context(), w, provider, canon, clientReasoningProtocolChat) {
 			return
 		}
 		canon.RequestID = requestID
@@ -107,13 +114,6 @@ func handleChat() http.HandlerFunc {
 		logging.Event("proxyBuiltCanonicalRequest", attrs)
 
 		ctx := r.Context()
-		ctx = withTokenEstimatorObservation(ctx, tokenEstimatorObservationInput{
-			ProviderID:         providerID,
-			EndpointType:       providerCfg.UpstreamEndpointType,
-			FinalUpstreamModel: canon.Model,
-			BaseEstimate:       baseEstimate,
-			Canon:              canon,
-		})
 		usageRecorder := combinedUsageRecorder(
 			cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType),
 			tokenEstimatorUsageRecorder(ctx, canon.RequestID, providerCfg.UpstreamEndpointType, bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r)),

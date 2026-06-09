@@ -409,18 +409,6 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	applyProviderMaxOutputTokens(&canon, provider)
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
-	if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
-		if writeRequestValidationError(w, err) {
-			return nil, false
-		}
-		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
-		return nil, false
-	}
-	if !compact && writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolResponses) {
-		return nil, false
-	}
-	canon.RequestID = requestID
-	canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	observationCtx := withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 		ProviderID:         providerID,
 		EndpointType:       providerCfg.UpstreamEndpointType,
@@ -429,6 +417,18 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		Canon:              canon,
 	})
 	*r = *r.Clone(observationCtx)
+	if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if writeRequestValidationError(w, err) {
+			return nil, false
+		}
+		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return nil, false
+	}
+	if !compact && writeContextLimitExceededIfNeeded(r.Context(), w, provider, canon, clientReasoningProtocolResponses) {
+		return nil, false
+	}
+	canon.RequestID = requestID
+	canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	usageRecorder := combinedUsageRecorder(
 		cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType),
 		tokenEstimatorUsageRecorder(observationCtx, requestID, providerCfg.UpstreamEndpointType, bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r)),

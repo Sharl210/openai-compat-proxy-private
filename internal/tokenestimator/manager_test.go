@@ -107,3 +107,19 @@ func TestRecordObservationPersistsStateImmediately(t *testing.T) {
 		t.Fatalf("expected persisted state, got %#v", loaded)
 	}
 }
+
+
+func TestManagerConservativeAdmissionLimitUsesSmallerLearnedBound(t *testing.T) {
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex"} })
+	obs := Observation{Bucket: BucketKey{ProviderID: "codex", EndpointType: "responses", Model: "gpt-5.4"}, BaseEstimate: 100, InputTokens: 390, CachedTokens: 0, UncachedInputTokens: 390, Shape: ShapePlain, ProtocolSignature: "responses:v1", EstimatorSignature: "base-estimator:v1"}
+	if err := mgr.RecordObservation("req-overflow", obs); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	limit, ok := mgr.ConservativeAdmissionLimit(obs.Bucket, 300)
+	if !ok {
+		t.Fatal("expected conservative admission limit")
+	}
+	if limit >= 300 {
+		t.Fatalf("expected learned/observed guard to tighten below configured limit, got %d", limit)
+	}
+}

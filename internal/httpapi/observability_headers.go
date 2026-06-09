@@ -20,6 +20,7 @@ const (
 	headerSystemPromptAttach                 = "X-SYSTEM-PROMPT-ATTACH"
 	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
+	headerProxyEstimatedInputTokens          = "X-Proxy-Estimated-Input-Tokens"
 	headerProxyModelLimitContextTokens       = "X-Proxy-Model-Limit-Context-Tokens"
 	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
 	headerProxyToUpstreamMaxOutputTokens     = "X-Proxy-To-Upstream-Max-Output-Tokens"
@@ -290,6 +291,7 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, provider config.P
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
 	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
+	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokens(canon)))
 	setProxyModelLimitContextHeader(w, provider, canon)
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {
@@ -342,6 +344,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerClientToProxyReasoningEffort,
 		headerClientToProxyNoPrompt,
 		headerProxyToUpstreamModel,
+		headerProxyEstimatedInputTokens,
 		headerProxyModelLimitContextTokens,
 		headerProxyToUpstreamServiceTier,
 		headerProxyToUpstreamMaxOutputTokens,

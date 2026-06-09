@@ -107,6 +107,55 @@ func (m *Manager) GetBucketState(key BucketKey) *BucketState {
 	return &clone
 }
 
+func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int) (int, bool) {
+	if configuredLimit <= 0 {
+		return 0, false
+	}
+	state := m.GetBucketState(key)
+	if state == nil {
+		return configuredLimit, true
+	}
+	best := configuredLimit
+	if observed := conservativeObservedOverflowEstimateLimit(state, configuredLimit); observed > 0 && observed < best {
+		best = observed
+	}
+	if learned := conservativeLearnedEstimateLimit(state, configuredLimit); learned > 0 && learned < best {
+		best = learned
+	}
+	if best < 1 {
+		best = 1
+	}
+	return best, true
+}
+
+func conservativeObservedOverflowEstimateLimit(state *BucketState, configuredLimit int) int {
+	if state == nil || configuredLimit <= 0 || len(state.RecentSamples) == 0 {
+		return 0
+	}
+	last := state.RecentSamples[len(state.RecentSamples)-1]
+	if last.InputTokens <= int64(configuredLimit) || last.BaseEstimate <= 0 {
+		return 0
+	}
+	const safetyFactor = 0.95
+	guard := int(math.Floor(float64(last.InputTokens) * safetyFactor))
+	if guard <= 0 {
+		return 0
+	}
+	return guard
+}
+
+func conservativeLearnedEstimateLimit(state *BucketState, configuredLimit int) int {
+	if state == nil || configuredLimit <= 0 {
+		return 0
+	}
+	ratio := math.Max(state.RollingTotalCorrection, state.AvgTotalRatio)
+	if ratio <= 1 {
+		return 0
+	}
+	const safetyFactor = 0.95
+	return int(math.Floor(float64(configuredLimit) / ratio * safetyFactor))
+}
+
 func (m *Manager) RecordObservation(requestID string, obs Observation) error {
 	if obs.BaseEstimate <= 0 || obs.InputTokens < 0 || obs.CachedTokens < 0 || obs.UncachedInputTokens < 0 || obs.InputTokens < obs.CachedTokens {
 		return ErrInvalidObservation

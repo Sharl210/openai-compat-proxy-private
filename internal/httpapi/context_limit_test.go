@@ -5,10 +5,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/testutil"
+	"openai-compat-proxy/internal/tokenestimator"
 )
 
 func TestResponsesSuccessSetsModelLimitContextHeader(t *testing.T) {
@@ -43,6 +45,9 @@ func TestResponsesSuccessSetsModelLimitContextHeader(t *testing.T) {
 	}
 	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "-1" {
 		t.Fatalf("expected context limit header -1, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyEstimatedInputTokens); got == "" || got == "0" {
+		t.Fatalf("expected estimated input tokens header, got %q", got)
 	}
 }
 
@@ -238,5 +243,65 @@ func TestEstimateCanonicalInputTokensDoesNotDoubleCountAnthropicOrderedContent(t
 	gotWithDuplicate := estimateCanonicalInputTokens(canonWithDuplicateParts)
 	if gotWithDuplicate != gotOrderedOnly {
 		t.Fatalf("expected ordered anthropic content to be counted once, got ordered_only=%d with_duplicate=%d", gotOrderedOnly, gotWithDuplicate)
+	}
+}
+
+
+func TestResponsesContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *testing.T) {
+	providersDir := t.TempDir()
+	mgr := tokenestimator.NewManager(providersDir, time.UTC, func() []string { return []string{"openai"} })
+	if err := mgr.RecordObservation("req-prev-overflow", tokenestimator.Observation{Bucket: tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.5"}, BaseEstimate: 100, InputTokens: 390, CachedTokens: 0, UncachedInputTokens: 390, Shape: tokenestimator.ShapePlain, ProtocolSignature: "responses:v1", EstimatorSignature: "base-estimator:v1"}); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	if tightened, ok := mgr.ConservativeAdmissionLimit(tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.5"}, 300); !ok {
+		t.Fatal("expected conservative admission limit")
+	} else {
+		t.Logf("tightened_limit=%d", tightened)
+	}
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{ProvidersDir: providersDir, DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, SupportsResponses: true, ManualModels: []string{"gpt-5.5"}, ModelLimitContextTokens: 300, UpstreamEndpointType: config.UpstreamEndpointTypeResponses, UpstreamBaseURL: "https://upstream.invalid/v1", UpstreamAPIKey: "test-key"}}}), nil, mgr)
+	body := `{"model":"gpt-5.5","input":[{"role":"user","content":"` + strings.Repeat("hello ", 220) + `"}]}`
+	canon := modelpkg.CanonicalRequest{Model: "gpt-5.5", ResponseInputItems: []map[string]any{{"role": "user", "content": strings.Repeat("hello ", 220)}}}
+	t.Logf("estimated_tokens=%d", estimateCanonicalInputTokens(canon))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "context_length_exceeded") {
+		t.Fatalf("expected context overflow body, got %s", rec.Body.String())
+	}
+}
+
+func TestChatContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *testing.T) {
+	providersDir := t.TempDir()
+	mgr := tokenestimator.NewManager(providersDir, time.UTC, func() []string { return []string{"openai"} })
+	if err := mgr.RecordObservation("req-prev-overflow-chat", tokenestimator.Observation{Bucket: tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeChat, Model: "gpt-5.5"}, BaseEstimate: 100, InputTokens: 390, CachedTokens: 0, UncachedInputTokens: 390, Shape: tokenestimator.ShapePlain, ProtocolSignature: "chat:v1", EstimatorSignature: "base-estimator:v1"}); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{ProvidersDir: providersDir, DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, SupportsChat: true, ManualModels: []string{"gpt-5.5"}, ModelLimitContextTokens: 300, UpstreamEndpointType: config.UpstreamEndpointTypeChat, UpstreamBaseURL: "https://upstream.invalid/v1", UpstreamAPIKey: "test-key"}}}), nil, mgr)
+	body := `{"model":"gpt-5.5","messages":[{"role":"user","content":"` + strings.Repeat("hello ", 220) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAnthropicContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *testing.T) {
+	providersDir := t.TempDir()
+	mgr := tokenestimator.NewManager(providersDir, time.UTC, func() []string { return []string{"openai"} })
+	if err := mgr.RecordObservation("req-prev-overflow-messages", tokenestimator.Observation{Bucket: tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeAnthropic, Model: "claude-sonnet-4-5"}, BaseEstimate: 100, InputTokens: 390, CachedTokens: 0, UncachedInputTokens: 390, Shape: tokenestimator.ShapePlain, ProtocolSignature: "anthropic:v1", EstimatorSignature: "base-estimator:v1"}); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{ProvidersDir: providersDir, DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, SupportsAnthropicMessages: true, ManualModels: []string{"claude-sonnet-4-5"}, ModelLimitContextTokens: 300, UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, UpstreamBaseURL: "https://upstream.invalid", UpstreamAPIKey: "test-key"}}}), nil, mgr)
+	body := `{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":"` + strings.Repeat("hello ", 220) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
