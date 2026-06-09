@@ -82,3 +82,28 @@ func TestManagerFlushPersistsBuckets(t *testing.T) {
 		t.Fatalf("expected flushed state, got %#v err=%v", state, err)
 	}
 }
+
+func TestRecordObservationPersistsStateImmediately(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(root, time.UTC, func() []string { return []string{"codex-2"} })
+	obs := Observation{
+		Bucket:              BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "gpt-5.4"},
+		BaseEstimate:        100,
+		InputTokens:         120,
+		CachedTokens:        20,
+		UncachedInputTokens: 100,
+		Shape:               ShapePlain,
+		ProtocolSignature:   "responses:v1",
+		EstimatorSignature:  "base-estimator:v1",
+	}
+	if err := mgr.RecordObservation("req-persist", obs); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	loaded, err := LoadBucketState(root, obs.Bucket)
+	if err != nil {
+		t.Fatalf("LoadBucketState error: %v", err)
+	}
+	if loaded == nil || loaded.SampleCount != 1 {
+		t.Fatalf("expected persisted state, got %#v", loaded)
+	}
+}

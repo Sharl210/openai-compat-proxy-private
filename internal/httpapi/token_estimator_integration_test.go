@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -93,5 +94,49 @@ func TestChatStreamRecordsTokenEstimatorObservationOnResponseCompleted(t *testin
 	state := mgr.GetBucketState(tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.4"})
 	if state == nil || state.SampleCount != 1 {
 		t.Fatalf("expected recorded estimator state, got %#v", state)
+	}
+}
+
+func TestResponsesNonStreamPersistsTokenEstimatorFilesImmediately(t *testing.T) {
+	root := t.TempDir()
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":240,"input_tokens_details":{"cached_tokens":120},"output_tokens":20,"total_tokens":260}}`))
+	}))
+	defer upstreamServer.Close()
+
+	mgr := tokenestimator.NewManager(root, time.UTC, func() []string { return []string{"openai"} })
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		ProvidersDir:         root,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstreamServer.URL,
+			UpstreamAPIKey:              "provider-upstream-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsModels:              true,
+			EnableReasoningEffortSuffix: true,
+			ManualModels:                []string{"gpt-5.4"},
+		}},
+	}), nil, mgr)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello"}`))
+	req.Header.Set("Authorization", "Bearer root-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	jsonPath, txtPath := tokenestimator.BucketPaths(root, tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.4"})
+	if _, err := os.Stat(jsonPath); err != nil {
+		t.Fatalf("expected json file immediately, got %v", err)
+	}
+	if _, err := os.Stat(txtPath); err != nil {
+		t.Fatalf("expected txt file immediately, got %v", err)
 	}
 }

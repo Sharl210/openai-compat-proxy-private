@@ -151,7 +151,7 @@ func (m *Manager) RecordObservation(requestID string, obs Observation) error {
 	state.AvgToolResultCount = rollingMean(state.AvgToolResultCount, float64(obs.FeatureCounts["tool_result_count"]), state.UsableSampleCount)
 	state.AvgMultimodalItemCount = rollingMean(state.AvgMultimodalItemCount, float64(obs.FeatureCounts["multimodal_item_count"]), state.UsableSampleCount)
 	state.ConfidenceLevel = confidenceLabel(state.UsableSampleCount)
-	state.RuntimeReady = false
+	state.RuntimeReady = state.UsableSampleCount >= 16 && state.RollingUncachedCorrection > 0
 	state.RecentSamples = append(state.RecentSamples, SampleSummary{
 		RecordedAt:          obs.RecordedAt,
 		BaseEstimate:        obs.BaseEstimate,
@@ -167,7 +167,8 @@ func (m *Manager) RecordObservation(requestID string, obs Observation) error {
 		state.RecentSamples = state.RecentSamples[len(state.RecentSamples)-m.recentLimit:]
 	}
 	m.seenRequests[requestID] = struct{}{}
-	return nil
+	clone := *state
+	return SaveBucketState(m.providersDir, obs.Bucket, &clone)
 }
 
 func (m *Manager) ensureBucketLocked(obs Observation) *BucketState {
