@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"context"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,17 +30,20 @@ func setProxyModelLimitContextHeader(w http.ResponseWriter, provider config.Prov
 func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest, protocol string) bool {
 	limit := setProxyModelLimitContextHeader(w, provider, canon)
 	if limit < 0 {
+		w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokens(canon)))
 		return false
 	}
-	estimatedTokens := estimateCanonicalInputTokens(canon)
+	rawEstimatedTokens := estimateCanonicalInputTokens(canon)
 	effectiveLimit := limit
 	if ctx != nil {
 		effectiveLimit = conservativeContextAdmissionLimit(ctx, limit, canon)
 	}
-	if estimatedTokens <= effectiveLimit {
+	displayedEstimatedTokens := presentDisplayedEstimatedTokens(rawEstimatedTokens, effectiveLimit, limit)
+	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(displayedEstimatedTokens))
+	if rawEstimatedTokens <= effectiveLimit {
 		return false
 	}
-	message := buildContextLimitExceededMessage(estimatedTokens, effectiveLimit)
+	message := buildContextLimitExceededMessage(displayedEstimatedTokens, limit)
 	switch protocol {
 	case clientReasoningProtocolMessages:
 		writeAnthropicContextLimitExceeded(w, message)
@@ -47,6 +51,20 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 		errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", message)
 	}
 	return true
+}
+
+func presentDisplayedEstimatedTokens(rawEstimatedTokens int, effectiveLimit int, configuredLimit int) int {
+	if rawEstimatedTokens <= 0 {
+		return 0
+	}
+	if effectiveLimit <= 0 || configuredLimit <= 0 || effectiveLimit >= configuredLimit {
+		return rawEstimatedTokens
+	}
+	scaled := int(math.Round(float64(rawEstimatedTokens) / float64(effectiveLimit) * float64(configuredLimit)))
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
 }
 
 
@@ -64,7 +82,10 @@ func conservativeContextAdmissionLimit(ctx context.Context, configuredLimit int,
 		EndpointType: strings.TrimSpace(input.EndpointType),
 		Model:        strings.TrimSpace(input.FinalUpstreamModel),
 	}
-	if tightened, ok := mgr.ConservativeAdmissionLimit(key, configuredLimit); ok {
+	shape := tokenestimator.ShapeClass("")
+	snap := buildEstimatorSnapshot(canon)
+	shape = classifyEstimatorShape(snap)
+	if tightened, ok := mgr.ConservativeAdmissionLimit(key, configuredLimit, shape); ok {
 		return tightened
 	}
 	return configuredLimit

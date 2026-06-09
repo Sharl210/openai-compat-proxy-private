@@ -107,7 +107,7 @@ func (m *Manager) GetBucketState(key BucketKey) *BucketState {
 	return &clone
 }
 
-func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int) (int, bool) {
+func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int, currentShape ShapeClass) (int, bool) {
 	if configuredLimit <= 0 {
 		return 0, false
 	}
@@ -115,11 +115,12 @@ func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int)
 	if state == nil {
 		return configuredLimit, true
 	}
+	samples := matchingRecentSamples(state, currentShape)
 	best := configuredLimit
-	if observed := conservativeObservedOverflowEstimateLimit(state, configuredLimit); observed > 0 && observed < best {
+	if observed := conservativeObservedOverflowEstimateLimit(samples, configuredLimit); observed > 0 && observed < best {
 		best = observed
 	}
-	if learned := conservativeLearnedEstimateLimit(state, configuredLimit); learned > 0 && learned < best {
+	if learned := conservativeLearnedEstimateLimit(samples, configuredLimit); learned > 0 && learned < best {
 		best = learned
 	}
 	if best < 1 {
@@ -128,27 +129,70 @@ func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int)
 	return best, true
 }
 
-func conservativeObservedOverflowEstimateLimit(state *BucketState, configuredLimit int) int {
-	if state == nil || configuredLimit <= 0 || len(state.RecentSamples) == 0 {
+func matchingRecentSamples(state *BucketState, currentShape ShapeClass) []SampleSummary {
+	if state == nil || len(state.RecentSamples) == 0 {
+		return nil
+	}
+	if currentShape == "" {
+		return append([]SampleSummary(nil), state.RecentSamples...)
+	}
+	matched := make([]SampleSummary, 0, len(state.RecentSamples))
+	for _, sample := range state.RecentSamples {
+		if sample.Shape == currentShape {
+			matched = append(matched, sample)
+		}
+	}
+	if len(matched) == 0 {
+		return nil
+	}
+	return matched
+	}
+
+func conservativeObservedOverflowEstimateLimit(samples []SampleSummary, configuredLimit int) int {
+	if configuredLimit <= 0 || len(samples) == 0 {
 		return 0
 	}
-	last := state.RecentSamples[len(state.RecentSamples)-1]
-	if last.InputTokens <= int64(configuredLimit) || last.BaseEstimate <= 0 {
+	var overflowBaseEstimates []int64
+	for _, sample := range samples {
+		if sample.InputTokens <= int64(configuredLimit) || sample.BaseEstimate <= 0 {
+			continue
+		}
+		overflowBaseEstimates = append(overflowBaseEstimates, sample.BaseEstimate)
+	}
+	if len(overflowBaseEstimates) < 3 {
 		return 0
+	}
+	best := overflowBaseEstimates[0]
+	for _, sampleBaseEstimate := range overflowBaseEstimates[1:] {
+		if sampleBaseEstimate < best {
+			best = sampleBaseEstimate
+		}
 	}
 	const safetyFactor = 0.95
-	guard := int(math.Floor(float64(last.InputTokens) * safetyFactor))
+	guard := int(math.Floor(float64(best) * safetyFactor))
 	if guard <= 0 {
 		return 0
 	}
 	return guard
 }
 
-func conservativeLearnedEstimateLimit(state *BucketState, configuredLimit int) int {
-	if state == nil || configuredLimit <= 0 {
+func conservativeLearnedEstimateLimit(samples []SampleSummary, configuredLimit int) int {
+	if configuredLimit <= 0 || len(samples) == 0 {
 		return 0
 	}
-	ratio := math.Max(state.RollingTotalCorrection, state.AvgTotalRatio)
+	var ratioSum float64
+	var ratioCount int
+	for _, sample := range samples {
+		if sample.BaseEstimate <= 0 || sample.InputTokens <= 0 {
+			continue
+		}
+		ratioSum += clip(float64(sample.InputTokens)/float64(sample.BaseEstimate), 0.25, 8.0)
+		ratioCount++
+	}
+	if ratioCount == 0 {
+		return 0
+	}
+	ratio := ratioSum / float64(ratioCount)
 	if ratio <= 1 {
 		return 0
 	}

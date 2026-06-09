@@ -375,7 +375,6 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 		setConfigVersionHeaders(w, snapshot, providerID)
 	}
-	baseEstimate := int64(estimateCanonicalInputTokens(canon))
 	authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
 	if err != nil {
 		clearTransparencyHeaders(w)
@@ -413,7 +412,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		ProviderID:         providerID,
 		EndpointType:       providerCfg.UpstreamEndpointType,
 		FinalUpstreamModel: canon.Model,
-		BaseEstimate:       baseEstimate,
+		BaseEstimate:       int64(estimateCanonicalInputTokens(canon)),
 		Canon:              canon,
 	})
 	*r = *r.Clone(observationCtx)

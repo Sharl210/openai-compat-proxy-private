@@ -253,7 +253,7 @@ func TestResponsesContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *te
 	if err := mgr.RecordObservation("req-prev-overflow", tokenestimator.Observation{Bucket: tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.5"}, BaseEstimate: 100, InputTokens: 390, CachedTokens: 0, UncachedInputTokens: 390, Shape: tokenestimator.ShapePlain, ProtocolSignature: "responses:v1", EstimatorSignature: "base-estimator:v1"}); err != nil {
 		t.Fatalf("RecordObservation error: %v", err)
 	}
-	if tightened, ok := mgr.ConservativeAdmissionLimit(tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.5"}, 300); !ok {
+	if tightened, ok := mgr.ConservativeAdmissionLimit(tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.5"}, 300, tokenestimator.ShapePlain); !ok {
 		t.Fatal("expected conservative admission limit")
 	} else {
 		t.Logf("tightened_limit=%d", tightened)
@@ -270,6 +270,32 @@ func TestResponsesContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *te
 	}
 	if !strings.Contains(rec.Body.String(), "context_length_exceeded") {
 		t.Fatalf("expected context overflow body, got %s", rec.Body.String())
+	}
+}
+
+func TestResponsesContextLimitPresentsDisplayedTokensInConfiguredLimitDomain(t *testing.T) {
+	providersDir := t.TempDir()
+	mgr := tokenestimator.NewManager(providersDir, time.UTC, func() []string { return []string{"openai"} })
+	if err := mgr.RecordObservation("req-prev-overflow-separate-limits", tokenestimator.Observation{Bucket: tokenestimator.BucketKey{ProviderID: "openai", EndpointType: config.UpstreamEndpointTypeResponses, Model: "gpt-5.5"}, BaseEstimate: 100, InputTokens: 390, CachedTokens: 0, UncachedInputTokens: 390, Shape: tokenestimator.ShapePlain, ProtocolSignature: "responses:v1", EstimatorSignature: "base-estimator:v1"}); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{ProvidersDir: providersDir, DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, SupportsResponses: true, ManualModels: []string{"gpt-5.5"}, ModelLimitContextTokens: 300, UpstreamEndpointType: config.UpstreamEndpointTypeResponses, UpstreamBaseURL: "https://upstream.invalid/v1", UpstreamAPIKey: "test-key"}}}), nil, mgr)
+	body := `{"model":"gpt-5.5","input":[{"role":"user","content":"` + strings.Repeat("hello ", 220) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "300" {
+		t.Fatalf("expected configured limit header 300, got %q", got)
+	}
+	displayedEstimate := rec.Header().Get(headerProxyEstimatedInputTokens)
+	if displayedEstimate == "" || displayedEstimate == "73" || displayedEstimate == "339" {
+		t.Fatalf("expected displayed estimate to be remapped into user-configured limit domain, got %q", displayedEstimate)
+	}
+	if !strings.Contains(rec.Body.String(), "estimated input tokens "+displayedEstimate+" exceed maximum 300") {
+		t.Fatalf("expected body to use same displayed estimate and configured limit domain, got %s", rec.Body.String())
 	}
 }
 

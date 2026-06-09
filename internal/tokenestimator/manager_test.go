@@ -115,11 +115,51 @@ func TestManagerConservativeAdmissionLimitUsesSmallerLearnedBound(t *testing.T) 
 	if err := mgr.RecordObservation("req-overflow", obs); err != nil {
 		t.Fatalf("RecordObservation error: %v", err)
 	}
-	limit, ok := mgr.ConservativeAdmissionLimit(obs.Bucket, 300)
+	limit, ok := mgr.ConservativeAdmissionLimit(obs.Bucket, 300, ShapePlain)
 	if !ok {
 		t.Fatal("expected conservative admission limit")
 	}
 	if limit >= 300 {
 		t.Fatalf("expected learned/observed guard to tighten below configured limit, got %d", limit)
+	}
+}
+
+func TestManagerConservativeAdmissionLimitDoesNotUseLastOverflowSampleAsGlobalClamp(t *testing.T) {
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex"} })
+	key := BucketKey{ProviderID: "codex", EndpointType: "responses", Model: "gpt-5.4"}
+	for i := 0; i < 24; i++ {
+		obs := Observation{
+			Bucket:              key,
+			BaseEstimate:        100000,
+			InputTokens:         108000,
+			CachedTokens:        12000,
+			UncachedInputTokens: 96000,
+			Shape:               ShapePlain,
+			ProtocolSignature:   "responses:v1",
+			EstimatorSignature:  "base-estimator:v1",
+		}
+		if err := mgr.RecordObservation("req-stable-"+time.Unix(int64(i), 0).UTC().Format("150405"), obs); err != nil {
+			t.Fatalf("RecordObservation stable error: %v", err)
+		}
+	}
+	spike := Observation{
+		Bucket:              key,
+		BaseEstimate:        100000,
+		InputTokens:         390000,
+		CachedTokens:        0,
+		UncachedInputTokens: 390000,
+		Shape:               ShapeToolHeavy,
+		ProtocolSignature:   "responses:v1",
+		EstimatorSignature:  "base-estimator:v1",
+	}
+	if err := mgr.RecordObservation("req-spike", spike); err != nil {
+		t.Fatalf("RecordObservation spike error: %v", err)
+	}
+	limit, ok := mgr.ConservativeAdmissionLimit(key, 300000, ShapePlain)
+	if !ok {
+		t.Fatal("expected conservative admission limit")
+	}
+	if limit < 250000 {
+		t.Fatalf("expected a single latest spike to not globally clamp later requests, got %d", limit)
 	}
 }
