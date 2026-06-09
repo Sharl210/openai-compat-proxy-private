@@ -1,0 +1,84 @@
+package tokenestimator
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+func TestManagerLoadsExistingBucketOnStartup(t *testing.T) {
+	root := t.TempDir()
+	key := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "gpt-5.4"}
+	state := &BucketState{
+		SchemaVersion:         1,
+		EstimatorVersion:      1,
+		ProviderID:            key.ProviderID,
+		EndpointType:          key.EndpointType,
+		FinalUpstreamRawModel: key.Model,
+		SafeModelName:         SafeModelName(key.Model),
+		SampleCount:           9,
+	}
+	if err := SaveBucketState(root, key, state); err != nil {
+		t.Fatalf("SaveBucketState error: %v", err)
+	}
+	mgr := NewManager(root, time.UTC, func() []string { return []string{"codex-2"} })
+	loaded := mgr.GetBucketState(key)
+	if loaded == nil || loaded.SampleCount != 9 {
+		t.Fatalf("expected preloaded state, got %#v", loaded)
+	}
+}
+
+func TestRecordObservationUpdatesRollingState(t *testing.T) {
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex-2"} })
+	obs := Observation{
+		Bucket:              BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "gpt-5.4"},
+		BaseEstimate:        100000,
+		InputTokens:         150000,
+		CachedTokens:        120000,
+		UncachedInputTokens: 30000,
+		Shape:               ShapeStructuredResponses,
+		FeatureCounts:       map[string]int64{"text_chars": 80000, "reasoning_items": 10},
+		ProtocolSignature:   "responses:v1",
+		EstimatorSignature:  "base-estimator:v1",
+	}
+	if err := mgr.RecordObservation("req-1", obs); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	state := mgr.GetBucketState(obs.Bucket)
+	if state == nil || state.SampleCount != 1 || state.AvgInputTokens != 150000 {
+		t.Fatalf("unexpected state: %#v", state)
+	}
+	if state.RollingUncachedCorrection <= 0 {
+		t.Fatalf("expected positive correction, got %#v", state)
+	}
+}
+
+func TestRecordObservationDropsInvalidUsage(t *testing.T) {
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex-2"} })
+	err := mgr.RecordObservation("req-1", Observation{
+		Bucket:              BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "gpt-5.4"},
+		BaseEstimate:        100,
+		InputTokens:         50,
+		CachedTokens:        60,
+		UncachedInputTokens: -10,
+	})
+	if err == nil {
+		t.Fatal("expected invalid usage error")
+	}
+}
+
+func TestManagerFlushPersistsBuckets(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(root, time.UTC, func() []string { return []string{"codex-2"} })
+	obs := Observation{Bucket: BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "gpt-5.4"}, BaseEstimate: 100, InputTokens: 120, CachedTokens: 20, UncachedInputTokens: 100, Shape: ShapePlain, ProtocolSignature: "responses:v1", EstimatorSignature: "base-estimator:v1"}
+	if err := mgr.RecordObservation("req-1", obs); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	if err := mgr.Flush(context.Background()); err != nil {
+		t.Fatalf("Flush error: %v", err)
+	}
+	state, err := LoadBucketState(root, obs.Bucket)
+	if err != nil || state == nil || state.SampleCount != 1 {
+		t.Fatalf("expected flushed state, got %#v err=%v", state, err)
+	}
+}
