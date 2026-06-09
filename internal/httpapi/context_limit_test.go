@@ -46,8 +46,8 @@ func TestResponsesSuccessSetsModelLimitContextHeader(t *testing.T) {
 	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "-1" {
 		t.Fatalf("expected context limit header -1, got %q", got)
 	}
-	if got := rec.Header().Get(headerProxyEstimatedInputTokens); got == "" || got == "0" {
-		t.Fatalf("expected estimated input tokens header, got %q", got)
+	if got := rec.Header().Get(headerProxyEstimatedInputTokens); got != "" {
+		t.Fatalf("expected no estimated input tokens header when context limit disabled, got %q", got)
 	}
 }
 

@@ -30,7 +30,7 @@ func setProxyModelLimitContextHeader(w http.ResponseWriter, provider config.Prov
 func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWriter, provider config.ProviderConfig, canon modelpkg.CanonicalRequest, protocol string) bool {
 	limit := setProxyModelLimitContextHeader(w, provider, canon)
 	if limit < 0 {
-		w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokens(canon)))
+		w.Header().Del(headerProxyEstimatedInputTokens)
 		return false
 	}
 	rawEstimatedTokens := estimateCanonicalInputTokens(canon)
