@@ -92,12 +92,23 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
+		baseEstimate := int64(estimateCanonicalInputTokens(canon))
 		if writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolMessages) {
 			return
 		}
 		canon.RequestID = requestID
-		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType)
 		ctx := r.Context()
+		ctx = withTokenEstimatorObservation(ctx, tokenEstimatorObservationInput{
+			ProviderID:         providerID,
+			EndpointType:       providerCfg.UpstreamEndpointType,
+			FinalUpstreamModel: canon.Model,
+			BaseEstimate:       baseEstimate,
+			Canon:              canon,
+		})
+		usageRecorder := combinedUsageRecorder(
+			cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType),
+			tokenEstimatorUsageRecorder(ctx, canon.RequestID, providerCfg.UpstreamEndpointType, bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r)),
+		)
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {
 			ctx, cancel = context.WithTimeout(ctx, providerCfg.TotalTimeout)

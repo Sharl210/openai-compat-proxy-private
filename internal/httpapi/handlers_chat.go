@@ -84,11 +84,11 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
+		baseEstimate := int64(estimateCanonicalInputTokens(canon))
 		if writeContextLimitExceededIfNeeded(w, provider, canon, clientReasoningProtocolChat) {
 			return
 		}
 		canon.RequestID = requestID
-		usageRecorder := cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType)
 		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
@@ -107,6 +107,17 @@ func handleChat() http.HandlerFunc {
 		logging.Event("proxyBuiltCanonicalRequest", attrs)
 
 		ctx := r.Context()
+		ctx = withTokenEstimatorObservation(ctx, tokenEstimatorObservationInput{
+			ProviderID:         providerID,
+			EndpointType:       providerCfg.UpstreamEndpointType,
+			FinalUpstreamModel: canon.Model,
+			BaseEstimate:       baseEstimate,
+			Canon:              canon,
+		})
+		usageRecorder := combinedUsageRecorder(
+			cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType),
+			tokenEstimatorUsageRecorder(ctx, canon.RequestID, providerCfg.UpstreamEndpointType, bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r)),
+		)
 		var cancel context.CancelFunc
 		if providerCfg.TotalTimeout > 0 {
 			ctx, cancel = context.WithTimeout(ctx, providerCfg.TotalTimeout)

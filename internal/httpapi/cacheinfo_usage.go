@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/tokenestimator"
 )
 
 func cacheInfoUsageRecorder(r *http.Request, requestID, providerID, upstreamEndpointType string) usageRecorderFunc {
@@ -32,6 +34,50 @@ func cacheInfoUsageRecorder(r *http.Request, requestID, providerID, upstreamEndp
 			return
 		}
 		_ = manager.RecordFinalUsage(requestID, providerID, parsed)
+	}
+}
+
+func tokenEstimatorUsageRecorder(ctx context.Context, requestID string, upstreamEndpointType string, bypass bool) usageRecorderFunc {
+	if ctx == nil {
+		return nil
+	}
+	manager, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
+	if manager == nil {
+		return nil
+	}
+	if bypass {
+		return nil
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil
+	}
+	return func(usage map[string]any) {
+		if usage == nil {
+			return
+		}
+		parsed, ok := usageTotalsFromMap(usage, upstreamEndpointType)
+		if !ok {
+			return
+		}
+		_ = recordTokenEstimatorUsage(ctx, requestID, parsed)
+	}
+}
+
+func combinedUsageRecorder(recorders ...usageRecorderFunc) usageRecorderFunc {
+	active := make([]usageRecorderFunc, 0, len(recorders))
+	for _, recorder := range recorders {
+		if recorder != nil {
+			active = append(active, recorder)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return func(usage map[string]any) {
+		for _, recorder := range active {
+			recorder(usage)
+		}
 	}
 }
 
@@ -61,10 +107,26 @@ func shouldBypassUsageRecorderForRequest(r *http.Request) bool {
 }
 
 func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*cacheinfo.Usage, bool) {
-	if len(usage) == 0 {
+	parsed, ok := parseUsageMetrics(usage, upstreamEndpointType)
+	if !ok {
 		return nil, false
 	}
-	parsed := &cacheinfo.Usage{}
+	return parsed.cacheInfoUsage(), true
+}
+
+type usageMetrics struct {
+	InputTokens         int64
+	OutputTokens        int64
+	TotalTokens         int64
+	CachedTokens        int64
+	CacheCreationTokens int64
+}
+
+func parseUsageMetrics(usage map[string]any, upstreamEndpointType string) (usageMetrics, bool) {
+	if len(usage) == 0 {
+		return usageMetrics{}, false
+	}
+	parsed := usageMetrics{}
 	var hasValues bool
 	if n, ok := usageNumberAsInt64(usage["input_tokens"]); ok {
 		parsed.InputTokens = n
@@ -99,7 +161,7 @@ func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*
 		hasValues = true
 	}
 	if !hasValues {
-		return nil, false
+		return usageMetrics{}, false
 	}
 	if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic && anthropicUsageNeedsTotalNormalization(usage) {
 		parsed.InputTokens += parsed.CachedTokens + parsed.CacheCreationTokens
@@ -113,6 +175,27 @@ func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*
 		parsed.TotalTokens = parsed.InputTokens + parsed.OutputTokens
 	}
 	return parsed, true
+}
+
+func (m usageMetrics) cacheInfoUsage() *cacheinfo.Usage {
+	return &cacheinfo.Usage{
+		InputTokens:         m.InputTokens,
+		OutputTokens:        m.OutputTokens,
+		TotalTokens:         m.TotalTokens,
+		CachedTokens:        m.CachedTokens,
+		CacheCreationTokens: m.CacheCreationTokens,
+	}
+}
+
+func usageTotalsFromMap(usage map[string]any, upstreamEndpointType string) (usageTotals, bool) {
+	metrics, ok := parseUsageMetrics(usage, upstreamEndpointType)
+	if !ok {
+		return usageTotals{}, false
+	}
+	return usageTotals{
+		InputTokens:  metrics.InputTokens,
+		CachedTokens: metrics.CachedTokens,
+	}, true
 }
 
 func anthropicUsageNeedsTotalNormalization(usage map[string]any) bool {

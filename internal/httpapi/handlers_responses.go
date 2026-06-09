@@ -375,7 +375,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 		setConfigVersionHeaders(w, snapshot, providerID)
 	}
-	usageRecorder := cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType)
+	baseEstimate := int64(estimateCanonicalInputTokens(canon))
 	authorization, err := authHeaderForResolvedProviderUpstream(r, providerCfg, providerID)
 	if err != nil {
 		clearTransparencyHeaders(w)
@@ -421,6 +421,18 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	}
 	canon.RequestID = requestID
 	canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
+	observationCtx := withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
+		ProviderID:         providerID,
+		EndpointType:       providerCfg.UpstreamEndpointType,
+		FinalUpstreamModel: canon.Model,
+		BaseEstimate:       baseEstimate,
+		Canon:              canon,
+	})
+	*r = *r.Clone(observationCtx)
+	usageRecorder := combinedUsageRecorder(
+		cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType),
+		tokenEstimatorUsageRecorder(observationCtx, requestID, providerCfg.UpstreamEndpointType, bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r)),
+	)
 	return &preparedResponsesRequest{
 		canon:                     canon,
 		provider:                  provider,

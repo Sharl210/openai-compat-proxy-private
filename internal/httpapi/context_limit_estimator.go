@@ -1,11 +1,33 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"time"
 	"unicode/utf8"
 
 	modelpkg "openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/tokenestimator"
 )
+
+type usageTotals struct {
+	InputTokens  int64
+	CachedTokens int64
+}
+
+type tokenEstimatorObservationInput struct {
+	ProviderID         string
+	EndpointType       string
+	FinalUpstreamModel string
+	BaseEstimate       int64
+	Canon              modelpkg.CanonicalRequest
+	Now                time.Time
+	Usage              usageTotals
+}
+
+type tokenEstimatorObservationContextKey string
+
+const tokenEstimatorObservationKey tokenEstimatorObservationContextKey = "token-estimator-observation"
 
 type estimatorSnapshot struct {
 	TextChars           int64
@@ -118,4 +140,71 @@ func buildEstimatorSnapshot(canon modelpkg.CanonicalRequest) estimatorSnapshot {
 
 func isMultimodalPart(part modelpkg.CanonicalContentPart) bool {
 	return part.ImageURL != "" || part.MimeType != "" || part.Type == "input_file" || part.Type == "input_audio"
+}
+
+func withTokenEstimatorObservation(ctx context.Context, input tokenEstimatorObservationInput) context.Context {
+	return context.WithValue(ctx, tokenEstimatorObservationKey, input)
+}
+
+func buildTokenEstimatorObservation(input tokenEstimatorObservationInput) tokenestimator.Observation {
+	snap := buildEstimatorSnapshot(input.Canon)
+	uncached := input.Usage.InputTokens - input.Usage.CachedTokens
+	if uncached < 0 {
+		uncached = 0
+	}
+	return tokenestimator.Observation{
+		Bucket: tokenestimator.BucketKey{
+			ProviderID:   input.ProviderID,
+			EndpointType: input.EndpointType,
+			Model:        input.FinalUpstreamModel,
+		},
+		BaseEstimate:        input.BaseEstimate,
+		InputTokens:         input.Usage.InputTokens,
+		CachedTokens:        input.Usage.CachedTokens,
+		UncachedInputTokens: uncached,
+		Shape:               classifyEstimatorShape(snap),
+		FeatureCounts: map[string]int64{
+			"text_chars":            snap.TextChars,
+			"input_item_count":      snap.InputItemCount,
+			"reasoning_item_count":  snap.ReasoningItemCount,
+			"tool_call_count":       snap.ToolCallCount,
+			"tool_result_count":     snap.ToolResultCount,
+			"multimodal_item_count": snap.MultimodalItemCount,
+		},
+		ProtocolSignature:  input.EndpointType + ":v1",
+		EstimatorSignature: "base-estimator:v1",
+		RecordedAt:         input.Now,
+	}
+}
+
+func recordTokenEstimatorUsage(ctx context.Context, requestID string, usage usageTotals) error {
+	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
+	if mgr == nil {
+		return nil
+	}
+	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
+	if input.ProviderID == "" || input.FinalUpstreamModel == "" || input.BaseEstimate <= 0 {
+		return nil
+	}
+	input.Usage = usage
+	if input.Now.IsZero() {
+		input.Now = time.Now().UTC()
+	}
+	return mgr.RecordObservation(requestID, buildTokenEstimatorObservation(input))
+}
+
+func classifyEstimatorShape(snap estimatorSnapshot) tokenestimator.ShapeClass {
+	if snap.MultimodalItemCount > 0 {
+		return tokenestimator.ShapeMultimodal
+	}
+	if snap.ToolCallCount+snap.ToolResultCount >= 6 {
+		return tokenestimator.ShapeToolHeavy
+	}
+	if snap.ReasoningItemCount >= 3 {
+		return tokenestimator.ShapeReasoningHeavy
+	}
+	if snap.InputItemCount >= 4 {
+		return tokenestimator.ShapeStructuredResponses
+	}
+	return tokenestimator.ShapePlain
 }
