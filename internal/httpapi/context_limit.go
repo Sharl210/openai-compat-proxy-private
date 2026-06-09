@@ -35,15 +35,20 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 	}
 	rawEstimatedTokens := estimateCanonicalInputTokens(canon)
 	effectiveLimit := limit
+	confidence := "cold"
 	if ctx != nil {
 		effectiveLimit = conservativeContextAdmissionLimit(ctx, limit, canon)
+		if current := currentEstimatorConfidence(ctx, canon); current != "" {
+			confidence = current
+		}
 	}
 	displayedEstimatedTokens := presentDisplayedEstimatedTokens(rawEstimatedTokens, effectiveLimit, limit)
-	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(displayedEstimatedTokens))
+	displayedEstimateText := formatDisplayedEstimatedTokens(displayedEstimatedTokens, confidence)
+	w.Header().Set(headerProxyEstimatedInputTokens, displayedEstimateText)
 	if rawEstimatedTokens <= effectiveLimit {
 		return false
 	}
-	message := buildContextLimitExceededMessage(displayedEstimatedTokens, limit)
+	message := buildContextLimitExceededMessage(displayedEstimateText, strconv.Itoa(limit))
 	switch protocol {
 	case clientReasoningProtocolMessages:
 		writeAnthropicContextLimitExceeded(w, message)
@@ -51,6 +56,30 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 		errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", message)
 	}
 	return true
+}
+
+func currentEstimatorConfidence(ctx context.Context, canon modelpkg.CanonicalRequest) string {
+	if ctx == nil {
+		return ""
+	}
+	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
+	if mgr == nil {
+		return ""
+	}
+	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
+	if input.ProviderID == "" || input.EndpointType == "" || input.FinalUpstreamModel == "" {
+		return ""
+	}
+	key := tokenestimator.BucketKey{
+		ProviderID:   strings.TrimSpace(input.ProviderID),
+		EndpointType: strings.TrimSpace(input.EndpointType),
+		Model:        strings.TrimSpace(input.FinalUpstreamModel),
+	}
+	state := mgr.GetBucketState(key)
+	if state == nil {
+		return ""
+	}
+	return strings.TrimSpace(state.ConfidenceLevel)
 }
 
 func presentDisplayedEstimatedTokens(rawEstimatedTokens int, effectiveLimit int, configuredLimit int) int {
@@ -65,6 +94,13 @@ func presentDisplayedEstimatedTokens(rawEstimatedTokens int, effectiveLimit int,
 		return 1
 	}
 	return scaled
+}
+
+func formatDisplayedEstimatedTokens(tokens int, confidence string) string {
+	if confidence == "" {
+		confidence = "cold"
+	}
+	return strconv.Itoa(tokens) + "(置信度:" + confidence + ")"
 }
 
 
@@ -92,11 +128,11 @@ func conservativeContextAdmissionLimit(ctx context.Context, configuredLimit int,
 }
 
 
-func buildContextLimitExceededMessage(estimatedTokens int, limit int) string {
-	if estimatedTokens <= 0 || limit <= 0 {
+func buildContextLimitExceededMessage(estimatedTokens string, limit string) string {
+	if strings.TrimSpace(estimatedTokens) == "" || strings.TrimSpace(limit) == "" {
 		return contextOverflowMessage
 	}
-	return contextOverflowMessage + ": estimated input tokens " + strconv.Itoa(estimatedTokens) + " exceed maximum " + strconv.Itoa(limit)
+	return contextOverflowMessage + ": estimated input tokens " + estimatedTokens + " exceed maximum " + limit
 }
 
 func writeAnthropicContextLimitExceeded(w http.ResponseWriter, message string) {

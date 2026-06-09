@@ -294,6 +294,9 @@ func TestResponsesContextLimitPresentsDisplayedTokensInConfiguredLimitDomain(t *
 	if displayedEstimate == "" || displayedEstimate == "73" || displayedEstimate == "339" {
 		t.Fatalf("expected displayed estimate to be remapped into user-configured limit domain, got %q", displayedEstimate)
 	}
+	if !strings.Contains(displayedEstimate, "(置信度:cold)") {
+		t.Fatalf("expected displayed estimate header to include confidence, got %q", displayedEstimate)
+	}
 	if !strings.Contains(rec.Body.String(), "estimated input tokens "+displayedEstimate+" exceed maximum 300") {
 		t.Fatalf("expected body to use same displayed estimate and configured limit domain, got %s", rec.Body.String())
 	}
