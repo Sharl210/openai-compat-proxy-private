@@ -835,7 +835,7 @@ func populateCanonicalArchiveEvent(canonical *model.CanonicalEvent, evt Event) {
 		canonical.ReasoningDelta = stringValue(evt.Data["summary"])
 	case "response.output_item.added", "response.output_item.done":
 		item := anyMap(evt.Data["item"])
-		if stringValue(item["type"]) != "function_call" {
+		if !isResponseToolCallItemType(stringValue(item["type"])) {
 			return
 		}
 		canonical.ItemID = stringValue(item["id"])
@@ -873,6 +873,15 @@ func populateCanonicalArchiveEvent(canonical *model.CanonicalEvent, evt Event) {
 		} else if len(evt.Data) > 0 {
 			canonical.Error = cloneMap(evt.Data)
 		}
+	}
+}
+
+func isResponseToolCallItemType(itemType string) bool {
+	switch itemType {
+	case "function_call", "web_search_call", "file_search_call", "computer_call", "custom_tool_call", "code_interpreter_call":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1390,13 +1399,7 @@ func buildResponsesUpstreamToolPayloads(tools []model.CanonicalTool, compatMode 
 
 func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode string) map[string]any {
 	if normalizeResponsesToolCompatMode(compatMode) != config.ResponsesToolCompatModeFunctionOnly || strings.TrimSpace(tool.Type) == "function" {
-		parameters := normalizeResponsesFunctionToolParameters(tool)
-		return map[string]any{
-			"type":        tool.Type,
-			"name":        tool.Name,
-			"description": tool.Description,
-			"parameters":  parameters,
-		}
+		return buildPreservedResponsesToolPayload(tool)
 	}
 
 	entry := map[string]any{
@@ -1420,6 +1423,51 @@ func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode stri
 		entry["parameters"] = cloneJSONValue(responsesFallbackFunctionToolSchema)
 	}
 	return entry
+}
+
+func buildPreservedResponsesToolPayload(tool model.CanonicalTool) map[string]any {
+	trimmedType := strings.TrimSpace(tool.Type)
+	if trimmedType == "" {
+		trimmedType = tool.Type
+	}
+	if trimmedType == "function" {
+		return map[string]any{
+			"type":        tool.Type,
+			"name":        tool.Name,
+			"description": tool.Description,
+			"parameters":  normalizeResponsesFunctionToolParameters(tool),
+		}
+	}
+	if len(tool.Raw) > 0 {
+		preserved := cloneMap(tool.Raw)
+		deleteEmptyResponsesToolFields(preserved)
+		preserved["type"] = tool.Type
+		if len(preserved) > 1 {
+			return preserved
+		}
+	}
+	entry := map[string]any{"type": tool.Type}
+	if strings.TrimSpace(tool.Name) != "" {
+		entry["name"] = tool.Name
+	}
+	if strings.TrimSpace(tool.Description) != "" {
+		entry["description"] = tool.Description
+	}
+	if len(tool.Parameters) > 0 {
+		entry["parameters"] = cloneJSONValue(tool.Parameters)
+	}
+	return entry
+}
+
+func deleteEmptyResponsesToolFields(payload map[string]any) {
+	for _, key := range []string{"name", "description"} {
+		if strings.TrimSpace(stringValue(payload[key])) == "" {
+			delete(payload, key)
+		}
+	}
+	if parameters, ok := payload["parameters"].(map[string]any); ok && len(parameters) == 0 {
+		delete(payload, "parameters")
+	}
 }
 
 func normalizeResponsesFunctionToolParameters(tool model.CanonicalTool) any {

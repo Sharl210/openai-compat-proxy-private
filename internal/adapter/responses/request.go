@@ -139,6 +139,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.Parameters,
+			Raw: map[string]any{
+				"type":        t.Type,
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  cloneMapAny(t.Parameters),
+			},
 		})
 	}
 	sort.SliceStable(canon.Tools, func(i, j int) bool {

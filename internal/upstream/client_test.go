@@ -988,7 +988,6 @@ func TestBuildRequestBodyPreservesResponsesToolTypesForCustomOnlyTools(t *testin
 		"type":        "custom",
 		"name":        "code_exec",
 		"description": "Run code",
-		"parameters":  map[string]any{},
 	}})
 }
 
@@ -999,9 +998,7 @@ func TestBuildRequestBodyPreservesResponsesToolTypesForWebSearchOnlyTools(t *tes
 	}})
 	assertJSONEqual(t, tools, []map[string]any{{
 		"type":        "web_search",
-		"name":        "",
 		"description": "Search the web",
-		"parameters":  map[string]any{},
 	}})
 }
 
@@ -1018,7 +1015,7 @@ func TestBuildRequestBodyPreservesResponsesToolTypesForMixedToolFamilies(t *test
 		{Type: "web_search", Description: "Search the web"},
 	})
 	assertJSONEqual(t, tools, []map[string]any{
-		{"type": "custom", "name": "code_exec", "description": "Run code", "parameters": map[string]any{}},
+		{"type": "custom", "name": "code_exec", "description": "Run code"},
 		{"type": "function", "name": "get_weather", "description": "Get weather", "parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -1026,7 +1023,7 @@ func TestBuildRequestBodyPreservesResponsesToolTypesForMixedToolFamilies(t *test
 			},
 			"required": []string{"city"},
 		}},
-		{"type": "web_search", "name": "", "description": "Search the web", "parameters": map[string]any{}},
+		{"type": "web_search", "description": "Search the web"},
 	})
 }
 
