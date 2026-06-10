@@ -100,3 +100,31 @@ func TestResultFromResponsePayloadRepairsMalformedToolArguments(t *testing.T) {
 		t.Fatalf("expected malformed function arguments to be repaired, got %q", got)
 	}
 }
+
+func TestResultFromResponsePayloadPreservesNativeToolCallItems(t *testing.T) {
+	payload := map[string]any{
+		"output": []any{
+			map[string]any{
+				"type":      "web_search_call",
+				"id":        "ws_1",
+				"call_id":   "call_ws_1",
+				"name":      "web_search",
+				"arguments": `{"query":"latest news"}`,
+			},
+		},
+	}
+
+	result, err := ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload returned error: %v", err)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected one native tool call, got %#v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].Name != "web_search" {
+		t.Fatalf("expected native tool call name web_search, got %#v", result.ToolCalls[0])
+	}
+	if result.ToolCalls[0].Arguments != `{"query":"latest news"}` {
+		t.Fatalf("expected native tool call arguments preserved, got %#v", result.ToolCalls[0])
+	}
+}

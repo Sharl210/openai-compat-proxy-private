@@ -339,6 +339,50 @@ func TestPayloadToSyntheticCanonicalEvents_ToolCalls(t *testing.T) {
 	}
 }
 
+func TestPayloadToSyntheticCanonicalEvents_NativeToolCalls(t *testing.T) {
+	payload := map[string]any{
+		"id":            "resp_native_tool_790",
+		"finish_reason": "tool_calls",
+		"output": []any{
+			map[string]any{
+				"type":      "web_search_call",
+				"id":        "call_native_1",
+				"name":      "web_search",
+				"arguments": `{"query":"Shanghai weather"}`,
+			},
+		},
+	}
+
+	directResult, err := ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload failed: %v", err)
+	}
+
+	syntheticEvents := PayloadToSyntheticCanonicalEvents(payload)
+
+	c := NewCollector()
+	for _, evt := range syntheticEvents {
+		c.Accept(evt)
+	}
+
+	eventResult, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() from synthetic events failed: %v", err)
+	}
+
+	if len(eventResult.ToolCalls) != len(directResult.ToolCalls) {
+		t.Fatalf("native ToolCalls count mismatch: direct=%d, via synthetic events=%d", len(directResult.ToolCalls), len(eventResult.ToolCalls))
+	}
+	if len(eventResult.ToolCalls) > 0 {
+		if eventResult.ToolCalls[0].Name != directResult.ToolCalls[0].Name {
+			t.Fatalf("native ToolCall[0].Name mismatch: direct=%q, via synthetic events=%q", directResult.ToolCalls[0].Name, eventResult.ToolCalls[0].Name)
+		}
+		if eventResult.ToolCalls[0].Arguments != directResult.ToolCalls[0].Arguments {
+			t.Fatalf("native ToolCall[0].Arguments mismatch: direct=%q, via synthetic events=%q", directResult.ToolCalls[0].Arguments, eventResult.ToolCalls[0].Arguments)
+		}
+	}
+}
+
 // TestPayloadToSyntheticCanonicalEvents_Usage demonstrates that a non-stream payload's
 // usage can be represented as synthetic canonical events.
 func TestPayloadToSyntheticCanonicalEvents_Usage(t *testing.T) {

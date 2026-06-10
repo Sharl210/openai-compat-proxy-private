@@ -98,7 +98,7 @@ func (c *Collector) Accept(evt upstream.Event) {
 			if item == nil {
 				continue
 			}
-			if itemType, _ := item["type"].(string); itemType != "function_call" {
+			if itemType, _ := item["type"].(string); !isResponseToolCallItemType(itemType) {
 				continue
 			}
 			if stringValue(item["id"]) != itemID && stringValue(item["call_id"]) != itemID {
@@ -157,7 +157,7 @@ func (c *Collector) Accept(evt upstream.Event) {
 			}
 			return
 		}
-		if itemType, _ := item["type"].(string); itemType != "function_call" {
+		if itemType, _ := item["type"].(string); !isResponseToolCallItemType(itemType) {
 			return
 		}
 		itemID, _ := item["id"].(string)

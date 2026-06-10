@@ -44,7 +44,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 		if item == nil {
 			continue
 		}
-		if itemType, _ := item["type"].(string); itemType == "function_call" {
+		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
 			if arguments, _ := item["arguments"].(string); arguments != "" {
 				if repaired, ok := syntaxrepair.RepairJSON(arguments); ok {
 					item = cloneMap(item)
@@ -87,7 +87,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 			if blocks := reasoningBlocksFromMap(item); len(blocks) > 0 {
 				result.ReasoningBlocks = append(result.ReasoningBlocks, cloneReasoningBlocks(blocks)...)
 			}
-		case "function_call":
+		case "function_call", "web_search_call", "file_search_call", "computer_call", "custom_tool_call", "code_interpreter_call":
 			call := ToolCall{}
 			if id, _ := item["id"].(string); id != "" {
 				call.ID = id
@@ -119,6 +119,15 @@ func cloneMap(input map[string]any) map[string]any {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+func isResponseToolCallItemType(itemType string) bool {
+	switch itemType {
+	case "function_call", "web_search_call", "file_search_call", "computer_call", "custom_tool_call", "code_interpreter_call":
+		return true
+	default:
+		return false
+	}
 }
 
 // PayloadToSyntheticCanonicalEvents converts a non-stream upstream payload into
