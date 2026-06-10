@@ -198,6 +198,47 @@ func TestChatStreamUsesToolCallsFinishReasonForToolCallTurns(t *testing.T) {
 	}
 }
 
+func TestChatStreamRecognizesNativeWebSearchCallItems(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"ws_1\",\"type\":\"web_search_call\",\"call_id\":\"call_ws_1\",\"name\":\"web_search\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"ws_1\",\"delta\":\"{\\\"query\\\":\\\"Shanghai\\\"}\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"tool_calls":[{"function":{"arguments":"{\"query\":\"Shanghai\"}","name":"web_search"},"id":"call_ws_1","index":0,"type":"function"}]`) {
+		t.Fatalf("expected native web_search_call to map into chat tool_calls, got %s", body)
+	}
+	if !strings.Contains(body, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("expected native web_search_call turn to end as tool_calls, got %s", body)
+	}
+}
+
 func TestChatStreamSendsAssistantRoleBeforeToolCalls(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +

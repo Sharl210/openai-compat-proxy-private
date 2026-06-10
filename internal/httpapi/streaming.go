@@ -456,7 +456,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if itemType == "compaction" && h.downstreamType == "responses" {
 			h.beginCompactionLifecycle()
 		}
-		if itemType == "function_call" {
+		if isResponseToolCallItemType(itemType) {
 			itemID, _ := item["id"].(string)
 			if itemID == "" {
 				itemID, _ = item["call_id"].(string)
@@ -1013,7 +1013,7 @@ func logDownstreamToolEvent(requestID, downstreamType, event string, data map[st
 		return
 	}
 	if item, _ := data["item"].(map[string]any); item != nil {
-		if itemType, _ := item["type"].(string); itemType == "function_call" {
+		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
 			arguments, _ := item["arguments"].(string)
 			logging.Event("downstreamToolEvent", map[string]any{
 				"request_id":        requestID,
@@ -1048,7 +1048,7 @@ func withParsedToolParameters(item map[string]any) map[string]any {
 	if item == nil {
 		return item
 	}
-	if itemType, _ := item["type"].(string); itemType != "function_call" {
+	if itemType, _ := item["type"].(string); !isResponseToolCallItemType(itemType) {
 		return item
 	}
 	arguments, _ := item["arguments"].(string)
@@ -1518,7 +1518,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
-		if itemType, _ := item["type"].(string); itemType == "function_call" {
+		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
 			itemID := anthropicToolStateKey(item)
 			if evt.Event == "response.output_item.done" && itemID != "" && state.emittedToolItems[itemID] {
 				if !(state.toolStarted && !state.toolStopped && state.toolItemID == itemID) {
@@ -2163,7 +2163,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				return err
 			}
 		}
-		if itemType, _ := item["type"].(string); itemType == "function_call" {
+		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
 			rawItemID, _ := item["id"].(string)
 			itemID := rawItemID
 			if callID, _ := item["call_id"].(string); callID != "" {
@@ -2463,6 +2463,15 @@ func chatToolDelta(index int, callID, name, arguments string, includeMetadata bo
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func isResponseToolCallItemType(itemType string) bool {
+	switch itemType {
+	case "function_call", "web_search_call", "file_search_call", "computer_call", "custom_tool_call", "code_interpreter_call":
+		return true
+	default:
+		return false
+	}
 }
 
 func reasoningContentValue(data map[string]any) string {
