@@ -303,6 +303,7 @@ func TestProviderMaxOutputTokensScopedRulesIgnoreNoPromptMarker(t *testing.T) {
 		path:                    "/v1/responses",
 		body:                    `{"model":"gpt-5.5-high-noprompt","input":[{"role":"user","content":"hello"}]}`,
 		providerMaxOutputTokens: 64000,
+		enableNoPromptModelSuffix: true,
 		providerMaxOutputTokenRules: []config.ScopedIntRule{
 			exactScopedRule("claude-sonnet-4-5", 128000),
 			exactScopedRule("claude-sonnet-4-5-high", 160000),
@@ -346,6 +347,40 @@ func TestDecodeAndResolveResponsesRequestKeepsClientModelAndScopedRules(t *testi
 	}
 	if len(initial.provider.UpstreamMaxOutputTokenRules) != 2 {
 		t.Fatalf("expected provider scoped rules preserved, got %#v", initial.provider.UpstreamMaxOutputTokenRules)
+	}
+}
+
+func TestDecodeAndResolveResponsesRequestAllowsNoPromptReasoningFamilyModel(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:           "openai",
+		EnableLegacyV1Routes:      true,
+		EnableNoPromptModelSuffix: true,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			SupportsResponses:           true,
+			UpstreamBaseURL:             "https://example.com",
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeAnthropic,
+			EnableReasoningEffortSuffix: true,
+			UpstreamMaxOutputTokens:     64000,
+			UpstreamMaxOutputTokenRules: []config.ScopedIntRule{exactScopedRule("claude-sonnet-4-5", 128000), exactScopedRule("claude-sonnet-4-5-high", 160000)},
+			ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.5", "claude-sonnet-4-5")},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-high-noprompt","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
+	rec := httptest.NewRecorder()
+	initial, ok := decodeAndResolveResponsesRequest(rec, req)
+	if !ok || initial == nil {
+		t.Fatalf("expected decodeAndResolveResponsesRequest success, body=%s", rec.Body.String())
+	}
+	if initial.clientModel != "gpt-5.5-high" {
+		t.Fatalf("expected client model to drop noprompt marker but keep reasoning suffix, got %q", initial.clientModel)
+	}
+	if initial.resolvedModel != "gpt-5.5-high" {
+		t.Fatalf("expected resolved legacy model family member before provider normalization, got %q", initial.resolvedModel)
 	}
 }
 
@@ -393,6 +428,7 @@ type providerMaxOutputTokensScenario struct {
 	providerMaxOutputTokenRules  []config.ScopedIntRule
 	anthropicMaxThinkingBudget   int
 	forceProviderMaxOutputTokens bool
+	enableNoPromptModelSuffix    bool
 	modelMap                     []config.ModelMapEntry
 }
 
@@ -430,6 +466,7 @@ func serveProviderMaxOutputTokensRequest(t *testing.T, scenario providerMaxOutpu
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
 		AnthropicMaxThinkingBudget:  32000,
+		EnableNoPromptModelSuffix:   scenario.enableNoPromptModelSuffix,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
