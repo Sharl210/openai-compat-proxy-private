@@ -28,6 +28,7 @@ const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 const tokenEstimatorManagerKey routeContextKey = "token-estimator-manager"
+const routeRequestEffortKey routeContextKey = "route-request-effort"
 const runtimeStoreKey routeContextKey = "runtime-store"
 const legacyRoutingModelKey routeContextKey = "legacy-routing-model"
 
@@ -170,6 +171,16 @@ func routeInfoFromRequest(r *http.Request) (routeInfo, bool) {
 	return info, ok
 }
 
+func requestEffortFromRouteContext(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if value, ok := r.Context().Value(routeRequestEffortKey).(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
 func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool) {
 	snapshot, ok := r.Context().Value(runtimeSnapshotKey).(*config.RuntimeSnapshot)
 	return snapshot, ok
@@ -248,9 +259,10 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 	}
 	if info, ok := routeInfoFromRequest(r); ok {
 		providerID := info.ProviderID
+		originalModel := canonicalModel
 		resolvedModel := canonicalModel
 		if info.Legacy && canonicalModel != "" {
-			canonicalModel = snapshot.Config.ResolveV1Model(canonicalModel)
+			canonicalModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, requestEffortFromRouteContext(r))
 			resolvedModel = canonicalModel
 			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, canonicalModel))
 			refreshDefaultProviderOverlayCacheFromRequest(r)
@@ -268,8 +280,17 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				}
 			} else if realtimeErr != nil {
 				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
-			} else if strippedModel, stripped := stripNoPromptModelSuffix(canonicalModel); stripped {
-				if resolvedID, modelForProvider, strippedOK := snapshot.ResolveDefaultProviderSelection(strippedModel); strippedOK {
+			} else if snapshot.Config.EnableNoPromptModelSuffix {
+				strippedModel, stripped := stripNoPromptModelSuffix(canonicalModel)
+				if !stripped {
+					if shouldBypassUsageRecorderForRequest(r) {
+						if len(snapshot.DefaultProviderIDs) > 0 {
+							providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
+						}
+					} else if legacyModelsListEnforced(snapshot) {
+						return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+					}
+				} else if resolvedID, modelForProvider, strippedOK := snapshot.ResolveDefaultProviderSelection(strippedModel); strippedOK {
 					if provider, err := snapshot.Config.ProviderByID(resolvedID); err == nil && provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(canonicalModel) {
 						providerID = resolvedID
 						resolvedModel = modelForProvider
@@ -288,6 +309,11 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			}
 		}
 		if provider, err := snapshot.Config.ProviderByID(providerID); err == nil {
+			if info.Legacy && hasNoPromptModelSuffix(originalModel) {
+				if !provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) || provider.HidesModel(originalModel) {
+					return config.ProviderConfig{}, config.Config{}, "", originalModel, false, nil
+				}
+			}
 			return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true, nil
 		}
 	}

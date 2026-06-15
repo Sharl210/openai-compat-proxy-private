@@ -61,13 +61,18 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		}
 		return nil
 	}
-	if baseModel, _, ok := reasoning.SplitSuffix(requestedModel); ok {
-		if _, exists := allowed[baseModel]; exists && (provider.EnableReasoningEffortSuffix || provider.HasManualReasonSuffixForModel(requestedModel)) && !provider.HidesModel(requestedModel) {
+	if baseWithoutNoPrompt, ok := stripNoPromptModelSuffix(requestedModel); ok && providerCfg.EnableNoPromptModelSuffix {
+		if _, exists := allowed[baseWithoutNoPrompt]; exists && !provider.HidesModel(requestedModel) {
 			return nil
 		}
+		if baseModel, _, suffixOK := reasoning.SplitSuffix(baseWithoutNoPrompt); suffixOK {
+			if _, exists := allowed[baseModel]; exists && (provider.EnableReasoningEffortSuffix || provider.HasManualReasonSuffixForModel(baseWithoutNoPrompt)) && !provider.HidesModel(requestedModel) {
+				return nil
+			}
+		}
 	}
-	if baseModel, ok := stripNoPromptModelSuffix(requestedModel); ok {
-		if _, exists := allowed[baseModel]; exists && providerCfg.EnableNoPromptModelSuffix && !provider.HidesModel(requestedModel) {
+	if baseModel, _, ok := reasoning.SplitSuffix(requestedModel); ok {
+		if _, exists := allowed[baseModel]; exists && (provider.EnableReasoningEffortSuffix || provider.HasManualReasonSuffixForModel(requestedModel)) && !provider.HidesModel(requestedModel) {
 			return nil
 		}
 	}

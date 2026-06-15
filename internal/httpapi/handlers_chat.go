@@ -39,12 +39,12 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support chat completions")
 			return
 		}
-		rawClientModel := canon.Model
-		clientModel := canon.Model
-		if !provider.HidesModel(canon.Model) {
-			applyNoPromptModelSuffix(&canon, providerCfg)
-			clientModel = canon.Model
-		}
+	rawClientModel := canon.Model
+	clientModel := canon.Model
+	if !provider.HidesModel(canon.Model) {
+		applyNoPromptModelSuffix(&canon, providerCfg)
+		clientModel = canon.Model
+	}
 		if hasNoPromptModelSuffix(canon.Model) {
 			w.Header().Set(headerClientToProxyNoPrompt, "false")
 		}
@@ -66,10 +66,11 @@ func handleChat() http.HandlerFunc {
 			return
 		}
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
-		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolChat, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
-		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
-		canon.Messages = prepareCanonicalMessages(canon.Messages)
+	clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
+	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolChat, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
+	clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
+	*r = *r.Clone(context.WithValue(r.Context(), routeRequestEffortKey, clientReasoningEffort))
+	canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		if ok {
 			normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
