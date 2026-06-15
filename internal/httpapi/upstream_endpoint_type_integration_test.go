@@ -946,6 +946,177 @@ func TestResponsesRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 	}
 }
 
+func TestResponsesRouteNoPromptSuffixWorksBeforeReasoningSuffix(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_123","object":"response","output":[{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from responses upstream"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsChat:                true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+			SystemPromptText:            "provider system",
+			SystemPromptPosition:        config.SystemPromptPositionAppend,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5-noprompt-low","instructions":"user instructions","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
+		t.Fatalf("expected proxy suffix markers to be stripped before upstream model resolution, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyModel); got != "gpt-5.5-noprompt-low" {
+		t.Fatalf("expected client model observability header to preserve raw client model, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected noprompt observability header true, got %q", got)
+	}
+	if got := rec.Header().Get("X-Client-To-Proxy-Reasoning-Effort"); got != "low" {
+		t.Fatalf("expected reasoning suffix effort low to be preserved, got %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal responses upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["instructions"].(string); got != "user instructions" {
+		t.Fatalf("expected provider prompt to be skipped while client instructions remain, got %#v body=%s", payload["instructions"], gotBody)
+	}
+	if !strings.Contains(gotBody, `"reasoning":{"effort":"low","summary":"auto"}`) {
+		t.Fatalf("expected reasoning suffix to remain effective after noprompt stripping, got %s", gotBody)
+	}
+	}
+
+func TestChatRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello from chat upstream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+			ManualModels:         []string{"gpt-5.5"},
+			SystemPromptText:     "provider system",
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.5-noprompt","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.5" {
+		t.Fatalf("expected noprompt suffix to be stripped before upstream model resolution, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected noprompt observability header true, got %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal chat upstream payload: %v body=%s", err, gotBody)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("expected provider prompt to be skipped and only user message to remain, got %#v", payload["messages"])
+	}
+	first, _ := messages[0].(map[string]any)
+	if role, _ := first["role"].(string); role != "user" {
+		t.Fatalf("expected user message to remain first when provider prompt is skipped, got %#v", first)
+	}
+}
+
+func TestAnthropicRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
+	var gotBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic upstream"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "anthropic",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		EnableNoPromptModelSuffix:   true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+			ManualModels:              []string{"claude-sonnet-4-5"},
+			SystemPromptText:          "provider system",
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5-noprompt","max_tokens":128,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "claude-sonnet-4-5" {
+		t.Fatalf("expected noprompt suffix to be stripped before upstream model resolution, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected noprompt observability header true, got %q", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
+		t.Fatalf("unmarshal anthropic upstream payload: %v body=%s", err, gotBody)
+	}
+	if got, _ := payload["system"].(string); got != "" {
+		t.Fatalf("expected provider prompt to be skipped for anthropic system field, got %#v body=%s", payload["system"], gotBody)
+	}
+}
+
 func TestExplicitResponsesRouteManualNoPromptModelStillActsAsProxySuffix(t *testing.T) {
 	var gotBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

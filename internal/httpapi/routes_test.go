@@ -364,3 +364,33 @@ func TestProviderSelectionForLegacyNoPromptReasoningSuffix(t *testing.T) {
 	}
 	_ = server
 }
+
+func TestProviderSelectionForLegacyNoPromptBeforeReasoningSuffix(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		EnableNoPromptModelSuffix:   true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+		}},
+	})
+	server := NewServerWithStore(store, nil, nil)
+
+	req := httptest.NewRequest("POST", "/v1/responses", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "gpt-5.5-noprompt-low")
+	if err != nil {
+		t.Fatalf("expected provider selection without error, got %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected noprompt-before-reasoning suffix provider selection to succeed")
+	}
+	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "gpt-5.5-low" {
+		t.Fatalf("expected openai/gpt-5.5-low, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
+	}
+	_ = server
+}
