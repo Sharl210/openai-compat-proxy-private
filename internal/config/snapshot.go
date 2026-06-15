@@ -253,6 +253,17 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string
 	if s == nil {
 		return "", false
 	}
+	if strippedModel, stripped := stripNoPromptModelSuffix(model); stripped {
+		providerID, ok := s.ResolveDefaultProviderIDForModel(strippedModel)
+		if !ok {
+			return "", false
+		}
+		provider, err := s.Config.ProviderByID(providerID)
+		if err != nil || !provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) || provider.HidesModel(model) {
+			return "", false
+		}
+		return providerID, true
+	}
 	if owner, ok := s.DefaultModelOwners[model]; ok {
 		return owner, true
 	}
@@ -306,6 +317,12 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 	}
 	if !s.Config.EnableDefaultProviderModelTags {
 		if providerID, ok := s.ResolveDefaultProviderIDForModel(model); ok {
+			if strippedModel, stripped := stripNoPromptModelSuffix(model); stripped {
+				provider, err := s.Config.ProviderByID(providerID)
+				if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(model) {
+					return providerID, strippedModel, true
+				}
+			}
 			return providerID, model, true
 		}
 		if baseModel, ok := stripNoPromptModelSuffix(model); ok {
@@ -333,12 +350,11 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 }
 
 func stripNoPromptModelSuffix(model string) (string, bool) {
-	const suffix = "-noprompt"
-	trimmed := strings.TrimSpace(model)
-	if len(trimmed) <= len(suffix) || !strings.HasSuffix(trimmed, suffix) {
+	trimmed, _, hasNoPrompt := stripRootProxySuffixMarkers(model)
+	if !hasNoPrompt {
 		return model, false
 	}
-	return strings.TrimSuffix(trimmed, suffix), true
+	return trimmed, true
 }
 
 func providerResolvesModel(provider ProviderConfig, model string) bool {

@@ -957,8 +957,11 @@ func (p ProviderConfig) ResolveModelAndEffort(model string, enableSuffix bool) (
 func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, requestEffort string, enableClientSuffix bool) (string, string) {
 	explicitRequestEffort := normalizeReasoningEffort(requestEffort)
 	configSuffixEnabled := true
-	if strippedModel, stripped := stripProviderNoPromptModelSuffix(model); stripped {
-		model = strippedModel
+	if normalizedModel, normalizedEffort, hasNoPrompt := stripRootProxySuffixMarkers(model); hasNoPrompt {
+		model = normalizedModel
+		if explicitRequestEffort == "" {
+			explicitRequestEffort = normalizedEffort
+		}
 	}
 	enableClientSuffix = enableClientSuffix || (p.HasManualReasonSuffixForModel(model) && !p.HasLiteralManualModel(model))
 	requestedModel := model
@@ -1008,13 +1011,53 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 }
 
 func stripProviderNoPromptModelSuffix(model string) (string, bool) {
-	const suffix = "-noprompt"
-	trimmed := strings.TrimSpace(model)
-	if len(trimmed) <= len(suffix) || !strings.HasSuffix(trimmed, suffix) {
+	normalizedModel, _, hasNoPrompt := stripRootProxySuffixMarkers(model)
+	if !hasNoPrompt {
 		return model, false
 	}
-	return strings.TrimSuffix(trimmed, suffix), true
+	return normalizedModel, true
 }
+
+func stripRootProxySuffixMarkers(model string) (string, string, bool) {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return trimmed, "", false
+	}
+	current := trimmed
+	resolvedEffort := ""
+	hasNoPrompt := false
+	for {
+		changed := false
+		if len(current) > len(providerNoPromptModelSuffix) && strings.HasSuffix(current, providerNoPromptModelSuffix) {
+			current = strings.TrimSuffix(current, providerNoPromptModelSuffix)
+			hasNoPrompt = true
+			changed = true
+		}
+		if baseModel, effort, ok := splitReasoningSuffix(current); ok {
+			current = baseModel
+			if resolvedEffort == "" {
+				resolvedEffort = effort
+			}
+			changed = true
+		}
+		if !changed {
+			break
+		}
+	}
+	if resolvedEffort != "" {
+		current += "-" + resolvedEffort
+	}
+	return current, resolvedEffort, hasNoPrompt
+}
+
+func stripEnabledNoPromptModelSuffix(model string, enabled bool) (string, bool) {
+	if !enabled {
+		return model, false
+	}
+	return stripProviderNoPromptModelSuffix(model)
+}
+
+const providerNoPromptModelSuffix = "-noprompt"
 
 func sourceEffortForMatchedModel(entry ModelMapEntry, synthesized bool, fallback string) string {
 	if synthesized {

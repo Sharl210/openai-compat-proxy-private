@@ -199,6 +199,15 @@ func TestResolveModelAndEffortWithRequestEffortPrefersMappedTargetSuffixOverExpl
 	}
 }
 
+func TestResolveModelAndEffortWithRequestEffortTreatsNoPromptAndReasoningSuffixAsOrderIndependent(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.4-mini-minimal", "gpt-5.4-mini-low")}}
+
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("gpt-5.4-mini-noprompt-minimal", "none", true)
+	if model != "gpt-5.4-mini" || effort != "low" {
+		t.Fatalf("expected noprompt marker to be ignored regardless of ordering, got %q/%q", model, effort)
+	}
+}
+
 func TestResolveModelAndEffortWithRequestEffortPrefersMappedTargetSuffixForBaseSourceRule(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("gpt-5.4", "gpt-5.4-xhigh")}}
 

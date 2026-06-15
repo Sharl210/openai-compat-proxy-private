@@ -557,8 +557,47 @@ func ResolveProvidersDir(rootEnvPath string, providersDir string) string {
 }
 
 func (c Config) ResolveV1Model(model string) string {
+	return c.ResolveV1ModelForRequest(model, "")
+}
+
+func (c Config) ResolveV1ModelForRequest(model string, requestEffort string) string {
 	provider := ProviderConfig{ModelMap: c.V1ModelMap}
-	return provider.ResolveModel(model, false)
+	trimmedModel := strings.TrimSpace(model)
+	if trimmedModel == "" {
+		return model
+	}
+	if enabledModel, hasNoPrompt := stripEnabledNoPromptModelSuffix(trimmedModel, c.EnableNoPromptModelSuffix); hasNoPrompt {
+		trimmedModel = enabledModel
+	}
+	if mapped, _ := provider.resolveModelEntry(trimmedModel); mapped != "" {
+		return mapped
+	}
+	baseModel := trimmedModel
+	effectiveEffort := normalizeReasoningEffort(requestEffort)
+	if strippedBase, suffixEffort, ok := splitReasoningSuffix(trimmedModel); ok {
+		baseModel = strippedBase
+		if effectiveEffort == "" {
+			effectiveEffort = suffixEffort
+		}
+	}
+	if effectiveEffort != "" {
+		suffixedSource := baseModel + "-" + effectiveEffort
+		if suffixedSource != trimmedModel {
+			if mapped, _ := provider.resolveModelEntry(suffixedSource); mapped != "" {
+				return mapped
+			}
+		}
+	}
+	if mapped, _ := provider.resolveModelEntry(baseModel); mapped != "" {
+		if effectiveEffort == "" {
+			return mapped
+		}
+		if _, _, ok := splitReasoningSuffix(mapped); ok {
+			return mapped
+		}
+		return mapped + "-" + effectiveEffort
+	}
+	return trimmedModel
 }
 
 func (c *Config) applyStartupOnlyFrom(previous Config) {

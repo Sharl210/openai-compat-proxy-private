@@ -114,6 +114,33 @@ func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
 	}
 }
 
+func TestResolveV1ModelTreatsReasoningFamilyMembersAsOneSourceFamily(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"V1_MODEL_MAP":                  "gpt-5.5:gpt-5.4",
+		"ENABLE_NOPROMPT_MODEL_SUFFIX": "true",
+	})
+
+	if got := cfg.ResolveV1Model("gpt-5.5"); got != "gpt-5.4" {
+		t.Fatalf("expected base family member to map to base target, got %q", got)
+	}
+	if got := cfg.ResolveV1Model("gpt-5.5-high"); got != "gpt-5.4-high" {
+		t.Fatalf("expected suffixed family member to map via same root family rule, got %q", got)
+	}
+	if got := cfg.ResolveV1ModelForRequest("gpt-5.5-noprompt-high", ""); got != "gpt-5.4-high" {
+		t.Fatalf("expected noprompt marker to stay out of root family map key, got %q", got)
+	}
+}
+
+func TestResolveV1ModelTreatsExplicitReasoningRequestAsSameFamilyMember(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"V1_MODEL_MAP": "gpt-5.5:gpt-5.4",
+	})
+
+	if got := cfg.ResolveV1Model("gpt-5.5-high"); got != "gpt-5.4-high" {
+		t.Fatalf("expected explicit-effort equivalent family member to map to same root target, got %q", got)
+	}
+}
+
 func TestLoadFromValuesParsesRootUpstreamMaxOutputTokens(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
 		"UPSTREAM_MAX_OUTPUT_TOKENS":       "64000,gpt-5.5:128000,#re:.*gpt-.*:100000",
@@ -620,6 +647,29 @@ func TestRuntimeSnapshotResolveDefaultProviderSelectionStripsNoPromptBeforeReaso
 	providerID, model, ok := snapshot.ResolveDefaultProviderSelection("gpt-5.5-low-noprompt")
 	if !ok || providerID != "openai" || model != "gpt-5.5-low" {
 		t.Fatalf("expected noprompt reasoning suffix selection to resolve to openai/gpt-5.5-low, got provider=%q model=%q ok=%v", providerID, model, ok)
+	}
+}
+
+func TestRuntimeSnapshotResolveDefaultProviderSelectionStripsNoPromptRegardlessOfSuffixOrder(t *testing.T) {
+	cfg := Config{
+		DefaultProvider:           "openai",
+		EnableNoPromptModelSuffix: true,
+		Providers: []ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			ManualModels:                []string{"gpt-5.5"},
+			EnableReasoningEffortSuffix: true,
+		}},
+	}
+	providerIDs, owners, visible, taggedOwners, taggedVisible, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("build overlay: %v", err)
+	}
+	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible}
+
+	providerID, model, ok := snapshot.ResolveDefaultProviderSelection("gpt-5.5-noprompt-low")
+	if !ok || providerID != "openai" || model != "gpt-5.5-low" {
+		t.Fatalf("expected noprompt marker before reasoning suffix to resolve to openai/gpt-5.5-low, got provider=%q model=%q ok=%v", providerID, model, ok)
 	}
 }
 
