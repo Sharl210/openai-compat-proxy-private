@@ -214,7 +214,7 @@ http://127.0.0.1:21021/
 V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 ```
 
-它只在 bare `/v1/*` 和无 `/v1` 裸别名上生效，不会影响显式 `/{providerId}/v1/*` 路由。`src` 默认按字面量精确匹配，所以 `gpt-5.5` 里的点就是普通点；只有以 `#re:` 开头时才按 Go regexp 全字符串匹配。捕获替换只支持 `$0-$9`，其中 `$0` 是完整匹配，`$1-$9` 是第 1 到第 9 个 regexp 捕获组，例如 `#re:mini(.*)o:real-$0-$1` 会把 `mini2o` 映射成 `real-mini2o-2`；`$10` 及以上会保留字面值，避免 `$12` 到底表示第 12 组还是 `$1` 后接 `2` 的歧义；如果要输出字面 `$`，在 target 中写成 `\$`，例如 `\$12` 输出 `$12`。处理顺序是：`V1_MODEL_MAP` 先把入站模型名纯文本改成 canonical routing input，然后进入 `DEFAULT_PROVIDER` / default group 模型归属选择，最后才进入命中 provider 自己的 `MODEL_MAP` 与 reasoning suffix 处理。`V1_MODEL_MAP` 不是纠错或兜底机制；如果映射 target 不在默认分组可见模型列表中，请求仍会按现有 `invalid_model` 路径失败。该字段属于根级可热加载配置。
+它只在 bare `/v1/*` 和无 `/v1` 裸别名上生效，不会影响显式 `/{providerId}/v1/*` 路由。`src` 默认按字面量精确匹配，所以 `gpt-5.5` 里的点就是普通点；只有以 `#re:` 开头时才按 Go regexp 全字符串匹配。捕获替换只支持 `$0-$9`，其中 `$0` 是完整匹配，`$1-$9` 是第 1 到第 9 个 regexp 捕获组，例如 `#re:mini(.*)o:real-$0-$1` 会把 `mini2o` 映射成 `real-mini2o-2`；`$10` 及以上会保留字面值，避免 `$12` 到底表示第 12 组还是 `$1` 后接 `2` 的歧义；如果要输出字面 `$`，在 target 中写成 `\$`，例如 `\$12` 输出 `$12`。根级 `V1_MODEL_MAP` 对 reasoning family 生效：`gpt-5.5`、`gpt-5.5-high`、以及“`gpt-5.5` + 显式 reasoning 参数”的等效请求，都会按同一家族进行预映射；`-noprompt` 仍然只是代理标记，只有在该能力开启时才会在代理层剥离，不参与映射 key。`V1_MODEL_MAP` 不是纠错或兜底机制；如果映射 target 不在默认分组可见模型列表中，请求仍会按现有 `invalid_model` 路径失败。该字段属于根级可热加载配置。
 
 如果启用了 `ENABLE_DEFAULT_PROVIDER_MODEL_TAGS=true`，则默认分组会切到“标签模式”：
 
