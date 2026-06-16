@@ -43,12 +43,12 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support anthropic messages")
 			return
 		}
-	rawClientModel := canon.Model
-	clientModel := canon.Model
-	if !provider.HidesModel(canon.Model) {
-		applyNoPromptModelSuffix(&canon, providerCfg)
-		clientModel = canon.Model
-	}
+		rawClientModel := canon.Model
+		clientModel := canon.Model
+		if !provider.HidesModel(canon.Model) {
+			applyNoPromptModelSuffix(&canon, providerCfg)
+			clientModel = canon.Model
+		}
 		if hasNoPromptModelSuffix(canon.Model) {
 			w.Header().Set(headerClientToProxyNoPrompt, "false")
 		}
@@ -69,12 +69,12 @@ func handleAnthropicMessages() http.HandlerFunc {
 			writeModelAllowanceError(w, err)
 			return
 		}
-	client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-	clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
-	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
-	clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
-	*r = *r.Clone(context.WithValue(r.Context(), routeRequestEffortKey, clientReasoningEffort))
-	canon.Messages = prepareCanonicalMessages(canon.Messages)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
+		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
+		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
+		*r = *r.Clone(context.WithValue(r.Context(), routeRequestEffortKey, clientReasoningEffort))
+		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeAnthropic {
 			stripAnthropicCacheControl(&canon)
 		}
@@ -94,7 +94,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			BaseEstimate:       baseEstimate,
 			Canon:              canon,
 		}))
-		if err := setDirectionalObservabilityHeaders(w, provider, providerCfg, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			if writeRequestValidationError(w, err) {
 				return
 			}

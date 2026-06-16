@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
 )
@@ -64,6 +66,105 @@ func TestResponsesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"output_text"`) {
 		t.Fatalf("expected responses payload, got %s", rec.Body.String())
 	}
+}
+
+func TestRouteObservabilityHeadersExposeRetryCacheControlAndCacheRates(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}`))
+	}))
+	defer upstream.Close()
+
+	cacheMgr := cacheinfo.NewManager(t.TempDir(), time.UTC, []string{"openai", "fallback"}, nil)
+	if err := cacheMgr.RecordFinalUsage("req-openai", "openai", &cacheinfo.Usage{InputTokens: 100, CachedTokens: 25, TotalTokens: 100}); err != nil {
+		t.Fatalf("RecordFinalUsage openai: %v", err)
+	}
+	if err := cacheMgr.RecordFinalUsage("req-fallback", "fallback", &cacheinfo.Usage{InputTokens: 100, CachedTokens: 50, TotalTokens: 100}); err != nil {
+		t.Fatalf("RecordFinalUsage fallback: %v", err)
+	}
+
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:             "openai,fallback",
+		EnableLegacyV1Routes:        true,
+		UpstreamRetryCount:          3,
+		UpstreamRetryDelay:          5 * time.Second,
+		UpstreamCacheControl:        config.UpstreamCacheControl5Min,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{
+			{
+				ID:                      "openai",
+				Enabled:                 true,
+				UpstreamBaseURL:         upstream.URL,
+				UpstreamAPIKey:          "test-key",
+				UpstreamEndpointType:    config.UpstreamEndpointTypeResponses,
+				SupportsResponses:       true,
+				ManualModels:            []string{"gpt-5"},
+				UpstreamRetryCountSet:   true,
+				UpstreamRetryCount:      4,
+				UpstreamRetryDelaySet:   true,
+				UpstreamRetryDelay:      7 * time.Second,
+				UpstreamCacheControlSet: true,
+				UpstreamCacheControl:    config.UpstreamCacheControl1H,
+			},
+			{
+				ID:                   "fallback",
+				Enabled:              true,
+				UpstreamBaseURL:      upstream.URL,
+				UpstreamAPIKey:       "test-key",
+				UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+				SupportsResponses:    true,
+				ManualModels:         []string{"fallback-model"},
+			},
+		},
+	}), cacheMgr, nil)
+
+	explicitReq := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	explicitReq.Header.Set("Content-Type", "application/json")
+	explicitRec := httptest.NewRecorder()
+	server.ServeHTTP(explicitRec, explicitReq)
+	if explicitRec.Code != http.StatusOK {
+		t.Fatalf("expected explicit route status 200, got %d body=%s", explicitRec.Code, explicitRec.Body.String())
+	}
+	if got := explicitRec.Header().Get(headerProviderTodayCacheRate); got != "25.00 %" {
+		t.Fatalf("expected explicit provider today cache rate 25.00 %%, got %q", got)
+	}
+	if got := explicitRec.Header().Get(headerRootProviderTodayCacheRate); got != "" {
+		t.Fatalf("expected explicit provider route to omit root provider cache rate, got %q", got)
+	}
+
+	rootReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	rootReq.Header.Set("Content-Type", "application/json")
+	rootRec := httptest.NewRecorder()
+	server.ServeHTTP(rootRec, rootReq)
+	if rootRec.Code != http.StatusOK {
+		t.Fatalf("expected root route status 200, got %d body=%s", rootRec.Code, rootRec.Body.String())
+	}
+	if got := rootRec.Header().Get(headerProxyUpstreamRetryCount); got != "4" {
+		t.Fatalf("expected %s 4, got %q", headerProxyUpstreamRetryCount, got)
+	}
+	if got := rootRec.Header().Get(headerProxyUpstreamRetryDelay); got != "7s" {
+		t.Fatalf("expected %s 7s, got %q", headerProxyUpstreamRetryDelay, got)
+	}
+	if got := rootRec.Header().Get(headerProxyUpstreamAnthropicCacheControl); got != config.UpstreamCacheControl1H {
+		t.Fatalf("expected %s %q, got %q", headerProxyUpstreamAnthropicCacheControl, config.UpstreamCacheControl1H, got)
+	}
+	if got := rootRec.Header().Get(headerProviderTodayCacheRate); got != "25.00 %" {
+		t.Fatalf("expected provider today cache rate 25.00 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerProviderHistoryCacheRate); got != "25.00 %" {
+		t.Fatalf("expected provider history cache rate 25.00 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerRootProviderTodayCacheRate); got != "37.50 %" {
+		t.Fatalf("expected root provider today cache rate 37.50 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerRootProviderHistoryCacheRate); got != "37.50 %" {
+		t.Fatalf("expected root provider history cache rate 37.50 %%, got %q", got)
+	}
+
 }
 
 func TestResponsesRouteClientReasoningEffortPrefersSuffixOverRequestBodyParameter(t *testing.T) {

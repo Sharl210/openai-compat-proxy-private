@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	modelpkg "openai-compat-proxy/internal/model"
 	reasoningpkg "openai-compat-proxy/internal/reasoning"
@@ -26,6 +28,13 @@ const (
 	headerProxyToUpstreamMaxOutputTokens     = "X-Proxy-To-Upstream-Max-Output-Tokens"
 	headerProxyToUpstreamReasoningEffort     = "X-Proxy-To-Upstream-Reasoning-Effort"
 	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
+	headerProxyUpstreamRetryCount            = "X-Proxy-Upstream-Retry-Count"
+	headerProxyUpstreamRetryDelay            = "X-Proxy-Upstream-Retry-Delay"
+	headerProxyUpstreamAnthropicCacheControl = "X-Proxy-Upstream-Anthropic-Cache-Control"
+	headerProviderTodayCacheRate             = "X-Provider-Today-Cache-Rate"
+	headerProviderHistoryCacheRate           = "X-Provider-History-Cache-Rate"
+	headerRootProviderTodayCacheRate         = "X-Root-Provider-Today-Cache-Rate"
+	headerRootProviderHistoryCacheRate       = "X-Root-Provider-History-Cache-Rate"
 )
 
 const (
@@ -275,7 +284,7 @@ func applyProviderOpenAIServiceTierOverride(canon *modelpkg.CanonicalRequest, pr
 	canon.PreservedTopLevelFields["service_tier"] = provider.OpenAIServiceTier
 }
 
-func setDirectionalObservabilityHeaders(w http.ResponseWriter, provider config.ProviderConfig, providerCfg config.Config, canon modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
+func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, providerID string, canon modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
 	preview, err := upstream.PreviewRequestObservability(canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
 	if err != nil {
 		return err
@@ -301,7 +310,71 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, provider config.P
 	}
 	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(canon, preview)))
 	w.Header().Set(headerProxyToUpstreamReasoningParameters, strings.TrimSpace(preview.ReasoningParameters))
+	w.Header().Set(headerProxyUpstreamRetryCount, strconv.Itoa(providerCfg.UpstreamRetryCount))
+	w.Header().Set(headerProxyUpstreamRetryDelay, providerCfg.UpstreamRetryDelay.String())
+	w.Header().Set(headerProxyUpstreamAnthropicCacheControl, strings.TrimSpace(providerCfg.UpstreamCacheControl))
+	setCacheRateHeaders(w, r, providerID)
 	return nil
+}
+
+func setCacheRateHeaders(w http.ResponseWriter, r *http.Request, providerID string) {
+	if r == nil {
+		return
+	}
+	manager := cacheInfoManagerFromRequest(r)
+	if manager == nil {
+		return
+	}
+	info, ok := routeInfoFromRequest(r)
+	if !ok {
+		return
+	}
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		providerID = strings.TrimSpace(info.ProviderID)
+	}
+	if providerStats, ok := manager.ProviderStatsSnapshot(providerID); ok {
+		setCacheRateHeaderPair(w, headerProviderTodayCacheRate, headerProviderHistoryCacheRate, providerStats)
+	}
+	if info.Legacy {
+		if rootStats := rootProviderStatsSnapshot(r, manager); rootStats != nil {
+			setCacheRateHeaderPair(w, headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, rootStats)
+		}
+	}
+}
+
+func rootProviderStatsSnapshot(r *http.Request, manager *cacheinfo.Manager) *cacheinfo.ProviderStats {
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil || manager == nil {
+		return nil
+	}
+	statsList := make([]*cacheinfo.ProviderStats, 0, len(snapshot.DefaultProviderIDs))
+	for _, id := range snapshot.DefaultProviderIDs {
+		if stats, ok := manager.ProviderStatsSnapshot(id); ok {
+			statsList = append(statsList, stats)
+		}
+	}
+	if len(statsList) == 0 {
+		return nil
+	}
+	loc, err := snapshot.Config.CacheInfoLocation()
+	if err != nil || loc == nil {
+		loc = time.UTC
+	}
+	aggregated := cacheinfo.AggregateProviderStats(snapshot.Config.CacheInfoTimezone, time.Now().In(loc), statsList)
+	return &aggregated
+}
+
+func setCacheRateHeaderPair(w http.ResponseWriter, todayHeader string, historyHeader string, stats *cacheinfo.ProviderStats) {
+	if stats == nil {
+		return
+	}
+	w.Header().Set(todayHeader, formatCacheRatePercentage(cacheinfo.DailyCacheRate(*stats)))
+	w.Header().Set(historyHeader, formatCacheRatePercentage(cacheinfo.ProviderCacheRate(*stats)))
+}
+
+func formatCacheRatePercentage(rate float64) string {
+	return strconv.FormatFloat(rate, 'f', 2, 64) + " %"
 }
 
 func proxyToUpstreamReasoningEffort(canon modelpkg.CanonicalRequest, preview upstream.RequestObservabilityPreview) string {
@@ -350,6 +423,13 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerProxyToUpstreamMaxOutputTokens,
 		headerProxyToUpstreamReasoningEffort,
 		headerProxyToUpstreamReasoningParameters,
+		headerProxyUpstreamRetryCount,
+		headerProxyUpstreamRetryDelay,
+		headerProxyUpstreamAnthropicCacheControl,
+		headerProviderTodayCacheRate,
+		headerProviderHistoryCacheRate,
+		headerRootProviderTodayCacheRate,
+		headerRootProviderHistoryCacheRate,
 	} {
 		w.Header().Del(header)
 	}

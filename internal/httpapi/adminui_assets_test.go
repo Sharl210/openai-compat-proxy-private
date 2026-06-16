@@ -173,3 +173,27 @@ func TestAdminUIAppScriptBindsIndependentEnvCommentZoom(t *testing.T) {
 		t.Fatalf("expected env comment zoom to stay independent from editor zoom, got %s", body)
 	}
 }
+
+func TestAdminUIAppScriptRendersValidationFailureModal(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"validationFailureModal",
+		"validation.restart_error",
+		"validation.hot_reload_error",
+		"保存校验失败",
+		"重启错误",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected app script to include validation failure modal behavior %q, got %s", want, body)
+		}
+	}
+}

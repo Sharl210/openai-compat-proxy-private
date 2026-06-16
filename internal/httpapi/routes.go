@@ -229,6 +229,7 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	}
 	providerCfg.UpstreamRetryCount = provider.UpstreamRetryCount
 	providerCfg.UpstreamRetryDelay = provider.UpstreamRetryDelay
+	providerCfg.UpstreamCacheControl = provider.UpstreamCacheControl
 	if provider.UpstreamUserAgent != "" {
 		providerCfg.UpstreamUserAgent = provider.UpstreamUserAgent
 	}

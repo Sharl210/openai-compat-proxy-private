@@ -26,6 +26,7 @@ const state = {
   toast: null,
   statusRefreshInFlight: false,
   editorCloseConfirm: false,
+  validationFailureModal: null,
 };
 
 const statusAutoRefreshIntervalMs = 3000;
@@ -334,6 +335,7 @@ async function saveCurrentFile() {
     state.lastSaveFeedback = data.validation && data.validation.restart_ok === false
       ? { tone: 'danger', text: '校验失败' }
       : { tone: 'ok', text: '校验通过' };
+    state.validationFailureModal = validationFailureModalForSave(data.validation);
     setToast(data.validation && data.validation.restart_ok === false ? 'error' : 'success', data.validation && data.validation.restart_ok === false ? '文件已保存，但重启校验未通过' : '文件已保存');
     await loadTree(state.currentDir);
     await refreshStatus();
@@ -342,6 +344,21 @@ async function saveCurrentFile() {
     state.lastSaveFeedback = { tone: 'danger', text: '保存失败' };
     setToast('error', error.message || '保存失败');
   }
+}
+
+function validationFailureModalForSave(validation) {
+  if (!validation || validation.restart_ok !== false) {
+    return null;
+  }
+  return {
+    restart_error: validation.restart_error || '',
+    hot_reload_error: validation.hot_reload_error || '',
+  };
+}
+
+function closeValidationFailureModal() {
+  state.validationFailureModal = null;
+  render();
 }
 
 function attemptCloseCurrentFile() {
@@ -820,6 +837,15 @@ function bindEvents() {
     });
   }
 
+  const validationFailureClose = document.getElementById('validation-failure-close');
+  if (validationFailureClose) {
+    validationFailureClose.addEventListener('click', closeValidationFailureModal);
+  }
+  const validationFailureBackdrop = document.getElementById('validation-failure-backdrop');
+  if (validationFailureBackdrop) {
+    validationFailureBackdrop.addEventListener('click', closeValidationFailureModal);
+  }
+
   const fullPathButton = document.getElementById('full-path-button');
   if (fullPathButton && state.currentFile?.path) {
     fullPathButton.addEventListener('click', () => {
@@ -1016,6 +1042,7 @@ function dashboardTemplate() {
       ${renderFileActionMenu()}
       ${renderClearCacheModal()}
       ${renderEditorCloseConfirmModal()}
+      ${renderValidationFailureModal()}
     </div>
   `;
 }
@@ -1437,6 +1464,24 @@ function renderEditorCloseConfirmModal() {
         <button id="editor-close-discard" class="secondary-btn material-outlined-button" type="button">不保存直接返回</button>
         <button id="editor-close-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
       </div>
+    </div>
+  `;
+}
+
+function renderValidationFailureModal() {
+  const validation = state.validationFailureModal;
+  if (!validation) {
+    return '';
+  }
+  return `
+    <div id="validation-failure-backdrop" class="file-action-backdrop is-open"></div>
+    <div class="file-action-modal" role="dialog" aria-modal="true" aria-label="保存校验失败">
+      <div class="file-action-title">保存校验失败</div>
+      <div class="info-grid material-warning-grid" style="margin: 0 0 16px;">
+        ${validation.hot_reload_error ? `<div class="info-card"><div class="info-label">热加载错误</div><div class="info-value">${escapeHtml(validation.hot_reload_error)}</div></div>` : ''}
+        ${validation.restart_error ? `<div class="info-card"><div class="info-label">重启错误</div><div class="info-value">${escapeHtml(validation.restart_error)}</div></div>` : ''}
+      </div>
+      <button id="validation-failure-close" class="secondary-btn material-tonal-button" type="button">知道了</button>
     </div>
   `;
 }
