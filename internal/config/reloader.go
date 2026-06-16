@@ -56,6 +56,13 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 	if cfg.AnthropicMaxThinkingBudget == 0 {
 		cfg.AnthropicMaxThinkingBudget = Default().AnthropicMaxThinkingBudget
 	}
+	if cfg.UpstreamRetryDelay == 0 && cfg.UpstreamRetryCount == 0 {
+		cfg.UpstreamRetryCount = Default().UpstreamRetryCount
+		cfg.UpstreamRetryDelay = Default().UpstreamRetryDelay
+	}
+	if strings.TrimSpace(cfg.UpstreamCacheControl) == "" {
+		cfg.UpstreamCacheControl = Default().UpstreamCacheControl
+	}
 	for i := range cfg.Providers {
 		if !cfg.Providers[i].ModelLimitContextTokensSet && cfg.Providers[i].ModelLimitContextTokens == 0 && len(cfg.Providers[i].ModelLimitContextTokenRules) == 0 {
 			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
@@ -63,6 +70,15 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 		}
 		if cfg.Providers[i].AnthropicMaxThinkingBudget == 0 {
 			cfg.Providers[i].AnthropicMaxThinkingBudget = cfg.AnthropicMaxThinkingBudget
+		}
+		if !cfg.Providers[i].UpstreamRetryCountSet {
+			cfg.Providers[i].UpstreamRetryCount = cfg.UpstreamRetryCount
+		}
+		if !cfg.Providers[i].UpstreamRetryDelaySet {
+			cfg.Providers[i].UpstreamRetryDelay = cfg.UpstreamRetryDelay
+		}
+		if !cfg.Providers[i].UpstreamCacheControlSet {
+			cfg.Providers[i].UpstreamCacheControl = cfg.UpstreamCacheControl
 		}
 	}
 }

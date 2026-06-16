@@ -53,7 +53,11 @@ type ProviderConfig struct {
 	EnableNoPromptModelSuffixSet           bool
 	UpstreamFirstByteTimeout               time.Duration
 	UpstreamRetryCount                     int
+	UpstreamRetryCountSet                  bool
 	UpstreamRetryDelay                     time.Duration
+	UpstreamRetryDelaySet                  bool
+	UpstreamCacheControl                   string
+	UpstreamCacheControlSet                bool
 	DownstreamNonStreamStrategyOverride    string
 	DownstreamNonStreamStrategyOverrideSet bool
 	ProxyAPIKeyOverride                    string
@@ -87,7 +91,7 @@ type ScopedIntRule struct {
 const (
 	SystemPromptPositionPrepend         = "prepend"
 	SystemPromptPositionAppend          = "append"
-	DefaultUpstreamRetryCount           = 5
+	DefaultUpstreamRetryCount           = 3
 	DefaultUpstreamRetryDelay           = 5 * time.Second
 	UpstreamEndpointTypeResponses       = "responses"
 	UpstreamEndpointTypeChat            = "chat"
@@ -96,6 +100,10 @@ const (
 	OpenAIServiceTierDefault            = "default"
 	OpenAIServiceTierFlex               = "flex"
 	OpenAIServiceTierPriority           = "priority"
+	UpstreamCacheControl5Min            = "5min"
+	UpstreamCacheControl1H              = "1h"
+	UpstreamCacheControlFalse           = "false"
+	UpstreamCacheControlNoChange        = "nochange"
 	ResponsesToolCompatModePreserve     = "preserve"
 	ResponsesToolCompatModeFunctionOnly = "function_only"
 )
@@ -318,17 +326,35 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.UpstreamFirstByteTimeout = parsed
 		case "UPSTREAM_RETRY_COUNT":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
 			parsed, err := parseProviderRetryCount(value, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+			provider.UpstreamRetryCountSet = true
 			provider.UpstreamRetryCount = parsed
 		case "UPSTREAM_RETRY_DELAY":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
 			parsed, err := parseProviderRetryDelay(value, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+			provider.UpstreamRetryDelaySet = true
 			provider.UpstreamRetryDelay = parsed
+		case "UPSTREAM_ANTHROPIC_CACHE_CONTROL":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			normalized, err := normalizeUpstreamCacheControl(value)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid UPSTREAM_ANTHROPIC_CACHE_CONTROL in %s: %q (allowed: 5min, 1h, false, nochange)", path, value))
+			}
+			provider.UpstreamCacheControlSet = true
+			provider.UpstreamCacheControl = normalized
 		case "DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE":
 			provider.DownstreamNonStreamStrategyOverrideSet = true
 			if strings.TrimSpace(value) == "" {

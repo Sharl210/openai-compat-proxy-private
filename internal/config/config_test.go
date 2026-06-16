@@ -1,7 +1,10 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,7 +119,7 @@ func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
 
 func TestResolveV1ModelTreatsReasoningFamilyMembersAsOneSourceFamily(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
-		"V1_MODEL_MAP":                  "gpt-5.5:gpt-5.4",
+		"V1_MODEL_MAP":                 "gpt-5.5:gpt-5.4",
 		"ENABLE_NOPROMPT_MODEL_SUFFIX": "true",
 	})
 
@@ -229,6 +232,90 @@ func TestValidateRootEnvValuesRejectsInvalidRootForceUpstreamMaxOutputTokens(t *
 	err := ValidateRootEnvValues(map[string]string{"FORCE_UPSTREAM_MAX_OUTPUT_TOKENS": "maybe"})
 	if err == nil {
 		t.Fatalf("expected invalid FORCE_UPSTREAM_MAX_OUTPUT_TOKENS to fail validation")
+	}
+}
+
+func TestLoadFromValuesParsesRootAndProviderUpstreamAnthropicCacheControl(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"UPSTREAM_ANTHROPIC_CACHE_CONTROL": "1h",
+	})
+	if got := cfg.UpstreamCacheControl; got != UpstreamCacheControl1H {
+		t.Fatalf("expected root cache control %q, got %q", UpstreamCacheControl1H, got)
+	}
+
+	tmp := t.TempDir()
+	providerPath := filepath.Join(tmp, "openai.env")
+	if err := os.WriteFile(providerPath, []byte("PROVIDER_ID=openai\nUPSTREAM_ANTHROPIC_CACHE_CONTROL=false\n"), 0o600); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+	providerCfg, err := loadProviderFile(providerPath)
+	if err != nil {
+		t.Fatalf("load provider env: %v", err)
+	}
+	if got := providerCfg.UpstreamCacheControl; got != UpstreamCacheControlFalse {
+		t.Fatalf("expected provider cache control %q, got %q", UpstreamCacheControlFalse, got)
+	}
+	if !providerCfg.UpstreamCacheControlSet {
+		t.Fatalf("expected provider cache control to be marked as explicitly set")
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidUpstreamAnthropicCacheControl(t *testing.T) {
+	if err := ValidateRootEnvValues(map[string]string{"UPSTREAM_ANTHROPIC_CACHE_CONTROL": ""}); err != nil {
+		t.Fatalf("expected empty UPSTREAM_ANTHROPIC_CACHE_CONTROL to be treated as unset, got %v", err)
+	}
+	for _, value := range []string{"maybe", "5m"} {
+		t.Run(value, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{"UPSTREAM_ANTHROPIC_CACHE_CONTROL": value})
+			if err == nil {
+				t.Fatalf("expected invalid UPSTREAM_ANTHROPIC_CACHE_CONTROL=%q to fail validation", value)
+			}
+		})
+	}
+}
+
+func TestProviderEmptyRetryAndCacheControlValuesInheritRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o700); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+	rootPath := filepath.Join(rootDir, ".env")
+	root := strings.Join([]string{
+		"PROVIDERS_DIR=" + providersDir,
+		"DEFAULT_PROVIDER=openai",
+		"UPSTREAM_RETRY_COUNT=4",
+		"UPSTREAM_RETRY_DELAY=7s",
+		"UPSTREAM_ANTHROPIC_CACHE_CONTROL=1h",
+		"",
+	}, "\n")
+	if err := os.WriteFile(rootPath, []byte(root), 0o600); err != nil {
+		t.Fatalf("write root env: %v", err)
+	}
+	provider := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://example.test",
+		"UPSTREAM_API_KEY=test-key",
+		"SUPPORTS_RESPONSES=true",
+		"UPSTREAM_RETRY_COUNT=",
+		"UPSTREAM_RETRY_DELAY=",
+		"UPSTREAM_ANTHROPIC_CACHE_CONTROL=",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(providersDir, "openai.env"), []byte(provider), 0o600); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+	snapshot, err := BuildRuntimeSnapshot(rootPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot error: %v", err)
+	}
+	providerCfg, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID error: %v", err)
+	}
+	if providerCfg.UpstreamRetryCount != 4 || providerCfg.UpstreamRetryDelay != 7*time.Second || providerCfg.UpstreamCacheControl != UpstreamCacheControl1H {
+		t.Fatalf("expected provider to inherit root retry/cache control values, got count=%d delay=%s cache=%q", providerCfg.UpstreamRetryCount, providerCfg.UpstreamRetryDelay, providerCfg.UpstreamCacheControl)
 	}
 }
 

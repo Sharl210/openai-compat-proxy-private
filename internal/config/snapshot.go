@@ -150,6 +150,15 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 		if !cfg.Providers[i].ForceUpstreamMaxOutputTokensSet {
 			cfg.Providers[i].ForceUpstreamMaxOutputTokens = cfg.ForceUpstreamMaxOutputTokens
 		}
+		if !cfg.Providers[i].UpstreamRetryCountSet {
+			cfg.Providers[i].UpstreamRetryCount = cfg.UpstreamRetryCount
+		}
+		if !cfg.Providers[i].UpstreamRetryDelaySet {
+			cfg.Providers[i].UpstreamRetryDelay = cfg.UpstreamRetryDelay
+		}
+		if !cfg.Providers[i].UpstreamCacheControlSet {
+			cfg.Providers[i].UpstreamCacheControl = cfg.UpstreamCacheControl
+		}
 	}
 }
 

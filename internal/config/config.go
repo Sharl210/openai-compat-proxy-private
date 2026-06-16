@@ -44,6 +44,7 @@ type Config struct {
 	TotalTimeout                      time.Duration
 	UpstreamRetryCount                int
 	UpstreamRetryDelay                time.Duration
+	UpstreamCacheControl              string
 	UpstreamThinkingTagStyle          string
 	UpstreamXMLToolCallStyle          string
 	LogFilePath                       string
@@ -67,6 +68,9 @@ func Default() Config {
 		FirstByteTimeout:            30 * time.Minute,
 		IdleTimeout:                 3 * time.Minute,
 		TotalTimeout:                time.Hour,
+		UpstreamRetryCount:          DefaultUpstreamRetryCount,
+		UpstreamRetryDelay:          DefaultUpstreamRetryDelay,
+		UpstreamCacheControl:        UpstreamCacheControl5Min,
 		UpstreamEndpointType:        UpstreamEndpointTypeResponses,
 		ResponsesToolCompatMode:     ResponsesToolCompatModePreserve,
 		AnthropicMaxThinkingBudget:  32000,
@@ -197,6 +201,21 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 			cfg.TotalTimeout = parsed
 		}
 	}
+	if value, ok := lookup("UPSTREAM_RETRY_COUNT"); ok && value != "" {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && parsed >= 0 {
+			cfg.UpstreamRetryCount = parsed
+		}
+	}
+	if value, ok := lookup("UPSTREAM_RETRY_DELAY"); ok && value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed >= 0 {
+			cfg.UpstreamRetryDelay = parsed
+		}
+	}
+	if value, ok := lookup("UPSTREAM_ANTHROPIC_CACHE_CONTROL"); ok && value != "" {
+		if normalized, err := normalizeUpstreamCacheControl(value); err == nil {
+			cfg.UpstreamCacheControl = normalized
+		}
+	}
 	if value, ok := lookup("UPSTREAM_USER_AGENT"); ok && value != "" {
 		cfg.UpstreamUserAgent = value
 	}
@@ -226,6 +245,15 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validatePositiveDuration(values, "TOTAL_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validateMinInt(values, "UPSTREAM_RETRY_COUNT", 0); err != nil {
+		return err
+	}
+	if err := validateMinDuration(values, "UPSTREAM_RETRY_DELAY", 0); err != nil {
+		return err
+	}
+	if err := validateUpstreamCacheControl(values, "UPSTREAM_ANTHROPIC_CACHE_CONTROL"); err != nil {
 		return err
 	}
 	if err := validateDownstreamNonStreamStrategy(values, "DOWNSTREAM_NON_STREAM_STRATEGY"); err != nil {
@@ -408,6 +436,45 @@ func validatePositiveDuration(values map[string]string, key string) error {
 	parsed, err := time.ParseDuration(value)
 	if err != nil || parsed <= 0 {
 		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func validateMinDuration(values map[string]string, key string, min time.Duration) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed < min {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q", key, value))
+	}
+	return nil
+}
+
+func normalizeUpstreamCacheControl(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case UpstreamCacheControl5Min:
+		return UpstreamCacheControl5Min, nil
+	case UpstreamCacheControl1H:
+		return UpstreamCacheControl1H, nil
+	case UpstreamCacheControlFalse:
+		return UpstreamCacheControlFalse, nil
+	case UpstreamCacheControlNoChange:
+		return UpstreamCacheControlNoChange, nil
+	default:
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid upstream anthropic cache control: %q", value))
+	}
+}
+
+func validateUpstreamCacheControl(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	_, err := normalizeUpstreamCacheControl(value)
+	if err != nil {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q (allowed: 5min, 1h, false, nochange)", key, value))
 	}
 	return nil
 }
@@ -631,6 +698,9 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.FirstByteTimeout == other.FirstByteTimeout &&
 		c.IdleTimeout == other.IdleTimeout &&
 		c.TotalTimeout == other.TotalTimeout &&
+		c.UpstreamRetryCount == other.UpstreamRetryCount &&
+		c.UpstreamRetryDelay == other.UpstreamRetryDelay &&
+		c.UpstreamCacheControl == other.UpstreamCacheControl &&
 		c.UpstreamUserAgent == other.UpstreamUserAgent &&
 		c.MasqueradeTarget == other.MasqueradeTarget &&
 		c.InjectClaudeCodeMetadataUserID == other.InjectClaudeCodeMetadataUserID &&
