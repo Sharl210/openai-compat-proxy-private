@@ -186,7 +186,7 @@ func extractOriginalToolIDs(req model.CanonicalRequest) map[int]string {
 	return result
 }
 
-func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, xmlToolCallStyle ...string) ([]byte, error) {
+func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, upstreamCacheControl string, xmlToolCallStyle ...string) ([]byte, error) {
 	if err := validateRequestForEndpoint(req, endpointType); err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func buildRequestBodyForEndpoint(req model.CanonicalRequest, endpointType string
 	case config.UpstreamEndpointTypeChat:
 		return buildChatRequestBody(req, xmlToolCallStyle...)
 	case config.UpstreamEndpointTypeAnthropic:
-		return buildAnthropicRequestBody(req, masqueradeTarget, injectMetadataUserID, injectSystemPrompt)
+		return buildAnthropicRequestBody(req, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, upstreamCacheControl)
 	default:
 		return buildResponsesRequestBodyWithMasquerade(req, config.ResponsesToolCompatModePreserve, masqueradeTarget)
 	}
@@ -300,9 +300,9 @@ func isResponsesOnlyTopLevelField(key string, endpointType string) bool {
 	}
 }
 
-func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, xmlToolCallStyle ...string) ([]byte, error) {
+func buildStreamingRequestBody(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, upstreamCacheControl string, xmlToolCallStyle ...string) ([]byte, error) {
 	req.Stream = true
-	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, xmlToolCallStyle...)
+	return buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, upstreamCacheControl, xmlToolCallStyle...)
 }
 
 func normalizeResponsePayload(endpointType string, payload map[string]any, thinkingTagStyle string, xmlToolCallStyle string) map[string]any {
@@ -1546,7 +1546,7 @@ func buildChatContentParts(parts []model.CanonicalContentPart) []any {
 	return content
 }
 
-func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) ([]byte, error) {
+func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool, upstreamCacheControl string) ([]byte, error) {
 	if err := validateAnthropicRequest(req); err != nil {
 		return nil, err
 	}
@@ -1594,6 +1594,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		payload["tool_choice"] = choice
 	}
 	payload["messages"] = buildAnthropicMessages(req)
+	applyAnthropicCacheControlMode(payload, upstreamCacheControl)
 
 	if injectMetadataUserID && masqueradeTarget == config.MasqueradeTargetClaude {
 		payload["metadata"] = map[string]any{
@@ -1602,6 +1603,55 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	}
 
 	return json.Marshal(payload)
+}
+
+func applyAnthropicCacheControlMode(payload map[string]any, mode string) {
+	switch strings.TrimSpace(mode) {
+	case "", config.UpstreamCacheControlNoChange:
+		return
+	case config.UpstreamCacheControlFalse:
+		walkAnthropicContentBlocks(payload, func(block map[string]any) {
+			delete(block, "cache_control")
+		})
+	case config.UpstreamCacheControl1H:
+		cacheControl := map[string]any{"type": "ephemeral", "ttl": "1h"}
+		walkAnthropicContentBlocks(payload, func(block map[string]any) {
+			block["cache_control"] = cloneMap(cacheControl)
+		})
+	default:
+		cacheControl := map[string]any{"type": "ephemeral"}
+		walkAnthropicContentBlocks(payload, func(block map[string]any) {
+			block["cache_control"] = cloneMap(cacheControl)
+		})
+	}
+}
+
+func walkAnthropicContentBlocks(payload map[string]any, fn func(map[string]any)) {
+	if len(payload) == 0 || fn == nil {
+		return
+	}
+	visitContent := func(raw any) {}
+	visitContent = func(raw any) {
+		switch content := raw.(type) {
+		case []any:
+			for _, item := range content {
+				block, _ := item.(map[string]any)
+				if len(block) == 0 {
+					continue
+				}
+				switch stringValue(block["type"]) {
+				case "text", "image", "document", "tool_result":
+					fn(block)
+				}
+			}
+		}
+	}
+	visitContent(payload["system"])
+	messages, _ := payload["messages"].([]any)
+	for _, rawMessage := range messages {
+		message, _ := rawMessage.(map[string]any)
+		visitContent(message["content"])
+	}
 }
 
 func validateAnthropicRequest(req model.CanonicalRequest) error {

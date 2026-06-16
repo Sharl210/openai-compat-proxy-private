@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -482,7 +483,7 @@ func TestBuildAnthropicRequestBodyPreservesSystemCacheControlBlocks(t *testing.T
 			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
 		}},
-	}, "", false, false)
+	}, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildAnthropicRequestBody error: %v", err)
 	}
@@ -505,6 +506,66 @@ func TestBuildAnthropicRequestBodyPreservesSystemCacheControlBlocks(t *testing.T
 	}
 }
 
+func TestBuildAnthropicRequestBodyAppliesConfiguredCacheControlMode(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		wantType  string
+		wantTTL   string
+		wantField bool
+	}{
+		{name: "five minute default", mode: config.UpstreamCacheControl5Min, wantType: "ephemeral", wantField: true},
+		{name: "one hour ttl", mode: config.UpstreamCacheControl1H, wantType: "ephemeral", wantTTL: "1h", wantField: true},
+		{name: "remove cache control", mode: config.UpstreamCacheControlFalse, wantField: false},
+		{name: "keep caller cache control", mode: config.UpstreamCacheControlNoChange, wantType: "ephemeral", wantTTL: "1h", wantField: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+				Model: "claude-sonnet-4-5",
+				Messages: []model.CanonicalMessage{{
+					Role: "user",
+					Parts: []model.CanonicalContentPart{{
+						Type: "text",
+						Text: "hello",
+						Raw:  map[string]any{"cache_control": map[string]any{"type": "ephemeral", "ttl": "1h"}},
+					}},
+				}},
+			}, "", false, false, tc.mode)
+			if err != nil {
+				t.Fatalf("buildAnthropicRequestBody error: %v", err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			messages, _ := payload["messages"].([]any)
+			message, _ := messages[0].(map[string]any)
+			content, _ := message["content"].([]any)
+			block, _ := content[0].(map[string]any)
+			cacheControl, exists := block["cache_control"].(map[string]any)
+			if exists != tc.wantField {
+				t.Fatalf("expected cache_control exists=%v, got block %#v", tc.wantField, block)
+			}
+			if !tc.wantField {
+				return
+			}
+			if got := cacheControl["type"]; got != tc.wantType {
+				t.Fatalf("expected cache_control.type %q, got %#v", tc.wantType, block)
+			}
+			if tc.wantTTL == "" {
+				if _, exists := cacheControl["ttl"]; exists {
+					t.Fatalf("expected cache_control.ttl to be omitted, got %#v", block)
+				}
+				return
+			}
+			if got := cacheControl["ttl"]; got != tc.wantTTL {
+				t.Fatalf("expected cache_control.ttl %q, got %#v", tc.wantTTL, block)
+			}
+		})
+	}
+}
+
 func TestBuildAnthropicRequestBodyKeepsStringSystemWhenNoInstructionParts(t *testing.T) {
 	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
 		Model:        "claude-sonnet-4-5",
@@ -513,7 +574,7 @@ func TestBuildAnthropicRequestBodyKeepsStringSystemWhenNoInstructionParts(t *tes
 			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
 		}},
-	}, "", false, false)
+	}, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildAnthropicRequestBody error: %v", err)
 	}
@@ -535,7 +596,7 @@ func TestBuildAnthropicRequestBodyUsesHoistedInstructionsAsSystem(t *testing.T) 
 			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2260,7 +2321,7 @@ func TestBuildResponsesRequestBodyAddsCodexReasoningIncludeOnlyForCodexMasquerad
 		}},
 	}
 
-	body, err := buildRequestBodyForEndpoint(req, config.UpstreamEndpointTypeResponses, config.MasqueradeTargetCodex, false, false)
+	body, err := buildRequestBodyForEndpoint(req, config.UpstreamEndpointTypeResponses, config.MasqueradeTargetCodex, false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2273,7 +2334,7 @@ func TestBuildResponsesRequestBodyAddsCodexReasoningIncludeOnlyForCodexMasquerad
 		t.Fatalf("expected codex masquerade responses payload to include reasoning.encrypted_content, got %#v", payload)
 	}
 
-	plainBody, err := buildRequestBodyForEndpoint(req, config.UpstreamEndpointTypeResponses, config.MasqueradeTargetNone, false, false)
+	plainBody, err := buildRequestBodyForEndpoint(req, config.UpstreamEndpointTypeResponses, config.MasqueradeTargetNone, false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("build plain responses body: %v", err)
 	}
@@ -2378,7 +2439,7 @@ func TestBuildRequestBodyForAllEndpointTypesIgnoresStaleResponsesItemsWhenCanoni
 
 	for _, endpointType := range []string{config.UpstreamEndpointTypeResponses, config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
 		t.Run(endpointType, func(t *testing.T) {
-			body, err := buildRequestBodyForEndpoint(req, endpointType, "", false, false)
+			body, err := buildRequestBodyForEndpoint(req, endpointType, "", false, false, config.UpstreamCacheControlNoChange)
 			if err != nil {
 				t.Fatalf("build body for %s: %v", endpointType, err)
 			}
@@ -2402,7 +2463,7 @@ func TestBuildChatRequestBodyPreservesFileContentPart(t *testing.T) {
 				Raw:  map[string]any{"input_file": map[string]any{"file_id": "file_123"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2432,7 +2493,7 @@ func TestBuildChatRequestBodyUsesObjectSchemaForFunctionToolWithoutParameters(t 
 			Name:        "get_current_time",
 			Description: "Get current time",
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2455,7 +2516,7 @@ func TestBuildAnthropicRequestBodyUsesObjectSchemaForFunctionToolWithoutParamete
 			Name:        "get_current_time",
 			Description: "Get current time",
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2479,7 +2540,7 @@ func TestBuildChatRequestBodyPreservesInputAudioContentPart(t *testing.T) {
 				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "mp3"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2508,7 +2569,7 @@ func TestBuildChatRequestBodyDropsAssistantToolCallsWithEmptyFunctionName(t *tes
 			Role:      "assistant",
 			ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "", Arguments: `{"url":"https://example.com"}`}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2542,7 +2603,7 @@ func TestBuildChatRequestBodyPreservesOrderedToolResultBetweenTextMessages(t *te
 			},
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "工具前"}, {Type: "text", Text: "工具后"}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2576,7 +2637,7 @@ func TestBuildChatRequestBodyConvertsLegacyXMLToolCallText(t *testing.T) {
 				Text: "\n<tool_call>\n<function=mcp__mt_apk_read_text>\n<parameter=includeLineNumbers>False</parameter>\n<parameter=limit>520</parameter>\n<parameter=locator>{\"kind\": \"dex_class\", \"target\": \"Lacr/browser/lightning/view/IDMDownloadListener;\"}</parameter>\n<parameter=maxChars>80000</parameter>\n<parameter=workspaceId>69jas4bi</parameter>\n</function>\n</tool_call>\n",
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamXMLToolCallStyleLegacy)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange, config.UpstreamXMLToolCallStyleLegacy)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2616,7 +2677,7 @@ func TestBuildChatRequestBodySanitizesRepeatedConcatenatedToolArguments(t *testi
 				Arguments: `{"url":"https://example.com"}{"url":"https://example.com"}{"url":"https://example.com"}`,
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2647,7 +2708,7 @@ func TestBuildChatRequestBodySanitizesCorruptedPrefixBeforeRepeatedToolArguments
 				Arguments: `{"url":"https://github.com/k3ss-official/g0dm0d3` + `{"url":"https://github.com/k3ss-official/g0dm0d3"}{"url":"https://github.com/k3ss-official/g0dm0d3"}`,
 			}},
 		}},
-	}, config.UpstreamEndpointTypeChat, "", false, false)
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2703,7 +2764,7 @@ func TestBuildAnthropicRequestBodyPreservesThinkingConfig(t *testing.T) {
 		Model:           "claude-sonnet-4-5",
 		MaxOutputTokens: intPtrForClientTest(128),
 		Reasoning:       &model.CanonicalReasoning{Raw: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 2048}}},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -2733,7 +2794,7 @@ func TestBuildAnthropicRequestBodyPreservesCacheControlOnContentBlocks(t *testin
 				Raw:  map[string]any{"cache_control": map[string]any{"type": "ephemeral"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -3059,7 +3120,7 @@ func TestBuildAnthropicRequestBodyRejectsInputAudio(t *testing.T) {
 				Raw:  map[string]any{"input_audio": map[string]any{"data": "YWJj", "format": "mp3"}},
 			}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
 	if err == nil {
 		t.Fatalf("expected anthropic request builder to reject input_audio")
 	}
@@ -3073,7 +3134,7 @@ func TestBuildAnthropicRequestBodyInjectsClaudeMetadataUserID(t *testing.T) {
 			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, true, false)
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, true, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -3103,7 +3164,7 @@ func TestBuildAnthropicRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *t
 			"response_format":      map[string]any{"type": "json_object"},
 			"custom_passthrough":   "keep-me",
 		},
-	}, config.UpstreamEndpointTypeAnthropic, "", false, false)
+	}, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -3130,7 +3191,7 @@ func TestBuildAnthropicRequestBodyInjectsClaudeSystemPrompt(t *testing.T) {
 			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, false, true)
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, false, true, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -3164,7 +3225,7 @@ func TestBuildAnthropicRequestBodyClaudeSystemPromptPreservesExistingInstruction
 			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
 		}},
-	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, false, true)
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, false, true, config.UpstreamCacheControlNoChange)
 	if err != nil {
 		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
 	}
@@ -3340,6 +3401,18 @@ func TestOpenEventStreamRetriesBeforeAnyEventUsingProviderRetryConfig(t *testing
 	}
 	if len(seen) != 1 || seen[0].Event != "response.completed" {
 		t.Fatalf("expected response.completed after retries, got %#v", seen)
+	}
+}
+
+func TestAnnotateRetryExhaustionPreservesWrappedTimeoutError(t *testing.T) {
+	timeoutErr := &net.DNSError{Err: "timeout", Name: "upstream.test", IsTimeout: true}
+	err := annotateRetryExhaustion(timeoutErr, 3, 5*time.Second)
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("expected retry annotation to preserve wrapped timeout error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "本代理层已重试3遍") {
+		t.Fatalf("expected retry annotation text to be preserved, got %v", err)
 	}
 }
 

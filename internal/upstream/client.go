@@ -35,6 +35,7 @@ type Client struct {
 	injectClaudeCodeSystemPrompt   bool
 	upstreamThinkingTagStyle       string
 	upstreamXMLToolCallStyle       string
+	upstreamCacheControl           string
 }
 
 type RequestObservabilityPreview struct {
@@ -129,6 +130,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
 		upstreamThinkingTagStyle:       cfg.UpstreamThinkingTagStyle,
 		upstreamXMLToolCallStyle:       cfg.UpstreamXMLToolCallStyle,
+		upstreamCacheControl:           cfg.UpstreamCacheControl,
 	}
 }
 
@@ -231,9 +233,9 @@ func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointTy
 		return buildResponsesRequestBodyWithMasquerade(req, c.responsesToolCompatMode, c.masqueradeTarget)
 	}
 	if stream {
-		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
+		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamCacheControl, c.upstreamXMLToolCallStyle)
 	}
-	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamXMLToolCallStyle)
+	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamCacheControl, c.upstreamXMLToolCallStyle)
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
@@ -427,7 +429,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 }
 
 func PreviewRequestObservability(req model.CanonicalRequest, endpointType string, masqueradeTarget string, injectMetadataUserID bool, injectSystemPrompt bool) (RequestObservabilityPreview, error) {
-	body, err := buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, config.UpstreamXMLToolCallStyleLegacy)
+	body, err := buildRequestBodyForEndpoint(req, endpointType, masqueradeTarget, injectMetadataUserID, injectSystemPrompt, config.UpstreamCacheControlNoChange, config.UpstreamXMLToolCallStyleLegacy)
 	if err != nil {
 		return RequestObservabilityPreview{}, err
 	}
@@ -940,7 +942,7 @@ func annotateRetryExhaustion(err error, retryCount int, retryDelay time.Duration
 		cloned.RetryDelay = retryDelay
 		return &cloned
 	}
-	return fmt.Errorf("%s%s", buildRetryNotice(retryCount, retryDelay), err.Error())
+	return fmt.Errorf("%s%w", buildRetryNotice(retryCount, retryDelay), err)
 }
 
 func mergeLogAttrs(base map[string]any, extra map[string]any) map[string]any {
