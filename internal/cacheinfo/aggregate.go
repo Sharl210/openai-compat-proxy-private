@@ -55,6 +55,10 @@ func aggregateStats(timezone string, today time.Time, statsList []*ProviderStats
 	return aggregated
 }
 
+func AggregateProviderStats(timezone string, today time.Time, statsList []*ProviderStats) ProviderStats {
+	return aggregateStats(timezone, today, statsList)
+}
+
 func addTokenTotals(dst, src TokenTotals) TokenTotals {
 	dst.InputTokens += src.InputTokens
 	dst.CachedTokens += src.CachedTokens

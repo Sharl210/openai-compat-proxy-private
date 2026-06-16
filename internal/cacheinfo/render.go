@@ -48,6 +48,14 @@ func RenderProviderStats(stats ProviderStats) string {
 	return b.String()
 }
 
+func ProviderCacheRate(stats ProviderStats) float64 {
+	return cacheRate(stats.HistoryTotal)
+}
+
+func DailyCacheRate(stats ProviderStats) float64 {
+	return cacheRate(stats.Today)
+}
+
 func renderDays(stats ProviderStats) []DailyStats {
 	if len(stats.RecentDays) > 0 {
 		return stats.RecentDays

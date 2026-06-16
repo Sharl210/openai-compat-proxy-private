@@ -48,6 +48,17 @@ type Manager struct {
 	wg     sync.WaitGroup
 }
 
+func cloneProviderStats(stats *ProviderStats) *ProviderStats {
+	if stats == nil {
+		return nil
+	}
+	cloned := *stats
+	if len(stats.RecentDays) > 0 {
+		cloned.RecentDays = append([]DailyStats(nil), stats.RecentDays...)
+	}
+	return &cloned
+}
+
 const defaultSubmittedLimit = 4096
 
 func NewManager(providersDir string, location *time.Location, enabledProviders []string, clock Clock) *Manager {
@@ -164,6 +175,16 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	m.submittedOrder = append(m.submittedOrder, submissionKey)
 	m.pruneSubmittedLocked()
 	return nil
+}
+
+func (m *Manager) ProviderStatsSnapshot(providerID string) (*ProviderStats, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	stats, ok := m.stats[providerID]
+	if !ok {
+		return nil, false
+	}
+	return cloneProviderStats(stats), true
 }
 
 func (m *Manager) pruneSubmittedLocked() {
