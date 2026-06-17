@@ -224,8 +224,16 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 		if isSyntheticResponsesReasoningInputItem(rawMap) {
 			return nil, model.CanonicalMessage{}, false, true, nil
 		}
-		reasoningContent := reasoningSummaryText(rawMap)
-		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningContent: reasoningContent, ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, false, nil
+		reasoningContent := normalizeResponsesReasoningText(reasoningSummaryText(rawMap))
+		preserved := cloneMapAny(rawMap)
+		if summary := normalizeResponsesReasoningSummary(preserved["summary"]); len(summary) > 0 {
+			preserved["summary"] = summary
+		}
+		message := model.CanonicalMessage{Role: "assistant", ReasoningContent: reasoningContent, ReasoningBlocks: []map[string]any{cloneMapAny(preserved)}}
+		if stringMapValue(rawMap, "id") == "rs_proxy" {
+			return nil, message, true, true, nil
+		}
+		return preserved, message, true, false, nil
 	}
 	if itemType == "function_call_output" {
 		msg, ok, err := decodeFunctionCallOutput(rawMap)
@@ -359,17 +367,74 @@ func extractInstructionTextFromInputItem(item map[string]any) string {
 }
 
 func isSyntheticResponsesReasoningInputItem(item map[string]any) bool {
-	if stringMapValue(item, "id") == "rs_proxy" {
+	if stringMapValue(item, "id") != "rs_proxy" {
+		return false
+	}
+	summary := responsesReasoningSummaryItems(item["summary"])
+	if len(summary) == 0 {
 		return true
 	}
-	summary, _ := item["summary"].([]any)
 	for _, raw := range summary {
 		entry, _ := raw.(map[string]any)
-		if strings.Contains(strings.TrimSpace(stringMapValue(entry, "text")), "代理层占位") {
-			return true
+		if !strings.Contains(strings.TrimSpace(stringMapValue(entry, "text")), "代理层占位") {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func responsesReasoningSummaryItems(raw any) []any {
+	switch typed := raw.(type) {
+	case []any:
+		return typed
+	case []map[string]any:
+		items := make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, item)
+		}
+		return items
+	default:
+		return nil
+	}
+}
+
+func normalizeResponsesReasoningText(text string) string {
+	if text == "" {
+		return ""
+	}
+	text = strings.TrimLeft(text, "\u200b\ufeff")
+	return text
+}
+
+func normalizeResponsesReasoningSummary(raw any) []map[string]any {
+	var summary []map[string]any
+	switch typed := raw.(type) {
+	case []map[string]any:
+		summary = cloneMapSlice(typed)
+	case []any:
+		for _, item := range typed {
+			entry, _ := item.(map[string]any)
+			if len(entry) == 0 {
+				continue
+			}
+			summary = append(summary, cloneMapAny(entry))
+		}
+	default:
+		return nil
+	}
+	for _, entry := range summary {
+		if text := stringMapValue(entry, "text"); text != "" {
+			entry["text"] = normalizeResponsesReasoningText(text)
+		}
+		if nested, ok := entry["summary_text"].(map[string]any); ok && len(nested) > 0 {
+			nested = cloneMap(nested)
+			if text := stringValue(nested["text"]); text != "" {
+				nested["text"] = normalizeResponsesReasoningText(text)
+			}
+			entry["summary_text"] = nested
+		}
+	}
+	return summary
 }
 
 func extractTextFromResponsesContent(content any) string {

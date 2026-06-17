@@ -356,6 +356,44 @@ func TestDecodeRequestDropsSyntheticTopLevelReasoningInputItem(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesRealReasoningFromProxyReasoningBeforeConsecutiveToolCalls(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"​真实推理\n"}]},
+			{"type":"function_call","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"},
+			{"type":"function_call","call_id":"call_2","name":"search_web","arguments":"{\"query\":\"news\"}"},
+			{"type":"function_call_output","call_id":"call_2","output":"{\"ok\":true}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 5 {
+		t.Fatalf("expected user plus two tool-call rounds, got %#v", canon.Messages)
+	}
+	firstCall := canon.Messages[1]
+	if firstCall.Role != "assistant" || len(firstCall.ToolCalls) != 1 || firstCall.ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected first assistant tool call, got %#v", firstCall)
+	}
+	if firstCall.ReasoningContent != "真实推理\n" {
+		t.Fatalf("expected real proxy reasoning to be preserved before first tool call, got %#v", firstCall)
+	}
+	if len(firstCall.ReasoningBlocks) != 1 {
+		t.Fatalf("expected real proxy reasoning block to be preserved, got %#v", firstCall)
+	}
+	for _, item := range canon.ResponseInputItems {
+		if got, _ := item["id"].(string); got == "rs_proxy" {
+			t.Fatalf("expected proxy reasoning item to stay out of preserved input items, got %#v", canon.ResponseInputItems)
+		}
+	}
+}
+
 func TestDecodeRequestPreservesToolOrder(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
