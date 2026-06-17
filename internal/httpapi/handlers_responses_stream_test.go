@@ -48,6 +48,9 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	if !strings.Contains(body, `"type":"response.reasoning_summary_text.delta"`) {
 		t.Fatalf("expected synthetic reasoning summary chunk type in stream body, got %s", body)
 	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected responses stream not to expose proxy placeholder reasoning text, got %s", body)
+	}
 	if !strings.Contains(body, `"type":"response.output_text.delta"`) {
 		t.Fatalf("expected output_text chunk type in stream body, got %s", body)
 	}
@@ -78,17 +81,20 @@ func TestResponsesStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	placeholderIdx := strings.Index(body, `**推理中**`)
 	textIdx := strings.Index(body, `"delta":"final answer"`)
 	completedIdx := strings.Index(body, `event: response.completed`)
-	if placeholderIdx == -1 || !strings.Contains(body, `代理层占位`) || textIdx == -1 || !strings.Contains(body, `"type":"response.output_text.delta"`) || completedIdx == -1 {
-		t.Fatalf("expected placeholder, final text and completed event, got %s", body)
+	proxyIdx := strings.Index(body, `"id":"rs_proxy"`)
+	if proxyIdx == -1 || textIdx == -1 || !strings.Contains(body, `"type":"response.output_text.delta"`) || completedIdx == -1 {
+		t.Fatalf("expected proxy reasoning lifecycle, final text and completed event, got %s", body)
+	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected responses stream not to expose proxy placeholder reasoning text, got %s", body)
 	}
 	if strings.Contains(body, `event: response.incomplete`) {
 		t.Fatalf("expected completed stream without incomplete event, got %s", body)
 	}
-	if !(placeholderIdx < textIdx && textIdx < completedIdx) {
-		t.Fatalf("expected placeholder before final text before completed, got %s", body)
+	if !(proxyIdx < textIdx && textIdx < completedIdx) {
+		t.Fatalf("expected proxy reasoning lifecycle before final text before completed, got %s", body)
 	}
 }
 
@@ -114,17 +120,20 @@ func TestResponsesStreamFromResponsesJSONUpstreamInjectsPlaceholderAndText(t *te
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	placeholderIdx := strings.Index(body, `**推理中**`)
 	textIdx := strings.Index(body, `"delta":"final answer"`)
 	completedIdx := strings.Index(body, `event: response.completed`)
-	if placeholderIdx == -1 || !strings.Contains(body, `代理层占位`) || textIdx == -1 || !strings.Contains(body, `"type":"response.output_text.delta"`) || completedIdx == -1 {
-		t.Fatalf("expected placeholder, final text and completed event, got %s", body)
+	proxyIdx := strings.Index(body, `"id":"rs_proxy"`)
+	if proxyIdx == -1 || textIdx == -1 || !strings.Contains(body, `"type":"response.output_text.delta"`) || completedIdx == -1 {
+		t.Fatalf("expected proxy reasoning lifecycle, final text and completed event, got %s", body)
+	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected responses stream not to expose proxy placeholder reasoning text, got %s", body)
 	}
 	if strings.Contains(body, `event: response.incomplete`) {
 		t.Fatalf("expected completed stream without incomplete event, got %s", body)
 	}
-	if !(placeholderIdx < textIdx && textIdx < completedIdx) {
-		t.Fatalf("expected placeholder before final text before completed, got %s", body)
+	if !(proxyIdx < textIdx && textIdx < completedIdx) {
+		t.Fatalf("expected proxy reasoning lifecycle before final text before completed, got %s", body)
 	}
 }
 
@@ -204,8 +213,11 @@ func TestResponsesStreamPreservesRealUpstreamReasoningText(t *testing.T) {
 	if !strings.Contains(body, `event: response.completed`) {
 		t.Fatalf("expected completed event to remain, got %s", body)
 	}
-	if !strings.Contains(body, `"id":"rs_proxy"`) || !strings.Contains(body, `代理层占位`) {
-		t.Fatalf("expected synthetic rs_proxy placeholder lifecycle to remain, got %s", body)
+	if !strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected synthetic rs_proxy lifecycle to remain, got %s", body)
+	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected responses stream not to expose proxy placeholder reasoning text, got %s", body)
 	}
 }
 
@@ -1231,7 +1243,7 @@ func TestProviderResponsesRouteEmitsPlaceholderBeforeFirstUpstreamEvent(t *testi
 			n, err := resp.Body.Read(buf)
 			if n > 0 {
 				out.Write(buf[:n])
-				if strings.Contains(out.String(), "代理层占位") {
+				if strings.Contains(out.String(), `"id":"rs_proxy"`) {
 					readDone <- out.String()
 					return
 				}
@@ -1245,17 +1257,20 @@ func TestProviderResponsesRouteEmitsPlaceholderBeforeFirstUpstreamEvent(t *testi
 
 	select {
 	case body := <-readDone:
-		if !strings.Contains(body, "代理层占位") {
-			t.Fatalf("expected placeholder body before first upstream event, got %q", body)
+		if !strings.Contains(body, `"id":"rs_proxy"`) {
+			t.Fatalf("expected proxy reasoning lifecycle before first upstream event, got %q", body)
+		}
+		if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+			t.Fatalf("expected early bytes not to expose proxy placeholder reasoning text, got %q", body)
 		}
 	case <-time.After(200 * time.Millisecond):
 		select {
 		case body := <-readDone:
 			_ = resp.Body.Close()
-			t.Fatalf("expected placeholder bytes before upstream event, but only received later body %q", body)
+			t.Fatalf("expected proxy reasoning lifecycle before upstream event, but only received later body %q", body)
 		case <-time.After(350 * time.Millisecond):
 			_ = resp.Body.Close()
-			t.Fatal("expected placeholder bytes to reach client before upstream event")
+			t.Fatal("expected proxy reasoning lifecycle bytes to reach client before upstream event")
 		}
 	}
 }

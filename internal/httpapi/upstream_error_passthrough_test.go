@@ -103,8 +103,11 @@ func TestResponsesStreamReturnsUpstreamErrorBeforeStartingSSE(t *testing.T) {
 		t.Fatalf("expected stream to stay in SSE protocol after placeholder prelude, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, "代理层占位") {
-		t.Fatalf("expected early synthetic placeholder before upstream auth error, got %s", body)
+	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected early synthetic reasoning lifecycle before upstream auth error, got %s", body)
+	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected upstream auth error stream not to expose proxy placeholder reasoning text, got %s", body)
 	}
 	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_error"`) {
 		t.Fatalf("expected SSE terminal upstream_error event, got %s", body)

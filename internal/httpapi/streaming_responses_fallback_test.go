@@ -51,8 +51,8 @@ func TestResponsesStreamClosesSyntheticReasoningWithoutRealReasoning(t *testing.
 	if strings.Contains(body, `分析中…`) || strings.Contains(body, `正在组织回答…`) || strings.Contains(body, `正在调用工具…`) {
 		t.Fatalf("expected synthetic fallback reasoning to use only one generic phrase, got %s", body)
 	}
-	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
-		t.Fatalf("expected synthetic reasoning done item to include non-empty summary text, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected synthetic reasoning lifecycle not to expose proxy placeholder reasoning text, got %s", body)
 	}
 }
 
@@ -119,7 +119,10 @@ func TestResponsesStreamKeepsSyntheticReasoningAliveBeforeFirstRealOutput(t *tes
 		t.Fatalf("expected response.created to include downstream model before first text, got %s", body)
 	}
 	if !strings.Contains(beforeText, `event: response.output_item.added`) || !strings.Contains(beforeText, `event: response.reasoning_summary_text.delta`) {
-		t.Fatalf("expected visible synthetic reasoning block before first text, got %s", body)
+		t.Fatalf("expected synthetic reasoning lifecycle before first text, got %s", body)
+	}
+	if strings.Contains(beforeText, "代理层占位") || strings.Contains(beforeText, "**推理中**") {
+		t.Fatalf("expected synthetic reasoning lifecycle not to expose proxy placeholder reasoning text, got %s", body)
 	}
 	if strings.Contains(beforeText, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {
 		t.Fatalf("expected no ellipsis tick before first text, got %s", body)
@@ -229,17 +232,20 @@ func TestResponsesStreamInjectsSyntheticReasoningForChatWithoutReasoningWhenThin
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	placeholderIdx := strings.Index(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`)
+	proxyIdx := strings.Index(body, `"id":"rs_proxy"`)
 	textIdx := strings.Index(body, `{"delta":"final answer","type":"response.output_text.delta"}`)
-	if placeholderIdx == -1 || textIdx == -1 {
-		t.Fatalf("expected synthetic reasoning placeholder and final text, got %s", body)
+	if proxyIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected synthetic reasoning lifecycle and final text, got %s", body)
 	}
-	if placeholderIdx > textIdx {
-		t.Fatalf("expected synthetic reasoning placeholder before final text, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected synthetic reasoning lifecycle not to expose proxy placeholder reasoning text, got %s", body)
+	}
+	if proxyIdx > textIdx {
+		t.Fatalf("expected synthetic reasoning lifecycle before final text, got %s", body)
 	}
 }
 
-func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *testing.T) {
+func TestResponsesStreamKeepsChatThinkTagsInRealReasoningBlock(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
@@ -265,23 +271,26 @@ func TestResponsesStreamMergesChatThinkTagsIntoSingleSyntheticReasoningBlock(t *
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
-	mergedReasoningIdx := strings.Index(body, `{"delta":"internal reasoning","type":"response.reasoning_summary_text.delta"}`)
+	realReasoningIdx := strings.Index(body, `{"delta":"internal reasoning","type":"response.reasoning_summary_text.delta"}`)
 	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
 	textIdx := strings.Index(body, `{"delta":"final answer","type":"response.output_text.delta"}`)
-	if proxyAddedIdx == -1 || mergedReasoningIdx == -1 || proxyDoneIdx == -1 || textIdx == -1 {
-		t.Fatalf("expected merged synthetic reasoning lifecycle and final text, got %s", body)
+	if proxyAddedIdx == -1 || realReasoningIdx == -1 || proxyDoneIdx == -1 || textIdx == -1 {
+		t.Fatalf("expected synthetic lifecycle, real reasoning and final text, got %s", body)
 	}
-	if !(proxyAddedIdx < mergedReasoningIdx && mergedReasoningIdx < proxyDoneIdx && proxyDoneIdx < textIdx) {
-		t.Fatalf("expected merged reasoning to stay in rs_proxy until text starts, got %s", body)
+	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < realReasoningIdx && realReasoningIdx < textIdx) {
+		t.Fatalf("expected proxy lifecycle to close before real reasoning and text, got %s", body)
 	}
 	if strings.Contains(body, `<think>`) || strings.Contains(body, `</think>`) {
 		t.Fatalf("expected think tags to be removed from final output text, got %s", body)
 	}
-	if !strings.Contains(body, `"summary":[{"text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\ninternal reasoning\n","type":"summary_text"}]`) {
-		t.Fatalf("expected rs_proxy summary to include merged real reasoning text, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected synthetic lifecycle not to expose proxy placeholder reasoning text, got %s", body)
+	}
+	if strings.Contains(body, `"id":"rs_proxy","summary":[{"text":"internal reasoning`) {
+		t.Fatalf("expected real reasoning not to be merged into rs_proxy, got %s", body)
 	}
 	if strings.Contains(body, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {
-		t.Fatalf("expected merged reasoning path to avoid synthetic ellipsis ticks, got %s", body)
+		t.Fatalf("expected real reasoning path to avoid synthetic ellipsis ticks, got %s", body)
 	}
 }
 

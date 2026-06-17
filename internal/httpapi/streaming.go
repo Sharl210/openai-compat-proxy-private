@@ -23,9 +23,26 @@ var syntheticReasoningTickInterval = 250 * time.Millisecond
 var sseHeartbeatInterval = 15 * time.Second
 
 const syntheticReasoningPlaceholder = "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"
+const invisibleSyntheticReasoningDelta = "\u200b"
 
 func syntheticReasoningPrelude() string {
 	return syntheticReasoningPlaceholder + "\n\n"
+}
+
+func invisibleSyntheticReasoningPrelude() string {
+	return invisibleSyntheticReasoningDelta
+}
+
+func sanitizeSyntheticReasoningText(text string) string {
+	if strings.Contains(text, syntheticReasoningPlaceholder) {
+		return invisibleSyntheticReasoningPrelude()
+	}
+	return text
+}
+
+func isInvisibleSyntheticReasoningText(text string) bool {
+	stripped := strings.ReplaceAll(text, invisibleSyntheticReasoningDelta, "")
+	return strings.TrimSpace(stripped) == ""
 }
 
 type usageRecorderFunc func(map[string]any)
@@ -342,14 +359,10 @@ func (h *responseEventWriterHelper) closeSyntheticReasoning() {
 		h.reasoningClosed = true
 		return
 	}
-	summary := []any{}
-	if text := h.syntheticSummary.String(); text != "" {
-		summary = append(summary, map[string]any{"type": "summary_text", "text": text})
-	}
 	h.addEvent("response.output_item.done", map[string]any{"item": map[string]any{
 		"id":      "rs_proxy",
 		"type":    "reasoning",
-		"summary": summary,
+		"summary": []any{},
 	}, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic})
 	h.reasoningClosed = true
 }
@@ -399,12 +412,6 @@ func (h *responseEventWriterHelper) beginCompactionLifecycle() {
 	}
 	h.compactionLifecycleStarted = true
 	h.closeSyntheticReasoning()
-}
-
-func (h *responseEventWriterHelper) shouldMergeChatReasoningIntoSynthetic() bool {
-	return h.downstreamType == "responses" &&
-		h.syntheticInjected &&
-		normalizeHTTPAPIUpstreamEndpointType(h.upstreamEndpointType) == config.UpstreamEndpointTypeChat
 }
 
 func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (processResponseEventResult, error) {
@@ -499,23 +506,6 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			if _, ok := evt.Data[aggregate.InternalReasoningSourceKey]; !ok {
 				evt.Data[aggregate.InternalReasoningSourceKey] = aggregate.ReasoningSourceUpstream
 			}
-		}
-		if h.shouldMergeChatReasoningIntoSynthetic() && evt.Event == "response.reasoning.delta" {
-			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
-				if h.syntheticSummary != nil {
-					h.syntheticSummary.WriteString(summary)
-					if !strings.HasSuffix(summary, "\n") {
-						h.syntheticSummary.WriteString("\n")
-					}
-				}
-				converted := map[string]any{"delta": summary, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}
-				if blocks, ok := evt.Data["blocks"]; ok {
-					converted["blocks"] = blocks
-				}
-				h.addEvent("response.reasoning_summary_text.delta", converted)
-			}
-			result.skipWrite = true
-			break
 		}
 		h.markRealReasoningSeen()
 		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
@@ -1138,14 +1128,15 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 		state.reasoningStarted = true
 		state.syntheticInjected = true
 	}
-	if !strings.HasSuffix(text, "\n\n") {
+	text = sanitizeSyntheticReasoningText(text)
+	if !isInvisibleSyntheticReasoningText(text) && !strings.HasSuffix(text, "\n\n") {
 		if strings.HasSuffix(text, "\n") {
 			text += "\n"
 		} else {
 			text += "\n\n"
 		}
 	}
-	if state != nil {
+	if state != nil && !isInvisibleSyntheticReasoningText(text) {
 		state.syntheticSummary.WriteString(text)
 	}
 	payload := map[string]any{"type": "response.reasoning.delta", "summary": text, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}
@@ -1180,7 +1171,7 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 }
 
 func writeSyntheticResponsesReasoningTick(w http.ResponseWriter, flusher http.Flusher) error {
-	payload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": "…"}
+	payload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": invisibleSyntheticReasoningDelta}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -1301,7 +1292,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 		"type":  "content_block_delta",
 		"index": state.thinkingIndex,
-		"delta": map[string]any{"type": "thinking_delta", "thinking": syntheticReasoningPrelude()},
+		"delta": map[string]any{"type": "thinking_delta", "thinking": invisibleSyntheticReasoningPrelude()},
 	})
 }
 
@@ -1941,7 +1932,7 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := writeChatChunk(w, flusher, &state, map[string]any{"reasoning_content": syntheticReasoningPrelude()}, "", nil); err != nil {
+	if err := writeChatChunk(w, flusher, &state, map[string]any{"reasoning_content": invisibleSyntheticReasoningPrelude()}, "", nil); err != nil {
 		return err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,

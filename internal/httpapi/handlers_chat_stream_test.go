@@ -65,8 +65,11 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
-		t.Fatalf("expected chat placeholder reasoning to use titled format, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected chat stream not to expose proxy placeholder reasoning text, got %s", body)
+	}
+	if !strings.Contains(body, `"reasoning_content":"`+invisibleSyntheticReasoningDelta+`"`) {
+		t.Fatalf("expected chat stream to keep reasoning lifecycle with invisible delta, got %s", body)
 	}
 }
 
@@ -107,8 +110,8 @@ func TestChatStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
-		t.Fatalf("expected chat placeholder reasoning, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected chat stream not to expose proxy placeholder reasoning text, got %s", body)
 	}
 	if !strings.Contains(body, `"content":"final answer"`) {
 		t.Fatalf("expected final answer content, got %s", body)

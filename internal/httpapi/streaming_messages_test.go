@@ -43,8 +43,11 @@ func TestMessagesStreamClosesThinkingBeforeTextAndEmitsSignature(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
-		t.Fatalf("expected anthropic placeholder thinking to use titled format, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected anthropic stream not to expose proxy placeholder thinking text, got %s", body)
+	}
+	if !strings.Contains(body, `"thinking":"`+invisibleSyntheticReasoningDelta+`"`) {
+		t.Fatalf("expected anthropic stream to keep thinking lifecycle with invisible delta, got %s", body)
 	}
 
 	sigIdx := strings.Index(body, `"type":"signature_delta"`)
@@ -102,8 +105,8 @@ func TestMessagesStreamFromAnthropicJSONUpstreamInjectsPlaceholderAndText(t *tes
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n"`) {
-		t.Fatalf("expected anthropic placeholder thinking, got %s", body)
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected anthropic stream not to expose proxy placeholder thinking text, got %s", body)
 	}
 	if !strings.Contains(body, `"text":"final answer"`) {
 		t.Fatalf("expected final answer text, got %s", body)

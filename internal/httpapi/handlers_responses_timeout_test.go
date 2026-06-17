@@ -43,8 +43,11 @@ func TestResponsesStreamFirstByteTimeoutReturnsGatewayTimeoutJSON(t *testing.T) 
 		t.Fatalf("expected status 200 after SSE prelude starts, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, "代理层占位") {
-		t.Fatalf("expected timeout path to keep early synthetic placeholder, got %s", body)
+	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected timeout path to keep early synthetic reasoning lifecycle, got %s", body)
+	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected timeout path not to expose proxy placeholder reasoning text, got %s", body)
 	}
 	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_timeout"`) {
 		t.Fatalf("expected SSE timeout terminal event after prelude, got %s", body)
