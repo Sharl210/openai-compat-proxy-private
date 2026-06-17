@@ -302,7 +302,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 |---|---|---|
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
 | `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
-| `X-This-Usage-Tokens` | 本次响应的 usage 摘要；普通响应头常驻，上游没有返回可用 usage 时为空字符串；流式请求会同时在 trailer 里补同名值 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
+| `X-This-Usage-Tokens` | 本次非流式响应的 usage 摘要；上游没有返回可用 usage 时为空字符串。流式响应不会返回这个头，因为最终 usage 在 SSE 末尾才可确定，普通响应头无法事后补值 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
 | `X-Client-To-Proxy-Service-Tier` | 客户端发给代理的原始服务层级；没有传时为空字符串 | `priority` |
 | `X-Client-To-Proxy-Reasoning-Parameters` | 客户端 → 代理这段链路里，代理按本地优先级（如 suffix 优先于请求体）处理后得到的客户端侧推理参数组；不同下游端口会保持各自协议视角 | `{"thinking":{"type":"enabled","budget_tokens":2048}}` |

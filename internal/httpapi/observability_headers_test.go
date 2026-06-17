@@ -317,7 +317,7 @@ func TestChatStreamExposesDirectionalObservabilityHeaders(t *testing.T) {
 	}
 }
 
-func TestResponsesStreamExposesUsageTokensTrailer(t *testing.T) {
+func TestResponsesStreamKeepsUsageTokensHeaderEmpty(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
 			"data: {\"delta\":\"hello\"}\n\n",
@@ -347,11 +347,11 @@ func TestResponsesStreamExposesUsageTokensTrailer(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("Trailer"); !strings.Contains(got, headerThisUsageTokens) {
-		t.Fatalf("expected Trailer to declare %s, got %q", headerThisUsageTokens, got)
+	if got := rec.Header().Get("Trailer"); strings.Contains(got, headerThisUsageTokens) {
+		t.Fatalf("expected stream response not to promise final usage in trailer, got %q", got)
 	}
-	if got := rec.Result().Trailer.Get(headerThisUsageTokens); got != "↑ 1,333,111(1,111,001 cached) | ↓ 1,231" {
-		t.Fatalf("expected usage trailer, got %q", got)
+	if _, exists := rec.Header()[headerThisUsageTokens]; exists {
+		t.Fatalf("expected stream response not to include %s, got %#v", headerThisUsageTokens, rec.Header()[headerThisUsageTokens])
 	}
 }
 

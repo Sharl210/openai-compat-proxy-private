@@ -76,8 +76,7 @@ func handleResponses() http.HandlerFunc {
 		}
 
 		if canon.Stream {
-			w.Header().Add("Trailer", headerThisUsageTokens)
-			usageRecorder = responseUsageTrailerRecorder(w, usageRecorder)
+			w.Header().Del(headerThisUsageTokens)
 			var flusher http.Flusher
 			var initialState *responsesStreamState
 			if shouldInjectSyntheticResponsesReasoning(providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle) {
@@ -228,15 +227,6 @@ func handleResponses() http.HandlerFunc {
 			"cached_tokens": nestedCachedTokens(result.Usage),
 			"usage_present": len(result.Usage) > 0,
 		})
-	}
-}
-
-func responseUsageTrailerRecorder(w http.ResponseWriter, next usageRecorderFunc) usageRecorderFunc {
-	return func(usage map[string]any) {
-		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(usage))
-		if next != nil {
-			next(usage)
-		}
 	}
 }
 
@@ -414,9 +404,6 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	canon.Messages = prepareCanonicalMessages(canon.Messages)
-	if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && canon.HasSyntheticReasoningReplay {
-		canon.Messages = downgradeSyntheticOnlyAnthropicToolReplay(canon.Messages)
-	}
 	applyProviderSystemPrompt(&canon, provider)
 	normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
 	applyProviderMaxOutputTokens(&canon, provider)
