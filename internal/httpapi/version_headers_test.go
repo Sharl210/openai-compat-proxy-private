@@ -41,8 +41,8 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	server := NewServerWithStore(store, nil, nil)
 
 	first := performResponsesRequest(t, server)
-	if got := first.Header().Get("X-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
-		t.Fatalf("expected initial X-Env-Version %q, got %q", config.FormatVersionTime(initialRootMTime), got)
+	if got := first.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
+		t.Fatalf("expected initial X-Root-Env-Version %q, got %q", config.FormatVersionTime(initialRootMTime), got)
 	}
 	if got := first.Header().Get("X-Provider-Version"); got != config.FormatVersionTime(initialProviderMTime) {
 		t.Fatalf("expected initial X-Provider-Version %q, got %q", config.FormatVersionTime(initialProviderMTime), got)
@@ -61,8 +61,8 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	}
 
 	second := performResponsesRequest(t, server)
-	if got := second.Header().Get("X-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
-		t.Fatalf("expected X-Env-Version to stay %q after failed refresh, got %q", config.FormatVersionTime(initialRootMTime), got)
+	if got := second.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
+		t.Fatalf("expected X-Root-Env-Version to stay %q after failed refresh, got %q", config.FormatVersionTime(initialRootMTime), got)
 	}
 	if got := second.Header().Get("X-Provider-Version"); got != config.FormatVersionTime(initialProviderMTime) {
 		t.Fatalf("expected X-Provider-Version to stay %q after failed refresh, got %q", config.FormatVersionTime(initialProviderMTime), got)
@@ -77,8 +77,8 @@ func TestVersionHeadersStayPresentAndUpdateOnlyAfterSuccessfulRefresh(t *testing
 	}
 
 	third := performResponsesRequest(t, server)
-	if got := third.Header().Get("X-Env-Version"); got != config.FormatVersionTime(successRootMTime) {
-		t.Fatalf("expected X-Env-Version to update to %q, got %q", config.FormatVersionTime(successRootMTime), got)
+	if got := third.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(successRootMTime) {
+		t.Fatalf("expected X-Root-Env-Version to update to %q, got %q", config.FormatVersionTime(successRootMTime), got)
 	}
 	if got := third.Header().Get("X-Provider-Version"); got != config.FormatVersionTime(successProviderMTime) {
 		t.Fatalf("expected X-Provider-Version to update to %q, got %q", config.FormatVersionTime(successProviderMTime), got)
@@ -120,8 +120,8 @@ func TestVersionHeadersUseConfiguredTimezone(t *testing.T) {
 	}
 
 	rec := performResponsesRequest(t, server)
-	if got := rec.Header().Get("X-Env-Version"); got != config.FormatVersionTimeInLocation(rootMTime, loc) {
-		t.Fatalf("expected X-Env-Version %q, got %q", config.FormatVersionTimeInLocation(rootMTime, loc), got)
+	if got := rec.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTimeInLocation(rootMTime, loc) {
+		t.Fatalf("expected X-Root-Env-Version %q, got %q", config.FormatVersionTimeInLocation(rootMTime, loc), got)
 	}
 	if got := rec.Header().Get("X-Provider-Version"); got != config.FormatVersionTimeInLocation(providerMTime, loc) {
 		t.Fatalf("expected X-Provider-Version %q, got %q", config.FormatVersionTimeInLocation(providerMTime, loc), got)
@@ -157,8 +157,8 @@ func TestVersionHeadersIgnoreStartupOnlyRootConfigChanges(t *testing.T) {
 	server := NewServerWithStore(store, nil, nil)
 
 	first := performResponsesRequest(t, server)
-	if got := first.Header().Get("X-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
-		t.Fatalf("expected initial X-Env-Version %q, got %q", config.FormatVersionTime(initialRootMTime), got)
+	if got := first.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
+		t.Fatalf("expected initial X-Root-Env-Version %q, got %q", config.FormatVersionTime(initialRootMTime), got)
 	}
 
 	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nLOG_ENABLE=true\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nTOTAL_TIMEOUT=1h\n", startupOnlyMTime)
@@ -167,8 +167,8 @@ func TestVersionHeadersIgnoreStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 
 	second := performResponsesRequest(t, server)
-	if got := second.Header().Get("X-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
-		t.Fatalf("expected startup-only change to keep X-Env-Version %q, got %q", config.FormatVersionTime(initialRootMTime), got)
+	if got := second.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(initialRootMTime) {
+		t.Fatalf("expected startup-only change to keep X-Root-Env-Version %q, got %q", config.FormatVersionTime(initialRootMTime), got)
 	}
 
 	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nLOG_ENABLE=true\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nENABLE_LEGACY_V1_ROUTES=true\nTOTAL_TIMEOUT=2h\n", hotChangeMTime)
@@ -177,8 +177,8 @@ func TestVersionHeadersIgnoreStartupOnlyRootConfigChanges(t *testing.T) {
 	}
 
 	third := performResponsesRequest(t, server)
-	if got := third.Header().Get("X-Env-Version"); got != config.FormatVersionTime(hotChangeMTime) {
-		t.Fatalf("expected hot change to update X-Env-Version to %q, got %q", config.FormatVersionTime(hotChangeMTime), got)
+	if got := third.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(hotChangeMTime) {
+		t.Fatalf("expected hot change to update X-Root-Env-Version to %q, got %q", config.FormatVersionTime(hotChangeMTime), got)
 	}
 }
 
@@ -355,8 +355,8 @@ func TestProviderScopedResponsesRequestExposesVersionAndStatusHeadersTogether(t 
 	if got := rec.Header().Get("X-Provider-Name"); got != "openai" {
 		t.Fatalf("expected X-Provider-Name openai, got %q", got)
 	}
-	if got := rec.Header().Get("X-Env-Version"); got != config.FormatVersionTime(rootMTime) {
-		t.Fatalf("expected X-Env-Version %q, got %q", config.FormatVersionTime(rootMTime), got)
+	if got := rec.Header().Get("X-Root-Env-Version"); got != config.FormatVersionTime(rootMTime) {
+		t.Fatalf("expected X-Root-Env-Version %q, got %q", config.FormatVersionTime(rootMTime), got)
 	}
 	if got := rec.Header().Get("X-Provider-Version"); got != config.FormatVersionTime(providerMTime) {
 		t.Fatalf("expected X-Provider-Version %q, got %q", config.FormatVersionTime(providerMTime), got)
@@ -399,7 +399,7 @@ func TestUnauthorizedRequestDoesNotExposeVersionHeaders(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthorized request, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
+	for _, header := range []string{"X-Provider-Name", headerProviderTodayCacheRate, headerProviderHistoryCacheRate, "X-Root-Env-Version", headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
 		if got := rec.Header().Get(header); got != "" {
 			t.Fatalf("expected %s to be omitted on unauthorized response, got %q", header, got)
 		}
@@ -480,7 +480,7 @@ func TestEarlyLocalErrorsDoNotExposeTransparencyHeaders(t *testing.T) {
 			if !strings.Contains(rec.Body.String(), tc.code) {
 				t.Fatalf("expected body to contain %q, got %s", tc.code, rec.Body.String())
 			}
-			for _, header := range []string{"X-Env-Version", "X-Provider-Name", "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
+			for _, header := range []string{"X-Provider-Name", headerProviderTodayCacheRate, headerProviderHistoryCacheRate, "X-Root-Env-Version", headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
 				if got := rec.Header().Get(header); got != "" {
 					t.Fatalf("expected %s to be omitted on early local error, got %q", header, got)
 				}

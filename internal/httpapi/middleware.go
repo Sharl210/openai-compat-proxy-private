@@ -163,7 +163,7 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 		return
 	}
 	if snapshot.RootEnvVersion != "" {
-		w.Header().Set("X-Env-Version", snapshot.RootEnvVersion)
+		w.Header().Set("X-Root-Env-Version", snapshot.RootEnvVersion)
 	}
 	if timezone := snapshot.Config.CacheInfoTimezone; timezone != "" {
 		w.Header().Set(headerCacheInfoTimezone, timezone)

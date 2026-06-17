@@ -406,9 +406,13 @@ func setProviderSystemPromptAttachHeader(w http.ResponseWriter, provider config.
 
 func clearTransparencyHeaders(w http.ResponseWriter) {
 	for _, header := range []string{
-		"X-Env-Version",
-		headerCacheInfoTimezone,
 		"X-Provider-Name",
+		headerProviderTodayCacheRate,
+		headerProviderHistoryCacheRate,
+		"X-Root-Env-Version",
+		headerRootProviderTodayCacheRate,
+		headerRootProviderHistoryCacheRate,
+		headerCacheInfoTimezone,
 		"X-Provider-Version",
 		headerSystemPromptAttach,
 		headerClientToProxyModel,
@@ -426,10 +430,6 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerProxyUpstreamRetryCount,
 		headerProxyUpstreamRetryDelay,
 		headerProxyUpstreamAnthropicCacheControl,
-		headerProviderTodayCacheRate,
-		headerProviderHistoryCacheRate,
-		headerRootProviderTodayCacheRate,
-		headerRootProviderHistoryCacheRate,
 	} {
 		w.Header().Del(header)
 	}

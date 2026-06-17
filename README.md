@@ -310,11 +310,15 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
 | `X-Proxy-To-Upstream-Service-Tier` | 代理最终实际发给上游的服务层级；如果 provider 配置覆写了该值，这里会显示覆写后的结果；没有值时为空字符串 | `priority` |
 | `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
-| `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前客户端模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
+| `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前最终上游模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
+| `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
+| `X-Provider-Today-Cache-Rate` | 本次请求命中 provider 今日缓存率 | `25.00 %` |
+| `X-Provider-History-Cache-Rate` | 本次请求命中 provider 历史缓存率 | `25.00 %` |
+| `X-Root-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
+| `X-Root-Provider-Today-Cache-Rate` | 本次请求命中根 provider 今日缓存率 | `37.50 %` |
+| `X-Root-Provider-History-Cache-Rate` | 本次请求命中根 provider 历史缓存率 | `37.50 %` |
 | `X-Proxy-To-Upstream-Reasoning-Effort` | 代理最终实际发给上游的推理强度摘要；响应头常驻，没有实际发给上游时为空字符串 | `high` |
 | `X-Proxy-To-Upstream-Reasoning-Parameters` | 代理最终实际发给上游的推理参数，按上游协议类型展示为紧凑 JSON 字符串；响应头常驻，没有实际发给上游时为空字符串 | `{"reasoning":{"effort":"high","summary":"auto"}}` |
-| `X-Env-Version` | 当前根 `.env` 的热加载版本戳 | `2026-03-25T11:03:00.111Z` |
-| `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
 | `X-Provider-Version` | 当前 provider 配置的热加载版本戳 | `2026-03-25T11:04:00.222Z` |
 | `X-SYSTEM-PROMPT-ATTACH` | 展示本次请求的 provider 级系统提示词附加状态；正常注入时为位置与原始文件串，`-noprompt` 生效或没有可注入内容时保留为空值 | `prepend:prompt.md, prompts/extra.md` |
 
@@ -329,12 +333,12 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 - `X-SYSTEM-PROMPT-ATTACH` 是本次请求的提示词附加透明度字段：正常注入 provider prompt 时显示 `prepend:prompt.md` 或 `append:...`；当 `-noprompt` 真正生效且 `X-Client-To-Proxy-NoPrompt=true` 时，这个 header 仍会存在但值为空，表示本次已明确跳过 provider prompt 注入；如果 `-noprompt` 没有生效，则继续按实际注入状态显示文件串。
 - 模型名里的 reasoning suffix 优先于客户端请求体里的任何 reasoning / thinking 设置；例如 `model-low` 会覆盖客户端传入的 `thinking: {"type":"disabled"}`，`model-none` 会强制关闭推理；当上游是 Anthropic 协议时会发送 `thinking: {"type":"disabled"}`，当上游是 OpenAI 风格协议时会显式携带 `none`。
 - `X-Proxy-To-Upstream-Max-Output-Tokens` 展示的是 canonical 请求里最终决定的输出上限；它会体现 `UPSTREAM_MAX_OUTPUT_TOKENS` 和 `FORCE_UPSTREAM_MAX_OUTPUT_TOKENS` 的处理结果。最终不携带输出上限时，这个响应头为空。
-- `X-Proxy-Model-Limit-Context-Tokens` 展示的是代理层用于模拟上下文超限的当前命中值；`-1` 表示代理不主动限制，但真实上游仍可能返回自己的上下文超限错误。
+- `X-Proxy-Model-Limit-Context-Tokens` 展示的是代理层用于模拟上下文超限的当前命中值；它按最终上游模型匹配，`-1` 表示代理不主动限制，但真实上游仍可能返回自己的上下文超限错误。
 - `X-Proxy-To-Upstream-Reasoning-Effort` 是代理到上游侧的**摘要值**；它展示代理实际写进上游请求体的推理强度。比如客户端传了 `reasoning.effort=xhigh`，但 provider 是 Anthropic 上游且 `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=false`，代理不会转换成 Anthropic `thinking/output_config`，而是把原始 `reasoning` 透传给上游；此时 `X-Proxy-To-Upstream-Reasoning-Effort=xhigh`，`X-Proxy-To-Upstream-Reasoning-Parameters` 会显示原始 OpenAI 风格 reasoning 字段。
 - `X-Proxy-To-Upstream-Reasoning-Parameters` 展示的是**实际上游请求体里的最终字段**，所以不同上游协议可能长得不一样：
   - `responses/chat` 常见为 `{"reasoning":{...}}`
   - `anthropic` 常见为 `{"thinking":{...}}` 或同时包含 `output_config`
-- `X-Cache-Info-Timezone` 展示的是当前运行时实际使用的时区；它不只影响 Cache_Info 统计展示，也会影响 `X-Env-Version` / `X-Provider-Version` 这类版本时间响应头的格式化结果。
+- `X-Cache-Info-Timezone` 展示的是当前运行时实际使用的时区；它不只影响 Cache_Info 统计展示，也会影响 `X-Root-Env-Version` / `X-Provider-Version` 这类版本时间响应头的格式化结果。
 - 如果 `/v1/messages` 是直接传 `thinking`，但**没有**显式 effort，也**没有**模型 suffix，代理会保留 `thinking` 参数组到 `X-Client-To-Proxy-Reasoning-Parameters`，同时根据 `thinking` 里的预算或 `output_config` 反推出一个客户端视角的强度摘要，填到 `X-Client-To-Proxy-Reasoning-Effort`。
 - 如果 `/v1/messages` 传的是 Anthropic adaptive thinking，但最终上游不是 Anthropic 协议，代理会按 `xhigh` 映射成 OpenAI 风格 reasoning；带明确预算或 `output_config.effort` 的 thinking 会继续按对应强度映射。
 - 当上游命中 Anthropic adaptive thinking（例如部分 `opus-4-6` 族模型）时，`X-Proxy-To-Upstream-Reasoning-Parameters` 里除了 `thinking` 之外，还可能同时看到 `output_config`，用来展示代理最终发给上游的 adaptive effort 配置。
@@ -423,7 +427,7 @@ scoped 覆写的匹配规则：
 - 没有任何 scoped 规则命中时，回落到默认值
 - 如果只写 scoped 规则、不写默认值，则未命中任何规则时视为“不设置 provider 默认值”
 
-例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000`；如果客户端请求 `gpt-5.5-high`，则 `claude-sonnet-4-5:128000` 会作为整一个推理家族的 base 规则命中，`claude-sonnet-4-5-high:160000` 这类更具体的成员规则会优先覆盖它。`-noprompt` 只是代理层跳过 provider prompt 注入的标记，不算独立模型，所以 `gpt-5.5-high-noprompt` 这类请求在这两个限制字段上也会继续命中 `claude-sonnet-4-5-high` / `claude-sonnet-4-5` 这类不带 `-noprompt` 的同一模型规则。
+例如客户端请求 `gpt-5.5` 经 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 解析后，最终上游模型是 `claude-sonnet-4-5`，这时 `UPSTREAM_MAX_OUTPUT_TOKENS=claude-sonnet-4-5:128000` 会命中；如果同一请求进一步落到 `claude-sonnet-4-5-high` 这类更具体的成员模型，则 `claude-sonnet-4-5-high:160000` 会优先命中。`-noprompt` 只是代理层跳过 provider prompt 注入的标记，不算独立模型，所以 `gpt-5.5-high-noprompt` 这类请求在这两个限制字段上也会继续命中 `claude-sonnet-4-5-high` / `claude-sonnet-4-5` 这类不带 `-noprompt` 的同一模型规则。
 
 这两个字段在根 `.env` 和 provider `.env` 中都支持热加载。`UPSTREAM_MAX_OUTPUT_TOKENS` 的默认值或 scoped value 写成 `0`、小于 `-1` 或非整数，或者强制开关写成非法布尔值时，新配置会直接校验失败并保留当前已生效配置。
 
@@ -435,7 +439,7 @@ scoped 覆写的匹配规则：
 - 正整数：代理按请求内容估算输入 token，超过该值时直接返回 `context_length_exceeded` / `prompt is too long`
 - scoped 规则：支持写成 `-1,claude-sonnet-4-5:400000,#re:.*claude-.*:256000`
 
-匹配规则与输出上限一致，都是按**最终真正发给上游的模型**匹配；字面量 base 模型名默认代表整一个推理家族，精确成员优先于家族 base。例如 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 时，客户端请求 `gpt-5.5` 应写 `MODEL_LIMIT_CONTEXT_TOKENS=claude-sonnet-4-5:400000`；客户端请求 `gpt-5.5-high` 时，这条 base 规则也会命中，但如果你同时写了 `claude-sonnet-4-5-high:200000`，则 high 成员规则优先。`-noprompt` 不参与这两个限制字段的模型计数，带这个标记的请求会直接复用去掉标记后的同一模型规则。
+匹配规则与输出上限一致，都是按**最终真正发给上游的模型**匹配；字面量 base 模型名默认代表整一个推理家族，精确成员优先于家族 base。例如客户端请求 `gpt-5.5` 经 `MODEL_MAP=gpt-5.5:claude-sonnet-4-5` 解析后，最终上游模型是 `claude-sonnet-4-5`，这时 `MODEL_LIMIT_CONTEXT_TOKENS=claude-sonnet-4-5:400000` 会命中；如果同一请求进一步落到 `claude-sonnet-4-5-high`，这条 base 规则也会命中，但如果你同时写了 `claude-sonnet-4-5-high:200000`，则 high 成员规则优先。`-noprompt` 不参与这两个限制字段的模型计数，带这个标记的请求会直接复用去掉标记后的同一模型规则。
 
 `MODEL_LIMIT_CONTEXT_TOKENS` 和 `UPSTREAM_MAX_OUTPUT_TOKENS` 是两种不同功能：前者限制的是代理估算的**输入上下文窗口**，用于在请求进上游前模拟超限；后者控制的是发给上游的**输出上限请求参数** `max_tokens` / `max_output_tokens`。两者可以同时配置，互不替代，也不会互相抵消。上下文限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩；它不是 tokenizer 精确计数，也不会扩大真实上游上下文，真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳；当前代理层会保留 `context_length_exceeded` / `prompt is too long` 这些关键词，并在 message 里附带 `estimated input tokens <current> exceed maximum <limit>`，以便 OpenCode / OMO 更稳定地识别为 token-limit 触发源。
 
