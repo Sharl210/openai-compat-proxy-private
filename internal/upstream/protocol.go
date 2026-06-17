@@ -1586,7 +1586,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
 		for _, tool := range req.Tools {
-			tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": normalizeFunctionToolJSONSchema(tool)})
+			tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": normalizeAnthropicToolInputSchema(tool)})
 		}
 		payload["tools"] = tools
 	}
@@ -2053,12 +2053,36 @@ func normalizeAnthropicToolChoice(choice model.CanonicalToolChoice) any {
 		if value, ok := choice.Raw["value"].(string); ok && value != "" {
 			return map[string]any{"type": value}
 		}
-		return cloneMap(choice.Raw)
+		if value, ok := choice.Raw["value"].(map[string]any); ok {
+			choice.Raw = value
+		}
+		return normalizeAnthropicToolChoiceMap(choice.Raw)
 	}
 	if choice.Mode != "" {
 		return map[string]any{"type": choice.Mode}
 	}
 	return nil
+}
+
+func normalizeAnthropicToolChoiceMap(raw map[string]any) map[string]any {
+	choice := cloneMap(raw)
+	if stringValue(choice["type"]) == "function" {
+		choice["type"] = "tool"
+	}
+	return choice
+}
+
+func normalizeAnthropicToolInputSchema(tool model.CanonicalTool) any {
+	schema := normalizeFunctionToolJSONSchema(tool)
+	if mapped, ok := schema.(map[string]any); ok && len(mapped) > 0 {
+		return mapped
+	}
+	switch strings.TrimSpace(tool.Type) {
+	case "web_search", "web_search_preview":
+		return cloneJSONValue(responsesWebSearchFunctionToolSchema)
+	default:
+		return schema
+	}
 }
 
 func stringifyToolOutput(value any) string {

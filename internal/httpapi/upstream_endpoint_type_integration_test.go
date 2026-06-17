@@ -278,7 +278,7 @@ func TestResponsesRouteUsesResponsesUpstreamEndpointTypeForToolCompatibilityBase
 }
 
 func TestResponsesRouteCompatibilityModeUsesSelectedUpstreamEndpointType(t *testing.T) {
-	requestBody := `{"model":"gpt-5","input":"hello","tools":[{"type":"custom","name":"code_exec","description":"Run code"},{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}},{"type":"web_search","name":"web_lookup","description":"Search the web"}]}`
+	requestBody := `{"model":"gpt-5","input":"hello","tools":[{"type":"custom","name":"code_exec","description":"Run code"},{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}},{"type":"web_search","name":"web_lookup","description":"Search the web"}],"tool_choice":{"type":"function","name":"web_lookup"}}`
 
 	decodePayload := func(t *testing.T, body string) map[string]any {
 		t.Helper()
@@ -416,7 +416,7 @@ func TestResponsesRouteCompatibilityModeUsesSelectedUpstreamEndpointType(t *test
 		assertEmptySchema(t, webSearchFunction["parameters"], "chat web_search tool")
 	})
 
-	t.Run("anthropic upstream ignores responses compat mode", func(t *testing.T) {
+	t.Run("anthropic upstream rewrites non-function responses tools", func(t *testing.T) {
 		var gotBody string
 		var gotPath string
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -451,7 +451,14 @@ func TestResponsesRouteCompatibilityModeUsesSelectedUpstreamEndpointType(t *test
 		if got, _ := webSearchTool["name"].(string); got != "web_lookup" {
 			t.Fatalf("expected anthropic upstream builder to preserve original web_search name, got %#v", webSearchTool)
 		}
-		assertEmptySchema(t, webSearchTool["input_schema"], "anthropic web_search tool")
+		assertFallbackStringSchema(t, webSearchTool["input_schema"], "query")
+		toolChoice, _ := decodePayload(t, gotBody)["tool_choice"].(map[string]any)
+		if got, _ := toolChoice["type"].(string); got != "tool" {
+			t.Fatalf("expected anthropic tool_choice.type=tool, got %#v", toolChoice)
+		}
+		if got, _ := toolChoice["name"].(string); got != "web_lookup" {
+			t.Fatalf("expected anthropic tool_choice name web_lookup, got %#v", toolChoice)
+		}
 	})
 }
 
@@ -1006,7 +1013,7 @@ func TestResponsesRouteNoPromptSuffixWorksBeforeReasoningSuffix(t *testing.T) {
 	if !strings.Contains(gotBody, `"reasoning":{"effort":"low","summary":"auto"}`) {
 		t.Fatalf("expected reasoning suffix to remain effective after noprompt stripping, got %s", gotBody)
 	}
-	}
+}
 
 func TestChatRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 	var gotBody string
