@@ -376,11 +376,16 @@ func isSyntheticResponsesReasoningInputItem(item map[string]any) bool {
 	}
 	for _, raw := range summary {
 		entry, _ := raw.(map[string]any)
-		if !strings.Contains(strings.TrimSpace(stringMapValue(entry, "text")), "代理层占位") {
+		if !isSyntheticResponsesReasoningSummaryText(stringMapValue(entry, "text")) {
 			return false
 		}
 	}
 	return true
+}
+
+func isSyntheticResponsesReasoningSummaryText(text string) bool {
+	text = normalizeResponsesReasoningText(text)
+	return text == "" || strings.Contains(strings.TrimSpace(text), "代理层占位")
 }
 
 func responsesReasoningSummaryItems(raw any) []any {
@@ -403,7 +408,19 @@ func normalizeResponsesReasoningText(text string) string {
 		return ""
 	}
 	text = strings.TrimLeft(text, "\u200b\ufeff")
+	if isInvisibleResponsesReasoningResidue(text) {
+		return ""
+	}
 	return text
+}
+
+func isInvisibleResponsesReasoningResidue(text string) bool {
+	if text == "" {
+		return false
+	}
+	text = strings.ReplaceAll(text, "\u200b", "")
+	text = strings.ReplaceAll(text, "\ufeff", "")
+	return strings.TrimSpace(text) == ""
 }
 
 func normalizeResponsesReasoningSummary(raw any) []map[string]any {

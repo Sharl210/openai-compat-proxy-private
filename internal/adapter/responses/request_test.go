@@ -117,6 +117,33 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestDropsSyntheticProxyReasoningWhitespaceResidue(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"\u200b \ufeff\n\t"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if !canon.HasSyntheticReasoningReplay {
+		t.Fatalf("expected rs_proxy residue to be marked synthetic replay")
+	}
+	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
+		t.Fatalf("expected only user message after dropping synthetic residue, got %#v", canon.Messages)
+	}
+	for _, item := range canon.ResponseInputItems {
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			t.Fatalf("expected synthetic residue reasoning input not to be preserved, got %#v", canon.ResponseInputItems)
+		}
+	}
+}
+
 func TestDecodeRequestPreservesCompactionItemsWithoutCanonicalMessages(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
