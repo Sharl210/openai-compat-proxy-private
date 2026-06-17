@@ -154,6 +154,7 @@ func handleResponses() http.HandlerFunc {
 				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
+			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 			w.Header().Set("Content-Type", "application/json")
 			if err := writeJSON(w, normalized); err != nil {
 				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
@@ -212,6 +213,7 @@ func handleResponses() http.HandlerFunc {
 			globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
+		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 		if err := writeJSON(w, normalized); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return

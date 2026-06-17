@@ -183,6 +183,7 @@ func handleChat() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported chat output content")
 				return
 			}
+			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 			w.Header().Set("Content-Type", "application/json")
 			if err := writeJSON(w, chatadapter.BuildResponse(result)); err != nil {
 				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
@@ -231,6 +232,7 @@ func handleChat() http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 		if err := writeJSON(w, chatadapter.BuildResponse(result)); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return

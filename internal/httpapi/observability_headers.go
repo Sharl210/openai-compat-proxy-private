@@ -21,6 +21,7 @@ const (
 	headerClientToProxyNoPrompt              = "X-Client-To-Proxy-NoPrompt"
 	headerSystemPromptAttach                 = "X-SYSTEM-PROMPT-ATTACH"
 	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
+	headerThisUsageTokens                    = "X-This-Usage-Tokens"
 	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
 	headerProxyEstimatedInputTokens          = "X-Proxy-Estimated-Input-Tokens"
 	headerProxyModelLimitContextTokens       = "X-Proxy-Model-Limit-Context-Tokens"
@@ -310,11 +311,72 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 	}
 	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(canon, preview)))
 	w.Header().Set(headerProxyToUpstreamReasoningParameters, strings.TrimSpace(preview.ReasoningParameters))
+	w.Header().Set(headerThisUsageTokens, "")
 	w.Header().Set(headerProxyUpstreamRetryCount, strconv.Itoa(providerCfg.UpstreamRetryCount))
 	w.Header().Set(headerProxyUpstreamRetryDelay, providerCfg.UpstreamRetryDelay.String())
 	w.Header().Set(headerProxyUpstreamAnthropicCacheControl, strings.TrimSpace(providerCfg.UpstreamCacheControl))
 	setCacheRateHeaders(w, r, providerID)
 	return nil
+}
+
+func formatThisUsageTokens(usage map[string]any) string {
+	if len(usage) == 0 {
+		return ""
+	}
+	inputTokens, ok := usageNumberAsInt64(usage["input_tokens"])
+	if !ok || inputTokens <= 0 {
+		return ""
+	}
+	outputTokens, ok := usageNumberAsInt64(usage["output_tokens"])
+	if !ok || outputTokens < 0 {
+		return ""
+	}
+	cachedTokens := int64(0)
+	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if n, ok := usageNumberAsInt64(details["cached_tokens"]); ok && n > 0 {
+			cachedTokens = n
+		}
+	} else if details, _ := usage["prompt_tokens_details"].(map[string]any); len(details) > 0 {
+		if n, ok := usageNumberAsInt64(details["cached_tokens"]); ok && n > 0 {
+			cachedTokens = n
+		}
+	} else if n, ok := usageNumberAsInt64(usage["cached_tokens"]); ok && n > 0 {
+		cachedTokens = n
+	}
+	return formatThisUsageTokensValue(inputTokens, cachedTokens, outputTokens)
+}
+
+func formatThisUsageTokensValue(inputTokens int64, cachedTokens int64, outputTokens int64) string {
+	return "↑ " + formatUsageTokensNumber(inputTokens) + "(" + formatUsageTokensNumber(cachedTokens) + " cached) | ↓ " + formatUsageTokensNumber(outputTokens)
+}
+
+func formatUsageTokensNumber(value int64) string {
+	return formatThousands(value)
+}
+
+func formatThousands(value int64) string {
+	negative := value < 0
+	if negative {
+		value = -value
+	}
+	if value < 1000 {
+		if negative {
+			return "-" + strconv.FormatInt(value, 10)
+		}
+		return strconv.FormatInt(value, 10)
+	}
+	digits := strconv.FormatInt(value, 10)
+	parts := make([]byte, 0, len(digits)+len(digits)/3)
+	for i, r := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			parts = append(parts, ',')
+		}
+		parts = append(parts, byte(r))
+	}
+	if negative {
+		return "-" + string(parts)
+	}
+	return string(parts)
 }
 
 func setCacheRateHeaders(w http.ResponseWriter, r *http.Request, providerID string) {

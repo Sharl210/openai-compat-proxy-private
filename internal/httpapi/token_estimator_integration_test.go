@@ -53,6 +53,85 @@ func TestResponsesNonStreamRecordsTokenEstimatorObservation(t *testing.T) {
 	if state.AvgCachedTokens != 120 {
 		t.Fatalf("expected cached tokens 120, got %#v", state)
 	}
+	if got := rec.Header().Get(headerThisUsageTokens); got != "↑ 240(120 cached) | ↓ 20" {
+		t.Fatalf("expected %s to summarize usage, got %q", headerThisUsageTokens, got)
+	}
+}
+
+func TestResponsesNonStreamAlwaysSetsUsageHeader(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1333111,"input_tokens_details":{"cached_tokens":1111001},"output_tokens":1231,"total_tokens":1334342}}`))
+	}))
+	defer upstreamServer.Close()
+
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstreamServer.URL,
+			UpstreamAPIKey:       "provider-upstream-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"gpt-5.4"},
+		}},
+	}), nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello"}`))
+	req.Header.Set("Authorization", "Bearer root-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerThisUsageTokens); got != "↑ 1,333,111(1,111,001 cached) | ↓ 1,231" {
+		t.Fatalf("expected %s to stay present with value, got %q", headerThisUsageTokens, got)
+	}
+}
+
+func TestResponsesNonStreamKeepsUsageHeaderEmptyWhenUsageMissing(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstreamServer.URL,
+			UpstreamAPIKey:       "provider-upstream-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"gpt-5.4"},
+		}},
+	}), nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello"}`))
+	req.Header.Set("Authorization", "Bearer root-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	values, ok := rec.Header()[headerThisUsageTokens]
+	if !ok {
+		t.Fatalf("expected %s to stay present", headerThisUsageTokens)
+	}
+	if len(values) != 1 || values[0] != "" {
+		t.Fatalf("expected %s to stay empty, got %#v", headerThisUsageTokens, values)
+	}
 }
 
 func TestChatStreamRecordsTokenEstimatorObservationOnResponseCompleted(t *testing.T) {
