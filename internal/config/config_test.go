@@ -319,6 +319,50 @@ func TestProviderEmptyRetryAndCacheControlValuesInheritRoot(t *testing.T) {
 	}
 }
 
+func TestRootRetryCountZeroDisablesInheritedProviderRetry(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o700); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+	rootPath := filepath.Join(rootDir, ".env")
+	root := strings.Join([]string{
+		"PROVIDERS_DIR=" + providersDir,
+		"DEFAULT_PROVIDER=openai",
+		"UPSTREAM_RETRY_COUNT=0",
+		"UPSTREAM_RETRY_DELAY=0s",
+		"",
+	}, "\n")
+	if err := os.WriteFile(rootPath, []byte(root), 0o600); err != nil {
+		t.Fatalf("write root env: %v", err)
+	}
+	provider := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://example.test",
+		"UPSTREAM_API_KEY=test-key",
+		"SUPPORTS_RESPONSES=true",
+		"UPSTREAM_RETRY_COUNT=",
+		"UPSTREAM_RETRY_DELAY=",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(providersDir, "openai.env"), []byte(provider), 0o600); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	snapshot, err := BuildRuntimeSnapshot(rootPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot error: %v", err)
+	}
+	providerCfg, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID error: %v", err)
+	}
+	if providerCfg.UpstreamRetryCount != 0 || providerCfg.UpstreamRetryDelay != 0 {
+		t.Fatalf("expected inherited retry disabled, got count=%d delay=%s", providerCfg.UpstreamRetryCount, providerCfg.UpstreamRetryDelay)
+	}
+}
+
 func TestLoadFromEnvParsesCacheInfoTimezone(t *testing.T) {
 	t.Setenv("CACHE_INFO_TIMEZONE", "UTC")
 

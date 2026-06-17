@@ -56,10 +56,6 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 	if cfg.AnthropicMaxThinkingBudget == 0 {
 		cfg.AnthropicMaxThinkingBudget = Default().AnthropicMaxThinkingBudget
 	}
-	if cfg.UpstreamRetryDelay == 0 && cfg.UpstreamRetryCount == 0 {
-		cfg.UpstreamRetryCount = Default().UpstreamRetryCount
-		cfg.UpstreamRetryDelay = Default().UpstreamRetryDelay
-	}
 	if strings.TrimSpace(cfg.UpstreamCacheControl) == "" {
 		cfg.UpstreamCacheControl = Default().UpstreamCacheControl
 	}

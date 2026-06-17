@@ -145,13 +145,15 @@ func TestResponsesStreamRetriesBeforeFirstUpstreamEvent(t *testing.T) {
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:                 "openai",
-			Enabled:            true,
-			UpstreamBaseURL:    upstream.URL,
-			UpstreamAPIKey:     "test-key",
-			SupportsResponses:  true,
-			UpstreamRetryCount: 1,
-			UpstreamRetryDelay: 10 * time.Millisecond,
+			ID:                    "openai",
+			Enabled:               true,
+			UpstreamBaseURL:       upstream.URL,
+			UpstreamAPIKey:        "test-key",
+			SupportsResponses:     true,
+			UpstreamRetryCountSet: true,
+			UpstreamRetryCount:    1,
+			UpstreamRetryDelaySet: true,
+			UpstreamRetryDelay:    10 * time.Millisecond,
 		}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
