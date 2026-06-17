@@ -188,6 +188,33 @@ func isSyntheticResponsesReasoningBlock(block map[string]any) bool {
 	if stringValue(block["type"]) != "reasoning" {
 		return false
 	}
+	if isSyntheticReasoningSummary(stringValue(block["thinking"])) || isSyntheticReasoningSummary(stringValue(block["text"])) {
+		return true
+	}
+	var summaries []any
+	switch typed := block["summary"].(type) {
+	case []any:
+		summaries = typed
+	case []map[string]any:
+		for _, item := range typed {
+			summaries = append(summaries, item)
+		}
+	}
+	if len(summaries) == 0 {
+		return true
+	}
+	for _, raw := range summaries {
+		item, _ := raw.(map[string]any)
+		if len(item) == 0 {
+			continue
+		}
+		if !isSyntheticReasoningSummary(stringValue(item["text"])) && !isSyntheticReasoningSummary(stringValue(item["summary_text"])) {
+			return false
+		}
+		if nested, _ := item["summary_text"].(map[string]any); len(nested) > 0 && !isSyntheticReasoningSummary(stringValue(nested["text"])) {
+			return false
+		}
+	}
 	return true
 }
 

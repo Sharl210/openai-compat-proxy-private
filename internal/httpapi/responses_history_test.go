@@ -202,6 +202,33 @@ func TestBuildResponsesHistorySnapshotKeepsRealReasoningBlocks(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesHistorySnapshotKeepsRealProxyReasoningBlock(t *testing.T) {
+	base := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":    "reasoning",
+			"id":      "rs_proxy",
+			"summary": []map[string]any{{"type": "summary_text", "text": "真实推理"}},
+		}},
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}
+
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+	if len(snapshot) != 2 {
+		t.Fatalf("expected user + assistant output, got %#v", snapshot)
+	}
+	if len(snapshot[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real rs_proxy reasoning block to remain in history snapshot, got %#v", snapshot[1])
+	}
+	if got, _ := snapshot[1].ReasoningBlocks[0]["id"].(string); got != "rs_proxy" {
+		t.Fatalf("expected real rs_proxy reasoning block preserved, got %#v", snapshot[1].ReasoningBlocks)
+	}
+}
+
 func TestBuildResponsesHistorySnapshotDropsSyntheticNativeThinkingBlocks(t *testing.T) {
 	base := []model.CanonicalMessage{{
 		Role:  "user",
