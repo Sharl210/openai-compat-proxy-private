@@ -194,6 +194,9 @@ func mergeAdjacentResponsesReasoningToolMessages(messages []model.CanonicalMessa
 		if isStandaloneResponsesReasoningMessage(msg) && idx+1 < len(messages) && canMergeResponsesReasoningIntoToolMessage(messages[idx+1]) {
 			next := messages[idx+1]
 			next.ReasoningBlocks = append(cloneMapSlice(msg.ReasoningBlocks), next.ReasoningBlocks...)
+			if next.ReasoningContent == "" {
+				next.ReasoningContent = msg.ReasoningContent
+			}
 			merged = append(merged, next)
 			idx++
 			continue
@@ -204,7 +207,7 @@ func mergeAdjacentResponsesReasoningToolMessages(messages []model.CanonicalMessa
 }
 
 func isStandaloneResponsesReasoningMessage(msg model.CanonicalMessage) bool {
-	return msg.Role == "assistant" && len(msg.ReasoningBlocks) > 0 && msg.ReasoningContent == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && msg.ToolCallID == ""
+	return msg.Role == "assistant" && (len(msg.ReasoningBlocks) > 0 || msg.ReasoningContent != "") && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && msg.ToolCallID == ""
 }
 
 func canMergeResponsesReasoningIntoToolMessage(msg model.CanonicalMessage) bool {
@@ -221,7 +224,8 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 		if isSyntheticResponsesReasoningInputItem(rawMap) {
 			return nil, model.CanonicalMessage{}, false, true, nil
 		}
-		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, false, nil
+		reasoningContent := reasoningSummaryText(rawMap)
+		return cloneMapAny(rawMap), model.CanonicalMessage{Role: "assistant", ReasoningContent: reasoningContent, ReasoningBlocks: []map[string]any{cloneMapAny(rawMap)}}, true, false, nil
 	}
 	if itemType == "function_call_output" {
 		msg, ok, err := decodeFunctionCallOutput(rawMap)
@@ -430,6 +434,67 @@ func decodeFunctionCallOutput(rawMap map[string]any) (model.CanonicalMessage, bo
 		return model.CanonicalMessage{}, false, err
 	}
 	return model.CanonicalMessage{Role: "tool", ToolCallID: callID, Parts: parts}, true, nil
+}
+
+func reasoningSummaryText(rawMap map[string]any) string {
+	if rawMap == nil {
+		return ""
+	}
+	if summary, ok := rawMap["summary"]; ok {
+		switch typed := summary.(type) {
+		case string:
+			return typed
+		case []any:
+			for _, item := range typed {
+				if summaryText := reasoningSummaryTextFromItem(item); summaryText != "" {
+					return summaryText
+				}
+			}
+		case []map[string]any:
+			for _, item := range typed {
+				if summaryText := reasoningSummaryTextFromItem(item); summaryText != "" {
+					return summaryText
+				}
+			}
+		case map[string]any:
+			return reasoningSummaryTextFromItem(typed)
+		}
+	}
+	if text, ok := rawMap["reasoning_content"].(string); ok {
+		return text
+	}
+	if text, ok := rawMap["thinking"].(string); ok {
+		return text
+	}
+	if text, ok := rawMap["content"].(string); ok {
+		return text
+	}
+	if text, ok := rawMap["text"].(string); ok {
+		return text
+	}
+	return ""
+}
+
+func reasoningSummaryTextFromItem(item any) string {
+	block, ok := item.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if text, ok := block["text"].(string); ok && text != "" {
+		return text
+	}
+	if text, ok := block["summary_text"].(string); ok && text != "" {
+		return text
+	}
+	if nested, ok := block["summary_text"].(map[string]any); ok {
+		if text, ok := nested["text"].(string); ok && text != "" {
+			return text
+		}
+	}
+	if text, ok := block["thinking"].(string); ok && text != "" {
+		return text
+	}
+	return ""
 }
 
 func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error) {

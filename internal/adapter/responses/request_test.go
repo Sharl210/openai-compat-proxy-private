@@ -107,6 +107,9 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	if canon.Messages[1].Role != "assistant" || len(canon.Messages[1].ReasoningBlocks) != 1 {
 		t.Fatalf("expected reasoning input item to also become canonical assistant reasoning, got %#v", canon.Messages[1])
 	}
+	if got := canon.Messages[1].ReasoningContent; got != "thinking" {
+		t.Fatalf("expected reasoning summary to become canonical reasoning_content, got %q", got)
+	}
 	if canon.Messages[2].Role != "tool" || canon.Messages[2].ToolCallID != "call_123" {
 		t.Fatalf("expected function_call_output to also become canonical tool message, got %#v", canon.Messages[2])
 	}
@@ -201,6 +204,9 @@ func TestDecodeRequestTurnsResponsesFunctionCallItemIntoCanonicalAssistantToolCa
 	}
 	if len(msg.ReasoningBlocks) != 1 {
 		t.Fatalf("expected reasoning block preserved, got %#v", msg)
+	}
+	if got := msg.ReasoningContent; got != "thinking" {
+		t.Fatalf("expected reasoning summary to become canonical reasoning_content, got %q", got)
 	}
 	if len(msg.ToolCalls) != 1 {
 		t.Fatalf("expected function_call item preserved as tool call, got %#v", msg)
