@@ -475,6 +475,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerRootProviderTodayCacheRate,
 		headerRootProviderHistoryCacheRate,
 		headerCacheInfoTimezone,
+		headerThisUsageTokens,
 		"X-Provider-Version",
 		headerSystemPromptAttach,
 		headerClientToProxyModel,

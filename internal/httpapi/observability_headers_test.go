@@ -317,6 +317,44 @@ func TestChatStreamExposesDirectionalObservabilityHeaders(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamExposesUsageTokensTrailer(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1333111,\"input_tokens_details\":{\"cached_tokens\":1111001},\"output_tokens\":1231,\"total_tokens\":1334342}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsResponses: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Trailer"); !strings.Contains(got, headerThisUsageTokens) {
+		t.Fatalf("expected Trailer to declare %s, got %q", headerThisUsageTokens, got)
+	}
+	if got := rec.Result().Trailer.Get(headerThisUsageTokens); got != "↑ 1,333,111(1,111,001 cached) | ↓ 1,231" {
+		t.Fatalf("expected usage trailer, got %q", got)
+	}
+}
+
 func TestMessagesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" {

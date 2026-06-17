@@ -76,6 +76,8 @@ func handleResponses() http.HandlerFunc {
 		}
 
 		if canon.Stream {
+			w.Header().Add("Trailer", headerThisUsageTokens)
+			usageRecorder = responseUsageTrailerRecorder(w, usageRecorder)
 			var flusher http.Flusher
 			var initialState *responsesStreamState
 			if shouldInjectSyntheticResponsesReasoning(providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle) {
@@ -226,6 +228,15 @@ func handleResponses() http.HandlerFunc {
 			"cached_tokens": nestedCachedTokens(result.Usage),
 			"usage_present": len(result.Usage) > 0,
 		})
+	}
+}
+
+func responseUsageTrailerRecorder(w http.ResponseWriter, next usageRecorderFunc) usageRecorderFunc {
+	return func(usage map[string]any) {
+		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(usage))
+		if next != nil {
+			next(usage)
+		}
 	}
 }
 
