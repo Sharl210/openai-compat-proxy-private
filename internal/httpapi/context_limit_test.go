@@ -122,6 +122,44 @@ func TestResponsesContextLimitScopedRulesUseFinalUpstreamModelAfterModelMap(t *t
 	}
 }
 
+func TestResponsesContextLimitScopedRulesUseFinalUpstreamReasoningFamily(t *testing.T) {
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			SupportsResponses:           true,
+			EnableReasoningEffortSuffix: true,
+			ManualModels:                []string{"client-gpt"},
+			ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("client-gpt", "upstream-gpt")},
+			ModelLimitContextTokens:     -1,
+			ModelLimitContextTokenRules: []config.ScopedIntRule{
+				exactScopedRule("upstream-gpt", 111111),
+				exactScopedRule("upstream-gpt-high", 222222),
+			},
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			UpstreamBaseURL:      "https://upstream.invalid/v1",
+			UpstreamAPIKey:       "test-key",
+		}},
+	})
+	body := `{"model":"client-gpt-high","input":[{"role":"user","content":"` + strings.Repeat("hello ", 20) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected request to pass proxy context limit and fail later on unreachable upstream, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "222222" {
+		t.Fatalf("expected context limit header from resolved upstream reasoning family member, got %q", got)
+	}
+	if strings.Contains(rec.Body.String(), "context_length_exceeded") {
+		t.Fatalf("expected resolved upstream reasoning family member rule to avoid proxy context overflow, got %s", rec.Body.String())
+	}
+}
+
 func TestChatContextLimitReturnsOpenAIOverflowShape(t *testing.T) {
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",
@@ -245,7 +283,6 @@ func TestEstimateCanonicalInputTokensDoesNotDoubleCountAnthropicOrderedContent(t
 		t.Fatalf("expected ordered anthropic content to be counted once, got ordered_only=%d with_duplicate=%d", gotOrderedOnly, gotWithDuplicate)
 	}
 }
-
 
 func TestResponsesContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *testing.T) {
 	providersDir := t.TempDir()
