@@ -292,6 +292,29 @@ func TestDecodeRequestDropsSyntheticTopLevelReasoningInputItem(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesToolOrder(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"tools":[
+			{"type":"function","name":"workspace_shell","description":"shell","parameters":{"type":"object"}},
+			{"type":"function","name":"search_web","description":"search","parameters":{"type":"object"}}
+		],
+		"input":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Tools) != 2 {
+		t.Fatalf("expected 2 tools, got %#v", canon.Tools)
+	}
+	if canon.Tools[0].Name != "workspace_shell" || canon.Tools[1].Name != "search_web" {
+		t.Fatalf("expected tool order preserved, got %#v", canon.Tools)
+	}
+}
+
 func TestDecodeRequestDropsSyntheticReasoningBlockInsideAssistantMessage(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
