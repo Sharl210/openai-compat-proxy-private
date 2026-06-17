@@ -302,7 +302,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 |---|---|---|
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
 | `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
-| `X-This-Usage-Tokens` | 本次响应的 usage 摘要；响应头常驻，上游没有返回可用 usage 时为空字符串 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
+| `X-This-Usage-Tokens` | 本次响应的 usage 摘要；普通响应头常驻，上游没有返回可用 usage 时为空字符串；流式请求会同时在 trailer 里补同名值 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
 | `X-Client-To-Proxy-Service-Tier` | 客户端发给代理的原始服务层级；没有传时为空字符串 | `priority` |
 | `X-Client-To-Proxy-Reasoning-Parameters` | 客户端 → 代理这段链路里，代理按本地优先级（如 suffix 优先于请求体）处理后得到的客户端侧推理参数组；不同下游端口会保持各自协议视角 | `{"thinking":{"type":"enabled","budget_tokens":2048}}` |
@@ -386,14 +386,14 @@ UPSTREAM_ENDPOINT_TYPE=responses
 每个 provider 可通过 `RESPONSES_TOOL_COMPAT_MODE` 控制 responses 上游请求体中的工具类型处理策略：
 
 - `preserve`（默认）：保留原始工具类型（`custom` / `web_search` / `function`），原样发给 responses 上游
-- `function_only`：将 `custom` 和 `web_search` 工具在发往 responses 上游前重写成普通 `function` 类型，以兼容不完全支持这些工具类型的上游
+- `function_only`：将 `custom` 和 `web_search` 工具在发往 responses 上游前重写成普通 `function` 类型，以兼容不完全支持这些工具类型的上游；Anthropic 上游会把 Responses 的 `web_search` / `tool_choice` 翻译成 Anthropic 可用的工具形态
 
 **代价说明**：
 
 - `custom` 变成 `function` 后，会丢失原生 free-form / grammar 约束语义
 - `web_search` 变成 `function` 后，会丢失原生 citations / sources / agentic search 语义
 
-这个字段只在 `UPSTREAM_ENDPOINT_TYPE=responses` 时生效；`function_only` 仅影响 responses-upstream 请求体构造，不会改变 chat / anthropic 上游的请求体。
+这个字段只在 `UPSTREAM_ENDPOINT_TYPE=responses` 时生效；`function_only` 主要影响 responses-upstream 请求体构造。Anthropic 上游会单独做自己的工具兼容翻译，避免把 Responses 内置工具原样送成 Anthropic 看不懂的形态。
 
 ### 3.5 OpenAI 协议服务层级覆写
 
