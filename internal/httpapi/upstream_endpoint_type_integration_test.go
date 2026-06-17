@@ -2283,11 +2283,54 @@ func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *te
 	if strings.Contains(upstreamBody, `"effort":"high"`) || strings.Contains(upstreamBody, `"summary":"auto"`) {
 		t.Fatalf("expected OpenAI-style reasoning controls to stay out of anthropic replay without real thinking history, got %s", upstreamBody)
 	}
-	if strings.Contains(upstreamBody, `"type":"tool_use"`) || strings.Contains(upstreamBody, `"type":"tool_result"`) {
-		t.Fatalf("expected synthetic-only replay to avoid native anthropic tool history without real thinking, got %s", upstreamBody)
+	if !strings.Contains(upstreamBody, `"type":"tool_use"`) || !strings.Contains(upstreamBody, `"id":"call_1"`) || !strings.Contains(upstreamBody, `"name":"search_web"`) {
+		t.Fatalf("expected synthetic reasoning to be filtered without downgrading real function_call history, got %s", upstreamBody)
 	}
-	if !strings.Contains(upstreamBody, `search_web`) || !strings.Contains(upstreamBody, `call_1`) || !strings.Contains(upstreamBody, `ok`) || !strings.Contains(upstreamBody, `true`) {
-		t.Fatalf("expected downgraded synthetic-only replay to preserve tool context as text, got %s", upstreamBody)
+	if !strings.Contains(upstreamBody, `"type":"tool_result"`) || !strings.Contains(upstreamBody, `"tool_use_id":"call_1"`) || !strings.Contains(upstreamBody, `\"ok\":true`) {
+		t.Fatalf("expected synthetic reasoning to be filtered without downgrading real function_call_output history, got %s", upstreamBody)
+	}
+}
+
+func TestResponsesRouteKeepsClientProvidedFunctionHistoryForAnthropicDespiteSyntheticReasoning(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		upstreamBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyProxyBuffer, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true, EnableReasoningEffortSuffix: true, MapReasoningSuffixToAnthropicThinking: true}}})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"reasoning":{"effort":"high","summary":"auto"},
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"}]},
+			{"type":"function_call","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if strings.Contains(upstreamBody, "代理层占位") || strings.Contains(upstreamBody, `"id":"rs_proxy"`) {
+		t.Fatalf("expected synthetic rs_proxy reasoning to stay out of anthropic upstream payload, got %s", upstreamBody)
+	}
+	if !strings.Contains(upstreamBody, `"type":"tool_use"`) || !strings.Contains(upstreamBody, `"id":"call_1"`) || !strings.Contains(upstreamBody, `"name":"search_web"`) {
+		t.Fatalf("expected client-provided function_call to stay structured as anthropic tool_use, got %s", upstreamBody)
+	}
+	if !strings.Contains(upstreamBody, `"type":"tool_result"`) || !strings.Contains(upstreamBody, `"tool_use_id":"call_1"`) || !strings.Contains(upstreamBody, `\"ok\":true`) {
+		t.Fatalf("expected client-provided function_call_output to stay structured as anthropic tool_result, got %s", upstreamBody)
+	}
+	if strings.Contains(upstreamBody, "工具调用 search_web") {
+		t.Fatalf("expected real function history not to be downgraded into plain text, got %s", upstreamBody)
 	}
 }
 
