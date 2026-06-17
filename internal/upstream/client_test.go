@@ -3411,8 +3411,10 @@ func TestAnnotateRetryExhaustionPreservesWrappedTimeoutError(t *testing.T) {
 	if !errors.As(err, &netErr) || !netErr.Timeout() {
 		t.Fatalf("expected retry annotation to preserve wrapped timeout error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "本代理层已重试3遍") {
-		t.Fatalf("expected retry annotation text to be preserved, got %v", err)
+	for _, want := range []string{"本代理层已重试3遍", "每次重试间隔5秒", "共重试了15秒"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected retry annotation text to contain %q, got %v", want, err)
+		}
 	}
 }
 
