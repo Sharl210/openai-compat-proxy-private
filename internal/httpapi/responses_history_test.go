@@ -276,6 +276,27 @@ func TestAssistantHistoryMessagesFromResultDropsSyntheticReasoningSummary(t *tes
 	}
 }
 
+func TestAssistantHistoryMessagesFromResultDropsInvisibleSyntheticReasoningSummary(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		ResponseMessageContent: []map[string]any{{"type": "output_text", "text": "final answer"}},
+		Reasoning: map[string]any{
+			"summary": "\u200b \ufeff\n\t",
+		},
+	})
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant history message, got %#v", messages)
+	}
+	if got := messages[0].ReasoningContent; got != "" {
+		t.Fatalf("expected invisible synthetic reasoning summary to be dropped from history message, got %#v", messages[0])
+	}
+	if len(messages[0].ReasoningBlocks) != 0 {
+		t.Fatalf("expected no reasoning blocks when only invisible synthetic summary exists, got %#v", messages[0])
+	}
+	if len(messages[0].Parts) != 1 || messages[0].Parts[0].Text != "final answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", messages[0])
+	}
+}
+
 func TestShouldRestorePreviousConversationAllowsNewUserTurnWithoutClientHistory(t *testing.T) {
 	messages := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "follow up"}}}}
 	if !shouldRestorePreviousConversation(messages) {

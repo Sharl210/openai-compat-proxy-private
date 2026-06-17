@@ -258,11 +258,23 @@ func isSyntheticReasoningBlock(block map[string]any) bool {
 }
 
 func isSyntheticReasoningSummary(summary string) bool {
+	if isInvisibleReasoningResidue(summary) {
+		return true
+	}
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return false
 	}
 	return strings.Contains(summary, "代理层占位")
+}
+
+func isInvisibleReasoningResidue(summary string) bool {
+	if summary == "" {
+		return false
+	}
+	stripped := strings.ReplaceAll(summary, "\u200b", "")
+	stripped = strings.ReplaceAll(stripped, "\ufeff", "")
+	return stripped != summary && strings.TrimSpace(stripped) == ""
 }
 
 func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
