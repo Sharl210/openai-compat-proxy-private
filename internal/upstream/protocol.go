@@ -1709,7 +1709,7 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		content := buildAnthropicContentParts(msg.Parts)
 		if msg.Role == "assistant" && len(msg.ReasoningBlocks) > 0 {
 			content = append(cloneAnySliceOfMaps(msg.ReasoningBlocks), content...)
-		} else if msg.Role == "assistant" && msg.ReasoningContent != "" {
+		} else if msg.Role == "assistant" && msg.ReasoningContent != "" && !isSyntheticProxyReasoningContent(msg.ReasoningContent) {
 			content = append([]any{map[string]any{"type": "thinking", "thinking": msg.ReasoningContent}}, content...)
 		}
 		for _, call := range msg.ToolCalls {
@@ -1726,6 +1726,10 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 	}
 	pendingToolResults = appendPendingToolResults(pendingToolResults)
 	return messages
+}
+
+func isSyntheticProxyReasoningContent(content string) bool {
+	return strings.Contains(strings.TrimSpace(content), "代理层占位")
 }
 
 func buildAnthropicOrderedContent(blocks []model.CanonicalContentBlock) []any {
