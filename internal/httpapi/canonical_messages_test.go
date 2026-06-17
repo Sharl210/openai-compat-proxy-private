@@ -144,6 +144,22 @@ func TestPrepareCanonicalMessagesKeepsAssistantToolCallsWithFollowingResult(t *t
 	}
 }
 
+func TestPrepareCanonicalMessagesKeepsAssistantReasoningToolCallWithFollowingResult(t *testing.T) {
+	messages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "search"}}},
+		{Role: "assistant", ReasoningBlocks: []map[string]any{{"type": "reasoning", "encrypted_content": "enc_123"}}, ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"weather"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+	}
+
+	prepared := prepareCanonicalMessages(messages)
+	if len(prepared) != 3 {
+		t.Fatalf("expected paired reasoning tool_call and tool result kept, got %#v", prepared)
+	}
+	if len(prepared[1].ReasoningBlocks) != 1 || len(prepared[1].ToolCalls) != 1 || prepared[2].Role != "tool" {
+		t.Fatalf("expected reasoning, tool call, and result preserved together, got %#v", prepared)
+	}
+}
+
 func TestPrepareCanonicalMessagesKeepsAssistantToolCallsWithOrderedToolResult(t *testing.T) {
 	messages := []model.CanonicalMessage{
 		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "search"}}},

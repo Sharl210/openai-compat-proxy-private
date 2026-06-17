@@ -178,6 +178,64 @@ func TestDecodeRequestTurnsFunctionCallOutputIntoCanonicalToolMessage(t *testing
 	}
 }
 
+func TestDecodeRequestTurnsResponsesFunctionCallItemIntoCanonicalAssistantToolCall(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"type":"reasoning","id":"rs_123","summary":[{"type":"summary_text","text":"thinking"}],"encrypted_content":"enc_123"},
+			{"type":"function_call","id":"call_123","call_id":"call_123","name":"search_web","arguments":"{\"query\":\"weather\"}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected reasoning and function_call output items to merge into one assistant message, got %#v", canon.Messages)
+	}
+	msg := canon.Messages[0]
+	if msg.Role != "assistant" {
+		t.Fatalf("expected assistant message, got %#v", msg)
+	}
+	if len(msg.ReasoningBlocks) != 1 {
+		t.Fatalf("expected reasoning block preserved, got %#v", msg)
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("expected function_call item preserved as tool call, got %#v", msg)
+	}
+	if got := msg.ToolCalls[0].ID; got != "call_123" {
+		t.Fatalf("expected tool call id call_123, got %#v", msg.ToolCalls[0])
+	}
+}
+
+func TestDecodeRequestUsesResponsesFunctionCallIDWhenCallIDMissing(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"type":"reasoning","id":"rs_123","summary":[{"type":"summary_text","text":"thinking"}],"encrypted_content":"enc_123"},
+			{"type":"function_call","id":"call_123","name":"search_web","arguments":"{\"query\":\"weather\"}"},
+			{"type":"function_call_output","call_id":"call_123","output":"{\"ok\":true}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 2 {
+		t.Fatalf("expected assistant tool call plus tool result, got %#v", canon.Messages)
+	}
+	if got := canon.Messages[0].ToolCalls[0].ID; got != "call_123" {
+		t.Fatalf("expected function_call id fallback to produce call_123, got %#v", canon.Messages[0].ToolCalls[0])
+	}
+	if got := canon.Messages[1].ToolCallID; got != "call_123" {
+		t.Fatalf("expected matching tool result call_123, got %#v", canon.Messages[1])
+	}
+}
+
 func TestDecodeRequestPreservesAssistantMessagesAsOutputText(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

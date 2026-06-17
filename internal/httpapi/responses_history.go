@@ -134,7 +134,11 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 	}
 	toolCalls := make([]model.CanonicalToolCall, 0, len(result.ToolCalls))
 	for _, call := range result.ToolCalls {
-		toolCalls = append(toolCalls, model.CanonicalToolCall{ID: call.ID, Type: "function", Name: call.Name, Arguments: call.Arguments})
+		callID := call.CallID
+		if callID == "" {
+			callID = call.ID
+		}
+		toolCalls = append(toolCalls, model.CanonicalToolCall{ID: callID, Type: "function", Name: call.Name, Arguments: call.Arguments})
 	}
 	reasoningBlocks := cloneReasoningBlocks(result.ReasoningBlocks)
 	if len(parts) == 0 && len(toolCalls) == 0 && len(reasoningBlocks) == 0 {

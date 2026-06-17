@@ -1,6 +1,7 @@
 package aggregate
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"openai-compat-proxy/internal/syntaxrepair"
@@ -105,6 +106,35 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 				call.Arguments = arguments
 			}
 			result.ToolCalls = append(result.ToolCalls, call)
+		}
+	}
+	if len(result.ToolCalls) == 0 && len(result.ReasoningBlocks) == 0 {
+		if content, _ := payload["content"].([]any); len(content) > 0 {
+			for _, rawPart := range content {
+				part, _ := rawPart.(map[string]any)
+				if part == nil {
+					continue
+				}
+				switch partType, _ := part["type"].(string); partType {
+				case "thinking", "redacted_thinking":
+					result.ReasoningBlocks = append(result.ReasoningBlocks, cloneMap(part))
+				case "tool_use":
+					call := ToolCall{}
+					if id, _ := part["id"].(string); id != "" {
+						call.ID = id
+						call.CallID = id
+					}
+					if name, _ := part["name"].(string); name != "" {
+						call.Name = name
+					}
+					if input, ok := part["input"]; ok {
+						if arguments, err := json.Marshal(input); err == nil {
+							call.Arguments = string(arguments)
+						}
+					}
+					result.ToolCalls = append(result.ToolCalls, call)
+				}
+			}
 		}
 	}
 	return result, nil

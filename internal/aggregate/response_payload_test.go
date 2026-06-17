@@ -128,3 +128,26 @@ func TestResultFromResponsePayloadPreservesNativeToolCallItems(t *testing.T) {
 		t.Fatalf("expected native tool call arguments preserved, got %#v", result.ToolCalls[0])
 	}
 }
+
+func TestResultFromResponsePayloadPreservesAnthropicMessageToolCalls(t *testing.T) {
+	payload := map[string]any{
+		"content": []any{
+			map[string]any{"type": "thinking", "thinking": "internal reasoning", "signature": "sig_123"},
+			map[string]any{"type": "tool_use", "id": "call_1", "name": "search_web", "input": map[string]any{"query": "weather"}},
+		},
+	}
+
+	result, err := ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload returned error: %v", err)
+	}
+	if len(result.ReasoningBlocks) != 1 {
+		t.Fatalf("expected anthropic thinking block preserved, got %#v", result.ReasoningBlocks)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected anthropic tool_use preserved, got %#v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].CallID != "call_1" && result.ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected anthropic tool call id preserved, got %#v", result.ToolCalls[0])
+	}
+}

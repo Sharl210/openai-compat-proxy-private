@@ -179,8 +179,36 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	if len(inputInstructions) > 0 {
 		canon.Instructions = mergeResponsesInstructions(strings.Join(inputInstructions, "\n\n"), canon.Instructions)
 	}
+	canon.Messages = mergeAdjacentResponsesReasoningToolMessages(canon.Messages)
 
 	return canon, nil
+}
+
+func mergeAdjacentResponsesReasoningToolMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
+	if len(messages) < 2 {
+		return messages
+	}
+	merged := make([]model.CanonicalMessage, 0, len(messages))
+	for idx := 0; idx < len(messages); idx++ {
+		msg := messages[idx]
+		if isStandaloneResponsesReasoningMessage(msg) && idx+1 < len(messages) && canMergeResponsesReasoningIntoToolMessage(messages[idx+1]) {
+			next := messages[idx+1]
+			next.ReasoningBlocks = append(cloneMapSlice(msg.ReasoningBlocks), next.ReasoningBlocks...)
+			merged = append(merged, next)
+			idx++
+			continue
+		}
+		merged = append(merged, msg)
+	}
+	return merged
+}
+
+func isStandaloneResponsesReasoningMessage(msg model.CanonicalMessage) bool {
+	return msg.Role == "assistant" && len(msg.ReasoningBlocks) > 0 && msg.ReasoningContent == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && msg.ToolCallID == ""
+}
+
+func canMergeResponsesReasoningIntoToolMessage(msg model.CanonicalMessage) bool {
+	return msg.Role == "assistant" && len(msg.ToolCalls) > 0 && msg.ToolCallID == "" && len(msg.Parts) == 0
 }
 
 func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, bool, error) {
@@ -205,6 +233,9 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 	// Handle type: "function_call" - extract tool call from top-level fields
 	if itemType == "function_call" {
 		callID, _ := rawMap["call_id"].(string)
+		if callID == "" {
+			callID, _ = rawMap["id"].(string)
+		}
 		name, _ := rawMap["name"].(string)
 		arguments, _ := rawMap["arguments"].(string)
 		role, _ := rawMap["role"].(string)
@@ -515,6 +546,17 @@ func cloneMapAny(input map[string]any) map[string]any {
 	cloned := make(map[string]any, len(input))
 	for k, v := range input {
 		cloned[k] = v
+	}
+	return cloned
+}
+
+func cloneMapSlice(input []map[string]any) []map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(input))
+	for _, item := range input {
+		cloned = append(cloned, cloneMapAny(item))
 	}
 	return cloned
 }

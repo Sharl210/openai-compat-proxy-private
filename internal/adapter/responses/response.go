@@ -1,6 +1,8 @@
 package responses
 
 import (
+	"strconv"
+
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/syntaxrepair"
 )
@@ -30,6 +32,9 @@ func BuildResponse(result aggregate.Result) map[string]any {
 			"role":    "assistant",
 			"content": content,
 		})
+	}
+	if len(result.ReasoningBlocks) > 0 && !hasResponsesOutputItemType(output, "reasoning") {
+		output = insertResponsesOutputItemsBeforeFirstFunctionCall(output, responsesReasoningOutputItems(result.ReasoningBlocks))
 	}
 	for _, call := range result.ToolCalls {
 		if hasResponsesFunctionCall(output, call) {
@@ -62,6 +67,58 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		response["service_tier"] = result.ServiceTier
 	}
 	return response
+}
+
+func responsesReasoningOutputItems(blocks []map[string]any) []map[string]any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(blocks))
+	for idx, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		item := cloneMap(block)
+		if stringValue(item["type"]) == "thinking" {
+			item["type"] = "reasoning"
+		}
+		if stringValue(item["type"]) == "reasoning" {
+			if signature := stringValue(item["signature"]); signature != "" && stringValue(item["encrypted_content"]) == "" {
+				item["encrypted_content"] = signature
+			}
+			delete(item, "signature")
+		}
+		if stringValue(item["id"]) == "" {
+			item["id"] = buildReasoningOutputItemID(idx)
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func insertResponsesOutputItemsBeforeFirstFunctionCall(output []map[string]any, items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return output
+	}
+	insertAt := len(output)
+	for idx, item := range output {
+		if stringValue(item["type"]) == "function_call" {
+			insertAt = idx
+			break
+		}
+	}
+	merged := make([]map[string]any, 0, len(output)+len(items))
+	merged = append(merged, output[:insertAt]...)
+	merged = append(merged, items...)
+	merged = append(merged, output[insertAt:]...)
+	return merged
+}
+
+func buildReasoningOutputItemID(index int) string {
+	if index == 0 {
+		return "rs_upstream"
+	}
+	return "rs_upstream_" + strconv.Itoa(index)
 }
 
 func outwardReasoning(reasoning map[string]any) map[string]any {

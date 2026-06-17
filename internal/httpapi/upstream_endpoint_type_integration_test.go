@@ -2242,6 +2242,77 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	}
 }
 
+func TestResponsesRouteExposesAnthropicThinkingForClientReplay(t *testing.T) {
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"internal reasoning","signature":"sig_123"},{"type":"tool_use","id":"call_1","name":"search_web","input":{"query":"weather"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	var firstResp map[string]any
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("unmarshal first response: %v", err)
+	}
+	output, _ := firstResp["output"].([]any)
+	if len(output) < 2 {
+		t.Fatalf("expected first response output to expose reasoning and function_call items, got %#v", output)
+	}
+	encodedOutput, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	if !strings.Contains(string(encodedOutput), `"type":"reasoning"`) || !strings.Contains(string(encodedOutput), `"encrypted_content":"sig_123"`) {
+		t.Fatalf("expected output to expose replayable reasoning item, got %s", encodedOutput)
+	}
+
+	secondInput := []string{`{"role":"user","content":"hello"}`}
+	for _, raw := range output {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			t.Fatalf("marshal output item: %v", err)
+		}
+		secondInput = append(secondInput, string(encoded))
+	}
+	secondInput = append(secondInput, `{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}`)
+	secondBodyJSON := `{"model":"gpt-5","input":[` + strings.Join(secondInput, ",") + `]}`
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(secondBodyJSON))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"internal reasoning"`) || !strings.Contains(secondBody, `"signature":"sig_123"`) {
+		t.Fatalf("expected client replay to restore anthropic thinking block, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) {
+		t.Fatalf("expected client replay to restore function_call as tool_use, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
+		t.Fatalf("expected client replay to include tool_result, got %s", secondBody)
+	}
+}
+
 func TestResponsesRouteFiltersSyntheticProxyReasoningBeforeAnthropicReplay(t *testing.T) {
 	var upstreamBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

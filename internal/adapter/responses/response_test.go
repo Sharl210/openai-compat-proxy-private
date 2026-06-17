@@ -179,3 +179,62 @@ func TestBuildResponsePreservesUpstreamReasoning(t *testing.T) {
 		t.Fatalf("expected final answer preserved, got %#v", output)
 	}
 }
+
+func TestBuildResponseEmitsReasoningOutputItemBeforeFunctionCall(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		ResponseID: "resp_123",
+		ReasoningBlocks: []map[string]any{{
+			"type":              "reasoning",
+			"id":                "rs_123",
+			"summary":           []map[string]any{{"type": "summary_text", "text": "internal reasoning"}},
+			"encrypted_content": "enc_123",
+		}},
+		ToolCalls: []aggregate.ToolCall{{ID: "call_1", CallID: "call_1", Name: "search_web", Arguments: `{"query":"weather"}`}},
+	})
+
+	output := resp["output"].([]map[string]any)
+	if len(output) != 2 {
+		t.Fatalf("expected reasoning item and function call item, got %#v", output)
+	}
+	reasoning := output[0]
+	if got, _ := reasoning["type"].(string); got != "reasoning" {
+		t.Fatalf("expected first output item to be reasoning, got %#v", output)
+	}
+	if got, _ := reasoning["encrypted_content"].(string); got != "enc_123" {
+		t.Fatalf("expected reasoning encrypted_content preserved, got %#v", reasoning)
+	}
+	call := output[1]
+	if got, _ := call["type"].(string); got != "function_call" {
+		t.Fatalf("expected second output item to be function_call, got %#v", output)
+	}
+}
+
+func TestBuildResponsePrependsReasoningBeforePreservedFunctionCall(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		ResponseID: "resp_123",
+		ResponseOutputItems: []map[string]any{{
+			"id":        "call_1",
+			"type":      "function_call",
+			"status":    "completed",
+			"call_id":   "call_1",
+			"name":      "search_web",
+			"arguments": `{"query":"weather"}`,
+		}},
+		ReasoningBlocks: []map[string]any{{
+			"type":      "thinking",
+			"thinking":  "internal reasoning",
+			"signature": "sig_123",
+		}},
+	})
+
+	output := resp["output"].([]map[string]any)
+	if len(output) != 2 {
+		t.Fatalf("expected reasoning item and preserved function_call item, got %#v", output)
+	}
+	if got, _ := output[0]["type"].(string); got != "reasoning" {
+		t.Fatalf("expected reasoning before function_call for client replay, got %#v", output)
+	}
+	if got, _ := output[1]["type"].(string); got != "function_call" {
+		t.Fatalf("expected preserved function_call after reasoning, got %#v", output)
+	}
+}
