@@ -613,7 +613,7 @@ func TestResponsesReasoningAndToolCallPreservedForChatUpstream(t *testing.T) {
 	}
 }
 
-func TestChatStreamingUpstreamWithoutReasoningGetsProxyPlaceholderInResponsesNonStream(t *testing.T) {
+func TestChatStreamingUpstreamWithoutReasoningOmitsProxyPlaceholderFromResponsesNonStreamSummary(t *testing.T) {
 	upstream := newChatStreamingUpstream(t, []string{
 		"event: chat\n" +
 			`data: {"id":"chat-plain","choices":[{"delta":{"content":"final answer"}}]}` + "\n\n",
@@ -658,8 +658,8 @@ func TestChatStreamingUpstreamWithoutReasoningGetsProxyPlaceholderInResponsesNon
 	}
 	reasoning, _ := resp["reasoning"].(map[string]any)
 	summary, _ := reasoning["summary"].(string)
-	if !strings.Contains(summary, "**推理中**") || !strings.Contains(summary, "代理层占位") {
-		t.Fatalf("expected proxy placeholder reasoning summary, got %#v body=%s", reasoning, rec.Body.String())
+	if strings.Contains(summary, "代理层占位") || strings.Contains(rec.Body.String(), "代理层占位") {
+		t.Fatalf("expected proxy placeholder to stay out of buffered response summary, got %#v body=%s", reasoning, rec.Body.String())
 	}
 	if strings.Contains(summary, "final answer") {
 		t.Fatalf("expected final text to stay out of reasoning summary, got %q", summary)

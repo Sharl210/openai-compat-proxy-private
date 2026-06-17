@@ -257,6 +257,9 @@ func (c *Collector) Accept(evt upstream.Event) {
 			c.reasoning = map[string]any{}
 		}
 		if source, _ := evt.Data[InternalReasoningSourceKey].(string); source != "" {
+			if source == ReasoningSourceSynthetic {
+				return
+			}
 			c.reasoning[InternalReasoningSourceKey] = source
 		} else {
 			c.reasoning[InternalReasoningSourceKey] = ReasoningSourceUpstream

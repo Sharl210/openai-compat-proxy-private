@@ -147,6 +147,40 @@ func TestCollectorPreservesReasoningSourceMetadata(t *testing.T) {
 	}
 }
 
+func TestCollectorDropsSyntheticReasoningSummaryBeforeRealReasoning(t *testing.T) {
+	c := NewCollector()
+
+	c.Accept(upstream.Event{
+		Event: "response.reasoning.delta",
+		Data: map[string]any{
+			InternalReasoningSourceKey: ReasoningSourceSynthetic,
+			"summary":                 "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
+		},
+	})
+	c.Accept(upstream.Event{
+		Event: "response.reasoning.delta",
+		Data: map[string]any{
+			InternalReasoningSourceKey: ReasoningSourceUpstream,
+			"summary":                 "真实推理",
+		},
+	})
+	c.Accept(upstream.Event{
+		Event: "response.completed",
+		Data:  map[string]any{"response": map[string]any{"finish_reason": "stop"}},
+	})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if got, _ := result.Reasoning["summary"].(string); got != "真实推理" {
+		t.Fatalf("expected only upstream reasoning summary, got %#v", result.Reasoning)
+	}
+	if got, _ := result.Reasoning[InternalReasoningSourceKey].(string); got != ReasoningSourceUpstream {
+		t.Fatalf("expected upstream reasoning source, got %#v", result.Reasoning)
+	}
+}
+
 func TestCollectorFillsRefusalFromOutputItemDoneMessageRefusal(t *testing.T) {
 	c := NewCollector()
 
