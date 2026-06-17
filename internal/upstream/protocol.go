@@ -1665,10 +1665,10 @@ func applyAnthropicCacheControlAtStableBreakpoint(payload map[string]any, cacheC
 	if len(payload) == 0 || len(cacheControl) == 0 {
 		return
 	}
-	var fallback map[string]any
+	var lastStableMessageBlock map[string]any
 	if visitAnthropicContentBlocks(payload["system"], func(block map[string]any) bool {
 		block["cache_control"] = cloneMap(cacheControl)
-		return true
+		return false
 	}) {
 		return
 	}
@@ -1676,12 +1676,12 @@ func applyAnthropicCacheControlAtStableBreakpoint(payload map[string]any, cacheC
 	for _, rawMessage := range messages {
 		message, _ := rawMessage.(map[string]any)
 		visitAnthropicContentBlocks(message["content"], func(block map[string]any) bool {
-			fallback = block
+			lastStableMessageBlock = block
 			return false
 		})
 	}
-	if fallback != nil {
-		fallback["cache_control"] = cloneMap(cacheControl)
+	if lastStableMessageBlock != nil {
+		lastStableMessageBlock["cache_control"] = cloneMap(cacheControl)
 	}
 }
 

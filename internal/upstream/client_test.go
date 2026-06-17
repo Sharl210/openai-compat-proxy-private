@@ -566,14 +566,24 @@ func TestBuildAnthropicRequestBodyAppliesConfiguredCacheControlMode(t *testing.T
 	}
 }
 
-func TestBuildAnthropicRequestBodyPlacesCacheControlOnStablePrefixOnly(t *testing.T) {
+func TestBuildAnthropicRequestBodyPlacesCacheControlOnSystemAndRollingConversationTail(t *testing.T) {
 	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
 		Model:            "claude-sonnet-4-5",
 		InstructionParts: []model.CanonicalContentPart{{Type: "text", Text: "stable system prompt"}},
-		Messages: []model.CanonicalMessage{{
-			Role:  "user",
-			Parts: []model.CanonicalContentPart{{Type: "text", Text: "dynamic user request"}},
-		}},
+		Messages: []model.CanonicalMessage{
+			{
+				Role:  "user",
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "stable earlier user message"}},
+			},
+			{
+				Role:  "assistant",
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "stable earlier assistant message"}},
+			},
+			{
+				Role:  "user",
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "dynamic latest user request"}},
+			},
+		},
 	}, "", false, false, config.UpstreamCacheControl5Min)
 	if err != nil {
 		t.Fatalf("buildAnthropicRequestBody error: %v", err)
@@ -592,11 +602,17 @@ func TestBuildAnthropicRequestBodyPlacesCacheControlOnStablePrefixOnly(t *testin
 		t.Fatalf("expected stable system block to carry cache_control, got %#v", systemBlock)
 	}
 	messages, _ := payload["messages"].([]any)
-	message, _ := messages[0].(map[string]any)
-	content, _ := message["content"].([]any)
-	userBlock, _ := content[0].(map[string]any)
-	if _, exists := userBlock["cache_control"]; exists {
-		t.Fatalf("expected dynamic user block to avoid cache_control, got %#v", userBlock)
+	assistantMessage, _ := messages[1].(map[string]any)
+	assistantContent, _ := assistantMessage["content"].([]any)
+	assistantBlock, _ := assistantContent[0].(map[string]any)
+	if _, exists := assistantBlock["cache_control"]; exists {
+		t.Fatalf("expected only the rolling conversation tail to carry message cache_control, got %#v", assistantBlock)
+	}
+	latestMessage, _ := messages[2].(map[string]any)
+	latestContent, _ := latestMessage["content"].([]any)
+	latestBlock, _ := latestContent[0].(map[string]any)
+	if _, ok := latestBlock["cache_control"].(map[string]any); !ok {
+		t.Fatalf("expected rolling latest user block to carry cache_control, got %#v", latestBlock)
 	}
 }
 
