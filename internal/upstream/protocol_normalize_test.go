@@ -244,6 +244,52 @@ func TestNormalizeChatFrame_LegacyXMLToolTextParsesLooseParameters(t *testing.T)
 	}
 }
 
+func TestNormalizeChatFrame_LegacyXMLToolCallWithPrefixTextPreservesTextAndConvertsTool(t *testing.T) {
+	frame := &sseFrame{Event: "chat", Data: `{"id":"chat-123","choices":[{"delta":{"content":"我先查一下：\n<tool_call>\n<function=search_web>\n<parameter=query>weather</parameter>\n</function>\n</tool_call>"},"finish_reason":"tool_calls"}]}`}
+	state := &chatNormalizationState{
+		toolIDsByIndex:       map[int]string{},
+		toolSent:             map[string]bool{},
+		upstreamXMLToolStyle: config.UpstreamXMLToolCallStyleLegacy,
+	}
+
+	events, done, err := normalizeChatFrame(frame, state)
+	if err != nil {
+		t.Fatalf("normalizeChatFrame error: %v", err)
+	}
+	if done {
+		t.Fatal("unexpected done")
+	}
+
+	var text string
+	var tool map[string]any
+	for _, evt := range events {
+		switch evt.Event {
+		case "response.output_text.delta":
+			text += stringValue(evt.Data["delta"])
+		case "response.output_item.done":
+			item, _ := evt.Data["item"].(map[string]any)
+			if stringValue(item["type"]) == "function_call" {
+				tool = item
+			}
+		}
+	}
+	if strings.Contains(text, "<tool_call>") {
+		t.Fatalf("expected XML tool text to be consumed, got text %q from %#v", text, events)
+	}
+	if !strings.Contains(text, "我先查一下") {
+		t.Fatalf("expected prefix text to be preserved, got %q from %#v", text, events)
+	}
+	if tool == nil {
+		t.Fatalf("expected function_call item, got %#v", events)
+	}
+	if got := stringValue(tool["name"]); got != "search_web" {
+		t.Fatalf("unexpected tool name %q from %#v", got, tool)
+	}
+	if got := stringValue(tool["arguments"]); got != `{"query":"weather"}` {
+		t.Fatalf("unexpected tool arguments %s from %#v", got, tool)
+	}
+}
+
 func TestNormalizeChatFrame_ToolCall(t *testing.T) {
 	// 测试 tool call 的转换 - 模拟上游 chat SSE 事件序列
 	// 1. tool_call 开始（index=0, id="tool_0", name="get_weather"）

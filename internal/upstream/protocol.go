@@ -621,6 +621,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 		if delta != nil {
 			if text, _ := delta["content"].(string); text != "" {
 				if state.upstreamXMLToolStyle == config.UpstreamXMLToolCallStyleLegacy {
+					if prefix, item, suffix, ok := extractLegacyXMLToolCallFromText(text); ok {
+						events = appendChatTextEvents(events, prefix, state)
+						events = append(events, legacyXMLToolCallEventsForState(item, state)...)
+						events = appendChatTextEvents(events, suffix, state)
+						continue
+					}
 					if item, buffered := consumeLegacyXMLToolText(text, state); buffered {
 						if item != nil {
 							events = append(events, legacyXMLToolCallEventsForState(item, state)...)
@@ -632,20 +638,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 						continue
 					}
 				}
-				if state.thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy && !state.implicitThinkingInitialized {
-					state.implicitThinkingInitialized = true
-					state.implicitThinkingActive = true
-				}
-				cleanText, reasoningContent := extractContentAndReasoningTagsWithState(text, state)
-				state.suppressBlankTextAfterThink = state.suppressBlankTextAfterThink || reasoningContent != ""
-				if reasoningContent != "" {
-					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
-				}
-				cleanText = suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, state.suppressBlankTextAfterThink)
-				if cleanText != "" {
-					state.suppressBlankTextAfterThink = false
-					events = append(events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": cleanText}})
-				}
+				events = appendChatTextEvents(events, text, state)
 			}
 			if reasoning, _ := delta["reasoning_content"].(string); reasoning != "" {
 				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoning}})
@@ -730,6 +723,52 @@ func consumeLegacyXMLToolText(text string, state *chatNormalizationState) (map[s
 	buffered := state.pendingLegacyXMLToolText
 	state.pendingLegacyXMLToolText = ""
 	return parseLegacyXMLToolCall(buffered), true
+}
+
+func appendChatTextEvents(events []Event, text string, state *chatNormalizationState) []Event {
+	if text == "" {
+		return events
+	}
+	if state.thinkingTagStyle == config.UpstreamThinkingTagStyleLegacy && !state.implicitThinkingInitialized {
+		state.implicitThinkingInitialized = true
+		state.implicitThinkingActive = true
+	}
+	cleanText, reasoningContent := extractContentAndReasoningTagsWithState(text, state)
+	state.suppressBlankTextAfterThink = state.suppressBlankTextAfterThink || reasoningContent != ""
+	if reasoningContent != "" {
+		events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
+	}
+	cleanText = suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, state.suppressBlankTextAfterThink)
+	if cleanText != "" {
+		state.suppressBlankTextAfterThink = false
+		events = append(events, Event{Event: "response.output_text.delta", Data: map[string]any{"delta": cleanText}})
+	}
+	return events
+}
+
+func extractLegacyXMLToolCallFromText(text string) (string, map[string]any, string, bool) {
+	start := strings.Index(text, "<tool_call>")
+	if start < 0 {
+		return "", nil, "", false
+	}
+	end := strings.Index(text[start:], "</tool_call>")
+	if end < 0 {
+		return "", nil, "", false
+	}
+	end += start + len("</tool_call>")
+	item := parseLegacyXMLToolCall(text[start:end])
+	if item == nil {
+		return "", nil, "", false
+	}
+	prefix := text[:start]
+	if strings.TrimSpace(prefix) == "" {
+		prefix = ""
+	}
+	suffix := text[end:]
+	if strings.TrimSpace(suffix) == "" {
+		suffix = ""
+	}
+	return prefix, item, suffix, true
 }
 
 func parseLegacyXMLToolCall(text string) map[string]any {
