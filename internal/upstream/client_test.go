@@ -2450,6 +2450,54 @@ func TestBuildResponsesRequestBodyPrefersCanonicalMessagesForCacheStableToolSequ
 	assertJSONEqual(t, gotPayload["input"], wantPayload["input"])
 }
 
+func TestBuildResponsesRequestBodyIgnoresInvisibleSyntheticReasoningResidueForCacheStableToolSequences(t *testing.T) {
+	cleanMessages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},
+		{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "开始追引用"}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_lookup", Type: "function", Name: "mcp__run_ubuntu", Arguments: `{"command":"python3 scan.py"}`}}},
+		{Role: "tool", ToolCallID: "call_lookup", Parts: []model.CanonicalContentPart{{Type: "text", Text: "pool 0x36eb0 hits 2"}}},
+		{Role: "assistant", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续追 AECAB0"}}},
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续"}}},
+	}
+	withResidueMessages := append([]model.CanonicalMessage(nil), cleanMessages...)
+	withResidueMessages[1].ReasoningContent = "\u200b \ufeff\n\t"
+	withResidueMessages[1].ReasoningBlocks = []map[string]any{{
+		"type":    "reasoning",
+		"id":      "rs_proxy",
+		"summary": []map[string]any{{"type": "summary_text", "text": "\u200b \ufeff\n\t"}},
+	}}
+
+	canonicalOnly := model.CanonicalRequest{Model: "gpt-5", Messages: cleanMessages}
+	withInvisibleResidue := model.CanonicalRequest{
+		Model:    "gpt-5",
+		Messages: withResidueMessages,
+	}
+
+	wantBody, err := buildResponsesRequestBody(canonicalOnly, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build canonical-only responses body: %v", err)
+	}
+	gotBody, err := buildResponsesRequestBody(withInvisibleResidue, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build invisible-residue responses body: %v", err)
+	}
+
+	var wantPayload, gotPayload map[string]any
+	if err := json.Unmarshal(wantBody, &wantPayload); err != nil {
+		t.Fatalf("unmarshal canonical-only payload: %v", err)
+	}
+	if err := json.Unmarshal(gotBody, &gotPayload); err != nil {
+		t.Fatalf("unmarshal invisible-residue payload: %v", err)
+	}
+	assertJSONEqual(t, gotPayload["input"], wantPayload["input"])
+	if got, _ := gotPayload["prompt_cache_key"].(string); got == "" {
+		t.Fatalf("expected prompt_cache_key to be generated, got %#v", gotPayload)
+	}
+	if got, _ := gotPayload["prompt_cache_key"].(string); got != wantPayload["prompt_cache_key"] {
+		t.Fatalf("expected invisible residue to keep prompt_cache_key stable, want %#v got %#v", wantPayload["prompt_cache_key"], got)
+	}
+}
+
 func TestBuildResponsesRequestBodyAutoFillsPromptCacheKeyWhenMissing(t *testing.T) {
 	req := model.CanonicalRequest{
 		Model:        "gpt-5.5",

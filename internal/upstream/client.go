@@ -1646,6 +1646,7 @@ func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
 	if reasoningContent == "" {
 		reasoningContent = reasoningContentFromBlocks(msg.ReasoningBlocks)
 	}
+	reasoningContent = normalizeResponsesReasoningInputText(reasoningContent)
 	if reasoningContent == "" {
 		return nil
 	}
@@ -1656,6 +1657,19 @@ func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
 			"text": reasoningContent,
 		}},
 	}
+}
+
+func normalizeResponsesReasoningInputText(text string) string {
+	if text == "" {
+		return ""
+	}
+	text = strings.TrimLeft(text, "\u200b\ufeff")
+	stripped := strings.ReplaceAll(text, "\u200b", "")
+	stripped = strings.ReplaceAll(stripped, "\ufeff", "")
+	if strings.TrimSpace(stripped) == "" {
+		return ""
+	}
+	return text
 }
 
 func joinTextParts(parts []model.CanonicalContentPart) string {
