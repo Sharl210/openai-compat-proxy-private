@@ -566,6 +566,34 @@ func TestBuildAnthropicRequestBodyAppliesConfiguredCacheControlMode(t *testing.T
 	}
 }
 
+func TestBuildAnthropicRequestBodyPreservesToolOrder(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Tools: []model.CanonicalTool{
+			{Type: "function", Name: "workspace_shell", Description: "shell", Parameters: map[string]any{"type": "object"}},
+			{Type: "function", Name: "search_web", Description: "search", Parameters: map[string]any{"type": "object"}},
+		},
+		Messages: []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}},
+	}, "", false, false, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildAnthropicRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %#v", payload["tools"])
+	}
+	first, _ := tools[0].(map[string]any)
+	second, _ := tools[1].(map[string]any)
+	if first["name"] != "workspace_shell" || second["name"] != "search_web" {
+		t.Fatalf("expected tool order preserved, got %#v", payload["tools"])
+	}
+}
+
 func TestBuildAnthropicRequestBodyKeepsStringSystemWhenNoInstructionParts(t *testing.T) {
 	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
 		Model:        "claude-sonnet-4-5",
