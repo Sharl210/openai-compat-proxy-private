@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -394,6 +396,37 @@ func TestDecodeRequestPreservesRealReasoningFromProxyReasoningBeforeConsecutiveT
 	}
 }
 
+func TestDecodeRequestReplaysAdjacentToolProductionShape(t *testing.T) {
+	req := readReplayRequestBody(t, "../../../testdata/replay/req-1781731449828543605-25/request.ndjson")
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Messages) != 6 {
+		t.Fatalf("expected 6 canonical messages, got %#v", canon.Messages)
+	}
+	roles := make([]string, 0, len(canon.Messages))
+	for _, msg := range canon.Messages {
+		roles = append(roles, msg.Role)
+	}
+	if want := []string{"user", "user", "assistant", "tool", "assistant", "tool"}; !reflect.DeepEqual(roles, want) {
+		t.Fatalf("unexpected message roles: got %#v want %#v", roles, want)
+	}
+	if len(canon.Messages[2].ToolCalls) != 1 || len(canon.Messages[4].ToolCalls) != 1 {
+		t.Fatalf("expected two assistant tool calls, got %#v", canon.Messages)
+	}
+	if strings.TrimSpace(canon.Messages[2].ReasoningContent) == "" {
+		t.Fatalf("expected first adjacent tool call to retain real reasoning, got %#v", canon.Messages[2])
+	}
+	for _, item := range canon.ResponseInputItems {
+		if got, _ := item["id"].(string); got == "rs_proxy" {
+			t.Fatalf("expected proxy reasoning replay to stay out of preserved input items, got %#v", canon.ResponseInputItems)
+		}
+	}
+}
+
 func TestDecodeRequestPreservesToolOrder(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
@@ -415,6 +448,30 @@ func TestDecodeRequestPreservesToolOrder(t *testing.T) {
 	if canon.Tools[0].Name != "workspace_shell" || canon.Tools[1].Name != "search_web" {
 		t.Fatalf("expected tool order preserved, got %#v", canon.Tools)
 	}
+}
+
+func readReplayRequestBody(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read replay fixture: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("decode replay row: %v", err)
+		}
+		body, _ := row["request_body"].(string)
+		if body == "" {
+			t.Fatalf("replay row missing request_body")
+		}
+		return body
+	}
+	t.Fatalf("empty replay fixture")
+	return ""
 }
 
 func TestDecodeRequestDropsSyntheticReasoningBlockInsideAssistantMessage(t *testing.T) {

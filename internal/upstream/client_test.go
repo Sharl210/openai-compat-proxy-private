@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -613,6 +614,73 @@ func TestBuildAnthropicRequestBodyPlacesCacheControlOnSystemAndRollingConversati
 	latestBlock, _ := latestContent[0].(map[string]any)
 	if _, ok := latestBlock["cache_control"].(map[string]any); !ok {
 		t.Fatalf("expected rolling latest user block to carry cache_control, got %#v", latestBlock)
+	}
+}
+
+func TestBuildAnthropicRequestBodyReplaysAdjacentToolProductionShape(t *testing.T) {
+	canon := model.CanonicalRequest{
+		Model: "deepseek-v4-flash",
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "first user"}}},
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "second user"}}},
+			{
+				Role:             "assistant",
+				ReasoningContent: "real reasoning",
+				ToolCalls: []model.CanonicalToolCall{{
+					ID:        "call_00_QYKD16UQaFTdlwHq7x6I5004",
+					Type:      "function",
+					Name:      "search_web",
+					Arguments: `{"query":"first"}`,
+				}},
+			},
+			{Role: "tool", ToolCallID: "call_00_QYKD16UQaFTdlwHq7x6I5004", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+			{
+				Role: "assistant",
+				ToolCalls: []model.CanonicalToolCall{{
+					ID:        "call_01_NI7fF0whLahOJEM0DxjG2203",
+					Type:      "function",
+					Name:      "search_web",
+					Arguments: `{"query":"second"}`,
+				}},
+			},
+			{Role: "tool", ToolCallID: "call_01_NI7fF0whLahOJEM0DxjG2203", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+		},
+	}
+
+	upstreamBody, err := buildRequestBodyForEndpoint(canon, config.UpstreamEndpointTypeAnthropic, "", false, false, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(upstreamBody, &payload); err != nil {
+		t.Fatalf("unmarshal upstream body: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) < 6 {
+		t.Fatalf("expected replay messages to keep adjacent tool sequence, got %#v", messages)
+	}
+	assertAnthropicToolSequence(t, messages)
+}
+
+func assertAnthropicToolSequence(t *testing.T, messages []any) {
+	t.Helper()
+	var sequence []string
+	for _, raw := range messages {
+		msg, _ := raw.(map[string]any)
+		role, _ := msg["role"].(string)
+		content, _ := msg["content"].([]any)
+		for _, rawBlock := range content {
+			block, _ := rawBlock.(map[string]any)
+			typ, _ := block["type"].(string)
+			if typ == "tool_use" || typ == "tool_result" {
+				sequence = append(sequence, role+":"+typ)
+			}
+		}
+	}
+	want := []string{"assistant:tool_use", "user:tool_result", "assistant:tool_use", "user:tool_result"}
+	if !reflect.DeepEqual(sequence, want) {
+		t.Fatalf("unexpected tool sequence: got %#v want %#v", sequence, want)
 	}
 }
 
