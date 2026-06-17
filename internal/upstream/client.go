@@ -1393,7 +1393,7 @@ func normalizeResponsesTextPayloadFromResponseFormat(value any) map[string]any {
 
 func buildResponsesUpstreamToolPayloads(tools []model.CanonicalTool, compatMode string) []map[string]any {
 	out := make([]map[string]any, 0, len(tools))
-	for _, tool := range tools {
+	for _, tool := range sortedCanonicalTools(tools) {
 		out = append(out, buildResponsesUpstreamToolPayload(tool, compatMode))
 	}
 	return out

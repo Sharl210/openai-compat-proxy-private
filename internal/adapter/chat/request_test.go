@@ -68,7 +68,7 @@ func TestDecodeRequestSanitizesAssistantToolCallArgumentsWithTrailingGarbage(t *
 	}
 }
 
-func TestDecodeRequestPreservesToolOrder(t *testing.T) {
+func TestDecodeRequestPreservesClientToolOrderForCanonicalization(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
 		"tools":[
@@ -87,7 +87,7 @@ func TestDecodeRequestPreservesToolOrder(t *testing.T) {
 		t.Fatalf("expected 2 tools, got %#v", canon.Tools)
 	}
 	if canon.Tools[0].Name != "workspace_shell" || canon.Tools[1].Name != "search_web" {
-		t.Fatalf("expected tool order preserved, got %#v", canon.Tools)
+		t.Fatalf("expected client tool order preserved in canonical form, got %#v", canon.Tools)
 	}
 }
 

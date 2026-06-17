@@ -1280,6 +1280,83 @@ func buildResponsesUpstreamToolEntriesWithCompatMode(t *testing.T, tools []model
 	return out
 }
 
+func TestBuildAnthropicRequestBodySortsToolsForStableUpstreamPrefix(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Tools: []model.CanonicalTool{
+			{Name: "workspace_shell", Description: "shell", Parameters: map[string]any{"type": "object"}},
+			{Name: "search_web", Description: "search", Parameters: map[string]any{"type": "object"}},
+		},
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}, "", false, false, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildAnthropicRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("expected two tools, got %#v", payload["tools"])
+	}
+	first, _ := tools[0].(map[string]any)
+	second, _ := tools[1].(map[string]any)
+	if first["name"] != "search_web" || second["name"] != "workspace_shell" {
+		t.Fatalf("expected proxy-sorted anthropic tools, got %#v", tools)
+	}
+}
+
+func TestBuildChatRequestBodySortsToolsForStableUpstreamPrefix(t *testing.T) {
+	body, err := buildChatRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Tools: []model.CanonicalTool{
+			{Name: "workspace_shell", Description: "shell", Parameters: map[string]any{"type": "object"}},
+			{Name: "search_web", Description: "search", Parameters: map[string]any{"type": "object"}},
+		},
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("buildChatRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("expected two tools, got %#v", payload["tools"])
+	}
+	first, _ := tools[0].(map[string]any)
+	second, _ := tools[1].(map[string]any)
+	firstFn, _ := first["function"].(map[string]any)
+	secondFn, _ := second["function"].(map[string]any)
+	if firstFn["name"] != "search_web" || secondFn["name"] != "workspace_shell" {
+		t.Fatalf("expected proxy-sorted chat tools, got %#v", tools)
+	}
+}
+
+func TestBuildResponsesRequestBodySortsToolsForStableUpstreamPrefix(t *testing.T) {
+	tools := buildResponsesToolEntries(t, []model.CanonicalTool{
+		{Name: "workspace_shell", Type: "function", Description: "shell", Parameters: map[string]any{"type": "object"}},
+		{Name: "search_web", Type: "function", Description: "search", Parameters: map[string]any{"type": "object"}},
+	})
+	if len(tools) != 2 {
+		t.Fatalf("expected two tools, got %#v", tools)
+	}
+	if tools[0]["name"] != "search_web" || tools[1]["name"] != "workspace_shell" {
+		t.Fatalf("expected proxy-sorted responses tools, got %#v", tools)
+	}
+}
+
 func assertJSONEqual(t *testing.T, got any, want any) {
 	t.Helper()
 	gotJSON, err := json.Marshal(got)

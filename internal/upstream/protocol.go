@@ -1409,7 +1409,7 @@ func buildChatRequestBody(req model.CanonicalRequest, xmlToolCallStyle ...string
 	payload["messages"] = buildChatMessages(req, xmlToolCallStyle...)
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
-		for _, tool := range req.Tools {
+		for _, tool := range sortedCanonicalTools(req.Tools) {
 			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": tool.Name, "description": tool.Description, "parameters": normalizeFunctionToolJSONSchema(tool)}})
 		}
 		payload["tools"] = tools
@@ -1624,7 +1624,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	}
 	if len(req.Tools) > 0 {
 		tools := make([]any, 0, len(req.Tools))
-		for _, tool := range req.Tools {
+		for _, tool := range sortedCanonicalTools(req.Tools) {
 			tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": normalizeAnthropicToolInputSchema(tool)})
 		}
 		payload["tools"] = tools
@@ -1642,6 +1642,33 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	}
 
 	return json.Marshal(payload)
+}
+
+func sortedCanonicalTools(tools []model.CanonicalTool) []model.CanonicalTool {
+	if len(tools) < 2 {
+		return tools
+	}
+	sorted := append([]model.CanonicalTool(nil), tools...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left := canonicalToolSortName(sorted[i])
+		right := canonicalToolSortName(sorted[j])
+		if left == right {
+			return sorted[i].Type < sorted[j].Type
+		}
+		return left < right
+	})
+	return sorted
+}
+
+func canonicalToolSortName(tool model.CanonicalTool) string {
+	name := strings.TrimSpace(tool.Name)
+	if name != "" {
+		return name
+	}
+	if strings.TrimSpace(tool.Type) == "web_search" {
+		return "web_search"
+	}
+	return name
 }
 
 func applyAnthropicCacheControlMode(payload map[string]any, mode string) {
