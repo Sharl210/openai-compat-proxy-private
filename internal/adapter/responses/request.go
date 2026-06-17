@@ -284,6 +284,9 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			case "reasoning":
 				if idx < len(rawContent) {
 					block := cloneMapAny(rawContent[idx])
+					if isSyntheticResponsesReasoningInputItem(block) {
+						continue
+					}
 					if len(block) > 0 {
 						reasoningBlocks = append(reasoningBlocks, block)
 						normalizedContent = append(normalizedContent, cloneMapAny(block))

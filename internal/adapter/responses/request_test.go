@@ -292,6 +292,36 @@ func TestDecodeRequestDropsSyntheticTopLevelReasoningInputItem(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestDropsSyntheticReasoningBlockInsideAssistantMessage(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"assistant","content":[
+				{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"}]},
+				{"type":"output_text","text":"final answer"}
+			]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.ResponseInputItems) != 1 {
+		t.Fatalf("expected assistant item preserved without synthetic reasoning, got %#v", canon.ResponseInputItems)
+	}
+	content, _ := canon.ResponseInputItems[0]["content"].([]map[string]any)
+	if len(content) != 1 {
+		t.Fatalf("expected only assistant text content preserved, got %#v", canon.ResponseInputItems[0])
+	}
+	if got, _ := content[0]["type"].(string); got != "output_text" {
+		t.Fatalf("expected output_text content, got %#v", content)
+	}
+	if len(canon.Messages) != 1 || len(canon.Messages[0].ReasoningBlocks) != 0 {
+		t.Fatalf("expected synthetic reasoning block to stay out of canonical messages, got %#v", canon.Messages)
+	}
+}
+
 func TestDecodeRequestExtractsInstructionInputMessages(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
