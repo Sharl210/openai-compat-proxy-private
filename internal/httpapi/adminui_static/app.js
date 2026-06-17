@@ -347,7 +347,7 @@ async function saveCurrentFile() {
 }
 
 function validationFailureModalForSave(validation) {
-  if (!validation || validation.restart_ok !== false) {
+  if (!validation || (validation.restart_ok !== false && validation.hot_reload_ok !== false)) {
     return null;
   }
   return {
