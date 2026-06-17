@@ -1615,15 +1615,55 @@ func applyAnthropicCacheControlMode(payload map[string]any, mode string) {
 		})
 	case config.UpstreamCacheControl1H:
 		cacheControl := map[string]any{"type": "ephemeral", "ttl": "1h"}
-		walkAnthropicContentBlocks(payload, func(block map[string]any) {
-			block["cache_control"] = cloneMap(cacheControl)
-		})
+		applyAnthropicCacheControlAtStableBreakpoint(payload, cacheControl)
 	default:
 		cacheControl := map[string]any{"type": "ephemeral"}
-		walkAnthropicContentBlocks(payload, func(block map[string]any) {
-			block["cache_control"] = cloneMap(cacheControl)
+		applyAnthropicCacheControlAtStableBreakpoint(payload, cacheControl)
+	}
+}
+
+func applyAnthropicCacheControlAtStableBreakpoint(payload map[string]any, cacheControl map[string]any) {
+	if len(payload) == 0 || len(cacheControl) == 0 {
+		return
+	}
+	var fallback map[string]any
+	if visitAnthropicContentBlocks(payload["system"], func(block map[string]any) bool {
+		block["cache_control"] = cloneMap(cacheControl)
+		return true
+	}) {
+		return
+	}
+	messages, _ := payload["messages"].([]any)
+	for _, rawMessage := range messages {
+		message, _ := rawMessage.(map[string]any)
+		visitAnthropicContentBlocks(message["content"], func(block map[string]any) bool {
+			fallback = block
+			return false
 		})
 	}
+	if fallback != nil {
+		fallback["cache_control"] = cloneMap(cacheControl)
+	}
+}
+
+func visitAnthropicContentBlocks(raw any, fn func(map[string]any) bool) bool {
+	if fn == nil {
+		return false
+	}
+	content, _ := raw.([]any)
+	for _, item := range content {
+		block, _ := item.(map[string]any)
+		if len(block) == 0 {
+			continue
+		}
+		switch stringValue(block["type"]) {
+		case "text", "image", "document", "tool_result":
+			if fn(block) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func walkAnthropicContentBlocks(payload map[string]any, fn func(map[string]any)) {

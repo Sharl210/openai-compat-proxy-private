@@ -566,15 +566,15 @@ func TestBuildAnthropicRequestBodyAppliesConfiguredCacheControlMode(t *testing.T
 	}
 }
 
-func TestBuildAnthropicRequestBodyPreservesToolOrder(t *testing.T) {
+func TestBuildAnthropicRequestBodyPlacesCacheControlOnStablePrefixOnly(t *testing.T) {
 	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
-		Model: "claude-sonnet-4-5",
-		Tools: []model.CanonicalTool{
-			{Type: "function", Name: "workspace_shell", Description: "shell", Parameters: map[string]any{"type": "object"}},
-			{Type: "function", Name: "search_web", Description: "search", Parameters: map[string]any{"type": "object"}},
-		},
-		Messages: []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}}}},
-	}, "", false, false, config.UpstreamCacheControlNoChange)
+		Model:            "claude-sonnet-4-5",
+		InstructionParts: []model.CanonicalContentPart{{Type: "text", Text: "stable system prompt"}},
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "dynamic user request"}},
+		}},
+	}, "", false, false, config.UpstreamCacheControl5Min)
 	if err != nil {
 		t.Fatalf("buildAnthropicRequestBody error: %v", err)
 	}
@@ -583,14 +583,20 @@ func TestBuildAnthropicRequestBodyPreservesToolOrder(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	tools, _ := payload["tools"].([]any)
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %#v", payload["tools"])
+	system, _ := payload["system"].([]any)
+	if len(system) != 1 {
+		t.Fatalf("expected system block, got %#v", payload["system"])
 	}
-	first, _ := tools[0].(map[string]any)
-	second, _ := tools[1].(map[string]any)
-	if first["name"] != "workspace_shell" || second["name"] != "search_web" {
-		t.Fatalf("expected tool order preserved, got %#v", payload["tools"])
+	systemBlock, _ := system[0].(map[string]any)
+	if _, ok := systemBlock["cache_control"].(map[string]any); !ok {
+		t.Fatalf("expected stable system block to carry cache_control, got %#v", systemBlock)
+	}
+	messages, _ := payload["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	userBlock, _ := content[0].(map[string]any)
+	if _, exists := userBlock["cache_control"]; exists {
+		t.Fatalf("expected dynamic user block to avoid cache_control, got %#v", userBlock)
 	}
 }
 
