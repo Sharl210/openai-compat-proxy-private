@@ -1206,7 +1206,7 @@ func ensureResponsesPromptCacheKey(payload map[string]any) {
 	}
 	seed := map[string]any{
 		"model":        payload["model"],
-		"instructions": payload["instructions"],
+		"instructions": promptCacheInstructions(payload["instructions"]),
 		"tools":        payload["tools"],
 		"input_prefix": promptCacheInputPrefix(payload["input"]),
 	}
@@ -1228,6 +1228,20 @@ func promptCacheInputPrefix(input any) any {
 		return items
 	}
 	return items[:maxItems]
+}
+
+func promptCacheInstructions(raw any) any {
+	instructions, ok := raw.(string)
+	if !ok || instructions == "" {
+		return raw
+	}
+	trimmed := strings.TrimLeft(instructions, "\r\n\t ")
+	if strings.HasPrefix(trimmed, "当前，日期和时间：") || strings.HasPrefix(trimmed, "Current time:") {
+		if idx := strings.Index(trimmed, "\n\n"); idx >= 0 {
+			trimmed = strings.TrimLeft(trimmed[idx+2:], "\r\n\t ")
+		}
+	}
+	return trimmed
 }
 
 func buildResponsesOrderedInputItems(msg model.CanonicalMessage) []map[string]any {

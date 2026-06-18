@@ -2558,6 +2558,65 @@ func TestBuildResponsesRequestBodyAutoFillsPromptCacheKeyWhenMissing(t *testing.
 	}
 }
 
+func TestBuildResponsesRequestBodyPromptCacheKeyIgnoresVolatileTimeReminder(t *testing.T) {
+	req := model.CanonicalRequest{
+		Model: "gpt-5.5",
+		Instructions: "\n当前，日期和时间：2026年6月18日 08:22:35\n\n\n\n" +
+			"<workspace>\nUse /workspace.\n</workspace>",
+		Tools: []model.CanonicalTool{{
+			Type:        "function",
+			Name:        "search_web",
+			Description: "Search the web",
+			Parameters:  map[string]any{"type": "object"},
+		}},
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "same prompt"}}},
+			{Role: "assistant", ReasoningContent: "same reasoning", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "search_web", Arguments: `{"query":"same"}`}}},
+			{Role: "tool", ToolCallID: "call_1", Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"items":[]}`}}},
+		},
+	}
+
+	firstBody, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build first responses body: %v", err)
+	}
+	changedTime := req
+	changedTime.Instructions = strings.Replace(req.Instructions, "2026年6月18日 08:22:35", "2026年6月18日 08:23:07", 1)
+	secondBody, err := buildResponsesRequestBody(changedTime, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build second responses body: %v", err)
+	}
+	changedPrompt := req
+	changedPrompt.Instructions = strings.Replace(req.Instructions, "Use /workspace.", "Use /workspace and /tmp.", 1)
+	changedBody, err := buildResponsesRequestBody(changedPrompt, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("build changed responses body: %v", err)
+	}
+
+	var firstPayload, secondPayload, changedPayload map[string]any
+	if err := json.Unmarshal(firstBody, &firstPayload); err != nil {
+		t.Fatalf("unmarshal first payload: %v", err)
+	}
+	if err := json.Unmarshal(secondBody, &secondPayload); err != nil {
+		t.Fatalf("unmarshal second payload: %v", err)
+	}
+	if err := json.Unmarshal(changedBody, &changedPayload); err != nil {
+		t.Fatalf("unmarshal changed payload: %v", err)
+	}
+	firstKey, _ := firstPayload["prompt_cache_key"].(string)
+	secondKey, _ := secondPayload["prompt_cache_key"].(string)
+	changedKey, _ := changedPayload["prompt_cache_key"].(string)
+	if firstKey == "" || secondKey == "" || changedKey == "" {
+		t.Fatalf("expected generated prompt_cache_key values, got %#v %#v %#v", firstPayload, secondPayload, changedPayload)
+	}
+	if firstKey != secondKey {
+		t.Fatalf("expected volatile time reminder not to change prompt_cache_key, got %q and %q", firstKey, secondKey)
+	}
+	if changedKey == firstKey {
+		t.Fatalf("expected real instruction changes to change prompt_cache_key, still got %q", changedKey)
+	}
+}
+
 func TestBuildResponsesRequestBodyPreservesClientPromptCacheKey(t *testing.T) {
 	body, err := buildResponsesRequestBody(model.CanonicalRequest{
 		Model:                   "gpt-5.5",
