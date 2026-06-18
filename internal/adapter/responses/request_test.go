@@ -403,18 +403,21 @@ func TestDecodeRequestPreservesRealReasoningFromProxyReasoningBeforeConsecutiveT
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
 
-	if len(canon.Messages) != 5 {
-		t.Fatalf("expected user plus two tool-call rounds, got %#v", canon.Messages)
+	if len(canon.Messages) != 4 {
+		t.Fatalf("expected user, one multi-tool assistant, and two tool results, got %#v", canon.Messages)
 	}
 	firstCall := canon.Messages[1]
-	if firstCall.Role != "assistant" || len(firstCall.ToolCalls) != 1 || firstCall.ToolCalls[0].ID != "call_1" {
-		t.Fatalf("expected first assistant tool call, got %#v", firstCall)
+	if firstCall.Role != "assistant" || len(firstCall.ToolCalls) != 2 || firstCall.ToolCalls[0].ID != "call_1" || firstCall.ToolCalls[1].ID != "call_2" {
+		t.Fatalf("expected one assistant message with both tool calls, got %#v", firstCall)
 	}
 	if firstCall.ReasoningContent != "真实推理\n" {
 		t.Fatalf("expected real proxy reasoning to be preserved before first tool call, got %#v", firstCall)
 	}
 	if len(firstCall.ReasoningBlocks) != 1 {
 		t.Fatalf("expected real proxy reasoning block to be preserved, got %#v", firstCall)
+	}
+	if canon.Messages[2].Role != "tool" || canon.Messages[2].ToolCallID != "call_1" || canon.Messages[3].Role != "tool" || canon.Messages[3].ToolCallID != "call_2" {
+		t.Fatalf("expected both tool results to remain ordered after assistant tool calls, got %#v", canon.Messages)
 	}
 	for _, item := range canon.ResponseInputItems {
 		if got, _ := item["id"].(string); got == "rs_proxy" {
@@ -431,18 +434,24 @@ func TestDecodeRequestReplaysAdjacentToolProductionShape(t *testing.T) {
 		t.Fatalf("DecodeRequest error: %v", err)
 	}
 
-	if len(canon.Messages) != 6 {
-		t.Fatalf("expected 6 canonical messages, got %#v", canon.Messages)
+	if len(canon.Messages) != 5 {
+		t.Fatalf("expected 5 canonical messages, got %#v", canon.Messages)
 	}
 	roles := make([]string, 0, len(canon.Messages))
 	for _, msg := range canon.Messages {
 		roles = append(roles, msg.Role)
 	}
-	if want := []string{"user", "user", "assistant", "tool", "assistant", "tool"}; !reflect.DeepEqual(roles, want) {
+	if want := []string{"user", "user", "assistant", "tool", "tool"}; !reflect.DeepEqual(roles, want) {
 		t.Fatalf("unexpected message roles: got %#v want %#v", roles, want)
 	}
-	if len(canon.Messages[2].ToolCalls) != 1 || len(canon.Messages[4].ToolCalls) != 1 {
-		t.Fatalf("expected two assistant tool calls, got %#v", canon.Messages)
+	if len(canon.Messages[2].ToolCalls) != 2 {
+		t.Fatalf("expected one assistant message with two tool calls, got %#v", canon.Messages)
+	}
+	if canon.Messages[2].ToolCalls[0].ID != "call_00_QYKD16UQaFTdlwHq7x6I5004" || canon.Messages[2].ToolCalls[1].ID != "call_01_NI7fF0whLahOJEM0DxjG2203" {
+		t.Fatalf("expected adjacent tool call order preserved, got %#v", canon.Messages[2].ToolCalls)
+	}
+	if canon.Messages[3].Role != "tool" || canon.Messages[3].ToolCallID != "call_00_QYKD16UQaFTdlwHq7x6I5004" || canon.Messages[4].Role != "tool" || canon.Messages[4].ToolCallID != "call_01_NI7fF0whLahOJEM0DxjG2203" {
+		t.Fatalf("expected adjacent tool results to remain ordered, got %#v", canon.Messages)
 	}
 	if strings.TrimSpace(canon.Messages[2].ReasoningContent) == "" {
 		t.Fatalf("expected first adjacent tool call to retain real reasoning, got %#v", canon.Messages[2])

@@ -203,6 +203,51 @@ func mergeAdjacentResponsesReasoningToolMessages(messages []model.CanonicalMessa
 		}
 		merged = append(merged, msg)
 	}
+	return mergeResponsesParallelToolCallRounds(merged)
+}
+
+func mergeResponsesParallelToolCallRounds(messages []model.CanonicalMessage) []model.CanonicalMessage {
+	if len(messages) < 3 {
+		return messages
+	}
+	merged := make([]model.CanonicalMessage, 0, len(messages))
+	for idx := 0; idx < len(messages); idx++ {
+		msg := messages[idx]
+		if !canStartResponsesParallelToolCallRound(msg) {
+			merged = append(merged, msg)
+			continue
+		}
+
+		callIDs := toolCallIDSet(msg.ToolCalls)
+		toolResults := make([]model.CanonicalMessage, 0)
+		nextIdx := idx + 1
+		changed := false
+		for nextIdx < len(messages) {
+			for nextIdx < len(messages) && isResponsesToolResultForCallIDs(messages[nextIdx], callIDs) {
+				toolResults = append(toolResults, messages[nextIdx])
+				nextIdx++
+			}
+			if nextIdx >= len(messages) || !canMergeResponsesToolCallContinuation(messages[nextIdx]) {
+				break
+			}
+			for _, call := range messages[nextIdx].ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, call)
+				if call.ID != "" {
+					callIDs[call.ID] = struct{}{}
+				}
+			}
+			changed = true
+			nextIdx++
+		}
+
+		if !changed {
+			merged = append(merged, messages[idx])
+			continue
+		}
+		merged = append(merged, msg)
+		merged = append(merged, toolResults...)
+		idx = nextIdx - 1
+	}
 	return merged
 }
 
@@ -212,6 +257,32 @@ func isStandaloneResponsesReasoningMessage(msg model.CanonicalMessage) bool {
 
 func canMergeResponsesReasoningIntoToolMessage(msg model.CanonicalMessage) bool {
 	return msg.Role == "assistant" && len(msg.ToolCalls) > 0 && msg.ToolCallID == "" && len(msg.Parts) == 0
+}
+
+func canStartResponsesParallelToolCallRound(msg model.CanonicalMessage) bool {
+	return msg.Role == "assistant" && len(msg.ToolCalls) > 0 && msg.ToolCallID == "" && len(msg.Parts) == 0 && len(msg.OrderedContent) == 0 && (msg.ReasoningContent != "" || len(msg.ReasoningBlocks) > 0)
+}
+
+func canMergeResponsesToolCallContinuation(msg model.CanonicalMessage) bool {
+	return msg.Role == "assistant" && len(msg.ToolCalls) > 0 && msg.ToolCallID == "" && len(msg.Parts) == 0 && len(msg.OrderedContent) == 0 && msg.ReasoningContent == "" && len(msg.ReasoningBlocks) == 0
+}
+
+func toolCallIDSet(calls []model.CanonicalToolCall) map[string]struct{} {
+	ids := make(map[string]struct{}, len(calls))
+	for _, call := range calls {
+		if call.ID != "" {
+			ids[call.ID] = struct{}{}
+		}
+	}
+	return ids
+}
+
+func isResponsesToolResultForCallIDs(msg model.CanonicalMessage, callIDs map[string]struct{}) bool {
+	if msg.Role != "tool" || msg.ToolCallID == "" {
+		return false
+	}
+	_, ok := callIDs[msg.ToolCallID]
+	return ok
 }
 
 func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, bool, error) {
