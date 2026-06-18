@@ -17,6 +17,7 @@ const state = {
   fileActionMenu: null,
   fileSearchModal: null,
   fileSearchResult: null,
+  fileSearchLoading: false,
   clearCacheModal: null,
   activeJobId: '',
   activeJob: null,
@@ -781,6 +782,10 @@ function bindEvents() {
   if (fileSearchForm) {
     fileSearchForm.addEventListener('submit', submitFileSearch);
   }
+  const fileSearchAdvanced = document.getElementById('file-search-advanced');
+  if (fileSearchAdvanced) {
+    fileSearchAdvanced.addEventListener('change', handleFileSearchAdvancedChange);
+  }
 
   const clearCacheButton = document.getElementById('clear-cache-button');
   if (clearCacheButton) {
@@ -1071,7 +1076,7 @@ function dashboardTemplate() {
 function renderBrowserPage() {
   const items = state.treeItems || [];
   const isCacheInfoDir = pathBaseName(state.currentDir) === 'Cache_Info';
-  const fileCountLabel = state.fileSearchResult ? `搜索结果 ${items.length}` : `项目文件 ${items.length}`;
+  const fileCountLabel = state.fileSearchLoading ? '搜索中' : state.fileSearchResult ? `搜索结果 ${items.length}` : `项目文件 ${items.length}`;
   return `
     <div class="browser-page-grid page-scene">
       <section class="panel">
@@ -1145,6 +1150,9 @@ function renderEditorPage() {
 }
 
 function renderTreeItems(items) {
+  if (state.fileSearchLoading) {
+    return '<div class="empty-state file-search-loading">搜索中…</div>';
+  }
   if (!items || items.length === 0) {
     return `<div class="empty-state">${state.fileSearchResult ? '没有匹配的文件。' : '当前目录没有可显示的文件。'}</div>`;
   }
@@ -1449,25 +1457,49 @@ function renderFileSearchModal() {
   }
   const query = state.fileSearchModal.query || '';
   const advanced = state.fileSearchModal.advanced === true;
+  const submitting = state.fileSearchModal.submitting === true;
   return `
     <div id="file-search-backdrop" class="file-action-backdrop is-open"></div>
     <form id="file-search-form" class="file-search-modal" role="dialog" aria-modal="true" aria-label="搜索">
       <div class="clear-cache-title">搜索</div>
       <label class="form-field">
         <span class="form-label">欲搜索文件名（支持通配符*和?）</span>
-        <input id="file-search-query" type="text" class="text-input" value="${escapeAttr(query)}" autocomplete="off" autofocus>
+        <input id="file-search-query" type="text" class="text-input" value="${escapeAttr(query)}" autocomplete="off" ${submitting ? 'disabled' : 'autofocus'}>
       </label>
       <label class="checkbox-row">
-        <input id="file-search-recursive" type="checkbox" checked>
+        <input id="file-search-recursive" type="checkbox" checked ${submitting ? 'disabled' : ''}>
         <span>搜索子目录</span>
       </label>
       <label class="checkbox-row">
-        <input id="file-search-advanced" type="checkbox" ${advanced ? 'checked' : ''}>
+        <input id="file-search-advanced" type="checkbox" ${advanced ? 'checked' : ''} ${submitting ? 'disabled' : ''}>
         <span>高级搜索</span>
       </label>
+      ${advanced ? `
+      <div id="file-search-advanced-options" class="file-search-advanced-options">
+        <label class="form-field">
+          <span class="form-label">文件最小字节</span>
+          <input id="file-search-min-size" type="number" class="text-input" min="0" inputmode="numeric" autocomplete="off" ${submitting ? 'disabled' : ''}>
+        </label>
+        <label class="form-field">
+          <span class="form-label">文件最大字节</span>
+          <input id="file-search-max-size" type="number" class="text-input" min="0" inputmode="numeric" autocomplete="off" ${submitting ? 'disabled' : ''}>
+        </label>
+        <label class="form-field">
+          <span class="form-label">文件中包含内容</span>
+          <input id="file-search-content" type="text" class="text-input" autocomplete="off" ${submitting ? 'disabled' : ''}>
+        </label>
+        <label class="checkbox-row">
+          <input id="file-search-case-sensitive" type="checkbox" ${submitting ? 'disabled' : ''}>
+          <span>区分大小写</span>
+        </label>
+        <label class="checkbox-row">
+          <input id="file-search-regex" type="checkbox" ${submitting ? 'disabled' : ''}>
+          <span>正则表达式</span>
+        </label>
+      </div>` : ''}
       <div class="file-search-actions">
-        <button id="file-search-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
-        <button id="file-search-confirm" class="primary-btn material-filled-button" type="submit">确定</button>
+        <button id="file-search-cancel" class="ghost-btn material-outlined-button" type="button" ${submitting ? 'disabled' : ''}>取消</button>
+        <button id="file-search-confirm" class="primary-btn material-filled-button" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? '搜索中…' : '确定'}</button>
       </div>
     </form>
   `;
@@ -1666,12 +1698,26 @@ function openFileSearchModal() {
 }
 
 function closeFileSearchModal() {
+  if (state.fileSearchModal?.submitting) {
+    return;
+  }
   state.fileSearchModal = null;
+  render();
+}
+
+function handleFileSearchAdvancedChange(event) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  state.fileSearchModal.advanced = event.target.checked === true;
   render();
 }
 
 async function submitFileSearch(event) {
   event.preventDefault();
+  if (state.fileSearchModal?.submitting) {
+    return;
+  }
   const query = String(document.getElementById('file-search-query')?.value || '').trim();
   if (!query) {
     setToast('error', '请输入文件名');
@@ -1683,14 +1729,29 @@ async function submitFileSearch(event) {
     query,
     recursive: recursive ? 'true' : 'false',
   });
+  const minSize = String(document.getElementById('file-search-min-size')?.value || '').trim();
+  const maxSize = String(document.getElementById('file-search-max-size')?.value || '').trim();
+  const contentContains = String(document.getElementById('file-search-content')?.value || '').trim();
+  const caseSensitive = document.getElementById('file-search-case-sensitive')?.checked === true;
+  const regex = document.getElementById('file-search-regex')?.checked === true;
+  if (minSize) params.set('min_size_bytes', minSize);
+  if (maxSize) params.set('max_size_bytes', maxSize);
+  if (contentContains) params.set('content_contains', contentContains);
+  if (caseSensitive) params.set('case_sensitive', 'true');
+  if (regex) params.set('regex', 'true');
+  state.fileSearchModal = null;
+  state.fileSearchLoading = true;
+  render();
   try {
     const data = await api(`/_admin/api/search?${params.toString()}`);
     state.treeItems = data.items || [];
     state.providersDir = data.providers_dir || state.providersDir || 'providers';
     state.fileSearchResult = { query: data.query || query, recursive: data.recursive !== false, path: data.path || state.currentDir || '' };
-    state.fileSearchModal = null;
+    state.fileSearchLoading = false;
     render();
   } catch (error) {
+    state.fileSearchLoading = false;
+    render();
     setToast('error', error.message || '搜索失败');
   }
 }

@@ -1368,6 +1368,20 @@ button { cursor: pointer; }
   justify-content: flex-end;
 }
 
+.file-search-advanced-options {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--md-sys-color-surface-container-high);
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.file-search-loading {
+  color: var(--md-sys-color-primary);
+  font-weight: 700;
+}
+
 .clear-cache-title {
   font-size: 16px;
   font-weight: 700;
