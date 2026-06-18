@@ -418,6 +418,69 @@ func TestAdminUITreeOnlyReturnsAllowedFileTypes(t *testing.T) {
 	}
 }
 
+func TestAdminUISearchFindsFilenamesFromCurrentDirectory(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	root := server.admin.rootDir()
+	logsDir := filepath.Join(root, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "req-root.txt"), []byte("root"), 0o644); err != nil {
+		t.Fatalf("write root log: %v", err)
+	}
+	nestedDir := filepath.Join(logsDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "req-nested.txt"), []byte("nested"), 0o644); err != nil {
+		t.Fatalf("write nested log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "req-outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatalf("write outside log: %v", err)
+	}
+
+	recursiveReq := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=req-*.txt", nil)
+	recursiveReq.AddCookie(cookie)
+	recursiveReq.Header.Set("X-Admin-CSRF", csrf)
+	recursiveRec := httptest.NewRecorder()
+	server.ServeHTTP(recursiveRec, recursiveReq)
+	if recursiveRec.Code != http.StatusOK {
+		t.Fatalf("expected recursive search 200, got %d body=%s", recursiveRec.Code, recursiveRec.Body.String())
+	}
+	recursiveData := decodeAdminJSON(t, recursiveRec.Body.Bytes())
+	if recursiveData["path"] != "logs" || recursiveData["query"] != "req-*.txt" || recursiveData["recursive"] != true {
+		t.Fatalf("expected search metadata, got %#v", recursiveData)
+	}
+	recursiveNames := adminTreeItemNames(t, recursiveRec.Body.Bytes())
+	if !slices.Contains(recursiveNames, "req-root.txt") || !slices.Contains(recursiveNames, "req-nested.txt") {
+		t.Fatalf("expected recursive search to include direct and nested matches, got %v", recursiveNames)
+	}
+	if slices.Contains(recursiveNames, "req-outside.txt") {
+		t.Fatalf("expected search to stay inside current directory, got %v", recursiveNames)
+	}
+
+	directReq := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=req-*.txt&recursive=false", nil)
+	directReq.AddCookie(cookie)
+	directReq.Header.Set("X-Admin-CSRF", csrf)
+	directRec := httptest.NewRecorder()
+	server.ServeHTTP(directRec, directReq)
+	if directRec.Code != http.StatusOK {
+		t.Fatalf("expected direct search 200, got %d body=%s", directRec.Code, directRec.Body.String())
+	}
+	directData := decodeAdminJSON(t, directRec.Body.Bytes())
+	if directData["recursive"] != false {
+		t.Fatalf("expected recursive=false metadata, got %#v", directData)
+	}
+	directNames := adminTreeItemNames(t, directRec.Body.Bytes())
+	if !slices.Contains(directNames, "req-root.txt") {
+		t.Fatalf("expected direct search to include direct match, got %v", directNames)
+	}
+	if slices.Contains(directNames, "req-nested.txt") {
+		t.Fatalf("expected direct search to exclude nested match, got %v", directNames)
+	}
+}
+
 func TestAdminUIReadNDJSONFileUsesJSONLanguage(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -699,6 +762,39 @@ func TestAdminUIAppScriptIncludesClearCacheModal(t *testing.T) {
 	}
 	if !strings.Contains(body, "/_admin/api/cacheinfo/providers/clear") || !strings.Contains(body, "provider_id") {
 		t.Fatalf("expected app script to call cacheinfo clear API with provider_id, got %s", body)
+	}
+}
+
+func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"search-tree-button",
+		"renderFileSearchModal",
+		"file-search-query",
+		"file-search-recursive",
+		"file-search-advanced",
+		"/_admin/api/search",
+		"搜索子目录",
+		"高级搜索",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected app script to include %q, got %s", want, body)
+		}
+	}
+	if !strings.Contains(body, `id="file-search-recursive" type="checkbox" checked`) {
+		t.Fatalf("expected search recursive checkbox checked by default, got %s", body)
+	}
+	if strings.Contains(body, `id="file-search-advanced" type="checkbox" checked`) {
+		t.Fatalf("expected advanced search checkbox not checked by default, got %s", body)
 	}
 }
 

@@ -146,6 +146,7 @@ func (a *adminUI) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/_admin/api/login", allowMethods(a.handleLogin(), http.MethodPost))
 	mux.HandleFunc("/_admin/api/logout", allowMethods(a.handleLogout(), http.MethodPost))
 	mux.HandleFunc("/_admin/api/tree", allowMethods(a.handleTree(), http.MethodGet))
+	mux.HandleFunc("/_admin/api/search", allowMethods(a.handleSearch(), http.MethodGet))
 	mux.HandleFunc("/_admin/api/file", a.handleFile())
 	mux.HandleFunc("/_admin/api/action", allowMethods(a.handleAction(), http.MethodPost))
 	mux.HandleFunc("/_admin/api/cacheinfo/providers/clear", allowMethods(a.handleClearProviderCacheInfoHistory(), http.MethodPost))
@@ -281,64 +282,10 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_path", err.Error())
 			return
 		}
-		entries, err := os.ReadDir(resolved)
+		items, err := a.adminTreeItems(rel, resolved)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_path", err.Error())
 			return
-		}
-		items := make([]adminFileEntry, 0, len(entries))
-		modifiedAt := make(map[string]time.Time, len(entries))
-		for _, entry := range entries {
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			if !info.IsDir() && !a.isVisibleTreeFile(resolved, entry.Name()) {
-				continue
-			}
-			itemRel := filepath.ToSlash(filepath.Join(rel, entry.Name()))
-			mode := info.Mode()
-			isSymlink := mode&os.ModeSymlink != 0
-			isDir := info.IsDir()
-			isText := false
-			editable := false
-			if !isDir && !isSymlink {
-				if text, err := a.isTextFile(filepath.Join(resolved, entry.Name())); err == nil {
-					isText = text
-					editable = text
-				}
-			}
-			items = append(items, adminFileEntry{
-				Name:      entry.Name(),
-				Path:      itemRel,
-				IsDir:     isDir,
-				IsText:    isText,
-				Editable:  editable,
-				Size:      info.Size(),
-				Modified:  info.ModTime().Format(time.RFC3339),
-				IsSymlink: isSymlink,
-			})
-			modifiedAt[itemRel] = info.ModTime()
-		}
-		if a.isTimeSortedDirectory(resolved) {
-			sort.Slice(items, func(i, j int) bool {
-				if items[i].IsDir != items[j].IsDir {
-					return items[i].IsDir
-				}
-				left := modifiedAt[items[i].Path]
-				right := modifiedAt[items[j].Path]
-				if !left.Equal(right) {
-					return left.After(right)
-				}
-				return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
-			})
-		} else {
-			sort.Slice(items, func(i, j int) bool {
-				if items[i].IsDir != items[j].IsDir {
-					return items[i].IsDir
-				}
-				return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
-			})
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]any{
 			"path":          filepath.ToSlash(rel),
@@ -346,6 +293,143 @@ func (a *adminUI) handleTree() http.HandlerFunc {
 			"providers_dir": a.providersDirRelative(),
 		})
 	}
+}
+
+func (a *adminUI) handleSearch() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, _, err := a.requireSession(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "admin login required")
+			return
+		}
+		rel := strings.TrimSpace(r.URL.Query().Get("path"))
+		query := strings.TrimSpace(r.URL.Query().Get("query"))
+		if query == "" {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "query is required")
+			return
+		}
+		resolved, err := a.resolvePath(rel, true)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_path", err.Error())
+			return
+		}
+		recursive := true
+		if value := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("recursive"))); value == "false" || value == "0" || value == "no" || value == "off" {
+			recursive = false
+		}
+		items, err := a.searchAdminFiles(rel, resolved, query, recursive)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeAdminJSON(w, http.StatusOK, map[string]any{
+			"path":          filepath.ToSlash(rel),
+			"query":         query,
+			"recursive":     recursive,
+			"items":         items,
+			"providers_dir": a.providersDirRelative(),
+		})
+	}
+}
+
+func (a *adminUI) adminTreeItems(rel string, resolved string) ([]adminFileEntry, error) {
+	entries, err := os.ReadDir(resolved)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]adminFileEntry, 0, len(entries))
+	modifiedAt := make(map[string]time.Time, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() && !a.isVisibleTreeFile(resolved, entry.Name()) {
+			continue
+		}
+		itemRel := filepath.ToSlash(filepath.Join(rel, entry.Name()))
+		mode := info.Mode()
+		isSymlink := mode&os.ModeSymlink != 0
+		isDir := info.IsDir()
+		isText := false
+		editable := false
+		if !isDir && !isSymlink {
+			if text, err := a.isTextFile(filepath.Join(resolved, entry.Name())); err == nil {
+				isText = text
+				editable = text
+			}
+		}
+		items = append(items, adminFileEntry{
+			Name:      entry.Name(),
+			Path:      itemRel,
+			IsDir:     isDir,
+			IsText:    isText,
+			Editable:  editable,
+			Size:      info.Size(),
+			Modified:  info.ModTime().Format(time.RFC3339),
+			IsSymlink: isSymlink,
+		})
+		modifiedAt[itemRel] = info.ModTime()
+	}
+	if a.isTimeSortedDirectory(resolved) {
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].IsDir != items[j].IsDir {
+				return items[i].IsDir
+			}
+			left := modifiedAt[items[i].Path]
+			right := modifiedAt[items[j].Path]
+			if !left.Equal(right) {
+				return left.After(right)
+			}
+			return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+		})
+	} else {
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].IsDir != items[j].IsDir {
+				return items[i].IsDir
+			}
+			return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+		})
+	}
+	return items, nil
+}
+
+func (a *adminUI) searchAdminFiles(rel string, resolved string, query string, recursive bool) ([]adminFileEntry, error) {
+	items, err := a.adminTreeItems(rel, resolved)
+	if err != nil {
+		return nil, err
+	}
+	var matches []adminFileEntry
+	for _, item := range items {
+		matched, err := adminFileSearchMatches(item.Name, query)
+		if err != nil {
+			return nil, err
+		}
+		if matched {
+			matches = append(matches, item)
+		}
+		if recursive && item.IsDir && !item.IsSymlink {
+			childResolved := filepath.Join(resolved, item.Name)
+			childMatches, err := a.searchAdminFiles(item.Path, childResolved, query, true)
+			if err != nil {
+				return nil, err
+			}
+			matches = append(matches, childMatches...)
+		}
+	}
+	return matches, nil
+}
+
+func adminFileSearchMatches(name string, query string) (bool, error) {
+	name = strings.ToLower(name)
+	query = strings.ToLower(strings.TrimSpace(query))
+	if strings.ContainsAny(query, "*?") {
+		matched, err := filepath.Match(query, name)
+		if err != nil {
+			return false, err
+		}
+		return matched, nil
+	}
+	return strings.Contains(name, query), nil
 }
 
 func (a *adminUI) isVisibleTreeFile(parentDir string, name string) bool {
