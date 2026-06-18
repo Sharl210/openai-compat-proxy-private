@@ -15,6 +15,8 @@ const state = {
   currentFile: null,
   envExpanded: {},
   fileActionMenu: null,
+  fileSearchModal: null,
+  fileSearchResult: null,
   clearCacheModal: null,
   activeJobId: '',
   activeJob: null,
@@ -263,6 +265,7 @@ async function loadTree(path) {
   const data = await api(`/_admin/api/tree?path=${encodeURIComponent(state.currentDir)}`);
   state.treeItems = data.items || [];
   state.providersDir = data.providers_dir || state.providersDir || 'providers';
+  state.fileSearchResult = null;
 }
 
 async function openDirectory(path) {
@@ -730,6 +733,10 @@ function bindEvents() {
   if (refreshTreeButton) {
     refreshTreeButton.addEventListener('click', refreshCurrentDirectory);
   }
+  const searchTreeButton = document.getElementById('search-tree-button');
+  if (searchTreeButton) {
+    searchTreeButton.addEventListener('click', openFileSearchModal);
+  }
 
   const createEnvButton = document.getElementById('create-env-button');
   if (createEnvButton) {
@@ -760,6 +767,19 @@ function bindEvents() {
   const fileActionDelete = document.getElementById('file-action-delete');
   if (fileActionDelete) {
     fileActionDelete.addEventListener('click', deleteTreeItemFromMenu);
+  }
+
+  const fileSearchBackdrop = document.getElementById('file-search-backdrop');
+  if (fileSearchBackdrop) {
+    fileSearchBackdrop.addEventListener('click', closeFileSearchModal);
+  }
+  const fileSearchCancel = document.getElementById('file-search-cancel');
+  if (fileSearchCancel) {
+    fileSearchCancel.addEventListener('click', closeFileSearchModal);
+  }
+  const fileSearchForm = document.getElementById('file-search-form');
+  if (fileSearchForm) {
+    fileSearchForm.addEventListener('submit', submitFileSearch);
   }
 
   const clearCacheButton = document.getElementById('clear-cache-button');
@@ -1040,6 +1060,7 @@ function dashboardTemplate() {
         ${state.view === 'browser' ? renderBrowserPage() : state.view === 'status' ? renderStatusPage() : renderEditorPage()}
       </div>
       ${renderFileActionMenu()}
+      ${renderFileSearchModal()}
       ${renderClearCacheModal()}
       ${renderEditorCloseConfirmModal()}
       ${renderValidationFailureModal()}
@@ -1050,6 +1071,7 @@ function dashboardTemplate() {
 function renderBrowserPage() {
   const items = state.treeItems || [];
   const isCacheInfoDir = pathBaseName(state.currentDir) === 'Cache_Info';
+  const fileCountLabel = state.fileSearchResult ? `搜索结果 ${items.length}` : `项目文件 ${items.length}`;
   return `
     <div class="browser-page-grid page-scene">
       <section class="panel">
@@ -1057,9 +1079,12 @@ function renderBrowserPage() {
           <div class="status-row compact-meta-row">
             <div class="compact-meta-left">
               <span class="badge info material-state-chip">当前目录 ${escapeHtml(state.currentDir || '/')}</span>
-              <span class="badge info material-state-chip">项目文件 ${items.length}</span>
+              <span class="badge info material-state-chip">${escapeHtml(fileCountLabel)}</span>
             </div>
-            <button id="refresh-tree-button" class="badge info material-state-chip compact-meta-button" type="button">刷新</button>
+            <div class="compact-meta-actions">
+              <button id="search-tree-button" class="badge info material-state-chip compact-meta-button" type="button">搜索</button>
+              <button id="refresh-tree-button" class="badge info material-state-chip compact-meta-button" type="button">刷新</button>
+            </div>
           </div>
           <div class="tree-nav">
             <button class="secondary-btn material-tonal-button" type="button" data-tree-open="" data-type="dir">回到根目录/</button>
@@ -1121,7 +1146,7 @@ function renderEditorPage() {
 
 function renderTreeItems(items) {
   if (!items || items.length === 0) {
-    return `<div class="empty-state">当前目录没有可显示的文件。</div>`;
+    return `<div class="empty-state">${state.fileSearchResult ? '没有匹配的文件。' : '当前目录没有可显示的文件。'}</div>`;
   }
   return items.map((item) => `
     <button class="tree-item ${state.currentFile?.path === item.path ? 'active' : ''}" type="button" data-tree-open="${escapeAttr(item.path)}" data-type="${item.is_dir ? 'dir' : 'file'}">
@@ -1418,6 +1443,36 @@ function renderFileActionMenu() {
   `;
 }
 
+function renderFileSearchModal() {
+  if (!state.fileSearchModal?.open) {
+    return '';
+  }
+  const query = state.fileSearchModal.query || '';
+  const advanced = state.fileSearchModal.advanced === true;
+  return `
+    <div id="file-search-backdrop" class="file-action-backdrop is-open"></div>
+    <form id="file-search-form" class="file-search-modal" role="dialog" aria-modal="true" aria-label="搜索">
+      <div class="clear-cache-title">搜索</div>
+      <label class="form-field">
+        <span class="form-label">欲搜索文件名（支持通配符*和?）</span>
+        <input id="file-search-query" type="text" class="text-input" value="${escapeAttr(query)}" autocomplete="off" autofocus>
+      </label>
+      <label class="checkbox-row">
+        <input id="file-search-recursive" type="checkbox" checked>
+        <span>搜索子目录</span>
+      </label>
+      <label class="checkbox-row">
+        <input id="file-search-advanced" type="checkbox" ${advanced ? 'checked' : ''}>
+        <span>高级搜索</span>
+      </label>
+      <div class="file-search-actions">
+        <button id="file-search-cancel" class="ghost-btn material-outlined-button" type="button">取消</button>
+        <button id="file-search-confirm" class="primary-btn material-filled-button" type="submit">确定</button>
+      </div>
+    </form>
+  `;
+}
+
 function renderClearCacheModal() {
   if (!state.clearCacheModal?.open) {
     return '';
@@ -1603,6 +1658,41 @@ function openTreeItemActionMenu(path, type = 'file') {
 function closeTreeItemActionMenu() {
   state.fileActionMenu = null;
   render();
+}
+
+function openFileSearchModal() {
+  state.fileSearchModal = { open: true, query: '', recursive: true, advanced: false };
+  render();
+}
+
+function closeFileSearchModal() {
+  state.fileSearchModal = null;
+  render();
+}
+
+async function submitFileSearch(event) {
+  event.preventDefault();
+  const query = String(document.getElementById('file-search-query')?.value || '').trim();
+  if (!query) {
+    setToast('error', '请输入文件名');
+    return;
+  }
+  const recursive = document.getElementById('file-search-recursive')?.checked !== false;
+  const params = new URLSearchParams({
+    path: state.currentDir || '',
+    query,
+    recursive: recursive ? 'true' : 'false',
+  });
+  try {
+    const data = await api(`/_admin/api/search?${params.toString()}`);
+    state.treeItems = data.items || [];
+    state.providersDir = data.providers_dir || state.providersDir || 'providers';
+    state.fileSearchResult = { query: data.query || query, recursive: data.recursive !== false, path: data.path || state.currentDir || '' };
+    state.fileSearchModal = null;
+    render();
+  } catch (error) {
+    setToast('error', error.message || '搜索失败');
+  }
 }
 
 async function openClearCacheModal() {

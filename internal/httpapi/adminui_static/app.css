@@ -665,6 +665,18 @@ button { cursor: pointer; }
   align-self: flex-start;
 }
 
+.compact-meta-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.compact-meta-actions .compact-meta-button {
+  margin-left: 0;
+}
+
 .compact-meta-button:hover {
   transform: translateY(-1px);
   background: var(--md-sys-color-primary-container);
@@ -1332,6 +1344,28 @@ button { cursor: pointer; }
   display: grid;
   gap: 12px;
   grid-template-rows: auto auto auto 1fr auto;
+}
+
+.file-search-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 24px));
+  padding: 16px;
+  border-radius: 18px;
+  background: var(--md-sys-color-surface-bright);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  box-shadow: var(--md-elevation-3);
+  z-index: 66;
+  display: grid;
+  gap: 12px;
+}
+
+.file-search-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .clear-cache-title {
