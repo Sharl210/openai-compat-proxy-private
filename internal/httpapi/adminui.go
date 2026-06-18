@@ -16,9 +16,11 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,6 +107,18 @@ type adminFileEntry struct {
 	Size      int64  `json:"size"`
 	Modified  string `json:"modified"`
 	IsSymlink bool   `json:"is_symlink"`
+}
+
+type adminFileSearchOptions struct {
+	Query           string
+	Recursive       bool
+	MinSizeBytes    *int64
+	MaxSizeBytes    *int64
+	ContentContains string
+	CaseSensitive   bool
+	Regex           bool
+	namePattern     *regexp.Regexp
+	contentPattern  *regexp.Regexp
 }
 
 type adminEnvEntry struct {
@@ -312,23 +326,98 @@ func (a *adminUI) handleSearch() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_path", err.Error())
 			return
 		}
-		recursive := true
-		if value := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("recursive"))); value == "false" || value == "0" || value == "no" || value == "off" {
-			recursive = false
+		options, err := parseAdminFileSearchOptions(r.URL.Query(), query)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
 		}
-		items, err := a.searchAdminFiles(rel, resolved, query, recursive)
+		items, err := a.searchAdminFiles(rel, resolved, options)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, map[string]any{
-			"path":          filepath.ToSlash(rel),
-			"query":         query,
-			"recursive":     recursive,
-			"items":         items,
-			"providers_dir": a.providersDirRelative(),
+			"path":             filepath.ToSlash(rel),
+			"query":            query,
+			"recursive":        options.Recursive,
+			"min_size_bytes":   options.MinSizeBytes,
+			"max_size_bytes":   options.MaxSizeBytes,
+			"content_contains": options.ContentContains,
+			"case_sensitive":   options.CaseSensitive,
+			"regex":            options.Regex,
+			"items":            items,
+			"providers_dir":    a.providersDirRelative(),
 		})
 	}
+}
+
+func parseAdminFileSearchOptions(values url.Values, query string) (adminFileSearchOptions, error) {
+	options := adminFileSearchOptions{
+		Query:           query,
+		Recursive:       true,
+		ContentContains: strings.TrimSpace(values.Get("content_contains")),
+		CaseSensitive:   parseAdminBool(values.Get("case_sensitive")),
+		Regex:           parseAdminBool(values.Get("regex")),
+	}
+	if value := strings.TrimSpace(strings.ToLower(values.Get("recursive"))); value == "false" || value == "0" || value == "no" || value == "off" {
+		options.Recursive = false
+	}
+	minSize, err := parseAdminOptionalNonNegativeInt64(values.Get("min_size_bytes"), "min_size_bytes")
+	if err != nil {
+		return options, err
+	}
+	maxSize, err := parseAdminOptionalNonNegativeInt64(values.Get("max_size_bytes"), "max_size_bytes")
+	if err != nil {
+		return options, err
+	}
+	if minSize != nil && maxSize != nil && *maxSize < *minSize {
+		return options, fmt.Errorf("max_size_bytes must be greater than or equal to min_size_bytes")
+	}
+	options.MinSizeBytes = minSize
+	options.MaxSizeBytes = maxSize
+	if options.Regex {
+		namePattern, err := compileAdminSearchRegexp(options.Query, options.CaseSensitive)
+		if err != nil {
+			return options, fmt.Errorf("invalid filename regex: %w", err)
+		}
+		options.namePattern = namePattern
+		if options.ContentContains != "" {
+			contentPattern, err := compileAdminSearchRegexp(options.ContentContains, options.CaseSensitive)
+			if err != nil {
+				return options, fmt.Errorf("invalid content regex: %w", err)
+			}
+			options.contentPattern = contentPattern
+		}
+	}
+	return options, nil
+}
+
+func parseAdminBool(value string) bool {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseAdminOptionalNonNegativeInt64(value string, name string) (*int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return &parsed, nil
+}
+
+func compileAdminSearchRegexp(pattern string, caseSensitive bool) (*regexp.Regexp, error) {
+	if caseSensitive {
+		return regexp.Compile(pattern)
+	}
+	return regexp.Compile("(?i:" + pattern + ")")
 }
 
 func (a *adminUI) adminTreeItems(rel string, resolved string) ([]adminFileEntry, error) {
@@ -393,23 +482,23 @@ func (a *adminUI) adminTreeItems(rel string, resolved string) ([]adminFileEntry,
 	return items, nil
 }
 
-func (a *adminUI) searchAdminFiles(rel string, resolved string, query string, recursive bool) ([]adminFileEntry, error) {
+func (a *adminUI) searchAdminFiles(rel string, resolved string, options adminFileSearchOptions) ([]adminFileEntry, error) {
 	items, err := a.adminTreeItems(rel, resolved)
 	if err != nil {
 		return nil, err
 	}
 	var matches []adminFileEntry
 	for _, item := range items {
-		matched, err := adminFileSearchMatches(item.Name, query)
+		matched, err := a.adminFileSearchMatches(resolved, item, options)
 		if err != nil {
 			return nil, err
 		}
 		if matched {
 			matches = append(matches, item)
 		}
-		if recursive && item.IsDir && !item.IsSymlink {
+		if options.Recursive && item.IsDir && !item.IsSymlink {
 			childResolved := filepath.Join(resolved, item.Name)
-			childMatches, err := a.searchAdminFiles(item.Path, childResolved, query, true)
+			childMatches, err := a.searchAdminFiles(item.Path, childResolved, options)
 			if err != nil {
 				return nil, err
 			}
@@ -419,17 +508,61 @@ func (a *adminUI) searchAdminFiles(rel string, resolved string, query string, re
 	return matches, nil
 }
 
-func adminFileSearchMatches(name string, query string) (bool, error) {
-	name = strings.ToLower(name)
-	query = strings.ToLower(strings.TrimSpace(query))
+func (a *adminUI) adminFileSearchMatches(parentResolved string, item adminFileEntry, options adminFileSearchOptions) (bool, error) {
+	matched, err := adminFileNameSearchMatches(item.Name, options)
+	if err != nil || !matched {
+		return matched, err
+	}
+	if options.MinSizeBytes != nil && item.Size < *options.MinSizeBytes {
+		return false, nil
+	}
+	if options.MaxSizeBytes != nil && item.Size > *options.MaxSizeBytes {
+		return false, nil
+	}
+	if strings.TrimSpace(options.ContentContains) == "" {
+		return true, nil
+	}
+	if item.IsDir || item.IsSymlink || !item.IsText || !item.Editable || item.Size > adminMaxTextFileSize {
+		return false, nil
+	}
+	content, err := os.ReadFile(filepath.Join(parentResolved, item.Name))
+	if err != nil {
+		return false, err
+	}
+	if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
+		return false, nil
+	}
+	return adminFileContentSearchMatches(string(content), options), nil
+}
+
+func adminFileNameSearchMatches(name string, options adminFileSearchOptions) (bool, error) {
+	query := strings.TrimSpace(options.Query)
+	if options.Regex {
+		return options.namePattern.MatchString(name), nil
+	}
+	if !options.CaseSensitive {
+		name = strings.ToLower(name)
+		query = strings.ToLower(query)
+	}
 	if strings.ContainsAny(query, "*?") {
-		matched, err := filepath.Match(query, name)
-		if err != nil {
-			return false, err
-		}
-		return matched, nil
+		return filepath.Match(query, name)
 	}
 	return strings.Contains(name, query), nil
+}
+
+func adminFileContentSearchMatches(content string, options adminFileSearchOptions) bool {
+	needle := strings.TrimSpace(options.ContentContains)
+	if needle == "" {
+		return true
+	}
+	if options.Regex {
+		return options.contentPattern.MatchString(content)
+	}
+	if !options.CaseSensitive {
+		content = strings.ToLower(content)
+		needle = strings.ToLower(needle)
+	}
+	return strings.Contains(content, needle)
 }
 
 func (a *adminUI) isVisibleTreeFile(parentDir string, name string) bool {

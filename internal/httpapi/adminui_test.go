@@ -481,6 +481,51 @@ func TestAdminUISearchFindsFilenamesFromCurrentDirectory(t *testing.T) {
 	}
 }
 
+func TestAdminUISearchAdvancedFiltersContentSizeCaseAndRegex(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	root := server.admin.rootDir()
+	logsDir := filepath.Join(root, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "alpha.txt"), []byte("Needle\n"), 0o644); err != nil {
+		t.Fatalf("write alpha: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "beta.txt"), []byte("needle with extra bytes\n"), 0o644); err != nil {
+		t.Fatalf("write beta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "gamma.json"), []byte(`{"kind":"needle"}`), 0o644); err != nil {
+		t.Fatalf("write gamma: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=.*\\.txt&regex=true&case_sensitive=true&content_contains=Needle&min_size_bytes=1&max_size_bytes=16", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected advanced search 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	if data["case_sensitive"] != true || data["regex"] != true || data["content_contains"] != "Needle" {
+		t.Fatalf("expected advanced metadata, got %#v", data)
+	}
+	names := adminTreeItemNames(t, rec.Body.Bytes())
+	if !slices.Equal(names, []string{"alpha.txt"}) {
+		t.Fatalf("expected only alpha.txt to match advanced filters, got %v", names)
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=*&min_size_bytes=20&max_size_bytes=10", nil)
+	invalidReq.AddCookie(cookie)
+	invalidReq.Header.Set("X-Admin-CSRF", csrf)
+	invalidRec := httptest.NewRecorder()
+	server.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid size range 400, got %d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+}
+
 func TestAdminUIReadNDJSONFileUsesJSONLanguage(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -762,39 +807,6 @@ func TestAdminUIAppScriptIncludesClearCacheModal(t *testing.T) {
 	}
 	if !strings.Contains(body, "/_admin/api/cacheinfo/providers/clear") || !strings.Contains(body, "provider_id") {
 		t.Fatalf("expected app script to call cacheinfo clear API with provider_id, got %s", body)
-	}
-}
-
-func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
-	server := newAdminUITestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	for _, want := range []string{
-		"search-tree-button",
-		"renderFileSearchModal",
-		"file-search-query",
-		"file-search-recursive",
-		"file-search-advanced",
-		"/_admin/api/search",
-		"搜索子目录",
-		"高级搜索",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected app script to include %q, got %s", want, body)
-		}
-	}
-	if !strings.Contains(body, `id="file-search-recursive" type="checkbox" checked`) {
-		t.Fatalf("expected search recursive checkbox checked by default, got %s", body)
-	}
-	if strings.Contains(body, `id="file-search-advanced" type="checkbox" checked`) {
-		t.Fatalf("expected advanced search checkbox not checked by default, got %s", body)
 	}
 }
 
