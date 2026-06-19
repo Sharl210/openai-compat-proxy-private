@@ -29,6 +29,8 @@ func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
 		"admin-file-search-size-settings",
 		"loadFileSearchSizeSettings",
 		"persistFileSearchSizeSettings",
+		"buildFileSearchRequestParams",
+		"fileSearchValueToBytes",
 		"restoreSearchResultsState",
 		"file-search-query",
 		"file-search-recursive",
