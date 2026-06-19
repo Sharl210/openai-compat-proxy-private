@@ -45,6 +45,7 @@ func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
 		"file-search-content-history-button",
 		"file-search-history-menu",
 		"file-search-history-item",
+		"file-search-history-pick",
 		"file-search-history-delete",
 		"file-search-history-clear",
 		"file-search-case-sensitive",

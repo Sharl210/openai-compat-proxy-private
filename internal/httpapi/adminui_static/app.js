@@ -606,10 +606,10 @@ async function openFile(path) {
       dirty: false,
     };
     state.lastSaveFeedback = null;
-    pushHistoryState();
     state.view = 'editor';
     state.sidebarOpen = false;
     state.envExpanded = {};
+    pushHistoryState();
     render();
   } catch (error) {
     setToast('error', error.message || '文件读取失败');
