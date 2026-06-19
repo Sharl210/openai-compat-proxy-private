@@ -394,3 +394,84 @@ func TestProviderSelectionForLegacyNoPromptBeforeReasoningSuffix(t *testing.T) {
 	}
 	_ = server
 }
+
+func TestProviderSelectionUnpacksExternalModelIDAfterLegacyProviderSelection(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         true,
+			ManualModels:    []string{"gpt-5.5"},
+			ModelIDTemplate: "openai-{{model}}",
+		}},
+	})
+	server := NewServerWithStore(store, nil, nil)
+
+	req := httptest.NewRequest("POST", "/v1/responses", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "openai-gpt-5.5")
+	if err != nil {
+		t.Fatalf("expected provider selection without error, got %v", err)
+	}
+	if !ok || providerID != "openai" || provider.ID != "openai" || resolvedModel != "gpt-5.5" {
+		t.Fatalf("expected external legacy model to resolve to openai/gpt-5.5, got providerID=%q provider=%q model=%q ok=%v", providerID, provider.ID, resolvedModel, ok)
+	}
+	_ = server
+}
+
+func TestProviderSelectionUnpacksExternalModelIDForExplicitProviderRoute(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         true,
+			ManualModels:    []string{"gpt-5.5"},
+			ModelIDTemplate: "openai-{{model}}",
+		}},
+	})
+	server := NewServerWithStore(store, nil, nil)
+
+	req := httptest.NewRequest("POST", "/openai/v1/responses", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "openai-gpt-5.5")
+	if err != nil {
+		t.Fatalf("expected provider selection without error, got %v", err)
+	}
+	if !ok || providerID != "openai" || provider.ID != "openai" || resolvedModel != "gpt-5.5" {
+		t.Fatalf("expected external provider-route model to resolve to openai/gpt-5.5, got providerID=%q provider=%q model=%q ok=%v", providerID, provider.ID, resolvedModel, ok)
+	}
+	_ = server
+}
+
+func TestProviderSelectionKeepsRawModelForRootOnlyExplicitProviderRoute(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			ID:                      "openai",
+			Enabled:                 true,
+			ManualModels:            []string{"gpt-5.5"},
+			ModelIDTemplate:         "openai-{{model}}",
+			ModelIDTemplateRootOnly: true,
+		}},
+	})
+	server := NewServerWithStore(store, nil, nil)
+
+	req := httptest.NewRequest("POST", "/openai/v1/responses", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "gpt-5.5")
+	if err != nil {
+		t.Fatalf("expected provider selection without error, got %v", err)
+	}
+	if !ok || providerID != "openai" || provider.ID != "openai" || resolvedModel != "gpt-5.5" {
+		t.Fatalf("expected raw provider-route model to remain openai/gpt-5.5, got providerID=%q provider=%q model=%q ok=%v", providerID, provider.ID, resolvedModel, ok)
+	}
+	_, _, _, _, ok, err = providerSelectionForModelRequest(req, "openai-gpt-5.5")
+	if err != nil {
+		t.Fatalf("expected provider selection rejection without upstream error, got %v", err)
+	}
+	if ok {
+		t.Fatalf("expected root-only explicit provider route to reject templated external model id")
+	}
+	_ = server
+}

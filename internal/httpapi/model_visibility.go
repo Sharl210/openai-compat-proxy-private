@@ -48,7 +48,7 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 	if !providerModelsListEnforcedForRequest(r, provider, info) {
 		return nil
 	}
-	allowed, enforced, err := explicitProviderVisibleModelSet(ctx, provider, providerCfg, authorization)
+	allowed, enforced, err := explicitProviderVisibleModelSet(ctx, r, provider, providerCfg, authorization)
 	if err != nil {
 		return err
 	}
@@ -128,22 +128,23 @@ func writeModelAllowanceError(w http.ResponseWriter, err error) {
 	errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 }
 
-func explicitProviderVisibleModelSet(ctx context.Context, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, bool, error) {
+func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, bool, error) {
 	if provider.SupportsModels {
+		rootRoute := modelIDTemplateRootScopeFromRequest(r)
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
 			return nil, false, err
 		}
 		if status == http.StatusNotFound {
-			if fallback, ok := configuredModelsFallbackBody(provider); ok {
+			if fallback, ok := configuredModelsFallbackBodyForRoute(provider, rootRoute); ok {
 				set, err := modelIDSetFromBody(fallback)
 				return set, true, err
 			}
 			return nil, false, nil
 		}
 		if status >= 200 && status < 300 {
-			set, err := modelIDSetFromBody(rewriteModelsBody(body, provider))
+			set, err := modelIDSetFromBody(rewriteModelsBodyForRoute(body, provider, rootRoute))
 			return set, true, err
 		}
 		return nil, false, &upstream.HTTPStatusError{
@@ -159,7 +160,7 @@ func explicitProviderVisibleModelSet(ctx context.Context, provider config.Provid
 	}
 	set := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		set[id] = struct{}{}
+		set[provider.ExternalModelID(id, modelIDTemplateRootScopeFromRequest(r))] = struct{}{}
 	}
 	return set, true, nil
 }
