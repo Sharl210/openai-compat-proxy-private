@@ -369,3 +369,41 @@ func TestPublicRouteAliasesReachHandlersWithoutV1Segment(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicRouteAliasesNormalizeClientBaseURLArtifacts(t *testing.T) {
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:             "openai",
+			Enabled:        true,
+			SupportsModels: true,
+		}},
+	})
+
+	paths := []string{
+		"//v1/models",
+		"/v1/models/",
+		"//models",
+		"/models/",
+		"/openai//v1/models/",
+		"/openai//models/",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://example.test"+path, strings.NewReader(`{"unused":true}`))
+			req.Header.Set("Authorization", "Bearer root-secret")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("expected normalized %s to reach models handler and return 405, got %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != http.MethodGet {
+				t.Fatalf("expected Allow=%q, got %q", http.MethodGet, got)
+			}
+		})
+	}
+}

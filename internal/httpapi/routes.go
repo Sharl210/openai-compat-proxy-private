@@ -85,11 +85,20 @@ func isCanonicalV1Path(path string) bool {
 }
 
 func canonicalPublicRoutePath(path string) (string, bool) {
+	path = normalizePublicRoutePath(path)
 	if isCanonicalV1Path(path) {
 		return path, true
 	}
 	canonicalPath, ok := publicRouteAliases[path]
 	return canonicalPath, ok
+}
+
+func normalizePublicRoutePath(path string) string {
+	parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' })
+	if len(parts) == 0 {
+		return "/"
+	}
+	return "/" + strings.Join(parts, "/")
 }
 
 func withCacheInfoManager(ctx context.Context, manager *cacheinfo.Manager) context.Context {
@@ -117,6 +126,7 @@ func tokenEstimatorManagerFromRequest(r *http.Request) *tokenestimator.Manager {
 }
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
+	path = normalizePublicRoutePath(path)
 	if canonicalPath, ok := canonicalPublicRoutePath(path); ok {
 		if !cfg.EnableLegacyV1Routes {
 			return routeInfo{}, errors.New("route not found")
