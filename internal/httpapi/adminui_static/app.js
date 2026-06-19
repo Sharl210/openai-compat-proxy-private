@@ -2185,7 +2185,7 @@ async function submitFileSearch(event) {
       maxSizeUnit,
     };
     state.fileSearchLoading = false;
-    replaceHistoryState();
+    pushHistoryState();
     render();
   } catch (error) {
     state.fileSearchLoading = false;
