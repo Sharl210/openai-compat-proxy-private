@@ -653,6 +653,102 @@ func TestResolveModelTreatsReColonAsLiteralWithoutHashPrefix(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesModelIDTemplate(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"MODEL_ID_TEMPLATE=packy-{{model}}-vip",
+		"MODEL_ID_TEMPLATE_ROOT_ONLY=true",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.ModelIDTemplate != "packy-{{model}}-vip" {
+		t.Fatalf("expected model id template to be parsed, got %q", provider.ModelIDTemplate)
+	}
+	if !provider.ModelIDTemplateRootOnly {
+		t.Fatalf("expected root-only flag to be parsed")
+	}
+}
+
+func TestProviderModelIDTemplateDefaultsToIdentityEverywhere(t *testing.T) {
+	provider := ProviderConfig{}
+
+	if got := provider.ExternalModelID("gpt-5.5", true); got != "gpt-5.5" {
+		t.Fatalf("expected identity root external model id, got %q", got)
+	}
+	if got := provider.ExternalModelID("gpt-5.5", false); got != "gpt-5.5" {
+		t.Fatalf("expected identity provider external model id, got %q", got)
+	}
+	if got, ok := provider.InternalModelID("gpt-5.5", true); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected identity root internal model id, got %q ok=%v", got, ok)
+	}
+	if got, ok := provider.InternalModelID("gpt-5.5", false); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected identity provider internal model id, got %q ok=%v", got, ok)
+	}
+}
+
+func TestProviderModelIDTemplateAppliesEverywhereByDefault(t *testing.T) {
+	provider := ProviderConfig{ModelIDTemplate: "packy-{{model}}-vip"}
+
+	if got := provider.ExternalModelID("gpt-5.5", true); got != "packy-gpt-5.5-vip" {
+		t.Fatalf("expected templated root external model id, got %q", got)
+	}
+	if got := provider.ExternalModelID("gpt-5.5", false); got != "packy-gpt-5.5-vip" {
+		t.Fatalf("expected templated provider external model id, got %q", got)
+	}
+	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", true); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected root external id to unpack, got %q ok=%v", got, ok)
+	}
+	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", false); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected provider external id to unpack, got %q ok=%v", got, ok)
+	}
+}
+
+func TestProviderModelIDTemplateRootOnlyKeepsProviderRoutesRaw(t *testing.T) {
+	provider := ProviderConfig{ModelIDTemplate: "packy-{{model}}-vip", ModelIDTemplateRootOnly: true}
+
+	if got := provider.ExternalModelID("gpt-5.5", true); got != "packy-gpt-5.5-vip" {
+		t.Fatalf("expected templated root external model id, got %q", got)
+	}
+	if got := provider.ExternalModelID("gpt-5.5", false); got != "gpt-5.5" {
+		t.Fatalf("expected raw provider-route model id, got %q", got)
+	}
+	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", true); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected root external id to unpack, got %q ok=%v", got, ok)
+	}
+	if got, ok := provider.InternalModelID("gpt-5.5", false); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected provider-route raw id to pass through, got %q ok=%v", got, ok)
+	}
+	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", false); ok || got != "" {
+		t.Fatalf("expected provider-route templated id to be rejected when root-only=true, got %q ok=%v", got, ok)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidModelIDTemplate(t *testing.T) {
+	for _, template := range []string{"packy-model", "{{model}}-{{model}}", ""} {
+		t.Run(template, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nMODEL_ID_TEMPLATE=" + template + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			if _, err := loadProviderFile(providerEnvPath); err == nil {
+				t.Fatalf("expected invalid MODEL_ID_TEMPLATE %q to fail", template)
+			}
+		})
+	}
+}
+
 func TestLoadProviderFileParsesHiddenModelsList(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

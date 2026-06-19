@@ -43,6 +43,8 @@ type ProviderConfig struct {
 	SupportsResponses                      bool
 	SupportsModels                         bool
 	SupportsAnthropicMessages              bool
+	ModelIDTemplate                        string
+	ModelIDTemplateRootOnly                bool
 	ModelMap                               []ModelMapEntry
 	ManualModels                           []string
 	HiddenModels                           []string
@@ -173,6 +175,7 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		UpstreamRetryDelay:                    DefaultUpstreamRetryDelay,
 		UpstreamEndpointType:                  UpstreamEndpointTypeResponses,
 		ResponsesToolCompatMode:               ResponsesToolCompatModePreserve,
+		ModelIDTemplate:                       defaultModelIDTemplate,
 		UpstreamXMLToolCallStyle:              UpstreamXMLToolCallStyleLegacy,
 		MapReasoningSuffixToAnthropicThinking: true,
 	}
@@ -276,6 +279,17 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 		case "SUPPORTS_ANTHROPIC_MESSAGES":
 			provider.SupportsAnthropicMessages, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "MODEL_ID_TEMPLATE":
+			normalized, err := normalizeModelIDTemplate(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.ModelIDTemplate = normalized
+		case "MODEL_ID_TEMPLATE_ROOT_ONLY":
+			provider.ModelIDTemplateRootOnly, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
@@ -438,6 +452,80 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("UPSTREAM_BASE_URL is required for enabled provider %q", provider.ID))
 	}
 	return provider, nil
+}
+
+const (
+	modelIDTemplatePlaceholder = "{{model}}"
+	defaultModelIDTemplate     = modelIDTemplatePlaceholder
+)
+
+func normalizeModelIDTemplate(value string, key string, path string) (string, error) {
+	template := strings.TrimSpace(value)
+	if template == "" {
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: must contain exactly one %s placeholder", key, path, modelIDTemplatePlaceholder))
+	}
+	if strings.Count(template, modelIDTemplatePlaceholder) != 1 {
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: must contain exactly one %s placeholder", key, path, modelIDTemplatePlaceholder))
+	}
+	return template, nil
+}
+
+func (p ProviderConfig) effectiveModelIDTemplate() string {
+	template := strings.TrimSpace(p.ModelIDTemplate)
+	if template == "" {
+		return defaultModelIDTemplate
+	}
+	return template
+}
+
+func (p ProviderConfig) modelIDTemplateApplies(rootRoute bool) bool {
+	return rootRoute || !p.ModelIDTemplateRootOnly
+}
+
+func (p ProviderConfig) ExternalModelID(model string, rootRoute bool) string {
+	model = strings.TrimSpace(model)
+	if model == "" || !p.modelIDTemplateApplies(rootRoute) {
+		return model
+	}
+	template := p.effectiveModelIDTemplate()
+	if template == defaultModelIDTemplate {
+		return model
+	}
+	return strings.Replace(template, modelIDTemplatePlaceholder, model, 1)
+}
+
+func (p ProviderConfig) InternalModelID(model string, rootRoute bool) (string, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", false
+	}
+	if !p.modelIDTemplateApplies(rootRoute) {
+		if internal, ok := p.unpackTemplatedModelID(model); ok && internal != model {
+			return "", false
+		}
+		return model, true
+	}
+	template := p.effectiveModelIDTemplate()
+	if template == defaultModelIDTemplate {
+		return model, true
+	}
+	return p.unpackTemplatedModelID(model)
+}
+
+func (p ProviderConfig) unpackTemplatedModelID(model string) (string, bool) {
+	template := p.effectiveModelIDTemplate()
+	if template == defaultModelIDTemplate {
+		return model, true
+	}
+	prefix, suffix, _ := strings.Cut(template, modelIDTemplatePlaceholder)
+	if !strings.HasPrefix(model, prefix) || !strings.HasSuffix(model, suffix) {
+		return "", false
+	}
+	internal := strings.TrimSuffix(strings.TrimPrefix(model, prefix), suffix)
+	if strings.TrimSpace(internal) == "" {
+		return "", false
+	}
+	return internal, true
 }
 
 func (p ProviderConfig) EffectiveDownstreamNonStreamStrategy(rootStrategy string) string {
