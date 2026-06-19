@@ -174,7 +174,7 @@ func prepareImagesRequest(w http.ResponseWriter, r *http.Request) (*preparedImag
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 		return nil, false
 	}
-	if mappedModel := provider.ResolveModel(modelName, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
+	if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
 		resolvedModel = mappedModel
 	}
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
@@ -224,7 +224,7 @@ func prepareJSONPassthroughRequest(w http.ResponseWriter, r *http.Request) (*pre
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
 		return nil, false
 	}
-	if mappedModel := provider.ResolveModel(modelName, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
+	if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
 		resolvedModel = mappedModel
 	}
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
