@@ -579,3 +579,56 @@ data: {}
 	t.Logf("function_call_arguments.delta: %d", argsDeltaCount)
 	t.Logf("function_call_arguments.done: %d", argsDoneCount)
 }
+
+func TestNormalizeAnthropicFrame_MergesMessageStartUsage(t *testing.T) {
+	frames := []struct {
+		event string
+		data  string
+	}{
+		{`message_start`, `{"message":{"id":"msg_123","type":"message","role":"assistant","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":8861,"input_tokens":1034,"output_tokens":0}}}`},
+		{`content_block_start`, `{"index":0,"content_block":{"type":"text","text":""}}`},
+		{`content_block_delta`, `{"index":0,"delta":{"type":"text_delta","text":"Hello"}}`},
+		{`message_delta`, `{"usage":{"output_tokens":1966},"delta":{"stop_reason":"end_turn"}}`},
+		{`message_stop`, `{}`},
+	}
+
+	state := &anthropicNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		usage:          map[string]any{},
+	}
+
+	var completed *Event
+	for _, f := range frames {
+		frame := &sseFrame{Event: f.event, Data: f.data}
+		events, done, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		if done {
+			break
+		}
+		for i := range events {
+			if events[i].Event == "response.completed" {
+				completed = &events[i]
+			}
+		}
+	}
+	if completed == nil {
+		t.Fatal("expected response.completed event")
+	}
+	response, _ := completed.Data["response"].(map[string]any)
+	usage, _ := response["usage"].(map[string]any)
+	if got := usage["input_tokens"]; got != float64(9895) {
+		t.Fatalf("expected input_tokens to include input and cache from message_start, got %#v", got)
+	}
+	details, _ := usage["input_tokens_details"].(map[string]any)
+	if got := details["cached_tokens"]; got != float64(8861) {
+		t.Fatalf("expected cached_tokens from message_start, got %#v", got)
+	}
+	if got := usage["output_tokens"]; got != float64(1966) {
+		t.Fatalf("expected output_tokens from message_delta, got %#v", got)
+	}
+	if got := usage["total_tokens"]; got != float64(11861) {
+		t.Fatalf("expected total_tokens to include start and delta usage, got %#v", got)
+	}
+}

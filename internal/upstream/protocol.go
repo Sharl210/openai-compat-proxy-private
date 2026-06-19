@@ -999,6 +999,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	switch frame.Event {
 	case "message_start":
 		message, _ := payload["message"].(map[string]any)
+		mergeUsage(state.usage, normalizeAnthropicUsage(message["usage"]))
 		if responseID := stringValue(message["id"]); responseID != "" {
 			state.responseID = responseID
 			events = append(events, Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": responseID, "object": "response"}}})
@@ -1348,6 +1349,11 @@ func normalizeAnthropicUsage(raw any) map[string]any {
 func mergeUsage(dst map[string]any, src map[string]any) {
 	for k, v := range src {
 		dst[k] = v
+	}
+	input := numberValue(dst["input_tokens"])
+	output := numberValue(dst["output_tokens"])
+	if input != 0 || output != 0 {
+		dst["total_tokens"] = input + output
 	}
 }
 
