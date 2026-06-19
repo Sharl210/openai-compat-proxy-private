@@ -14,6 +14,8 @@ import (
 
 const versionTimeLayout = "2006-01-02 15:04:05.000"
 
+const systemPromptSectionSeparator = "================================"
+
 type RuntimeSnapshot struct {
 	Config                     Config
 	RootEnvPath                string
@@ -555,7 +557,7 @@ func loadSystemPromptText(paths []string, latest time.Time) (string, time.Time, 
 		trimmed := strings.TrimRight(raw, "\r\n")
 		sections = append(sections, trimmed)
 	}
-	return strings.Join(sections, "\n\n"), latest, nil
+	return strings.Join(sections, "\n\n"+systemPromptSectionSeparator+"\n\n"), latest, nil
 }
 
 func (s *RuntimeSnapshot) PromptWatchDirs() []string {

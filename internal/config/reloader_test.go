@@ -785,6 +785,40 @@ func TestBuildRuntimeSnapshotLoadsSystemPromptTextFromProviderFiles(t *testing.T
 	}
 }
 
+func TestBuildRuntimeSnapshotJoinsMultipleSystemPromptFilesWithSeparator(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(filepath.Join(providersDir, "prompts"), 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	basePromptPath := filepath.Join(providersDir, "prompt.md")
+	extraPromptPath := filepath.Join(providersDir, "prompts", "extra.md")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", time.Date(2026, 6, 19, 16, 0, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nSYSTEM_PROMPT_FILES=prompt.md, prompts/extra.md\n", time.Date(2026, 6, 19, 16, 1, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, basePromptPath, "base prompt\n", time.Date(2026, 6, 19, 16, 1, 30, 0, time.UTC))
+	writeConfigFileWithMTime(t, extraPromptPath, "extra prompt\n", time.Date(2026, 6, 19, 16, 2, 0, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	expected := "base prompt\n\n================================\n\nextra prompt"
+	if provider.SystemPromptText != expected {
+		t.Fatalf("expected prompt files joined with separator, got %q", provider.SystemPromptText)
+	}
+	if got := snapshot.ProviderVersionByID["openai"]; got != formatVersionTime(time.Date(2026, 6, 19, 16, 2, 0, 0, time.UTC)) {
+		t.Fatalf("expected provider version to use newest prompt file time, got %q", got)
+	}
+}
+
 func TestBuildRuntimeSnapshotIgnoresMissingSystemPromptFiles(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")
