@@ -503,10 +503,20 @@ scoped 覆写的匹配规则：
 
 支持：
 
-- `SYSTEM_PROMPT_FILES=prompt.md,...`
+- `SYSTEM_PROMPT_FILES=base.md,tools.md,provider-extra.md`
 - `SYSTEM_PROMPT_POSITION=prepend|append`
 
-对应文件内容支持热加载。
+`SYSTEM_PROMPT_FILES` 是有序组件列表，使用逗号分隔，路径相对于当前 provider `.env` 所在目录。代理会按配置顺序读取所有非空文件，把前一个文件放在最终假想提示词的前面，后一个文件接在后面；每两个组件之间自动插入一条长分隔线，并在分隔线上下各保留一行空行：
+
+```text
+base prompt
+
+================================
+
+tools prompt
+```
+
+这样可以把通用规则、工具规则、provider 专属规则拆成多个可复用提示词组件。文件数量没有硬编码上限；缺失文件和空白文件会被忽略。对应文件内容支持热加载，任一组件文件变化都会刷新 provider 版本。
 
 ### 6. 调试归档与日志
 
