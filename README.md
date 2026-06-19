@@ -449,6 +449,7 @@ scoped 覆写的匹配规则：
 支持：
 
 - `MODEL_MAP` 默认字面量映射，`#re:` source pattern 映射
+- `MODEL_ID_TEMPLATE` provider 级对外模型 ID 模板，用于把同名原始模型包装成不同代理层模型 ID
 - `$0-$9` 占位符替换（仅对 `#re:` 的 Go regexp 子匹配有捕获意义；`$10` 及以上保留字面值以避免歧义）
 - `MANUAL_MODELS` 手动补模型，也支持从上游 `/models` 列表按 `#re:` 正则匹配扩展，或用 `#reason_suffix:model` 单独生成推理后缀家族
 - `HIDDEN_MODELS` 手动隐藏模型（支持 `#re:` 正则）
@@ -459,6 +460,9 @@ scoped 覆写的匹配规则：
 
 这些变量的实际含义：
 
+- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也按 `packy-gpt-5.5` 请求；代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`，所以上游仍收到原始模型或映射后的最终模型。
+- `MODEL_ID_TEMPLATE_ROOT_ONLY`：控制模板作用范围，默认 `false`。`false` 表示 root/default provider 聚合路由和显式 `/{providerId}/...` 路由都展示并接受模板后的模型 ID；`true` 表示只有 root/default provider 聚合视角使用模板，显式 provider 路由继续展示并接受原始模型名。例：`MODEL_ID_TEMPLATE=packy-{{model}}` 且 `MODEL_ID_TEMPLATE_ROOT_ONLY=true` 时，`/v1/models` 里是 `packy-gpt-5.5`，但 `/packy/v1/models` 里仍是 `gpt-5.5`。
+
 - `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。这一项里“冒号左侧为原始模型”和“冒号右侧为原始模型”要分开看：
   - 左侧 source 是原始模型 base 时，表示这条 base source 锁定整个客户端推理家族集合。例如 `MODEL_MAP=client-gpt:upstream-gpt` 会覆盖 `model=client-gpt`、`model=client-gpt-high`、`model=client-gpt-low`，也覆盖 `model=client-gpt` + `reasoning.effort=high` / `reasoning_effort=high` / Anthropic `thinking/output_config` 表达的 high；最终发往 `upstream-gpt`，effort 按客户端 suffix 或请求体参数保留。
   - 左侧 source 带 suffix 时，表示定向匹配某个推理档位，base 请求携带同档请求体参数也能反向锁定这条规则。例如 `MODEL_MAP=client-gpt-high:upstream-priority` 既匹配 `model=client-gpt-high`，也匹配 `model=client-gpt` + `reasoning.effort=high`，用于把 high 档定向转到 `upstream-priority`。这个等效匹配只作用于 MODEL_MAP，不会把 `client-gpt-high` 自动加入 `/models`。
@@ -468,7 +472,7 @@ scoped 覆写的匹配规则：
   - 右侧 target 一旦写成带 suffix 的模型，target suffix 就优先于客户端显式请求参数。例如 `MODEL_MAP=client-gpt-high:upstream-gpt-low` 遇到 `model=client-gpt` + `reasoning.effort=high` 时，仍会发往 `upstream-gpt`，但最终 effort 会被定板成 `low`；同理 `MODEL_MAP=gpt-5.4:gpt-5.4-xhigh` 遇到 `model=gpt-5.4` + `reasoning.effort=none` 时，最终也会按 `xhigh` 发给上游。只有右侧 target 是不带 suffix 的 base 模型时，客户端显式请求参数才继续生效。这些配置层 suffix 语义不受 `ENABLE_REASONING_EFFORT_SUFFIX` 限制。
   - 相同 source 多条规则时，越靠后优先级越高；后写的规则覆盖前面同 source 规则。例如 `MODEL_MAP=client-gpt:upstream-a,client-gpt:upstream-b` 最终命中 `upstream-b`。
   - 不同 source 规则不做链式递归映射，始终只对客户端原始请求模型做一次匹配。例如 `MODEL_MAP=model-a:model-c,model-c:model-d` 时，请求 `model-a` 只会得到 `model-c`，不会继续推出 `model-d`。
-- `MANUAL_MODELS`：模型列表补齐和筛选。静态模型名会作为字面模型暴露；`#re:` 只从上游 `/models` 返回的原始模型列表里扩展；`#reason_suffix:model` 会为 base model 手动生成推理后缀家族。它不参与请求时 MODEL_MAP 等效匹配，所以不会因为请求体带了 `reasoning.effort=high` 就把 `client-gpt` 当作 `client-gpt-high` 加入列表或准入。`MODEL_MAP` alias 要出现在 `/models`，必须在这里显式写出来。
+- `MANUAL_MODELS`：模型列表补齐和筛选。这里仍写 provider 内部原始模型名；如果配置了 `MODEL_ID_TEMPLATE`，代理会在 `/models` 输出和请求准入边界把它包装成对外模型 ID。静态模型名会作为字面模型暴露；`#re:` 只从上游 `/models` 返回的原始模型列表里扩展；`#reason_suffix:model` 会为 base model 手动生成推理后缀家族。它不参与请求时 MODEL_MAP 等效匹配，所以不会因为请求体带了 `reasoning.effort=high` 就把 `client-gpt` 当作 `client-gpt-high` 加入列表或准入。`MODEL_MAP` alias 要出现在 `/models`，必须在这里显式写出来。
 - `HIDDEN_MODELS`：模型列表隐藏和准入限制。它支持字面量、`#re:` 和 `#reason_suffix` family marker；`#re:` 是普通 Go regexp，不理解 suffix 语义边界。它也不参与请求时 MODEL_MAP 等效匹配，所以 `HIDDEN_MODELS=client-gpt-high` 不会阻止 `model=client-gpt` + `reasoning.effort=high` 命中 `MODEL_MAP=client-gpt-high:upstream-gpt`。
 - `ENABLE_REASONING_EFFORT_SUFFIX`：只控制客户端能不能用 `model-high` 这类模型名后缀表达推理强度；它不限制 `MODEL_MAP` source/target 里的配置层 suffix，也不限制请求体里显式传入的 reasoning effort。
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
