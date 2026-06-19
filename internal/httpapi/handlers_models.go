@@ -51,7 +51,7 @@ func handleModels() http.HandlerFunc {
 			return
 		}
 		if status == http.StatusNotFound {
-			if fallbackBody, fallbackOK := configuredModelsFallbackBody(provider); fallbackOK {
+			if fallbackBody, fallbackOK := configuredModelsFallbackBodyForRoute(provider, modelIDTemplateRootScopeFromRequest(r)); fallbackOK {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(fallbackBody)
@@ -63,7 +63,7 @@ func handleModels() http.HandlerFunc {
 			contentType = "application/json"
 		}
 		if ok {
-			body = rewriteModelsBody(body, provider)
+			body = rewriteModelsBodyForRoute(body, provider, modelIDTemplateRootScopeFromRequest(r))
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
@@ -197,6 +197,17 @@ func decodeModelEntries(body []byte) []map[string]any {
 }
 
 func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
+	return rewriteModelsBodyForRoute(body, provider, true)
+}
+
+func modelIDTemplateRootScopeFromRequest(r *http.Request) bool {
+	if info, ok := routeInfoFromRequest(r); ok {
+		return info.Legacy
+	}
+	return true
+}
+
+func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, rootRoute bool) []byte {
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body
@@ -257,12 +268,21 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 	}
 	expanded = filteredExpanded
 	entries := make([]map[string]any, 0, len(expanded))
+	seenExternalIDs := make(map[string]struct{}, len(expanded))
 	for _, id := range expanded {
+		externalID := provider.ExternalModelID(id, rootRoute)
+		if externalID == "" {
+			continue
+		}
+		if _, exists := seenExternalIDs[externalID]; exists {
+			continue
+		}
+		seenExternalIDs[externalID] = struct{}{}
 		entry := cloneModelEntry(entriesByID[id])
 		if len(entry) == 0 {
-			entry = map[string]any{"id": id}
+			entry = map[string]any{"id": externalID}
 		} else {
-			entry["id"] = id
+			entry["id"] = externalID
 		}
 		entries = append(entries, entry)
 	}
@@ -275,6 +295,10 @@ func rewriteModelsBody(body []byte, provider config.ProviderConfig) []byte {
 }
 
 func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool) {
+	return configuredModelsFallbackBodyForRoute(provider, true)
+}
+
+func configuredModelsFallbackBodyForRoute(provider config.ProviderConfig, rootRoute bool) ([]byte, bool) {
 	ids := provider.VisibleModelIDs()
 	if len(ids) == 0 {
 		return nil, false
@@ -282,7 +306,7 @@ func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool)
 	entries := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		entries = append(entries, map[string]any{
-			"id":     id,
+			"id":     provider.ExternalModelID(id, rootRoute),
 			"object": "model",
 		})
 	}

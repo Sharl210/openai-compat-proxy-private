@@ -91,6 +91,52 @@ func TestRewriteModelsBodyHidesAliasWhenMappedTargetIsMissing(t *testing.T) {
 	}
 }
 
+func TestRewriteModelsBodyAppliesModelIDTemplateByDefault(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"openai"}]}`)
+	provider := config.ProviderConfig{ModelIDTemplate: "packy-{{model}}"}
+
+	rewritten := rewriteModelsBodyForRoute(body, provider, false)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("expected one model entry, got %#v", data)
+	}
+	entry, _ := data[0].(map[string]any)
+	if got := entry["id"]; got != "packy-gpt-5.5" {
+		t.Fatalf("expected provider route to expose templated id by default, got %#v", got)
+	}
+}
+
+func TestRewriteModelsBodyRootOnlyTemplateKeepsProviderRouteRaw(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"openai"}]}`)
+	provider := config.ProviderConfig{ModelIDTemplate: "packy-{{model}}", ModelIDTemplateRootOnly: true}
+
+	providerBody := rewriteModelsBodyForRoute(body, provider, false)
+	var providerPayload map[string]any
+	if err := json.Unmarshal(providerBody, &providerPayload); err != nil {
+		t.Fatalf("decode provider models body: %v", err)
+	}
+	providerData, _ := providerPayload["data"].([]any)
+	providerEntry, _ := providerData[0].(map[string]any)
+	if got := providerEntry["id"]; got != "gpt-5.5" {
+		t.Fatalf("expected provider route to expose raw id when root-only=true, got %#v", got)
+	}
+
+	rootBody := rewriteModelsBodyForRoute(body, provider, true)
+	var rootPayload map[string]any
+	if err := json.Unmarshal(rootBody, &rootPayload); err != nil {
+		t.Fatalf("decode root models body: %v", err)
+	}
+	rootData, _ := rootPayload["data"].([]any)
+	rootEntry, _ := rootData[0].(map[string]any)
+	if got := rootEntry["id"]; got != "packy-gpt-5.5" {
+		t.Fatalf("expected root route to expose templated id when root-only=true, got %#v", got)
+	}
+}
+
 func TestExpandModelIDsKeepsExplicitAliases(t *testing.T) {
 	expanded := reasoning.ExpandModelIDs([]string{"public-gpt", "gpt-5.4", "gpt-5.4-high"}, []string{"public-gpt"}, true)
 	got := map[string]bool{}
