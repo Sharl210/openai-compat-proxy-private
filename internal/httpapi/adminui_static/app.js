@@ -606,10 +606,10 @@ async function openFile(path) {
       dirty: false,
     };
     state.lastSaveFeedback = null;
+    pushHistoryState();
     state.view = 'editor';
     state.sidebarOpen = false;
     state.envExpanded = {};
-    pushHistoryState();
     render();
   } catch (error) {
     setToast('error', error.message || '文件读取失败');
@@ -1773,7 +1773,7 @@ function renderFileSearchModal() {
         <span class="form-label">欲搜索文件名（支持通配符*和?）</span>
         <span class="file-search-input-wrap">
           <input id="file-search-query" type="text" class="text-input" value="${escapeAttr(query)}" autocomplete="off" ${submitting ? 'disabled' : 'autofocus'}>
-          <button id="file-search-filename-history-button" class="file-search-history-button" type="button" data-file-search-history="filename" ${submitting ? 'disabled' : ''}>⌄</button>
+          <button id="file-search-filename-history-button" class="file-search-history-button" type="button" data-file-search-history="filename" ${submitting ? 'disabled' : ''}>▾</button>
         </span>
         ${renderFileSearchHistoryMenu('filename', state.fileSearchModal.filenameHistory || [])}
       </label>
@@ -1805,7 +1805,7 @@ function renderFileSearchModal() {
           <span class="form-label">文件中包含内容</span>
           <span class="file-search-input-wrap">
             <input id="file-search-content" type="text" class="text-input" value="${escapeAttr(content)}" autocomplete="off" ${submitting ? 'disabled' : ''}>
-            <button id="file-search-content-history-button" class="file-search-history-button" type="button" data-file-search-history="content" ${submitting ? 'disabled' : ''}>⌄</button>
+            <button id="file-search-content-history-button" class="file-search-history-button" type="button" data-file-search-history="content" ${submitting ? 'disabled' : ''}>▾</button>
           </span>
           ${renderFileSearchHistoryMenu('content', state.fileSearchModal.contentHistory || [])}
         </label>
@@ -1840,10 +1840,12 @@ function renderFileSearchHistoryMenu(kind, items) {
     return '';
   }
   const entries = (items || []).map((item) => `
-    <button class="file-search-history-item" type="button" data-file-search-history-pick="${kind}" data-value="${escapeAttr(item)}">
-      <span>${escapeHtml(item)}</span>
-      <span class="file-search-history-delete" data-file-search-history-delete="${kind}" data-value="${escapeAttr(item)}">×</span>
-    </button>
+    <div class="file-search-history-item">
+      <button class="file-search-history-pick" type="button" data-file-search-history-pick="${kind}" data-value="${escapeAttr(item)}">
+        <span>${escapeHtml(item)}</span>
+      </button>
+      <button class="file-search-history-delete" type="button" data-file-search-history-delete="${kind}" data-value="${escapeAttr(item)}" aria-label="删除历史记录">×</button>
+    </div>
   `).join('');
   return `
     <div id="file-search-history-menu" class="file-search-history-menu" data-kind="${kind}">
