@@ -481,6 +481,117 @@ func TestAdminUISearchFindsFilenamesFromCurrentDirectory(t *testing.T) {
 	}
 }
 
+func TestAdminUISearchEmptyOrMissingQueryUsesWildcard(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	root := server.admin.rootDir()
+	logsDir := filepath.Join(root, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "req-root.txt"), []byte("root"), 0o644); err != nil {
+		t.Fatalf("write root log: %v", err)
+	}
+	nestedDir := filepath.Join(logsDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "req-nested.txt"), []byte("nested"), 0o644); err != nil {
+		t.Fatalf("write nested log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "req-outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatalf("write outside log: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "missing query", url: "/_admin/api/search?path=logs"},
+		{name: "empty query", url: "/_admin/api/search?path=logs&query="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			req.AddCookie(cookie)
+			req.Header.Set("X-Admin-CSRF", csrf)
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected wildcard search 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			data := decodeAdminJSON(t, rec.Body.Bytes())
+			if data["query"] != "*" {
+				t.Fatalf("expected wildcard query metadata, got %#v", data["query"])
+			}
+			if data["recursive"] != true {
+				t.Fatalf("expected recursive search by default, got %#v", data["recursive"])
+			}
+			names := adminTreeItemNames(t, rec.Body.Bytes())
+			if !slices.Contains(names, "req-root.txt") || !slices.Contains(names, "req-nested.txt") {
+				t.Fatalf("expected wildcard search to include visible files in scope, got %v", names)
+			}
+			if slices.Contains(names, "req-outside.txt") {
+				t.Fatalf("expected search to stay inside current directory, got %v", names)
+			}
+		})
+	}
+}
+
+func TestAdminUISearchRegexDoesNotApplyToFilenameQuery(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	root := server.admin.rootDir()
+	logsDir := filepath.Join(root, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "req-root.txt"), []byte("Needle"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=req-.*.txt&regex=true", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected glob filename search 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	data := decodeAdminJSON(t, rec.Body.Bytes())
+	if data["regex"] != true {
+		t.Fatalf("expected regex metadata to stay true, got %#v", data["regex"])
+	}
+	names := adminTreeItemNames(t, rec.Body.Bytes())
+	if len(names) != 0 {
+		t.Fatalf("expected filename query to stay glob-based, got %v", names)
+	}
+}
+
+func TestAdminUISearchInvalidContentRegexErrors(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, csrf := adminLogin(t, server)
+	root := server.admin.rootDir()
+	logsDir := filepath.Join(root, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logsDir, "alpha.txt"), []byte("Needle\n"), 0o644); err != nil {
+		t.Fatalf("write alpha: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=*.txt&regex=true&content_contains=(", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-Admin-CSRF", csrf)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid content regex 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid content regex") {
+		t.Fatalf("expected invalid content regex error, got %s", rec.Body.String())
+	}
+}
+
 func TestAdminUISearchAdvancedFiltersContentSizeCaseAndRegex(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -499,7 +610,7 @@ func TestAdminUISearchAdvancedFiltersContentSizeCaseAndRegex(t *testing.T) {
 		t.Fatalf("write gamma: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=.*\\.txt&regex=true&case_sensitive=true&content_contains=Needle&min_size_bytes=1&max_size_bytes=16", nil)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/search?path=logs&query=*.txt&regex=true&case_sensitive=true&content_contains=Needle&min_size_bytes=1&max_size_bytes=16", nil)
 	req.AddCookie(cookie)
 	req.Header.Set("X-Admin-CSRF", csrf)
 	rec := httptest.NewRecorder()

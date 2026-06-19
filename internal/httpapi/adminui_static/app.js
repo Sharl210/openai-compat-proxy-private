@@ -32,8 +32,290 @@ const state = {
   validationFailureModal: null,
 };
 
+const fileSearchHistoryLimit = 12;
+const fileSearchStorageKeys = {
+  filenameHistory: 'admin-file-search-filename-history',
+  contentHistory: 'admin-file-search-content-history',
+  sizeSettings: 'admin-file-search-size-settings',
+};
+const fileSearchSizeUnits = [
+  { value: 'B', factor: 1 },
+  { value: 'KB', factor: 1024 },
+  { value: 'MB', factor: 1024 * 1024 },
+  { value: 'GB', factor: 1024 * 1024 * 1024 },
+  { value: 'TB', factor: 1024 * 1024 * 1024 * 1024 },
+];
 const statusAutoRefreshIntervalMs = 3000;
 let statusAutoRefreshTimer = 0;
+
+function normalizeFileSearchUnit(unit) {
+  const value = String(unit || 'B').toUpperCase();
+  return fileSearchSizeUnits.some((item) => item.value === value) ? value : 'B';
+}
+
+function loadFileSearchHistory(kind) {
+  try {
+    const key = kind === 'content' ? fileSearchStorageKeys.contentHistory : fileSearchStorageKeys.filenameHistory;
+    const saved = JSON.parse(window.localStorage.getItem(key) || '[]');
+    if (!Array.isArray(saved)) {
+      return [];
+    }
+    return saved
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .slice(0, fileSearchHistoryLimit);
+  } catch {
+    return [];
+  }
+}
+
+function persistFileSearchHistory(kind, values) {
+  try {
+    const key = kind === 'content' ? fileSearchStorageKeys.contentHistory : fileSearchStorageKeys.filenameHistory;
+    window.localStorage.setItem(key, JSON.stringify(values.slice(0, fileSearchHistoryLimit)));
+  } catch {
+  }
+}
+
+function updateFileSearchHistory(kind, value) {
+  const nextValue = String(value || '').trim();
+  if (!nextValue) {
+    return loadFileSearchHistory(kind);
+  }
+  const next = [nextValue, ...loadFileSearchHistory(kind).filter((item) => item !== nextValue)].slice(0, fileSearchHistoryLimit);
+  persistFileSearchHistory(kind, next);
+  return next;
+}
+
+function deleteFileSearchHistoryEntry(kind, value) {
+  const nextValue = String(value || '').trim();
+  const next = loadFileSearchHistory(kind).filter((item) => item !== nextValue);
+  persistFileSearchHistory(kind, next);
+  return next;
+}
+
+function clearFileSearchHistory(kind) {
+  persistFileSearchHistory(kind, []);
+  return [];
+}
+
+function loadFileSearchSizeSettings() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(fileSearchStorageKeys.sizeSettings) || '{}');
+    const min = saved?.min || {};
+    const max = saved?.max || {};
+    return {
+      min: { value: String(min.value || ''), unit: normalizeFileSearchUnit(min.unit) },
+      max: { value: String(max.value || ''), unit: normalizeFileSearchUnit(max.unit) },
+    };
+  } catch {
+    return {
+      min: { value: '', unit: 'B' },
+      max: { value: '', unit: 'B' },
+    };
+  }
+}
+
+function persistFileSearchSizeSettings(settings) {
+  try {
+    window.localStorage.setItem(fileSearchStorageKeys.sizeSettings, JSON.stringify({
+      min: {
+        value: String(settings.min?.value || ''),
+        unit: normalizeFileSearchUnit(settings.min?.unit),
+      },
+      max: {
+        value: String(settings.max?.value || ''),
+        unit: normalizeFileSearchUnit(settings.max?.unit),
+      },
+    }));
+  } catch {
+  }
+}
+
+function fileSearchValueToBytes(value, unit) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return null;
+  }
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  const normalizedUnit = normalizeFileSearchUnit(unit);
+  const unitInfo = fileSearchSizeUnits.find((item) => item.value === normalizedUnit) || fileSearchSizeUnits[0];
+  return Math.trunc(parsed * unitInfo.factor);
+}
+
+function sizeBytesToValueUnit(bytes) {
+  if (!Number.isFinite(Number(bytes)) || Number(bytes) < 0) {
+    return { value: '', unit: 'B' };
+  }
+  const numeric = Number(bytes);
+  for (const unit of [...fileSearchSizeUnits].reverse()) {
+    if (numeric >= unit.factor && numeric % unit.factor === 0) {
+      return { value: String(numeric / unit.factor), unit: unit.value };
+    }
+  }
+  return { value: String(numeric), unit: 'B' };
+}
+
+function snapshotFileSearchResult(result) {
+  if (!result) {
+    return null;
+  }
+  return {
+    path: String(result.path || ''),
+    query: String(result.query || '*'),
+    recursive: result.recursive !== false,
+    contentContains: String(result.contentContains || ''),
+    caseSensitive: result.caseSensitive === true,
+    regex: result.regex === true,
+    minSizeValue: String(result.minSizeValue || ''),
+    minSizeUnit: normalizeFileSearchUnit(result.minSizeUnit),
+    maxSizeValue: String(result.maxSizeValue || ''),
+    maxSizeUnit: normalizeFileSearchUnit(result.maxSizeUnit),
+  };
+}
+
+function buildFileSearchRequestParams(searchState, currentDir = '') {
+  const params = new URLSearchParams({
+    path: String(searchState?.path || currentDir || ''),
+    query: String(searchState?.query || '*'),
+    recursive: searchState?.recursive === false ? 'false' : 'true',
+  });
+  const contentContains = String(searchState?.contentContains || '').trim();
+  const caseSensitive = searchState?.caseSensitive === true;
+  const regex = searchState?.regex === true;
+  const minSizeBytes = fileSearchValueToBytes(searchState?.minSizeValue, searchState?.minSizeUnit);
+  const maxSizeBytes = fileSearchValueToBytes(searchState?.maxSizeValue, searchState?.maxSizeUnit);
+  if (contentContains) {
+    params.set('content_contains', contentContains);
+  }
+  if (caseSensitive) {
+    params.set('case_sensitive', 'true');
+  }
+  if (regex) {
+    params.set('regex', 'true');
+  }
+  if (minSizeBytes !== null) {
+    params.set('min_size_bytes', String(minSizeBytes));
+  }
+  if (maxSizeBytes !== null) {
+    params.set('max_size_bytes', String(maxSizeBytes));
+  }
+  return params;
+}
+
+function fileSearchResultHasAdvancedFilters(result) {
+  if (!result) {
+    return false;
+  }
+  return Boolean(
+    String(result.contentContains || '').trim()
+    || String(result.minSizeValue || '').trim()
+    || String(result.maxSizeValue || '').trim()
+    || result.caseSensitive === true
+    || result.regex === true
+  );
+}
+
+function shouldDisplayBlankFileSearchQuery(query) {
+  return String(query || '') === '*';
+}
+
+function applyFileSearchStateToModal(result) {
+  const sizeSettings = loadFileSearchSizeSettings();
+  const searchState = snapshotFileSearchResult(result);
+  return {
+    open: true,
+    query: searchState ? (shouldDisplayBlankFileSearchQuery(searchState.query) ? '' : searchState.query) : '',
+    recursive: searchState ? searchState.recursive : true,
+    advanced: searchState ? fileSearchResultHasAdvancedFilters(searchState) : false,
+    contentContains: searchState ? searchState.contentContains : '',
+    caseSensitive: searchState ? searchState.caseSensitive : false,
+    regex: searchState ? searchState.regex : false,
+    minSizeValue: searchState?.minSizeValue || sizeSettings.min.value,
+    minSizeUnit: searchState?.minSizeUnit || sizeSettings.min.unit,
+    maxSizeValue: searchState?.maxSizeValue || sizeSettings.max.value,
+    maxSizeUnit: searchState?.maxSizeUnit || sizeSettings.max.unit,
+    historyMenu: null,
+    filenameHistory: loadFileSearchHistory('filename'),
+    contentHistory: loadFileSearchHistory('content'),
+    submitting: false,
+  };
+}
+
+function syncFileSearchSizeSettingsFromModal(modal) {
+  persistFileSearchSizeSettings({
+    min: { value: modal.minSizeValue, unit: modal.minSizeUnit },
+    max: { value: modal.maxSizeValue, unit: modal.maxSizeUnit },
+  });
+}
+
+function setFileSearchHistoryMenu(kind) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  state.fileSearchModal.historyMenu = kind;
+  render();
+}
+
+function closeFileSearchHistoryMenu() {
+  if (!state.fileSearchModal || !state.fileSearchModal.historyMenu) {
+    return;
+  }
+  state.fileSearchModal.historyMenu = null;
+  render();
+}
+
+function setFileSearchModalField(field, value) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  state.fileSearchModal[field] = value;
+}
+
+function setFileSearchModalSize(field, value, unit) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  state.fileSearchModal[field] = String(value ?? '');
+  state.fileSearchModal[`${field}Unit`] = normalizeFileSearchUnit(unit);
+  syncFileSearchSizeSettingsFromModal(state.fileSearchModal);
+}
+
+function setFileSearchModalHistory(kind, value) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  if (kind === 'filename') {
+    state.fileSearchModal.filenameHistory = updateFileSearchHistory('filename', value);
+  } else {
+    state.fileSearchModal.contentHistory = updateFileSearchHistory('content', value);
+  }
+}
+
+function removeFileSearchModalHistory(kind, value) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  if (kind === 'filename') {
+    state.fileSearchModal.filenameHistory = deleteFileSearchHistoryEntry('filename', value);
+  } else {
+    state.fileSearchModal.contentHistory = deleteFileSearchHistoryEntry('content', value);
+  }
+}
+
+function clearFileSearchModalHistory(kind) {
+  if (!state.fileSearchModal) {
+    return;
+  }
+  if (kind === 'filename') {
+    state.fileSearchModal.filenameHistory = clearFileSearchHistory('filename');
+  } else {
+    state.fileSearchModal.contentHistory = clearFileSearchHistory('content');
+  }
+}
 
 function getHistoryState() {
   return {
@@ -41,6 +323,10 @@ function getHistoryState() {
     currentDir: state.currentDir,
     currentFile: state.currentFile?.path || null,
     sidebarOpen: state.sidebarOpen,
+    fileSearchResult: state.view === 'browser' && state.fileSearchResult ? {
+      ...snapshotFileSearchResult(state.fileSearchResult),
+      items: state.treeItems || [],
+    } : null,
   };
 }
 
@@ -91,6 +377,10 @@ async function restoreHistoryState(saved) {
       return;
     }
     if (saved.view === 'browser' && saved.currentDir !== undefined) {
+      if (saved.fileSearchResult) {
+        restoreSearchResultsState(saved);
+        return;
+      }
       await navigateToBrowserAndWait(saved.currentDir, saved.sidebarOpen);
       return;
     }
@@ -100,6 +390,21 @@ async function restoreHistoryState(saved) {
   } finally {
     state._fromHistory = false;
   }
+}
+
+function restoreSearchResultsState(saved) {
+  const result = saved.fileSearchResult || {};
+  state.view = 'browser';
+  state.sidebarOpen = saved.sidebarOpen === true;
+  state.currentFile = null;
+  state.currentDir = saved.currentDir || result.path || '';
+  state.treeItems = Array.isArray(result.items) ? result.items : [];
+  state.fileSearchResult = {
+    ...snapshotFileSearchResult(result),
+    path: result.path || state.currentDir || '',
+  };
+  state.fileSearchLoading = false;
+  render();
 }
 
 const app = document.getElementById('app');
@@ -786,6 +1091,7 @@ function bindEvents() {
   if (fileSearchAdvanced) {
     fileSearchAdvanced.addEventListener('change', handleFileSearchAdvancedChange);
   }
+  bindFileSearchModalEvents();
 
   const clearCacheButton = document.getElementById('clear-cache-button');
   if (clearCacheButton) {
@@ -1458,16 +1764,21 @@ function renderFileSearchModal() {
   const query = state.fileSearchModal.query || '';
   const advanced = state.fileSearchModal.advanced === true;
   const submitting = state.fileSearchModal.submitting === true;
+  const content = state.fileSearchModal.contentContains || '';
   return `
     <div id="file-search-backdrop" class="file-action-backdrop is-open"></div>
     <form id="file-search-form" class="file-search-modal" role="dialog" aria-modal="true" aria-label="搜索">
       <div class="clear-cache-title">搜索</div>
-      <label class="form-field">
+      <label class="form-field file-search-history-field">
         <span class="form-label">欲搜索文件名（支持通配符*和?）</span>
-        <input id="file-search-query" type="text" class="text-input" value="${escapeAttr(query)}" autocomplete="off" ${submitting ? 'disabled' : 'autofocus'}>
+        <span class="file-search-input-wrap">
+          <input id="file-search-query" type="text" class="text-input" value="${escapeAttr(query)}" autocomplete="off" ${submitting ? 'disabled' : 'autofocus'}>
+          <button id="file-search-filename-history-button" class="file-search-history-button" type="button" data-file-search-history="filename" ${submitting ? 'disabled' : ''}>⌄</button>
+        </span>
+        ${renderFileSearchHistoryMenu('filename', state.fileSearchModal.filenameHistory || [])}
       </label>
       <label class="checkbox-row">
-        <input id="file-search-recursive" type="checkbox" checked ${submitting ? 'disabled' : ''}>
+        <input id="file-search-recursive" type="checkbox" ${state.fileSearchModal.recursive === false ? '' : 'checked'} ${submitting ? 'disabled' : ''}>
         <span>搜索子目录</span>
       </label>
       <label class="checkbox-row">
@@ -1477,23 +1788,33 @@ function renderFileSearchModal() {
       ${advanced ? `
       <div id="file-search-advanced-options" class="file-search-advanced-options">
         <label class="form-field">
-          <span class="form-label">文件最小字节</span>
-          <input id="file-search-min-size" type="number" class="text-input" min="0" inputmode="numeric" autocomplete="off" ${submitting ? 'disabled' : ''}>
+          <span class="form-label">文件最小大小</span>
+          <span class="file-search-size-group">
+            <input id="file-search-min-size" type="number" class="text-input" min="0" inputmode="decimal" autocomplete="off" value="${escapeAttr(state.fileSearchModal.minSizeValue || '')}" ${submitting ? 'disabled' : ''}>
+            ${renderFileSearchUnitSelect('file-search-min-size-unit', state.fileSearchModal.minSizeUnit, submitting)}
+          </span>
         </label>
         <label class="form-field">
-          <span class="form-label">文件最大字节</span>
-          <input id="file-search-max-size" type="number" class="text-input" min="0" inputmode="numeric" autocomplete="off" ${submitting ? 'disabled' : ''}>
+          <span class="form-label">文件最大大小</span>
+          <span class="file-search-size-group">
+            <input id="file-search-max-size" type="number" class="text-input" min="0" inputmode="decimal" autocomplete="off" value="${escapeAttr(state.fileSearchModal.maxSizeValue || '')}" ${submitting ? 'disabled' : ''}>
+            ${renderFileSearchUnitSelect('file-search-max-size-unit', state.fileSearchModal.maxSizeUnit, submitting)}
+          </span>
         </label>
-        <label class="form-field">
+        <label class="form-field file-search-history-field">
           <span class="form-label">文件中包含内容</span>
-          <input id="file-search-content" type="text" class="text-input" autocomplete="off" ${submitting ? 'disabled' : ''}>
+          <span class="file-search-input-wrap">
+            <input id="file-search-content" type="text" class="text-input" value="${escapeAttr(content)}" autocomplete="off" ${submitting ? 'disabled' : ''}>
+            <button id="file-search-content-history-button" class="file-search-history-button" type="button" data-file-search-history="content" ${submitting ? 'disabled' : ''}>⌄</button>
+          </span>
+          ${renderFileSearchHistoryMenu('content', state.fileSearchModal.contentHistory || [])}
         </label>
         <label class="checkbox-row">
-          <input id="file-search-case-sensitive" type="checkbox" ${submitting ? 'disabled' : ''}>
+          <input id="file-search-case-sensitive" type="checkbox" ${state.fileSearchModal.caseSensitive ? 'checked' : ''} ${submitting ? 'disabled' : ''}>
           <span>区分大小写</span>
         </label>
         <label class="checkbox-row">
-          <input id="file-search-regex" type="checkbox" ${submitting ? 'disabled' : ''}>
+          <input id="file-search-regex" type="checkbox" ${state.fileSearchModal.regex ? 'checked' : ''} ${submitting ? 'disabled' : ''}>
           <span>正则表达式</span>
         </label>
       </div>` : ''}
@@ -1502,6 +1823,33 @@ function renderFileSearchModal() {
         <button id="file-search-confirm" class="primary-btn material-filled-button" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? '搜索中…' : '确定'}</button>
       </div>
     </form>
+  `;
+}
+
+function renderFileSearchUnitSelect(id, selected, disabled) {
+  const value = normalizeFileSearchUnit(selected);
+  return `
+    <select id="${id}" class="file-search-size-unit" ${disabled ? 'disabled' : ''}>
+      ${fileSearchSizeUnits.map((unit) => `<option value="${unit.value}" ${unit.value === value ? 'selected' : ''}>${unit.value}</option>`).join('')}
+    </select>
+  `;
+}
+
+function renderFileSearchHistoryMenu(kind, items) {
+  if (state.fileSearchModal?.historyMenu !== kind) {
+    return '';
+  }
+  const entries = (items || []).map((item) => `
+    <button class="file-search-history-item" type="button" data-file-search-history-pick="${kind}" data-value="${escapeAttr(item)}">
+      <span>${escapeHtml(item)}</span>
+      <span class="file-search-history-delete" data-file-search-history-delete="${kind}" data-value="${escapeAttr(item)}">×</span>
+    </button>
+  `).join('');
+  return `
+    <div id="file-search-history-menu" class="file-search-history-menu" data-kind="${kind}">
+      ${entries || '<div class="file-search-history-empty">暂无记录</div>'}
+      <button class="file-search-history-clear" type="button" data-file-search-history-clear="${kind}">清理所有</button>
+    </div>
   `;
 }
 
@@ -1693,7 +2041,7 @@ function closeTreeItemActionMenu() {
 }
 
 function openFileSearchModal() {
-  state.fileSearchModal = { open: true, query: '', recursive: true, advanced: false };
+  state.fileSearchModal = applyFileSearchStateToModal(state.fileSearchResult);
   render();
 }
 
@@ -1713,32 +2061,108 @@ function handleFileSearchAdvancedChange(event) {
   render();
 }
 
+function bindFileSearchModalEvents() {
+  const modal = state.fileSearchModal;
+  if (!modal?.open) {
+    return;
+  }
+  const queryInput = document.getElementById('file-search-query');
+  if (queryInput) {
+    queryInput.addEventListener('input', (event) => setFileSearchModalField('query', event.target.value));
+  }
+  const contentInput = document.getElementById('file-search-content');
+  if (contentInput) {
+    contentInput.addEventListener('input', (event) => setFileSearchModalField('contentContains', event.target.value));
+  }
+  const minInput = document.getElementById('file-search-min-size');
+  const minUnit = document.getElementById('file-search-min-size-unit');
+  if (minInput) {
+    minInput.addEventListener('input', (event) => setFileSearchModalSize('minSizeValue', event.target.value, minUnit?.value || modal.minSizeUnit));
+  }
+  if (minUnit) {
+    minUnit.addEventListener('change', (event) => setFileSearchModalSize('minSizeValue', minInput?.value || modal.minSizeValue, event.target.value));
+  }
+  const maxInput = document.getElementById('file-search-max-size');
+  const maxUnit = document.getElementById('file-search-max-size-unit');
+  if (maxInput) {
+    maxInput.addEventListener('input', (event) => setFileSearchModalSize('maxSizeValue', event.target.value, maxUnit?.value || modal.maxSizeUnit));
+  }
+  if (maxUnit) {
+    maxUnit.addEventListener('change', (event) => setFileSearchModalSize('maxSizeValue', maxInput?.value || modal.maxSizeValue, event.target.value));
+  }
+  document.querySelectorAll('[data-file-search-history]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setFileSearchHistoryMenu(modal.historyMenu === button.dataset.fileSearchHistory ? null : button.dataset.fileSearchHistory);
+    });
+  });
+  document.querySelectorAll('[data-file-search-history-pick]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const kind = button.dataset.fileSearchHistoryPick;
+      if (kind === 'filename') {
+        setFileSearchModalField('query', button.dataset.value || '');
+      } else {
+        setFileSearchModalField('contentContains', button.dataset.value || '');
+      }
+      closeFileSearchHistoryMenu();
+    });
+  });
+  document.querySelectorAll('[data-file-search-history-delete]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeFileSearchModalHistory(button.dataset.fileSearchHistoryDelete, button.dataset.value || '');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-file-search-history-clear]').forEach((button) => {
+    button.addEventListener('click', () => {
+      clearFileSearchModalHistory(button.dataset.fileSearchHistoryClear);
+      render();
+    });
+  });
+}
+
 async function submitFileSearch(event) {
   event.preventDefault();
   if (state.fileSearchModal?.submitting) {
     return;
   }
-  const query = String(document.getElementById('file-search-query')?.value || '').trim();
-  if (!query) {
-    setToast('error', '请输入文件名');
-    return;
-  }
+  const inputQuery = String(document.getElementById('file-search-query')?.value || '').trim();
+  const query = inputQuery || '*';
   const recursive = document.getElementById('file-search-recursive')?.checked !== false;
   const params = new URLSearchParams({
     path: state.currentDir || '',
     query,
     recursive: recursive ? 'true' : 'false',
   });
-  const minSize = String(document.getElementById('file-search-min-size')?.value || '').trim();
-  const maxSize = String(document.getElementById('file-search-max-size')?.value || '').trim();
+  const minSizeValue = String(document.getElementById('file-search-min-size')?.value || '').trim();
+  const minSizeUnit = normalizeFileSearchUnit(document.getElementById('file-search-min-size-unit')?.value);
+  const maxSizeValue = String(document.getElementById('file-search-max-size')?.value || '').trim();
+  const maxSizeUnit = normalizeFileSearchUnit(document.getElementById('file-search-max-size-unit')?.value);
   const contentContains = String(document.getElementById('file-search-content')?.value || '').trim();
   const caseSensitive = document.getElementById('file-search-case-sensitive')?.checked === true;
   const regex = document.getElementById('file-search-regex')?.checked === true;
-  if (minSize) params.set('min_size_bytes', minSize);
-  if (maxSize) params.set('max_size_bytes', maxSize);
+  const minSize = fileSearchValueToBytes(minSizeValue, minSizeUnit);
+  const maxSize = fileSearchValueToBytes(maxSizeValue, maxSizeUnit);
+  if (minSizeValue && minSize === null) {
+    setToast('error', '最小大小无效');
+    return;
+  }
+  if (maxSizeValue && maxSize === null) {
+    setToast('error', '最大大小无效');
+    return;
+  }
+  if (minSize !== null) params.set('min_size_bytes', String(minSize));
+  if (maxSize !== null) params.set('max_size_bytes', String(maxSize));
   if (contentContains) params.set('content_contains', contentContains);
   if (caseSensitive) params.set('case_sensitive', 'true');
   if (regex) params.set('regex', 'true');
+  if (inputQuery) setFileSearchModalHistory('filename', inputQuery);
+  if (contentContains) setFileSearchModalHistory('content', contentContains);
+  persistFileSearchSizeSettings({
+    min: { value: minSizeValue, unit: minSizeUnit },
+    max: { value: maxSizeValue, unit: maxSizeUnit },
+  });
   state.fileSearchModal = null;
   state.fileSearchLoading = true;
   render();
@@ -1746,8 +2170,20 @@ async function submitFileSearch(event) {
     const data = await api(`/_admin/api/search?${params.toString()}`);
     state.treeItems = data.items || [];
     state.providersDir = data.providers_dir || state.providersDir || 'providers';
-    state.fileSearchResult = { query: data.query || query, recursive: data.recursive !== false, path: data.path || state.currentDir || '' };
+    state.fileSearchResult = {
+      query: data.query || query,
+      recursive: data.recursive !== false,
+      path: data.path || state.currentDir || '',
+      contentContains,
+      caseSensitive,
+      regex,
+      minSizeValue,
+      minSizeUnit,
+      maxSizeValue,
+      maxSizeUnit,
+    };
     state.fileSearchLoading = false;
+    replaceHistoryState();
     render();
   } catch (error) {
     state.fileSearchLoading = false;

@@ -117,7 +117,6 @@ type adminFileSearchOptions struct {
 	ContentContains string
 	CaseSensitive   bool
 	Regex           bool
-	namePattern     *regexp.Regexp
 	contentPattern  *regexp.Regexp
 }
 
@@ -318,8 +317,7 @@ func (a *adminUI) handleSearch() http.HandlerFunc {
 		rel := strings.TrimSpace(r.URL.Query().Get("path"))
 		query := strings.TrimSpace(r.URL.Query().Get("query"))
 		if query == "" {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "query is required")
-			return
+			query = "*"
 		}
 		resolved, err := a.resolvePath(rel, true)
 		if err != nil {
@@ -376,11 +374,6 @@ func parseAdminFileSearchOptions(values url.Values, query string) (adminFileSear
 	options.MinSizeBytes = minSize
 	options.MaxSizeBytes = maxSize
 	if options.Regex {
-		namePattern, err := compileAdminSearchRegexp(options.Query, options.CaseSensitive)
-		if err != nil {
-			return options, fmt.Errorf("invalid filename regex: %w", err)
-		}
-		options.namePattern = namePattern
 		if options.ContentContains != "" {
 			contentPattern, err := compileAdminSearchRegexp(options.ContentContains, options.CaseSensitive)
 			if err != nil {
@@ -487,7 +480,7 @@ func (a *adminUI) searchAdminFiles(rel string, resolved string, options adminFil
 	if err != nil {
 		return nil, err
 	}
-	var matches []adminFileEntry
+	matches := make([]adminFileEntry, 0)
 	for _, item := range items {
 		matched, err := a.adminFileSearchMatches(resolved, item, options)
 		if err != nil {
@@ -537,9 +530,6 @@ func (a *adminUI) adminFileSearchMatches(parentResolved string, item adminFileEn
 
 func adminFileNameSearchMatches(name string, options adminFileSearchOptions) (bool, error) {
 	query := strings.TrimSpace(options.Query)
-	if options.Regex {
-		return options.namePattern.MatchString(name), nil
-	}
 	if !options.CaseSensitive {
 		name = strings.ToLower(name)
 		query = strings.ToLower(query)

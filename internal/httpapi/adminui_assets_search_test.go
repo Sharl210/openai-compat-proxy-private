@@ -22,13 +22,26 @@ func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
 		"search-tree-button",
 		"renderFileSearchModal",
 		"handleFileSearchAdvancedChange",
+		"loadFileSearchHistory",
+		"persistFileSearchHistory",
+		"loadFileSearchSizeSettings",
+		"persistFileSearchSizeSettings",
+		"restoreSearchResultsState",
 		"file-search-query",
 		"file-search-recursive",
 		"file-search-advanced",
 		"file-search-advanced-options",
 		"file-search-min-size",
+		"file-search-min-size-unit",
 		"file-search-max-size",
+		"file-search-max-size-unit",
 		"file-search-content",
+		"file-search-filename-history-button",
+		"file-search-content-history-button",
+		"file-search-history-menu",
+		"file-search-history-item",
+		"file-search-history-delete",
+		"file-search-history-clear",
 		"file-search-case-sensitive",
 		"file-search-regex",
 		"fileSearchLoading",
@@ -47,8 +60,8 @@ func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
 			t.Fatalf("expected app script to include %q, got %s", want, body)
 		}
 	}
-	if !strings.Contains(body, `id="file-search-recursive" type="checkbox" checked`) {
-		t.Fatalf("expected search recursive checkbox checked by default, got %s", body)
+	if !strings.Contains(body, `id="file-search-recursive" type="checkbox"`) || !strings.Contains(body, `state.fileSearchModal.recursive === false ? '' : 'checked'`) {
+		t.Fatalf("expected search recursive checkbox to default checked from modal state, got %s", body)
 	}
 	if strings.Contains(body, `id="file-search-advanced" type="checkbox" checked`) {
 		t.Fatalf("expected advanced search checkbox not checked by default, got %s", body)
@@ -58,12 +71,11 @@ func TestAdminUIAppScriptIncludesFileSearchDialog(t *testing.T) {
 	if recursiveIndex < 0 || advancedOptionsIndex < 0 || recursiveIndex > advancedOptionsIndex {
 		t.Fatalf("expected recursive checkbox before advanced options, got recursive=%d advancedOptions=%d body=%s", recursiveIndex, advancedOptionsIndex, body)
 	}
-	if !strings.Contains(body, `state.fileSearchModal = null;
-  state.fileSearchLoading = true;
-  render();
-  try {
-    const data = await api`) {
+	if !strings.Contains(body, `state.fileSearchModal = null;`) || !strings.Contains(body, `state.fileSearchLoading = true;`) {
 		t.Fatalf("expected search submit to close modal and show loading before awaiting API, got %s", body)
+	}
+	if !strings.Contains(body, `snapshotFileSearchResult(state.fileSearchResult)`) || !strings.Contains(body, `restoreSearchResultsState`) {
+		t.Fatalf("expected file search history state restoration hooks, got %s", body)
 	}
 }
 
@@ -81,6 +93,12 @@ func TestAdminUIAppCSSIncludesFileSearchStates(t *testing.T) {
 	for _, want := range []string{
 		".file-search-advanced-options",
 		".file-search-loading",
+		".file-search-history-menu",
+		".file-search-history-item",
+		".file-search-history-delete",
+		".file-search-history-clear",
+		".file-search-size-group",
+		".file-search-size-unit",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected app css to include %s styles, got %s", want, body)
