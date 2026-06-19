@@ -30,14 +30,16 @@ func NewRuntimeStore(rootEnvPath string) (*RuntimeStore, error) {
 func NewStaticRuntimeStore(cfg Config) *RuntimeStore {
 	store := &RuntimeStore{}
 	normalizeRuntimeConfigDefaults(&cfg)
-	ids, owners, visible, taggedOwners, taggedVisible, _ := buildDefaultOverlayModelIndex(cfg)
+	ids, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, _ := buildDefaultOverlayModelIndex(cfg)
 	store.active.Store(&RuntimeSnapshot{
 		Config:                     cfg,
 		DefaultProviderIDs:         ids,
 		DefaultModelOwners:         owners,
 		DefaultVisibleModels:       visible,
+		DefaultModelRawIDs:         rawIDs,
 		DefaultTaggedModelOwners:   taggedOwners,
 		DefaultTaggedVisibleModels: taggedVisible,
+		DefaultTaggedModelRawIDs:   taggedRawIDs,
 		ProviderVersionByID:        map[string]string{},
 		ProviderPathByID:           map[string]string{},
 		PromptPathsByID:            map[string][]string{},
@@ -114,7 +116,7 @@ func (s *RuntimeStore) Refresh() error {
 	return nil
 }
 
-func (s *RuntimeStore) UpdateDefaultOverlayIndex(defaultModelOwners map[string]string, defaultVisibleModels []string, defaultTaggedModelOwners map[string]string, defaultTaggedVisibleModels []string) {
+func (s *RuntimeStore) UpdateDefaultOverlayIndex(defaultModelOwners map[string]string, defaultVisibleModels []string, defaultTaggedModelOwners map[string]string, defaultTaggedVisibleModels []string, defaultModelRawIDs map[string]string, defaultTaggedModelRawIDs map[string]string) {
 	if s == nil {
 		return
 	}
@@ -127,8 +129,10 @@ func (s *RuntimeStore) UpdateDefaultOverlayIndex(defaultModelOwners map[string]s
 	clone := *current
 	clone.DefaultModelOwners = cloneStringMap(defaultModelOwners)
 	clone.DefaultVisibleModels = append([]string(nil), defaultVisibleModels...)
+	clone.DefaultModelRawIDs = cloneStringMap(defaultModelRawIDs)
 	clone.DefaultTaggedModelOwners = cloneStringMap(defaultTaggedModelOwners)
 	clone.DefaultTaggedVisibleModels = append([]string(nil), defaultTaggedVisibleModels...)
+	clone.DefaultTaggedModelRawIDs = cloneStringMap(defaultTaggedModelRawIDs)
 	s.active.Store(&clone)
 }
 

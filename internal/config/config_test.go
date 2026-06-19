@@ -635,7 +635,7 @@ func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
 		},
 	}
 
-	ids, owners, visible, taggedOwners, taggedVisible, err := buildDefaultOverlayModelIndex(cfg)
+	ids, owners, visible, taggedOwners, taggedVisible, _, _, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
@@ -653,6 +653,79 @@ func TestBuildDefaultOverlayModelIndexLastWins(t *testing.T) {
 	}
 	if want := []string{"[azure]shared-model", "[azure]azure-only", "[azure]azure-manual", "[openai]openai-only", "[openai]shared-model", "[openai]openai-manual"}; !reflect.DeepEqual(taggedVisible, want) {
 		t.Fatalf("expected tagged visible models %v, got %v", want, taggedVisible)
+	}
+}
+
+func TestBuildDefaultOverlayModelIndexUsesExternalModelIDTemplate(t *testing.T) {
+	cfg := Config{
+		DefaultProvider: "openai,azure",
+		Providers: []ProviderConfig{
+			{
+				ID:              "openai",
+				Enabled:         true,
+				ManualModels:    []string{"gpt-4o"},
+				ModelIDTemplate: "openai-{{model}}",
+			},
+			{
+				ID:              "azure",
+				Enabled:         true,
+				ManualModels:    []string{"gpt-4o"},
+				ModelIDTemplate: "azure-{{model}}",
+			},
+		},
+	}
+
+	providerIDs, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("expected overlay model index build to succeed, got %v", err)
+	}
+	if want := []string{"openai", "azure"}; !reflect.DeepEqual(providerIDs, want) {
+		t.Fatalf("expected default provider ids %v, got %v", want, providerIDs)
+	}
+	if want := []string{"azure-gpt-4o", "openai-gpt-4o"}; !reflect.DeepEqual(visible, want) {
+		t.Fatalf("expected visible external models %v, got %v", want, visible)
+	}
+	if owners["openai-gpt-4o"] != "openai" || owners["azure-gpt-4o"] != "azure" {
+		t.Fatalf("expected external model owners, got %#v", owners)
+	}
+	if rawIDs["openai-gpt-4o"] != "gpt-4o" || rawIDs["azure-gpt-4o"] != "gpt-4o" {
+		t.Fatalf("expected external models to keep raw ids, got %#v", rawIDs)
+	}
+	if taggedOwners["[openai]openai-gpt-4o"] != "openai" || taggedOwners["[azure]azure-gpt-4o"] != "azure" {
+		t.Fatalf("expected tagged owners for external ids, got %#v", taggedOwners)
+	}
+	if taggedRawIDs["[openai]openai-gpt-4o"] != "gpt-4o" || taggedRawIDs["[azure]azure-gpt-4o"] != "gpt-4o" {
+		t.Fatalf("expected tagged external ids to keep raw ids, got %#v", taggedRawIDs)
+	}
+	if want := []string{"[azure]azure-gpt-4o", "[openai]openai-gpt-4o"}; !reflect.DeepEqual(taggedVisible, want) {
+		t.Fatalf("expected tagged visible external models %v, got %v", want, taggedVisible)
+	}
+}
+
+func TestRuntimeSnapshotResolveDefaultProviderSelectionReturnsRawModelForExternalID(t *testing.T) {
+	cfg := Config{
+		DefaultProvider: "openai",
+		Providers: []ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			ManualModels:                []string{"gpt-5.5"},
+			ModelIDTemplate:             "openai-{{model}}",
+			EnableReasoningEffortSuffix: true,
+		}},
+	}
+	providerIDs, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, err := buildDefaultOverlayModelIndex(cfg)
+	if err != nil {
+		t.Fatalf("build overlay: %v", err)
+	}
+	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible, DefaultModelRawIDs: rawIDs, DefaultTaggedModelRawIDs: taggedRawIDs}
+
+	providerID, model, ok := snapshot.ResolveDefaultProviderSelection("openai-gpt-5.5")
+	if !ok || providerID != "openai" || model != "gpt-5.5" {
+		t.Fatalf("expected external model to resolve to openai/gpt-5.5, got provider=%q model=%q ok=%v", providerID, model, ok)
+	}
+	providerID, model, ok = snapshot.ResolveDefaultProviderSelection("openai-gpt-5.5-low")
+	if !ok || providerID != "openai" || model != "gpt-5.5-low" {
+		t.Fatalf("expected external suffixed model to resolve to openai/gpt-5.5-low, got provider=%q model=%q ok=%v", providerID, model, ok)
 	}
 }
 
@@ -716,7 +789,7 @@ func TestBuildDefaultOverlayModelIndexSkipsHiddenModels(t *testing.T) {
 		},
 	}
 
-	_, owners, visible, _, _, err := buildDefaultOverlayModelIndex(cfg)
+	_, owners, visible, _, _, _, _, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
@@ -749,7 +822,7 @@ func TestBuildDefaultOverlayModelIndexHiddenModelsFilterReasoningSuffixVariants(
 		},
 	}
 
-	_, _, visible, _, _, err := buildDefaultOverlayModelIndex(cfg)
+	_, _, visible, _, _, _, _, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		t.Fatalf("expected overlay model index build to succeed, got %v", err)
 	}
@@ -769,11 +842,11 @@ func TestRuntimeSnapshotResolveDefaultProviderSelectionStripsNoPromptBeforeReaso
 			EnableReasoningEffortSuffix: true,
 		}},
 	}
-	providerIDs, owners, visible, taggedOwners, taggedVisible, err := buildDefaultOverlayModelIndex(cfg)
+	providerIDs, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		t.Fatalf("build overlay: %v", err)
 	}
-	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible}
+	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible, DefaultModelRawIDs: rawIDs, DefaultTaggedModelRawIDs: taggedRawIDs}
 
 	providerID, model, ok := snapshot.ResolveDefaultProviderSelection("gpt-5.5-low-noprompt")
 	if !ok || providerID != "openai" || model != "gpt-5.5-low" {
@@ -792,11 +865,11 @@ func TestRuntimeSnapshotResolveDefaultProviderSelectionStripsNoPromptRegardlessO
 			EnableReasoningEffortSuffix: true,
 		}},
 	}
-	providerIDs, owners, visible, taggedOwners, taggedVisible, err := buildDefaultOverlayModelIndex(cfg)
+	providerIDs, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		t.Fatalf("build overlay: %v", err)
 	}
-	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible}
+	snapshot := &RuntimeSnapshot{Config: cfg, DefaultProviderIDs: providerIDs, DefaultModelOwners: owners, DefaultVisibleModels: visible, DefaultTaggedModelOwners: taggedOwners, DefaultTaggedVisibleModels: taggedVisible, DefaultModelRawIDs: rawIDs, DefaultTaggedModelRawIDs: taggedRawIDs}
 
 	providerID, model, ok := snapshot.ResolveDefaultProviderSelection("gpt-5.5-noprompt-low")
 	if !ok || providerID != "openai" || model != "gpt-5.5-low" {

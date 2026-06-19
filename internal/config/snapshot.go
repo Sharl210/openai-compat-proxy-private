@@ -24,8 +24,10 @@ type RuntimeSnapshot struct {
 	DefaultProviderIDs         []string
 	DefaultModelOwners         map[string]string
 	DefaultVisibleModels       []string
+	DefaultModelRawIDs         map[string]string
 	DefaultTaggedModelOwners   map[string]string
 	DefaultTaggedVisibleModels []string
+	DefaultTaggedModelRawIDs   map[string]string
 	ProviderVersionByID        map[string]string
 	ProviderPathByID           map[string]string
 	PromptPathsByID            map[string][]string
@@ -112,7 +114,7 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	defaultProviderIDs, defaultModelOwners, defaultVisibleModels, defaultTaggedModelOwners, defaultTaggedVisibleModels, err := buildDefaultOverlayModelIndex(cfg)
+	defaultProviderIDs, defaultModelOwners, defaultVisibleModels, defaultTaggedModelOwners, defaultTaggedVisibleModels, defaultModelRawIDs, defaultTaggedModelRawIDs, err := buildDefaultOverlayModelIndex(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -124,8 +126,10 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 		DefaultProviderIDs:         defaultProviderIDs,
 		DefaultModelOwners:         defaultModelOwners,
 		DefaultVisibleModels:       defaultVisibleModels,
+		DefaultModelRawIDs:         defaultModelRawIDs,
 		DefaultTaggedModelOwners:   defaultTaggedModelOwners,
 		DefaultTaggedVisibleModels: defaultTaggedVisibleModels,
+		DefaultTaggedModelRawIDs:   defaultTaggedModelRawIDs,
 		ProviderVersionByID:        providerVersions,
 		ProviderPathByID:           providerPaths,
 		PromptPathsByID:            promptPaths,
@@ -164,28 +168,36 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 	}
 }
 
-func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []string, map[string]string, []string, error) {
+func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []string, map[string]string, []string, map[string]string, map[string]string, error) {
 	providerIDs, err := cfg.DefaultProviderIDs()
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	owners := make(map[string]string)
+	rawIDs := make(map[string]string)
 	taggedOwners := make(map[string]string)
+	taggedRawIDs := make(map[string]string)
 	if len(providerIDs) == 0 {
-		return nil, owners, nil, taggedOwners, nil, nil
+		return nil, owners, nil, taggedOwners, nil, rawIDs, taggedRawIDs, nil
 	}
 	visibleByProvider := make(map[string][]string, len(providerIDs))
+	externalByProvider := make(map[string]map[string]string, len(providerIDs))
 	modelCount := make(map[string]int)
 	for _, id := range providerIDs {
 		provider, err := cfg.ProviderByID(id)
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, err
 		}
 		visible := providerVisibleModelIDs(provider)
 		visibleByProvider[id] = visible
+		externalByProvider[id] = make(map[string]string, len(visible))
 		for _, modelID := range visible {
-			modelCount[modelID]++
-			taggedOwners[formatTaggedModelID(id, modelID)] = id
+			externalID := provider.ExternalModelID(modelID, true)
+			externalByProvider[id][modelID] = externalID
+			modelCount[externalID]++
+			taggedID := formatTaggedModelID(id, externalID)
+			taggedOwners[taggedID] = id
+			taggedRawIDs[taggedID] = modelID
 		}
 	}
 	visible := make([]string, 0, len(taggedOwners)+len(modelCount))
@@ -194,35 +206,40 @@ func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []s
 		for i := len(providerIDs) - 1; i >= 0; i-- {
 			id := providerIDs[i]
 			for _, modelID := range visibleByProvider[id] {
-				visibleID := modelID
-				if cfg.EnableAllDefaultProviderModelTags || modelCount[modelID] > 1 {
-					visibleID = formatTaggedModelID(id, modelID)
+				externalID := externalByProvider[id][modelID]
+				visibleID := externalID
+				if cfg.EnableAllDefaultProviderModelTags || modelCount[externalID] > 1 {
+					visibleID = formatTaggedModelID(id, externalID)
 				}
 				if _, ok := seen[visibleID]; ok {
 					continue
 				}
 				seen[visibleID] = struct{}{}
 				owners[visibleID] = id
+				rawIDs[visibleID] = modelID
 				visible = append(visible, visibleID)
 			}
 		}
 	} else {
 		for _, id := range providerIDs {
 			for _, modelID := range visibleByProvider[id] {
-				owners[modelID] = id
+				externalID := externalByProvider[id][modelID]
+				owners[externalID] = id
+				rawIDs[externalID] = modelID
 			}
 		}
 		for i := len(providerIDs) - 1; i >= 0; i-- {
 			id := providerIDs[i]
 			for _, modelID := range visibleByProvider[id] {
-				if owners[modelID] != id {
+				externalID := externalByProvider[id][modelID]
+				if owners[externalID] != id {
 					continue
 				}
-				if _, ok := seen[modelID]; ok {
+				if _, ok := seen[externalID]; ok {
 					continue
 				}
-				seen[modelID] = struct{}{}
-				visible = append(visible, modelID)
+				seen[externalID] = struct{}{}
+				visible = append(visible, externalID)
 			}
 		}
 	}
@@ -230,10 +247,10 @@ func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []s
 	for i := len(providerIDs) - 1; i >= 0; i-- {
 		id := providerIDs[i]
 		for _, modelID := range visibleByProvider[id] {
-			taggedVisible = append(taggedVisible, formatTaggedModelID(id, modelID))
+			taggedVisible = append(taggedVisible, formatTaggedModelID(id, externalByProvider[id][modelID]))
 		}
 	}
-	return providerIDs, owners, visible, taggedOwners, taggedVisible, nil
+	return providerIDs, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, nil
 }
 
 func formatTaggedModelID(providerID string, modelID string) string {
@@ -293,6 +310,39 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string
 	return owner, true
 }
 
+func (s *RuntimeSnapshot) rawDefaultModelID(model string) string {
+	if s == nil || len(s.DefaultModelRawIDs) == 0 {
+		return model
+	}
+	if raw := strings.TrimSpace(s.DefaultModelRawIDs[model]); raw != "" {
+		return raw
+	}
+	if baseModel, effort, ok := reasoning.SplitSuffix(model); ok {
+		if rawBase := strings.TrimSpace(s.DefaultModelRawIDs[baseModel]); rawBase != "" {
+			return rawBase + "-" + effort
+		}
+	}
+	return model
+}
+
+func (s *RuntimeSnapshot) rawTaggedDefaultModelID(model string) string {
+	if s == nil || len(s.DefaultTaggedModelRawIDs) == 0 {
+		_, baseModel, ok := parseTaggedModelID(model)
+		if ok {
+			return baseModel
+		}
+		return model
+	}
+	if raw := strings.TrimSpace(s.DefaultTaggedModelRawIDs[model]); raw != "" {
+		return raw
+	}
+	_, baseModel, ok := parseTaggedModelID(model)
+	if ok {
+		return baseModel
+	}
+	return model
+}
+
 func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (string, string, bool) {
 	if s == nil || !s.Config.EnableDefaultProviderModelTags {
 		return "", "", false
@@ -316,7 +366,7 @@ func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (
 			return "", "", false
 		}
 	}
-	return providerID, baseModel, true
+	return providerID, s.rawTaggedDefaultModelID(model), true
 }
 
 func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string, string, bool) {
@@ -331,10 +381,11 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 			if strippedModel, stripped := stripNoPromptModelSuffix(model); stripped {
 				provider, err := s.Config.ProviderByID(providerID)
 				if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(model) {
-					return providerID, strippedModel, true
+					rawStripped := s.rawDefaultModelID(strippedModel)
+					return providerID, rawStripped, true
 				}
 			}
-			return providerID, model, true
+			return providerID, s.rawDefaultModelID(model), true
 		}
 		if baseModel, ok := stripNoPromptModelSuffix(model); ok {
 			if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
@@ -347,7 +398,7 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 		return "", model, false
 	}
 	if owner, ok := s.DefaultModelOwners[model]; ok {
-		return owner, model, true
+		return owner, s.rawDefaultModelID(model), true
 	}
 	if baseModel, ok := stripNoPromptModelSuffix(model); ok {
 		if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
