@@ -460,8 +460,8 @@ scoped 覆写的匹配规则：
 
 这些变量的实际含义：
 
-- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也按 `packy-gpt-5.5` 请求；代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`，所以上游仍收到原始模型或映射后的最终模型。
-- `MODEL_ID_TEMPLATE_ROOT_ONLY`：控制模板作用范围，默认 `false`。`false` 表示 root/default provider 聚合路由和显式 `/{providerId}/...` 路由都展示并接受模板后的模型 ID；`true` 表示只有 root/default provider 聚合视角使用模板，显式 provider 路由继续展示并接受原始模型名。例：`MODEL_ID_TEMPLATE=packy-{{model}}` 且 `MODEL_ID_TEMPLATE_ROOT_ONLY=true` 时，`/v1/models` 里是 `packy-gpt-5.5`，但 `/packy/v1/models` 里仍是 `gpt-5.5`。
+- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-noprompt-vip` 会先还原为内部 `gpt-5.5-low-noprompt`，再按 `low` 和 `-noprompt` 继续处理。
+- `MODEL_ID_TEMPLATE_ROOT_ONLY`：旧兼容字段，仍可解析，但不再改变运行行为。只要 `MODEL_ID_TEMPLATE` 不是默认 `{{model}}`，该 provider 的所有外部入口都展示并接受模板后的模型 ID；raw provider ID 只存在于 provider 内部配置和上游请求链路中，不作为外部模型 ID 使用。
 
 - `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。这一项里“冒号左侧为原始模型”和“冒号右侧为原始模型”要分开看：
   - 左侧 source 是原始模型 base 时，表示这条 base source 锁定整个客户端推理家族集合。例如 `MODEL_MAP=client-gpt:upstream-gpt` 会覆盖 `model=client-gpt`、`model=client-gpt-high`、`model=client-gpt-low`，也覆盖 `model=client-gpt` + `reasoning.effort=high` / `reasoning_effort=high` / Anthropic `thinking/output_config` 表达的 high；最终发往 `upstream-gpt`，effort 按客户端 suffix 或请求体参数保留。

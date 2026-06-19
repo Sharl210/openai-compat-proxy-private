@@ -339,15 +339,12 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		return nil, false
 	}
 	rawClientModel := canon.Model
-	clientModel := canon.Model
-	if !provider.HidesModel(canon.Model) {
-		applyNoPromptModelSuffix(&canon, providerCfg)
-		clientModel = canon.Model
-	}
-	if hasNoPromptModelSuffix(canon.Model) {
+	clientModel := prepareProviderClientModel(&canon, resolvedModel, provider, providerCfg)
+	resolvedModel = clientModel
+	if hasNoPromptModelSuffix(clientModel) {
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
-	if info, ok := routeInfoFromRequest(r); ok && info.Legacy && canon.SkipProviderSystemPrompt {
+	if info, ok := routeInfoFromRequest(r); ok && info.Legacy {
 		*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 	}
 	return &initialResponsesRequest{

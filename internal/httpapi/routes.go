@@ -272,6 +272,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		providerID := info.ProviderID
 		originalModel := canonicalModel
 		resolvedModel := canonicalModel
+		resolvedModelIsInternal := false
 		if info.Legacy && canonicalModel != "" {
 			canonicalModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, requestEffortFromRouteContext(r))
 			resolvedModel = canonicalModel
@@ -281,6 +282,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
+				resolvedModelIsInternal = true
 			} else if resolvedID, realtimeErr, ok := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel); ok {
 				providerID = resolvedID
 				refreshDefaultProviderOverlayCacheFromRequest(r)
@@ -288,6 +290,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				if refreshedID, refreshedModel, refreshedOK := snapshot.ResolveDefaultProviderSelection(canonicalModel); refreshedOK {
 					providerID = refreshedID
 					resolvedModel = refreshedModel
+					resolvedModelIsInternal = true
 				}
 			} else if realtimeErr != nil {
 				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
@@ -305,6 +308,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 					if provider, err := snapshot.Config.ProviderByID(resolvedID); err == nil && provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(canonicalModel) {
 						providerID = resolvedID
 						resolvedModel = modelForProvider
+						resolvedModelIsInternal = true
 					} else if legacyModelsListEnforced(snapshot) {
 						return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 					}
@@ -325,10 +329,10 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 					return config.ProviderConfig{}, config.Config{}, "", originalModel, false, nil
 				}
 			}
-			if canonicalModel != "" {
+			if canonicalModel != "" && !resolvedModelIsInternal {
 				if internalModel, ok := provider.InternalModelID(resolvedModel, info.Legacy); ok {
 					resolvedModel = internalModel
-				} else if !info.Legacy {
+				} else {
 					return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
 				}
 			}

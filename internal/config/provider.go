@@ -478,13 +478,10 @@ func (p ProviderConfig) effectiveModelIDTemplate() string {
 	return template
 }
 
-func (p ProviderConfig) modelIDTemplateApplies(rootRoute bool) bool {
-	return rootRoute || !p.ModelIDTemplateRootOnly
-}
-
 func (p ProviderConfig) ExternalModelID(model string, rootRoute bool) string {
+	_ = rootRoute
 	model = strings.TrimSpace(model)
-	if model == "" || !p.modelIDTemplateApplies(rootRoute) {
+	if model == "" {
 		return model
 	}
 	template := p.effectiveModelIDTemplate()
@@ -495,15 +492,10 @@ func (p ProviderConfig) ExternalModelID(model string, rootRoute bool) string {
 }
 
 func (p ProviderConfig) InternalModelID(model string, rootRoute bool) (string, bool) {
+	_ = rootRoute
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return "", false
-	}
-	if !p.modelIDTemplateApplies(rootRoute) {
-		if internal, ok := p.unpackTemplatedModelID(model); ok && internal != model {
-			return "", false
-		}
-		return model, true
 	}
 	template := p.effectiveModelIDTemplate()
 	if template == defaultModelIDTemplate {

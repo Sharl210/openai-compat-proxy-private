@@ -712,23 +712,23 @@ func TestProviderModelIDTemplateAppliesEverywhereByDefault(t *testing.T) {
 	}
 }
 
-func TestProviderModelIDTemplateRootOnlyKeepsProviderRoutesRaw(t *testing.T) {
+func TestProviderModelIDTemplateRootOnlyDoesNotExposeRawProviderIDs(t *testing.T) {
 	provider := ProviderConfig{ModelIDTemplate: "packy-{{model}}-vip", ModelIDTemplateRootOnly: true}
 
 	if got := provider.ExternalModelID("gpt-5.5", true); got != "packy-gpt-5.5-vip" {
 		t.Fatalf("expected templated root external model id, got %q", got)
 	}
-	if got := provider.ExternalModelID("gpt-5.5", false); got != "gpt-5.5" {
-		t.Fatalf("expected raw provider-route model id, got %q", got)
+	if got := provider.ExternalModelID("gpt-5.5", false); got != "packy-gpt-5.5-vip" {
+		t.Fatalf("expected provider route to keep exposing templated model id despite root-only compatibility flag, got %q", got)
 	}
 	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", true); !ok || got != "gpt-5.5" {
 		t.Fatalf("expected root external id to unpack, got %q ok=%v", got, ok)
 	}
-	if got, ok := provider.InternalModelID("gpt-5.5", false); !ok || got != "gpt-5.5" {
-		t.Fatalf("expected provider-route raw id to pass through, got %q ok=%v", got, ok)
+	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", false); !ok || got != "gpt-5.5" {
+		t.Fatalf("expected provider-route templated id to unpack despite root-only compatibility flag, got %q ok=%v", got, ok)
 	}
-	if got, ok := provider.InternalModelID("packy-gpt-5.5-vip", false); ok || got != "" {
-		t.Fatalf("expected provider-route templated id to be rejected when root-only=true, got %q ok=%v", got, ok)
+	if got, ok := provider.InternalModelID("gpt-5.5", false); ok || got != "" {
+		t.Fatalf("expected provider-route raw id to be rejected once template is configured, got %q ok=%v", got, ok)
 	}
 }
 

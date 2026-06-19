@@ -76,3 +76,19 @@ func applyNoPromptModelSuffix(req *model.CanonicalRequest, cfg config.Config) {
 	}
 	req.SkipProviderSystemPrompt = true
 }
+
+func prepareProviderClientModel(req *model.CanonicalRequest, resolvedModel string, provider config.ProviderConfig, cfg config.Config) string {
+	if req == nil {
+		return strings.TrimSpace(resolvedModel)
+	}
+	if !provider.HidesModel(req.Model) {
+		applyNoPromptModelSuffix(req, cfg)
+	}
+	if strings.TrimSpace(resolvedModel) != "" {
+		req.Model = resolvedModel
+	}
+	if !provider.HidesModel(req.Model) {
+		applyNoPromptModelSuffix(req, cfg)
+	}
+	return req.Model
+}

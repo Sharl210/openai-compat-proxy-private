@@ -110,7 +110,7 @@ func TestRewriteModelsBodyAppliesModelIDTemplateByDefault(t *testing.T) {
 	}
 }
 
-func TestRewriteModelsBodyRootOnlyTemplateKeepsProviderRouteRaw(t *testing.T) {
+func TestRewriteModelsBodyRootOnlyTemplateStillWrapsProviderRoute(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"openai"}]}`)
 	provider := config.ProviderConfig{ModelIDTemplate: "packy-{{model}}", ModelIDTemplateRootOnly: true}
 
@@ -121,8 +121,8 @@ func TestRewriteModelsBodyRootOnlyTemplateKeepsProviderRouteRaw(t *testing.T) {
 	}
 	providerData, _ := providerPayload["data"].([]any)
 	providerEntry, _ := providerData[0].(map[string]any)
-	if got := providerEntry["id"]; got != "gpt-5.5" {
-		t.Fatalf("expected provider route to expose raw id when root-only=true, got %#v", got)
+	if got := providerEntry["id"]; got != "packy-gpt-5.5" {
+		t.Fatalf("expected provider route to expose templated id despite root-only compatibility flag, got %#v", got)
 	}
 
 	rootBody := rewriteModelsBodyForRoute(body, provider, true)
@@ -134,6 +134,85 @@ func TestRewriteModelsBodyRootOnlyTemplateKeepsProviderRouteRaw(t *testing.T) {
 	rootEntry, _ := rootData[0].(map[string]any)
 	if got := rootEntry["id"]; got != "packy-gpt-5.5" {
 		t.Fatalf("expected root route to expose templated id when root-only=true, got %#v", got)
+	}
+}
+
+func TestModelsExplicitProviderRouteExposesOnlyTemplatedIDs(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"upstream"}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider: "packy",
+		Providers: []config.ProviderConfig{{
+			ID:                      "packy",
+			Enabled:                 true,
+			UpstreamBaseURL:         upstream.URL,
+			UpstreamAPIKey:          "test-key",
+			SupportsModels:          true,
+			ModelIDTemplate:         "packy-{{model}}-vip",
+			ModelIDTemplateRootOnly: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/packy/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected explicit provider models status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	ids := decodeModelIDsFromBody(t, rec.Body.Bytes())
+	if !contains(ids, "packy-gpt-5.5-vip") || contains(ids, "gpt-5.5") {
+		t.Fatalf("expected only templated external model ids, got %#v", ids)
+	}
+}
+
+func TestModelsBareDefaultProviderExposesOnlyTemplatedIDs(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model","owned_by":"upstream"}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "packy",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                      "packy",
+			Enabled:                 true,
+			UpstreamBaseURL:         upstream.URL,
+			UpstreamAPIKey:          "test-key",
+			SupportsModels:          true,
+			ModelIDTemplate:         "packy-{{model}}-vip",
+			ModelIDTemplateRootOnly: true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected bare default models status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	ids := decodeModelIDsFromBody(t, rec.Body.Bytes())
+	if !contains(ids, "packy-gpt-5.5-vip") || contains(ids, "gpt-5.5") {
+		t.Fatalf("expected only templated external model ids, got %#v", ids)
 	}
 }
 
@@ -670,4 +749,20 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func decodeModelIDsFromBody(t *testing.T, body []byte) []string {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode models body: %v body=%s", err, string(body))
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		id, _ := entry["id"].(string)
+		ids = append(ids, id)
+	}
+	return ids
 }

@@ -130,21 +130,19 @@ func writeModelAllowanceError(w http.ResponseWriter, err error) {
 
 func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, bool, error) {
 	if provider.SupportsModels {
-		rootRoute := modelIDTemplateRootScopeFromRequest(r)
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
 			return nil, false, err
 		}
 		if status == http.StatusNotFound {
-			if fallback, ok := configuredModelsFallbackBodyForRoute(provider, rootRoute); ok {
-				set, err := modelIDSetFromBody(fallback)
-				return set, true, err
+			if ids := provider.VisibleModelIDs(); len(ids) > 0 {
+				return rawModelIDSetFromIDs(ids), true, nil
 			}
 			return nil, false, nil
 		}
 		if status >= 200 && status < 300 {
-			set, err := modelIDSetFromBody(rewriteModelsBodyForRoute(body, provider, rootRoute))
+			set, err := rawModelIDSetFromModelsBody(body, provider)
 			return set, true, err
 		}
 		return nil, false, &upstream.HTTPStatusError{
@@ -160,26 +158,76 @@ func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provi
 	}
 	set := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
-		set[provider.ExternalModelID(id, modelIDTemplateRootScopeFromRequest(r))] = struct{}{}
+		set[id] = struct{}{}
 	}
 	return set, true, nil
 }
 
-func modelIDSetFromBody(body []byte) (map[string]struct{}, error) {
+func rawModelIDSetFromIDs(ids []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		set[id] = struct{}{}
+	}
+	return set
+}
+
+func rawModelIDSetFromModelsBody(body []byte, provider config.ProviderConfig) (map[string]struct{}, error) {
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
 	data, _ := payload["data"].([]any)
-	ids := make(map[string]struct{}, len(data))
+	baseIDs := make([]string, 0, len(data)+len(provider.ManualModels))
+	upstreamBaseIDs := make([]string, 0, len(data))
+	seenIDs := make(map[string]struct{}, len(data)+len(provider.ManualModels))
 	for _, item := range data {
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		id = strings.TrimSpace(id)
-		if id == "" {
+		if id == "" || provider.HidesModel(id) || !modelSelectedByManualPatterns(provider, id) {
 			continue
 		}
-		ids[id] = struct{}{}
+		upstreamBaseIDs = append(upstreamBaseIDs, id)
+		if _, exists := seenIDs[id]; !exists {
+			baseIDs = append(baseIDs, id)
+			seenIDs[id] = struct{}{}
+		}
 	}
-	return ids, nil
+	for _, manualModel := range provider.ManualModels {
+		manualModel = strings.TrimSpace(manualModel)
+		if manualModel == "" || strings.HasPrefix(manualModel, "#reason_suffix:") || !config.IsStaticModelPattern(manualModel) {
+			continue
+		}
+		if _, exists := seenIDs[manualModel]; !exists {
+			baseIDs = append(baseIDs, manualModel)
+			seenIDs[manualModel] = struct{}{}
+		}
+	}
+	for _, id := range provider.ManualReasonSuffixModelIDsFrom(upstreamBaseIDs) {
+		id = strings.TrimSpace(id)
+		if id == "" || provider.HidesModel(id) {
+			continue
+		}
+		if _, exists := seenIDs[id]; !exists {
+			baseIDs = append(baseIDs, id)
+			seenIDs[id] = struct{}{}
+		}
+	}
+	visible := baseIDs
+	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
+		visible = reasoning.ExpandModelIDs(baseIDs, nil, true)
+	}
+	set := make(map[string]struct{}, len(visible))
+	for _, id := range visible {
+		id = strings.TrimSpace(id)
+		if id == "" || provider.HidesModel(id) {
+			continue
+		}
+		set[id] = struct{}{}
+	}
+	return set, nil
 }

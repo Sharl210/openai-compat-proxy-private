@@ -310,6 +310,50 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string
 	return owner, true
 }
 
+func (s *RuntimeSnapshot) resolveDefaultProviderSelectionFromTemplate(model string) (string, string, bool) {
+	if s == nil || strings.TrimSpace(model) == "" {
+		return "", model, false
+	}
+	for _, providerID := range s.DefaultProviderIDs {
+		provider, err := s.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		internalModel, ok := provider.InternalModelID(model, true)
+		if !ok || !providerAllowsInternalVisibleModel(provider, internalModel, s.Config.EnableNoPromptModelSuffix) {
+			continue
+		}
+		return providerID, internalModel, true
+	}
+	return "", model, false
+}
+
+func providerAllowsInternalVisibleModel(provider ProviderConfig, model string, enableNoPrompt bool) bool {
+	model = strings.TrimSpace(model)
+	if model == "" || provider.HidesModel(model) {
+		return false
+	}
+	visible := provider.VisibleModelIDs()
+	for _, id := range visible {
+		if strings.TrimSpace(id) == model {
+			return true
+		}
+	}
+	if strippedModel, stripped := stripNoPromptModelSuffix(model); stripped {
+		return provider.EffectiveNoPromptModelSuffix(enableNoPrompt) && !provider.HidesModel(model) && providerAllowsInternalVisibleModel(provider, strippedModel, enableNoPrompt)
+	}
+	baseModel, _, ok := reasoning.SplitSuffix(model)
+	if !ok || (!provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(model)) || provider.HidesModel(model) {
+		return false
+	}
+	for _, id := range visible {
+		if strings.TrimSpace(id) == baseModel {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *RuntimeSnapshot) rawDefaultModelID(model string) string {
 	if s == nil || len(s.DefaultModelRawIDs) == 0 {
 		return model
@@ -355,6 +399,9 @@ func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (
 	if err != nil {
 		return "", "", false
 	}
+	if internalModel, ok := provider.InternalModelID(baseModel, true); ok && providerAllowsInternalVisibleModel(provider, internalModel, s.Config.EnableNoPromptModelSuffix) {
+		return providerID, internalModel, true
+	}
 	if s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseModel)] != providerID {
 		baseVisibleModel, _, ok := reasoning.SplitSuffix(baseModel)
 		if !ok || (!provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(baseModel)) || provider.HidesModel(baseModel) || s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseVisibleModel)] != providerID {
@@ -387,6 +434,9 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 			}
 			return providerID, s.rawDefaultModelID(model), true
 		}
+		if providerID, internalModel, ok := s.resolveDefaultProviderSelectionFromTemplate(model); ok {
+			return providerID, internalModel, true
+		}
 		if baseModel, ok := stripNoPromptModelSuffix(model); ok {
 			if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
 				provider, err := s.Config.ProviderByID(owner)
@@ -399,6 +449,9 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 	}
 	if owner, ok := s.DefaultModelOwners[model]; ok {
 		return owner, s.rawDefaultModelID(model), true
+	}
+	if providerID, internalModel, ok := s.resolveDefaultProviderSelectionFromTemplate(model); ok {
+		return providerID, internalModel, true
 	}
 	if baseModel, ok := stripNoPromptModelSuffix(model); ok {
 		if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
