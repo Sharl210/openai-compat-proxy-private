@@ -1831,6 +1831,34 @@ func TestBuildAnthropicMessagesNormalizesResponsesReasoningBlocksToThinkingBlock
 	}
 }
 
+func TestBuildAnthropicMessagesSkipsResponsesReasoningBlocksWithoutThinkingText(t *testing.T) {
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":              "reasoning",
+			"id":                "rs_signature_only",
+			"encrypted_content": "enc_signature_only",
+		}},
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+	}}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one anthropic assistant message, got %#v", messages)
+	}
+	assistantMsg, _ := messages[0].(map[string]any)
+	content, _ := assistantMsg["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected signature-only responses reasoning block to be skipped, got %#v", assistantMsg)
+	}
+	text, _ := content[0].(map[string]any)
+	if got, _ := text["type"].(string); got != "text" {
+		t.Fatalf("expected only assistant text block, got %#v", content)
+	}
+	if got, _ := text["text"].(string); got != "final answer" {
+		t.Fatalf("expected assistant text preserved, got %#v", text)
+	}
+}
+
 func TestBuildAnthropicMessagesPreservesNativeThinkingBlocksForThinkingModeReplay(t *testing.T) {
 	original := map[string]any{
 		"type":      "thinking",

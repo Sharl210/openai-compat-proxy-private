@@ -1903,7 +1903,11 @@ func cloneAnySliceOfMaps(blocks []map[string]any) []any {
 		if len(block) == 0 {
 			continue
 		}
-		out = append(out, normalizeAnthropicReasoningBlock(block))
+		normalized := normalizeAnthropicReasoningBlock(block)
+		if len(normalized) == 0 {
+			continue
+		}
+		out = append(out, normalized)
 	}
 	if len(out) == 0 {
 		return nil
@@ -1919,15 +1923,14 @@ func normalizeAnthropicReasoningBlock(block map[string]any) map[string]any {
 	if stringValue(cloned["type"]) != "reasoning" {
 		return cloned
 	}
-	normalized := map[string]any{"type": "thinking"}
-	if text := reasoningTextFromResponsesBlock(cloned); text != "" {
-		normalized["thinking"] = text
+	text := reasoningTextFromResponsesBlock(cloned)
+	if text == "" {
+		return nil
 	}
+	normalized := map[string]any{"type": "thinking"}
+	normalized["thinking"] = text
 	if signature := stringValue(cloned["encrypted_content"]); signature != "" {
 		normalized["signature"] = signature
-	}
-	if len(normalized) == 1 {
-		return cloned
 	}
 	return normalized
 }
