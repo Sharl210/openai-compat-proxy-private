@@ -25,6 +25,7 @@ type Config struct {
 	ModelLimitContextTokens           int
 	ModelLimitContextTokenRules       []ScopedIntRule
 	UpstreamUserAgent                 string
+	UpstreamMasqueradeClientVersion   string
 	MasqueradeTarget                  string
 	InjectClaudeCodeMetadataUserID    bool
 	InjectClaudeCodeSystemPrompt      bool
@@ -220,6 +221,9 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	}
 	if value, ok := lookup("UPSTREAM_USER_AGENT"); ok && value != "" {
 		cfg.UpstreamUserAgent = value
+	}
+	if value, ok := lookup("UPSTREAM_MASQUERADE_CLIENT_VERSION"); ok && value != "" {
+		cfg.UpstreamMasqueradeClientVersion = strings.TrimSpace(value)
 	}
 	if value, ok := lookup("UPSTREAM_MASQUERADE_TARGET"); ok && value != "" {
 		cfg.MasqueradeTarget = strings.ToLower(value)
@@ -704,6 +708,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.UpstreamRetryDelay == other.UpstreamRetryDelay &&
 		c.UpstreamCacheControl == other.UpstreamCacheControl &&
 		c.UpstreamUserAgent == other.UpstreamUserAgent &&
+		c.UpstreamMasqueradeClientVersion == other.UpstreamMasqueradeClientVersion &&
 		c.MasqueradeTarget == other.MasqueradeTarget &&
 		c.InjectClaudeCodeMetadataUserID == other.InjectClaudeCodeMetadataUserID &&
 		c.InjectClaudeCodeSystemPrompt == other.InjectClaudeCodeSystemPrompt

@@ -35,6 +35,7 @@ type ProviderConfig struct {
 	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
 	UpstreamUserAgent                      string
+	MasqueradeClientVersion                string
 	InjectClaudeCodeMetadataUserID         bool
 	InjectClaudeCodeMetadataUserIDSet      bool
 	InjectClaudeCodeSystemPrompt           bool
@@ -394,6 +395,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.MasqueradeTarget = strings.ToLower(value)
 		case "UPSTREAM_USER_AGENT":
 			provider.UpstreamUserAgent = value
+		case "MASQUERADE_CLIENT_VERSION":
+			provider.MasqueradeClientVersion = strings.TrimSpace(value)
 		case "INJECT_CLAUDE_CODE_METADATA_USER_ID":
 			if strings.TrimSpace(value) == "" {
 				break

@@ -2710,9 +2710,9 @@ func TestApplyUpstreamHeadersClaudeMasqueradeUsesLatestFingerprint(t *testing.T)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	applyUpstreamHeaders(req, config.UpstreamEndpointTypeAnthropic, "Bearer key", "", "", "", config.MasqueradeTargetClaude)
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeAnthropic, "Bearer key", "", "", "", config.MasqueradeTargetClaude, "")
 
-	if got := req.Header.Get("User-Agent"); got != "claude-cli/2.1.167 (external, cli)" {
+	if got := req.Header.Get("User-Agent"); got != "claude-cli/2.1.183 (external, cli)" {
 		t.Fatalf("expected latest claude UA, got %q", got)
 	}
 	for _, want := range []string{
@@ -2741,8 +2741,8 @@ func TestApplyUpstreamHeadersOpenCodeMasqueradeUsesLatestFingerprint(t *testing.
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "", config.MasqueradeTargetOpenCode)
-	if got := req.Header.Get("User-Agent"); got != "opencode/1.16.2 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14" {
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "", config.MasqueradeTargetOpenCode, "")
+	if got := req.Header.Get("User-Agent"); got != "opencode/1.17.8 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14" {
 		t.Fatalf("expected latest opencode UA, got %q", got)
 	}
 	if got := req.Header.Get("originator"); got != "opencode" {
@@ -2755,8 +2755,8 @@ func TestApplyUpstreamHeadersCodexMasqueradeUsesLatestFingerprint(t *testing.T) 
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "", config.MasqueradeTargetCodex)
-	if got := req.Header.Get("User-Agent"); got != "codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app" {
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "", config.MasqueradeTargetCodex, "")
+	if got := req.Header.Get("User-Agent"); got != "codex_cli_rs/0.141.0 (Linux 6.1; x86_64) iTerm.app" {
 		t.Fatalf("expected latest codex UA, got %q", got)
 	}
 	if got := req.Header.Get("originator"); got != "codex_cli_rs" {
@@ -2764,6 +2764,47 @@ func TestApplyUpstreamHeadersCodexMasqueradeUsesLatestFingerprint(t *testing.T) 
 	}
 	if got := req.Header.Get("x-openai-internal-codex-residency"); got != "us" {
 		t.Fatalf("expected codex residency header, got %q", got)
+	}
+}
+
+func TestApplyUpstreamHeadersMasqueradeUsesCustomClientVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		endpoint string
+		want     string
+	}{
+		{name: "claude", target: config.MasqueradeTargetClaude, endpoint: config.UpstreamEndpointTypeAnthropic, want: "claude-cli/9.8.7 (external, cli)"},
+		{name: "codex", target: config.MasqueradeTargetCodex, endpoint: config.UpstreamEndpointTypeResponses, want: "codex_cli_rs/9.8.7 (Linux 6.1; x86_64) iTerm.app"},
+		{name: "opencode", target: config.MasqueradeTargetOpenCode, endpoint: config.UpstreamEndpointTypeResponses, want: "opencode/9.8.7 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			applyUpstreamHeaders(req, tt.endpoint, "Bearer key", "", "", "", tt.target, "9.8.7")
+
+			if got := req.Header.Get("User-Agent"); got != tt.want {
+				t.Fatalf("expected custom masquerade UA %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestApplyUpstreamHeadersExplicitUserAgentOverridesMasqueradeGeneratedUserAgent(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/messages", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeAnthropic, "Bearer key", "", "", "explicit-client/1.2.3", config.MasqueradeTargetClaude, "9.8.7")
+
+	if got := req.Header.Get("User-Agent"); got != "explicit-client/1.2.3" {
+		t.Fatalf("expected explicit user agent to override masquerade UA, got %q", got)
 	}
 }
 

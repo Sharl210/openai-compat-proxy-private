@@ -21,15 +21,15 @@ const (
 	// opencode 伪装：来自 @ai-sdk/provider-utils 的真实 User-Agent 格式
 	// 格式：opencode/{version} ai-sdk/provider-utils/{version} runtime/{runtime}/{version}
 	// 验证来源：issue #8444 (anomalyco/opencode), issue #12799/PR #12800 (vercel/ai)
-	opencodeUserAgent  = "opencode/1.16.2 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"
-	opencodeOriginator = "opencode"
+	opencodeDefaultClientVersion = "1.17.8"
+	opencodeOriginator           = "opencode"
 
 	// claude 伪装：必须用 claude-cli/ 格式才能通过 sub2api 的 isClaudeCodeClient 检测
 	// sub2api 的检测 regex：^claude-cli/\d+\.\d+\.\d+（需同时有 metadata.user_id）
 	// 真实 Claude Code CLI 发的是 claude-code/（不匹配），但 sub2api 接受 claude-cli/ 作为有效标识
 	// 来源：sub2api gateway_service.go 的 claudeCliUserAgentRe + DefaultHeaders (constants.go)
-	claudeCodeUserAgent = "claude-cli/2.1.167 (external, cli)"
-	claudeCodeXApp      = "cli"
+	claudeCodeDefaultClientVersion = "2.1.183"
+	claudeCodeXApp                 = "cli"
 	// beta header：与 sub2api 的 FullClaudeCodeMimicryBetas/当前 CLI 抓包对齐
 	claudeCodeBeta                = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
 	claudeCodeSystemPrompt        = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -37,8 +37,8 @@ const (
 
 	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
 	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
-	// 示例：codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app
-	codexUserAgent = "codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app"
+	// 示例：codex_cli_rs/0.141.0 (Linux 6.1; x86_64) iTerm.app
+	codexDefaultClientVersion = "0.141.0"
 
 	anthropicBetaCompact20260112           = "compact-2026-01-12"
 	anthropicBetaContextManagement20250627 = "context-management-2025-06-27"
@@ -84,17 +84,50 @@ func endpointPathForType(endpointType string) string {
 	}
 }
 
-func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string, anthropicBeta string, userAgent string, masqueradeTarget string) {
+func EffectiveMasqueradeUserAgent(masqueradeTarget string, masqueradeClientVersion string) string {
+	version := strings.TrimSpace(masqueradeClientVersion)
+	switch masqueradeTarget {
+	case config.MasqueradeTargetOpenCode:
+		if version == "" {
+			version = opencodeDefaultClientVersion
+		}
+		return "opencode/" + version + " ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"
+	case config.MasqueradeTargetClaude:
+		if version == "" {
+			version = claudeCodeDefaultClientVersion
+		}
+		return "claude-cli/" + version + " (external, cli)"
+	case config.MasqueradeTargetCodex:
+		if version == "" {
+			version = codexDefaultClientVersion
+		}
+		return "codex_cli_rs/" + version + " (Linux 6.1; x86_64) iTerm.app"
+	default:
+		return ""
+	}
+}
+
+func FinalMasqueradeUserAgent(userAgent string, masqueradeTarget string, masqueradeClientVersion string) string {
+	if masqueradeTarget == "" || masqueradeTarget == config.MasqueradeTargetNone {
+		return ""
+	}
+	if trimmed := strings.TrimSpace(userAgent); trimmed != "" {
+		return trimmed
+	}
+	return EffectiveMasqueradeUserAgent(masqueradeTarget, masqueradeClientVersion)
+}
+
+func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorization string, anthropicVersion string, anthropicBeta string, userAgent string, masqueradeTarget string, masqueradeClientVersion string) {
 	if httpReq == nil {
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	switch masqueradeTarget {
 	case config.MasqueradeTargetOpenCode:
-		httpReq.Header.Set("User-Agent", opencodeUserAgent)
+		httpReq.Header.Set("User-Agent", EffectiveMasqueradeUserAgent(masqueradeTarget, masqueradeClientVersion))
 		httpReq.Header.Set("originator", opencodeOriginator)
 	case config.MasqueradeTargetClaude:
-		httpReq.Header.Set("User-Agent", claudeCodeUserAgent)
+		httpReq.Header.Set("User-Agent", EffectiveMasqueradeUserAgent(masqueradeTarget, masqueradeClientVersion))
 		httpReq.Header.Set("X-App", claudeCodeXApp)
 		httpReq.Header.Set("anthropic-beta", claudeCodeBeta)
 		httpReq.Header.Set("X-Stainless-Lang", "js")
@@ -109,14 +142,14 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 		httpReq.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 		httpReq.Header.Set("Anthropic-Dangerous-Direct-Browser-Access", "true")
 	case config.MasqueradeTargetCodex:
-		httpReq.Header.Set("User-Agent", codexUserAgent)
+		httpReq.Header.Set("User-Agent", EffectiveMasqueradeUserAgent(masqueradeTarget, masqueradeClientVersion))
 		httpReq.Header.Set("originator", "codex_cli_rs")
 		httpReq.Header.Set("x-openai-internal-codex-residency", "us")
 	case config.MasqueradeTargetNone:
 		// no-op：不注入任何伪装 header
 	}
 	if userAgent != "" {
-		httpReq.Header.Set("User-Agent", userAgent)
+		httpReq.Header.Set("User-Agent", strings.TrimSpace(userAgent))
 	}
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeAnthropic {
 		version := strings.TrimSpace(anthropicVersion)

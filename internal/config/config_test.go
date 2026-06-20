@@ -108,6 +108,14 @@ func TestLoadFromValuesParsesNoPromptModelSuffixFlag(t *testing.T) {
 	}
 }
 
+func TestLoadFromValuesParsesUpstreamMasqueradeClientVersion(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{"UPSTREAM_MASQUERADE_CLIENT_VERSION": "9.8.7"})
+
+	if got := cfg.UpstreamMasqueradeClientVersion; got != "9.8.7" {
+		t.Fatalf("expected upstream masquerade client version 9.8.7, got %q", got)
+	}
+}
+
 func TestLoadFromValuesAllowsExplicitlyDisablingClaudeMasqueradeInjection(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
 		"UPSTREAM_INJECT_METADATA_USER_ID":     "false",

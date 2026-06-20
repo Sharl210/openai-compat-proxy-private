@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+func TestLoadProviderFileParsesMasqueradeClientVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "provider.env")
+	if err := os.WriteFile(path, []byte(strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://upstream.example.com",
+		"MASQUERADE_CLIENT_VERSION=8.7.6",
+	}, "\n")+"\n"), 0600); err != nil {
+		t.Fatalf("write provider file: %v", err)
+	}
+
+	provider, err := loadProviderFile(path)
+	if err != nil {
+		t.Fatalf("load provider file: %v", err)
+	}
+	if got := provider.MasqueradeClientVersion; got != "8.7.6" {
+		t.Fatalf("expected provider masquerade client version 8.7.6, got %q", got)
+	}
+}
+
 func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5-low"}}}
 

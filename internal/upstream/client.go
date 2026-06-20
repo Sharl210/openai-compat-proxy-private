@@ -31,6 +31,7 @@ type Client struct {
 	anthropicVersion               string
 	upstreamUserAgent              string
 	masqueradeTarget               string
+	masqueradeClientVersion        string
 	injectClaudeCodeMetadataUserID bool
 	injectClaudeCodeSystemPrompt   bool
 	upstreamThinkingTagStyle       string
@@ -126,6 +127,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		anthropicVersion:               strings.TrimSpace(cfg.AnthropicVersion),
 		upstreamUserAgent:              strings.TrimSpace(cfg.UpstreamUserAgent),
 		masqueradeTarget:               cfg.MasqueradeTarget,
+		masqueradeClientVersion:        strings.TrimSpace(cfg.UpstreamMasqueradeClientVersion),
 		injectClaudeCodeMetadataUserID: cfg.InjectClaudeCodeMetadataUserID,
 		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
 		upstreamThinkingTagStyle:       cfg.UpstreamThinkingTagStyle,
@@ -140,7 +142,7 @@ func PassThrough(ctx context.Context, cfg config.Config, authorization string, m
 	if err != nil {
 		return 0, "", nil, err
 	}
-	applyUpstreamHeaders(httpReq, config.UpstreamEndpointTypeResponses, authorization, client.anthropicVersion, "", client.upstreamUserAgent, client.masqueradeTarget)
+	applyUpstreamHeaders(httpReq, config.UpstreamEndpointTypeResponses, authorization, client.anthropicVersion, "", client.upstreamUserAgent, client.masqueradeTarget, client.masqueradeClientVersion)
 	if contentType != "" {
 		httpReq.Header.Set("Content-Type", contentType)
 	}
@@ -605,7 +607,7 @@ func (c *Client) responseOnce(ctx context.Context, endpointType string, body []b
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget, c.masqueradeClientVersion)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -640,7 +642,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 	if err != nil {
 		return nil, err
 	}
-	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget)
+	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget, c.masqueradeClientVersion)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

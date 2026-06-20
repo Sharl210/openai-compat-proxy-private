@@ -243,6 +243,9 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	if provider.UpstreamUserAgent != "" {
 		providerCfg.UpstreamUserAgent = provider.UpstreamUserAgent
 	}
+	if provider.MasqueradeClientVersion != "" {
+		providerCfg.UpstreamMasqueradeClientVersion = provider.MasqueradeClientVersion
+	}
 	if provider.MasqueradeTarget != "" {
 		providerCfg.MasqueradeTarget = provider.MasqueradeTarget
 	}
