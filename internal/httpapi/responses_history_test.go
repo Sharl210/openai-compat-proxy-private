@@ -23,6 +23,9 @@ func TestResponsesHistoryEvictsOldestWhenLimitExceeded(t *testing.T) {
 	if got := store.Load("openai", "resp-3"); len(got) != 1 {
 		t.Fatalf("expected resp-3 to remain, got %#v", got)
 	}
+	if got := store.LoadAny("resp-1"); got != nil {
+		t.Fatalf("expected evicted response id to be removed from LoadAny index, got %#v", got)
+	}
 }
 
 func TestResponsesHistorySaveSameKeyReplacesWithoutGrowingOrder(t *testing.T) {
@@ -57,6 +60,29 @@ func TestResponsesHistoryLoadReturnsClone(t *testing.T) {
 	reloaded := store.Load("openai", "resp-1")
 	if reloaded[0].Parts[0].Text != "one" {
 		t.Fatalf("expected stored history to stay immutable, got %#v", reloaded)
+	}
+}
+
+func TestResponsesHistoryLoadAnyReturnsLatestProviderSnapshot(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 3}
+
+	store.Save("codex-my", "resp-1", []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "codex snapshot"}}}})
+	store.Save("mimo", "resp-1", []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "mimo snapshot"}}}})
+	store.Save("codex-my", "resp-1", []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "latest codex snapshot"}}}})
+
+	if got := store.Load("mimo", "resp-1"); len(got) != 1 || got[0].Parts[0].Text != "mimo snapshot" {
+		t.Fatalf("expected exact provider lookup to keep provider-specific snapshot, got %#v", got)
+	}
+
+	loaded := store.LoadAny("resp-1")
+	if len(loaded) != 1 || loaded[0].Parts[0].Text != "latest codex snapshot" {
+		t.Fatalf("expected LoadAny to return latest saved provider snapshot, got %#v", loaded)
+	}
+
+	loaded[0].Parts[0].Text = "mutated"
+	reloaded := store.LoadAny("resp-1")
+	if len(reloaded) != 1 || reloaded[0].Parts[0].Text != "latest codex snapshot" {
+		t.Fatalf("expected LoadAny to return a clone, got %#v", reloaded)
 	}
 }
 
@@ -273,6 +299,22 @@ func TestAssistantHistoryMessagesFromResultDropsSyntheticReasoningSummary(t *tes
 	}
 	if len(messages[0].Parts) != 1 || messages[0].Parts[0].Text != "final answer" {
 		t.Fatalf("expected assistant text preserved, got %#v", messages[0])
+	}
+}
+
+func TestAssistantHistoryMessagesFromResultKeepsToolCalls(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		ToolCalls: []aggregate.ToolCall{{CallID: "call_1", ID: "fc_1", Name: "search_web", Arguments: `{"query":"weather"}`}},
+	})
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant history message, got %#v", messages)
+	}
+	if len(messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected tool call to be preserved, got %#v", messages[0])
+	}
+	call := messages[0].ToolCalls[0]
+	if call.ID != "call_1" || call.Name != "search_web" || call.Arguments != `{"query":"weather"}` {
+		t.Fatalf("expected call_1/search_web tool call preserved, got %#v", call)
 	}
 }
 

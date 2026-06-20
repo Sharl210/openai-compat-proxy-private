@@ -393,14 +393,24 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 		canon.IncludeUsage = true
 	}
+	previousHistoryRestored := false
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
+			currentMessages := prepareCanonicalMessages(canon.Messages)
 			if history := globalResponsesHistory.Load(providerID, previousResponseID); len(history) > 0 {
-				canon.Messages = append(history, canon.Messages...)
+				canon.Messages = append(history, currentMessages...)
+				previousHistoryRestored = true
+			} else if history := globalResponsesHistory.LoadAny(previousResponseID); len(history) > 0 {
+				canon.Messages = append(history, currentMessages...)
+				previousHistoryRestored = true
+			} else {
+				canon.Messages = currentMessages
 			}
 		}
 	}
-	canon.Messages = prepareCanonicalMessages(canon.Messages)
+	if !previousHistoryRestored {
+		canon.Messages = prepareCanonicalMessages(canon.Messages)
+	}
 	applyProviderSystemPrompt(&canon, provider)
 	normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
 	applyProviderMaxOutputTokens(&canon, provider)

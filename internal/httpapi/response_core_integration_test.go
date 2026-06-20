@@ -613,6 +613,135 @@ func TestResponsesReasoningAndToolCallPreservedForChatUpstream(t *testing.T) {
 	}
 }
 
+func TestResponsesPreviousResponseIDRestoresHistoryAcrossProviderSwitchForChatUpstream(t *testing.T) {
+	var mimoUpstreamBody string
+	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_codex_1",
+			"object":"response",
+			"status":"completed",
+			"output":[{"id":"fc_1","type":"function_call","status":"completed","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"}],
+			"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}
+		}`))
+	}))
+	defer codexUpstream.Close()
+	mimoUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		mimoUpstreamBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_mimo","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
+	}))
+	defer mimoUpstream.Close()
+
+	previousGlobalHistory := globalResponsesHistory
+	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: defaultResponsesHistoryMaxSize}
+	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "codex-my,mimo",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{
+			{
+				ID:                   "codex-my",
+				Enabled:              true,
+				UpstreamBaseURL:      codexUpstream.URL,
+				UpstreamAPIKey:       "test-key",
+				UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+				SupportsResponses:    true,
+				SupportsChat:         true,
+				ManualModels:         []string{"gpt-5"},
+			},
+			{
+				ID:                   "mimo",
+				Enabled:              true,
+				UpstreamBaseURL:      mimoUpstream.URL,
+				UpstreamAPIKey:       "test-key",
+				UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+				SupportsResponses:    true,
+				SupportsChat:         true,
+				ManualModels:         []string{"gpt-5"},
+			},
+		},
+	})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/codex-my/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"input":"search the web",
+		"tools":[{"type":"function","name":"search_web","description":"Search the web","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]
+	}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first responses request: expected status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	if !strings.Contains(firstRec.Body.String(), `"id":"resp_codex_1"`) {
+		t.Fatalf("expected first response id resp_codex_1, got %s", firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/mimo/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"previous_response_id":"resp_codex_1",
+		"input":"continue",
+		"tools":[{"type":"function","name":"search_web","description":"Search the web","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]
+	}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("second responses request: expected status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+
+	var upstreamPayload map[string]any
+	if err := json.Unmarshal([]byte(mimoUpstreamBody), &upstreamPayload); err != nil {
+		t.Fatalf("unmarshal mimo upstream body: %v body=%s", err, mimoUpstreamBody)
+	}
+	messages, _ := upstreamPayload["messages"].([]any)
+	if len(messages) == 0 {
+		t.Fatalf("expected chat upstream messages, got %s", mimoUpstreamBody)
+	}
+	var foundHistoricalToolCall bool
+	var foundCurrentUserMessage bool
+	for _, raw := range messages {
+		msg, _ := raw.(map[string]any)
+		if msg == nil {
+			continue
+		}
+		if msg["role"] == "user" {
+			if content, _ := msg["content"].(string); strings.Contains(content, "continue") {
+				foundCurrentUserMessage = true
+			}
+		}
+		toolCalls, _ := msg["tool_calls"].([]any)
+		for _, rawCall := range toolCalls {
+			call, _ := rawCall.(map[string]any)
+			function, _ := call["function"].(map[string]any)
+			if call["id"] == "call_1" && function["name"] == "search_web" {
+				foundHistoricalToolCall = true
+			}
+		}
+	}
+	if !foundHistoricalToolCall {
+		t.Fatalf("expected historical assistant tool_calls call_1/search_web in mimo upstream body, got %s", mimoUpstreamBody)
+	}
+	if !foundCurrentUserMessage {
+		t.Fatalf("expected current continue user message in mimo upstream body, got %s", mimoUpstreamBody)
+	}
+}
+
 func TestChatStreamingUpstreamWithoutReasoningOmitsProxyPlaceholderFromResponsesNonStreamSummary(t *testing.T) {
 	upstream := newChatStreamingUpstream(t, []string{
 		"event: chat\n" +

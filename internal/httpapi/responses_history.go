@@ -10,10 +10,11 @@ import (
 )
 
 type responsesHistoryStore struct {
-	mu      sync.RWMutex
-	entries map[string]responsesConversationSnapshot
-	order   []string
-	maxSize int
+	mu           sync.RWMutex
+	entries      map[string]responsesConversationSnapshot
+	byResponseID map[string]string
+	order        []string
+	maxSize      int
 }
 
 type responsesConversationSnapshot struct {
@@ -22,7 +23,7 @@ type responsesConversationSnapshot struct {
 
 const defaultResponsesHistoryMaxSize = 512
 
-var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: defaultResponsesHistoryMaxSize}
+var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, maxSize: defaultResponsesHistoryMaxSize}
 
 func responsesHistoryKey(providerID, responseID string) string {
 	return providerID + "::" + responseID
@@ -62,15 +63,22 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 	}
 	key := responsesHistoryKey(providerID, responseID)
 	s.mu.Lock()
+	if s.entries == nil {
+		s.entries = map[string]responsesConversationSnapshot{}
+	}
+	if s.byResponseID == nil {
+		s.byResponseID = map[string]string{}
+	}
 	if _, exists := s.entries[key]; exists {
 		s.removeKeyLocked(key)
 	}
 	s.entries[key] = responsesConversationSnapshot{Messages: cloneCanonicalMessages(messages)}
+	s.byResponseID[responseID] = key
 	s.order = append(s.order, key)
 	for len(s.order) > s.maxSize {
 		oldest := s.order[0]
 		s.order = s.order[1:]
-		delete(s.entries, oldest)
+		s.deleteKeyLocked(oldest)
 	}
 	s.mu.Unlock()
 }
@@ -88,6 +96,20 @@ func (s *responsesHistoryStore) Load(providerID, responseID string) []model.Cano
 	return cloneCanonicalMessages(stored.Messages)
 }
 
+func (s *responsesHistoryStore) LoadAny(responseID string) []model.CanonicalMessage {
+	if s == nil || responseID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	key := s.byResponseID[responseID]
+	stored, ok := s.entries[key]
+	s.mu.RUnlock()
+	if !ok || len(stored.Messages) == 0 {
+		return nil
+	}
+	return cloneCanonicalMessages(stored.Messages)
+}
+
 func (s *responsesHistoryStore) removeKeyLocked(target string) {
 	for idx, key := range s.order {
 		if key != target {
@@ -95,6 +117,16 @@ func (s *responsesHistoryStore) removeKeyLocked(target string) {
 		}
 		s.order = append(s.order[:idx], s.order[idx+1:]...)
 		return
+	}
+}
+
+func (s *responsesHistoryStore) deleteKeyLocked(key string) {
+	delete(s.entries, key)
+	for responseID, indexedKey := range s.byResponseID {
+		if indexedKey == key {
+			delete(s.byResponseID, responseID)
+			return
+		}
 	}
 }
 
