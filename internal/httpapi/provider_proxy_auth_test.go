@@ -392,7 +392,7 @@ func TestProviderScopedMasqueradeTargetsDoNotLeakAcrossProviders(t *testing.T) {
 	if claudeRec.Code != http.StatusOK {
 		t.Fatalf("expected claude provider request to succeed, got %d body=%s", claudeRec.Code, claudeRec.Body.String())
 	}
-	if claudeUserAgent != "claude-cli/2.1.167 (external, cli)" {
+	if claudeUserAgent != "claude-cli/2.1.183 (external, cli)" {
 		t.Fatalf("expected claude provider UA, got %q", claudeUserAgent)
 	}
 	if claudeXApp != "cli" {
@@ -413,7 +413,7 @@ func TestProviderScopedMasqueradeTargetsDoNotLeakAcrossProviders(t *testing.T) {
 	if codexRec.Code != http.StatusOK {
 		t.Fatalf("expected codex provider request to succeed, got %d body=%s", codexRec.Code, codexRec.Body.String())
 	}
-	if codexUserAgent != "codex_cli_rs/0.137.0 (Linux 6.1; x86_64) iTerm.app" {
+	if codexUserAgent != "codex_cli_rs/0.141.0 (Linux 6.1; x86_64) iTerm.app" {
 		t.Fatalf("expected codex provider UA, got %q", codexUserAgent)
 	}
 	if codexOriginator != "codex_cli_rs" {

@@ -68,6 +68,101 @@ func TestResponsesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	}
 }
 
+func TestProviderConfigForIDMasqueradeClientVersionOverridesRootAndInheritsEmpty(t *testing.T) {
+	snapshot := &config.RuntimeSnapshot{Config: config.Config{
+		UpstreamMasqueradeClientVersion: "root-version",
+		Providers: []config.ProviderConfig{
+			{ID: "inherit", Enabled: true},
+			{ID: "override", Enabled: true, MasqueradeClientVersion: "provider-version"},
+		},
+	}}
+
+	if got := providerConfigForID(snapshot, "inherit").UpstreamMasqueradeClientVersion; got != "root-version" {
+		t.Fatalf("expected empty provider masquerade client version to inherit root, got %q", got)
+	}
+	if got := providerConfigForID(snapshot, "override").UpstreamMasqueradeClientVersion; got != "provider-version" {
+		t.Fatalf("expected provider masquerade client version to override root, got %q", got)
+	}
+}
+
+func TestRouteObservabilityHeadersExposeMasqueradeUserAgent(t *testing.T) {
+	var upstreamUserAgent string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamUserAgent = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:                 "openai",
+		EnableLegacyV1Routes:            true,
+		UpstreamMasqueradeClientVersion: "9.8.7",
+		DownstreamNonStreamStrategy:     config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			MasqueradeTarget:     config.MasqueradeTargetOpenCode,
+			SupportsResponses:    true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	want := "opencode/9.8.7 ai-sdk/provider-utils/4.0.27 runtime/bun/1.3.14"
+	if got := rec.Header().Get(headerProxyToUpstreamMasqueradeUserAgent); got != want {
+		t.Fatalf("expected masquerade user-agent observability header %q, got %q", want, got)
+	}
+	if upstreamUserAgent != want {
+		t.Fatalf("expected upstream to receive masquerade user-agent %q, got %q", want, upstreamUserAgent)
+	}
+}
+
+func TestRouteObservabilityHeadersExposeEmptyMasqueradeUserAgentWhenDisabled(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			MasqueradeTarget:     config.MasqueradeTargetNone,
+			SupportsResponses:    true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertHeaderPresence(t, rec, headerProxyToUpstreamMasqueradeUserAgent)
+	if got := rec.Header().Get(headerProxyToUpstreamMasqueradeUserAgent); got != "" {
+		t.Fatalf("expected disabled masquerade user-agent observability header to be empty, got %q", got)
+	}
+}
+
 func TestRouteObservabilityHeadersExposeRetryCacheControlAndCacheRates(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {

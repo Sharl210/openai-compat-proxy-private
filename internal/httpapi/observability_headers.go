@@ -27,6 +27,7 @@ const (
 	headerProxyModelLimitContextTokens       = "X-Proxy-Model-Limit-Context-Tokens"
 	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
 	headerProxyToUpstreamMaxOutputTokens     = "X-Proxy-To-Upstream-Max-Output-Tokens"
+	headerProxyToUpstreamMasqueradeUserAgent = "X-Proxy-To-Upstream-Masquerade-User-Agent"
 	headerProxyToUpstreamReasoningEffort     = "X-Proxy-To-Upstream-Reasoning-Effort"
 	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
 	headerProxyUpstreamRetryCount            = "X-Proxy-Upstream-Retry-Count"
@@ -315,6 +316,7 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set(headerProxyUpstreamRetryCount, strconv.Itoa(providerCfg.UpstreamRetryCount))
 	w.Header().Set(headerProxyUpstreamRetryDelay, providerCfg.UpstreamRetryDelay.String())
 	w.Header().Set(headerProxyUpstreamAnthropicCacheControl, strings.TrimSpace(providerCfg.UpstreamCacheControl))
+	w.Header().Set(headerProxyToUpstreamMasqueradeUserAgent, upstream.FinalMasqueradeUserAgent(providerCfg.UpstreamUserAgent, providerCfg.MasqueradeTarget, providerCfg.UpstreamMasqueradeClientVersion))
 	setCacheRateHeaders(w, r, providerID)
 	return nil
 }
@@ -493,6 +495,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerProxyUpstreamRetryCount,
 		headerProxyUpstreamRetryDelay,
 		headerProxyUpstreamAnthropicCacheControl,
+		headerProxyToUpstreamMasqueradeUserAgent,
 	} {
 		w.Header().Del(header)
 	}
