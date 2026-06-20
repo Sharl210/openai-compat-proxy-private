@@ -31,8 +31,9 @@ const (
 	claudeCodeUserAgent = "claude-cli/2.1.167 (external, cli)"
 	claudeCodeXApp      = "cli"
 	// beta header：与 sub2api 的 FullClaudeCodeMimicryBetas/当前 CLI 抓包对齐
-	claudeCodeBeta         = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
-	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+	claudeCodeBeta                = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
+	claudeCodeSystemPrompt        = "You are Claude Code, Anthropic's official CLI for Claude."
+	claudeCodeBillingSystemMarker = "x-anthropic-billing-header\ncc_entrypoint=cli"
 
 	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
 	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
@@ -2023,7 +2024,7 @@ func buildAnthropicSystemParts(req model.CanonicalRequest) []any {
 }
 
 func buildClaudeMasqueradeSystemParts(req model.CanonicalRequest) []any {
-	content := []any{map[string]any{"type": "text", "text": claudeCodeSystemPrompt}}
+	content := []any{map[string]any{"type": "text", "text": claudeCodeSystemPrompt}, map[string]any{"type": "text", "text": claudeCodeBillingSystemMarker}}
 	if systemParts := buildAnthropicSystemParts(req); len(systemParts) > 0 {
 		return append(content, systemParts...)
 	}

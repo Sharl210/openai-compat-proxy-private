@@ -45,6 +45,16 @@ func TestDefaultDebugArchiveMaxRequestsIsTwoHundred(t *testing.T) {
 	}
 }
 
+func TestDefaultClaudeMasqueradeInjectionIsComplete(t *testing.T) {
+	cfg := Default()
+	if !cfg.InjectClaudeCodeMetadataUserID {
+		t.Fatalf("expected default Claude masquerade metadata.user_id injection to be enabled")
+	}
+	if !cfg.InjectClaudeCodeSystemPrompt {
+		t.Fatalf("expected default Claude masquerade system prompt injection to be enabled")
+	}
+}
+
 func TestDefaultResponsesToolCompatModeIsPreserve(t *testing.T) {
 	if got := responsesToolCompatModeFromField(t, Default()); got != "preserve" {
 		t.Fatalf("expected default responses tool compat mode %q, got %q", "preserve", got)
@@ -95,6 +105,20 @@ func TestLoadFromValuesParsesNoPromptModelSuffixFlag(t *testing.T) {
 
 	if !cfg.EnableNoPromptModelSuffix {
 		t.Fatalf("expected ENABLE_NOPROMPT_MODEL_SUFFIX=true to enable noprompt suffix parsing")
+	}
+}
+
+func TestLoadFromValuesAllowsExplicitlyDisablingClaudeMasqueradeInjection(t *testing.T) {
+	cfg := LoadFromValues(map[string]string{
+		"UPSTREAM_INJECT_METADATA_USER_ID":     "false",
+		"UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT": "false",
+	})
+
+	if cfg.InjectClaudeCodeMetadataUserID {
+		t.Fatalf("expected explicit UPSTREAM_INJECT_METADATA_USER_ID=false to disable metadata injection")
+	}
+	if cfg.InjectClaudeCodeSystemPrompt {
+		t.Fatalf("expected explicit UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT=false to disable system prompt injection")
 	}
 }
 

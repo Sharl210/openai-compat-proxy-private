@@ -3555,15 +3555,22 @@ func TestBuildAnthropicRequestBodyInjectsClaudeSystemPrompt(t *testing.T) {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	system, _ := payload["system"].([]any)
-	if len(system) != 1 {
-		t.Fatalf("expected one injected claude system block, got %#v", payload["system"])
+	if len(system) != 2 {
+		t.Fatalf("expected injected claude system prompt plus billing marker, got %#v", payload["system"])
 	}
-	block, _ := system[0].(map[string]any)
-	if got, _ := block["text"].(string); got != claudeCodeSystemPrompt {
+	prompt, _ := system[0].(map[string]any)
+	if got, _ := prompt["text"].(string); got != claudeCodeSystemPrompt {
 		t.Fatalf("expected injected claude system prompt text, got %#v", payload)
 	}
-	if got, _ := block["type"].(string); got != "text" {
+	if got, _ := prompt["type"].(string); got != "text" {
 		t.Fatalf("expected injected claude system prompt block type text, got %#v", payload)
+	}
+	marker, _ := system[1].(map[string]any)
+	if got, _ := marker["text"].(string); !strings.Contains(got, "x-anthropic-billing-header") || !strings.Contains(got, "cc_entrypoint=cli") {
+		t.Fatalf("expected billing marker block to be present, got %#v", payload["system"])
+	}
+	if got, _ := marker["type"].(string); got != "text" {
+		t.Fatalf("expected billing marker block type text, got %#v", payload)
 	}
 	if _, exists := payload["metadata"]; exists {
 		t.Fatalf("expected system prompt injection not to mutate metadata by itself, got %#v", payload)
@@ -3589,16 +3596,85 @@ func TestBuildAnthropicRequestBodyClaudeSystemPromptPreservesExistingInstruction
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	system, _ := payload["system"].([]any)
-	if len(system) != 2 {
-		t.Fatalf("expected injected claude prompt plus preserved instructions, got %#v", payload["system"])
+	if len(system) != 3 {
+		t.Fatalf("expected injected claude prompt, billing marker, plus preserved instructions, got %#v", payload["system"])
 	}
 	first, _ := system[0].(map[string]any)
 	second, _ := system[1].(map[string]any)
+	third, _ := system[2].(map[string]any)
 	if got, _ := first["text"].(string); got != claudeCodeSystemPrompt {
 		t.Fatalf("expected first system block to be claude prompt, got %#v", payload["system"])
 	}
-	if got, _ := second["text"].(string); got != "project-specific system" {
-		t.Fatalf("expected second system block to preserve existing instructions, got %#v", payload["system"])
+	if got, _ := second["text"].(string); !strings.Contains(got, "x-anthropic-billing-header") || !strings.Contains(got, "cc_entrypoint=cli") {
+		t.Fatalf("expected second system block to be billing marker, got %#v", payload["system"])
+	}
+	if got, _ := third["text"].(string); got != "project-specific system" {
+		t.Fatalf("expected third system block to preserve existing instructions, got %#v", payload["system"])
+	}
+}
+
+func TestBuildAnthropicRequestBodyClaudeMasqueradeAddsSub2APIBillingSystemMarker(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		InstructionParts: []model.CanonicalContentPart{{
+			Type: "text",
+			Text: "project instruction",
+		}},
+		Messages: []model.CanonicalMessage{
+			{
+				Role:  "system",
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "request system"}},
+			},
+			{
+				Role:  "developer",
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "developer system"}},
+			},
+			{
+				Role:  "user",
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+			},
+		},
+		MaxOutputTokens: intPtrForClientTest(128),
+	}, config.UpstreamEndpointTypeAnthropic, config.MasqueradeTargetClaude, true, true, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	system, _ := payload["system"].([]any)
+	if len(system) != 5 {
+		t.Fatalf("expected injected claude prompt, billing marker, and preserved system content, got %#v", payload["system"])
+	}
+	prompt, _ := system[0].(map[string]any)
+	if got, _ := prompt["text"].(string); got != claudeCodeSystemPrompt {
+		t.Fatalf("expected first system block to be claude prompt, got %#v", payload["system"])
+	}
+	marker, _ := system[1].(map[string]any)
+	if got, _ := marker["type"].(string); got != "text" {
+		t.Fatalf("expected billing marker block to be text, got %#v", payload["system"])
+	}
+	markerText, _ := marker["text"].(string)
+	if !strings.Contains(markerText, "x-anthropic-billing-header") || !strings.Contains(markerText, "cc_entrypoint=cli") {
+		t.Fatalf("expected billing marker text to include Claude Code billing marker, got %#v", payload["system"])
+	}
+	instruction, _ := system[2].(map[string]any)
+	if got, _ := instruction["text"].(string); got != "project instruction" {
+		t.Fatalf("expected instruction part to stay after billing marker, got %#v", payload["system"])
+	}
+	requestSystem, _ := system[3].(map[string]any)
+	if got, _ := requestSystem["text"].(string); got != "request system" {
+		t.Fatalf("expected request system text to be preserved in order, got %#v", payload["system"])
+	}
+	developerSystem, _ := system[4].(map[string]any)
+	if got, _ := developerSystem["text"].(string); got != "developer system" {
+		t.Fatalf("expected developer system text to be preserved in order, got %#v", payload["system"])
+	}
+	metadata, _ := payload["metadata"].(map[string]any)
+	if got := metadata["user_id"]; got == nil || got == "" {
+		t.Fatalf("expected Claude masquerade metadata.user_id to be present, got %#v", payload["metadata"])
 	}
 }
 
