@@ -34,6 +34,7 @@ const (
 	claudeCodeBeta                = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
 	claudeCodeSystemPrompt        = "You are Claude Code, Anthropic's official CLI for Claude."
 	claudeCodeBillingSystemMarker = "x-anthropic-billing-header\ncc_entrypoint=cli"
+	claudeCodeMetadataUserID      = `{"device_id":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","account_uuid":"00000000-0000-4000-8000-000000000000","session_id":"11111111-1111-4111-8111-111111111111"}`
 
 	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
 	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
@@ -1677,7 +1678,7 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 
 	if injectMetadataUserID && masqueradeTarget == config.MasqueradeTargetClaude {
 		payload["metadata"] = map[string]any{
-			"user_id": "user_" + strings.Repeat("deadbeef", 8) + "_account__session_" + "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdead",
+			"user_id": claudeCodeMetadataUserID,
 		}
 	}
 

@@ -3540,8 +3540,16 @@ func TestBuildAnthropicRequestBodyInjectsClaudeMetadataUserID(t *testing.T) {
 	}
 	metadata, _ := payload["metadata"].(map[string]any)
 	userID, _ := metadata["user_id"].(string)
-	if !strings.HasPrefix(userID, "user_") || !strings.Contains(userID, "_account__session_") {
-		t.Fatalf("expected claude metadata.user_id injection, got %#v", payload)
+	var parsedUserID struct {
+		DeviceID    string `json:"device_id"`
+		AccountUUID string `json:"account_uuid"`
+		SessionID   string `json:"session_id"`
+	}
+	if err := json.Unmarshal([]byte(userID), &parsedUserID); err != nil {
+		t.Fatalf("expected sub2api-compatible JSON metadata.user_id, got %q: %v", userID, err)
+	}
+	if parsedUserID.DeviceID != strings.Repeat("deadbeef", 8) || parsedUserID.SessionID == "" {
+		t.Fatalf("expected claude metadata.user_id device/session fields, got %#v", parsedUserID)
 	}
 }
 
