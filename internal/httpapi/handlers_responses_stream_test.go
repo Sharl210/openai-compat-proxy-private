@@ -246,8 +246,8 @@ func TestResponsesStreamPreservesCompactionItemLifecycle(t *testing.T) {
 
 	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
 	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
-	addedEvent := `{"item":{"encrypted_content":"enc_payload","id":"cmp_1","summary":[],"type":"compaction"},"type":"response.output_item.added"}`
-	doneEvent := `{"item":{"encrypted_content":"enc_payload","id":"cmp_1","summary":[{"text":"condensed","type":"summary_text"}],"type":"compaction"},"type":"response.output_item.done"}`
+	addedEvent := `{"item":{"encrypted_content":"enc_payload","id":"cmp_1","summary":[],"type":"compaction"},"output_index":1,"type":"response.output_item.added"}`
+	doneEvent := `{"item":{"encrypted_content":"enc_payload","id":"cmp_1","summary":[{"text":"condensed","type":"summary_text"}],"type":"compaction"},"output_index":1,"type":"response.output_item.done"}`
 	addedIdx := strings.Index(body, addedEvent)
 	doneIdx := strings.Index(body, doneEvent)
 
@@ -257,7 +257,7 @@ func TestResponsesStreamPreservesCompactionItemLifecycle(t *testing.T) {
 	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < addedIdx && addedIdx < doneIdx) {
 		t.Fatalf("expected synthetic reasoning to finish before compaction lifecycle begins, got %s", body)
 	}
-	if strings.Count(body, `"encrypted_content":"enc_payload"`) != 2 {
+	if strings.Count(body, `"encrypted_content":"enc_payload"`) < 2 {
 		t.Fatalf("expected encrypted_content to survive unchanged on both compaction events, got %s", body)
 	}
 	if strings.Contains(body, `{"item":{"encrypted_content":"enc_payload","id":"rs_proxy"`) {
@@ -281,10 +281,13 @@ func TestResponseEventWriterHelperBeginsCompactionLifecycleByClosingSyntheticRea
 	if !h.reasoningClosed {
 		t.Fatal("expected compaction lifecycle to close synthetic reasoning first")
 	}
-	if len(h.events) != 1 {
-		t.Fatalf("expected exactly one synthetic reasoning close event, got %d", len(h.events))
+	if len(h.events) != 2 {
+		t.Fatalf("expected synthesized response.created plus one reasoning close event, got %d", len(h.events))
 	}
-	if got := h.events[0].Event; got != "response.output_item.done" {
+	if got := h.events[0].Event; got != "response.created" {
+		t.Fatalf("expected response.created before reasoning close, got %q", got)
+	}
+	if got := h.events[1].Event; got != "response.output_item.done" {
 		t.Fatalf("expected reasoning close event before compaction, got %q", got)
 	}
 }
@@ -352,8 +355,71 @@ func TestResponsesStreamPreservesNativeFunctionCallArgumentDeltasForResponsesUps
 	if !strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected responses upstream to preserve native arguments delta events, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"fc_1","name":"get_weather","status":"in_progress","type":"function_call"},"output_index":1,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected responses upstream to preserve early added event, got %s", body)
+	}
+}
+
+func TestResponsesStreamAddsOutputIndexToNativeFunctionCallEventsForCodex(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"item_id\":\"fc_1\",\"delta\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"output":[]`) {
+		t.Fatalf("expected synthesized response.created to initialize empty output array for Codex snapshots, got %s", body)
+	}
+	for _, want := range []string{
+		`{"item":{"arguments":"","call_id":"call_1","id":"fc_1","name":"get_weather","status":"in_progress","type":"function_call"},"output_index":1,"type":"response.output_item.added"}`,
+		`{"delta":"{\"city\":\"Shanghai\"}","item_id":"call_1","output_index":1,"type":"response.function_call_arguments.delta"}`,
+		`{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","status":"completed","type":"function_call"},"output_index":1,"type":"response.output_item.done"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected native Responses tool event to include output_index payload %s, got %s", want, body)
+		}
+	}
+}
+
+func TestResponsesStreamAddsIndexesToNativeOutputTextDeltaForCodex(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `{"content_index":0,"delta":"hello","output_index":1,"type":"response.output_text.delta"}`) {
+		t.Fatalf("expected output_text.delta to include output_index/content_index for Codex, got %s", body)
 	}
 }
 
@@ -389,7 +455,7 @@ func TestResponsesStreamDoesNotEmitSyntheticFunctionCallArgumentsDoneForResponse
 	if !strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected native responses upstream stream to keep raw function_call_arguments.delta, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"weather\"}","call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"weather\"}","call_id":"call_1","id":"fc_1","name":"search_web","status":"completed","type":"function_call"},"output_index":1,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected native responses upstream stream to keep final function_call output_item.done, got %s", body)
 	}
 }
@@ -472,7 +538,7 @@ func TestResponsesStreamFunctionCallArgumentsStayNativeWithCompatModeEnabled(t *
 	if strings.Contains(body, `"type":"response.function_call_arguments.done"`) {
 		t.Fatalf("expected compat mode to avoid synthetic function_call_arguments.done on responses upstream, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","status":"completed","type":"function_call"},"output_index":1,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected compat mode to keep final native responses function_call item done event, got %s", body)
 	}
 }
@@ -484,8 +550,8 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	addedIdx := strings.Index(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"get_weather","type":"function_call"},"type":"response.output_item.added"}`)
-	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","parameters":{"city":"Shanghai"},"type":"function_call"},"type":"response.output_item.done"}`)
+	addedIdx := strings.Index(body, `{"item":{"arguments":"","call_id":"call_1","id":"fc_1","name":"get_weather","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`)
+	doneIdx := strings.Index(body, `{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","parameters":{"city":"Shanghai"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`)
 	completedIdx := strings.LastIndex(body, `event: response.completed`)
 
 	if addedIdx == -1 || doneIdx == -1 || completedIdx == -1 {
@@ -494,11 +560,29 @@ func TestResponsesStreamEmitsFunctionCallLifecycleWithCompleteArgumentsForClient
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress raw arguments delta events, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"city\":\"Shanghai\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"city\":\"Shanghai\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected function_call_arguments.done with stable call_id, got %s", body)
 	}
 	if !(addedIdx < doneIdx && doneIdx < completedIdx) {
 		t.Fatalf("expected function call lifecycle added -> done -> completed, got %s", body)
+	}
+}
+
+func TestResponsesStreamFunctionCallLifecycleIncludesOutputIndexForCodex(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "get_weather"}}},
+		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"city":"Shanghai"}`}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	for _, want := range []string{
+		`{"item":{"arguments":"","call_id":"call_1","id":"fc_1","name":"get_weather","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`,
+		`{"arguments":"{\"city\":\"Shanghai\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`,
+		`{"item":{"arguments":"{\"city\":\"Shanghai\"}","call_id":"call_1","id":"fc_1","name":"get_weather","parameters":{"city":"Shanghai"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Codex-compatible output_index payload %s, got %s", want, body)
+		}
 	}
 }
 
@@ -509,10 +593,10 @@ func TestResponsesStreamEmitsEmptyFunctionCallArgumentsForClients(t *testing.T) 
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	if !strings.Contains(body, `{"item":{"arguments":"{}","call_id":"tooluse_1","id":"tooluse_1","name":"get_current_time","type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{}","call_id":"tooluse_1","id":"tooluse_1","name":"get_current_time","status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function call item to contain empty arguments object, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{}","item_id":"tooluse_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{}","item_id":"tooluse_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected function_call_arguments.done with empty object arguments, got %s", body)
 	}
 }
@@ -524,10 +608,10 @@ func TestResponsesStreamAccumulatesMultipleFunctionCallArgumentDeltasBeforeDone(
 		upstream.Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"topic":"finance"}`}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel","topic":"finance"},"type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel","topic":"finance"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function call item to contain merged arguments, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected merged arguments done event, got %s", body)
 	}
 }
@@ -542,13 +626,13 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	if strings.Contains(body, `"type":"response.function_call_arguments.delta"`) {
 		t.Fatalf("expected compatibility mode to suppress partial function_call_arguments.delta events, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"fc_1","name":"search_web","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected compatibility mode to emit metadata-only added event, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel","topic":"finance"},"type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel","topic":"finance"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected final function_call item to retain full merged arguments, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\",\"topic\":\"finance\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected done event with stable call_id, got %s", body)
 	}
 }
@@ -560,10 +644,10 @@ func TestResponsesStreamCompatibilityKeepsOriginalItemIDWhilePreservingCallID(t 
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel"},"type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\":\"Quectel\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"Quectel"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected compatibility mode to preserve original function_call item id while retaining call_id, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"Quectel\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected arguments.done to keep stable call_id for follow-up, got %s", body)
 	}
 }
@@ -598,7 +682,7 @@ func TestResponsesStreamCompletedMirrorsTopLevelUsageIntoResponseUsageForCompati
 	if !strings.Contains(body, `"usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}`) {
 		t.Fatalf("expected top-level usage to stay in completed event, got %s", body)
 	}
-	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","status":"completed","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`) {
+	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","output":[],"status":"completed","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`) {
 		t.Fatalf("expected completed event to also include response.usage and status for compatibility, got %s", body)
 	}
 }
@@ -613,7 +697,7 @@ func TestResponsesStreamDoneMirrorsTopLevelUsageIntoResponseUsageForCompatibilit
 	if !strings.Contains(body, `event: response.done`) {
 		t.Fatalf("expected response.done event, got %s", body)
 	}
-	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}`) {
+	if !strings.Contains(body, `"response":{"id":"resp_proxy","object":"response","output":[],"status":"completed","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}`) {
 		t.Fatalf("expected done event to also include response.usage and status for compatibility, got %s", body)
 	}
 }
@@ -769,7 +853,7 @@ func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
-	if !strings.Contains(body, `"response":{"finish_reason":"stop","id":"chatcmpl_123","model":"gpt-5","object":"response","status":"completed","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens":2,"total_tokens":5}}`) {
+	if !strings.Contains(body, `"response":{"finish_reason":"stop","id":"chatcmpl_123","model":"gpt-5","object":"response","output":[{"id":"rs_proxy","summary":[],"type":"reasoning"}],"status":"completed","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1},"output_tokens":2,"total_tokens":5}}`) {
 		t.Fatalf("expected provider /chat/v1/responses stream to include usage, model, and status by default, got %s", body)
 	}
 	if !strings.Contains(body, `"cached_tokens":1`) {
@@ -912,28 +996,28 @@ func TestProviderResponsesRouteStreamsCompleteToolArgumentsForChatUpstream(t *te
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
-	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"scrape_web","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected compatibility stream to emit metadata-only added event, got %s", body)
 	}
 	if !strings.Contains(body, `"parameters":{"url":"https://example.com"}`) {
 		t.Fatalf("expected compatibility stream to also expose parsed parameters object, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://example.com"},"type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://example.com"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected compatibility stream to emit done event with parsed parameters object, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected compatibility stream to emit arguments.done with full arguments, got %s", body)
 	}
-	addedIndex := strings.Index(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`)
-	doneIndex := strings.Index(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://example.com"},"type":"function_call"},"type":"response.output_item.done"}`)
-	argumentsDoneIndex := strings.Index(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`)
+	addedIndex := strings.Index(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"scrape_web","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`)
+	doneIndex := strings.Index(body, `{"item":{"arguments":"{\"url\":\"https://example.com\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://example.com"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`)
+	argumentsDoneIndex := strings.Index(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`)
 	if addedIndex == -1 || doneIndex == -1 || argumentsDoneIndex == -1 {
 		t.Fatalf("expected added, done and arguments.done events, got %s", body)
 	}
 	if !(addedIndex < doneIndex && doneIndex < argumentsDoneIndex) {
 		t.Fatalf("expected added then done then arguments.done, got %s", body)
 	}
-	if count := strings.Count(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`); count != 1 {
+	if count := strings.Count(body, `{"arguments":"{\"url\":\"https://example.com\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`); count != 1 {
 		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
 	}
 }
@@ -979,8 +1063,8 @@ func TestProviderResponsesRouteStreamsSingleArgumentsDoneAfterToolEvents(t *test
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
-	addedEvent := `{"item":{"call_id":"call_1","id":"call_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`
-	doneEvent := `{"item":{"arguments":"{\"query\": \"openai compat proxy github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"openai compat proxy github","topic":"general"},"type":"function_call"},"type":"response.output_item.done"}`
+	addedEvent := `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"search_web","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`
+	doneEvent := `{"item":{"arguments":"{\"query\": \"openai compat proxy github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"openai compat proxy github","topic":"general"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`
 	addedIndex := strings.Index(body, addedEvent)
 	doneIndex := strings.Index(body, doneEvent)
 	if addedIndex == -1 || doneIndex == -1 {
@@ -989,7 +1073,7 @@ func TestProviderResponsesRouteStreamsSingleArgumentsDoneAfterToolEvents(t *test
 	if !(addedIndex < doneIndex) {
 		t.Fatalf("expected output_item.added then output_item.done, got %s", body)
 	}
-	argumentsDoneEvent := `{"arguments":"{\"query\": \"openai compat proxy github\", \"topic\": \"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`
+	argumentsDoneEvent := `{"arguments":"{\"query\": \"openai compat proxy github\", \"topic\": \"general\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`
 	if !strings.Contains(body, argumentsDoneEvent) {
 		t.Fatalf("expected arguments.done event, got %s", body)
 	}
@@ -1047,13 +1131,13 @@ func TestProviderResponsesRouteStreamsAvoidsDuplicateCompleteArgumentsAcrossEven
 	if strings.Contains(body, addedWithArguments) {
 		t.Fatalf("expected added event to avoid carrying complete arguments payload, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected compat stream to emit one final arguments.done payload for RikkaHub, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected done event to carry the complete final arguments once, got %s", body)
 	}
-	if count := strings.Count(body, `{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`); count != 1 {
+	if count := strings.Count(body, `{"arguments":"{\"query\": \"k3ss-official g0dm0d3 github\", \"topic\": \"general\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`); count != 1 {
 		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
 	}
 }
@@ -1065,16 +1149,16 @@ func TestProviderResponsesRouteStreamsMetadataAddedAndSingleArgumentsDoneForRikk
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"fc_1","name":"search_web","type":"function_call"},"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"fc_1","name":"search_web","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected metadata-only added event for client placeholder, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected final arguments.done event for client parser, got %s", body)
 	}
-	if strings.Contains(body, `{"item":{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"type":"function_call"},"type":"response.output_item.added"}`) {
+	if strings.Contains(body, `{"item":{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","call_id":"call_1","id":"fc_1","name":"search_web","parameters":{"query":"k3ss-official g0dm0d3 github","topic":"general"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected added event to avoid duplicate complete arguments payload, got %s", body)
 	}
-	if count := strings.Count(body, `{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`); count != 1 {
+	if count := strings.Count(body, `{"arguments":"{\"query\":\"k3ss-official g0dm0d3 github\",\"topic\":\"general\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`); count != 1 {
 		t.Fatalf("expected exactly one arguments.done event, got count=%d body=%s", count, body)
 	}
 }
@@ -1088,10 +1172,10 @@ func TestResponsesCompatibilityStreamFlushesConsecutiveToolCallsWithoutTextBridg
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}, "stop_reason": "tool_use"}},
 	)
 
-	call1Done := `{"item":{"arguments":"{\"query\":\"2026年6月 热门新闻\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"2026年6月 热门新闻"},"type":"function_call"},"type":"response.output_item.done"}`
-	call2Done := `{"item":{"arguments":"{\"query\":\"科技 最新 热点 2026\"}","call_id":"call_2","id":"call_2","name":"search_web","parameters":{"query":"科技 最新 热点 2026"},"type":"function_call"},"type":"response.output_item.done"}`
-	call1ArgsDone := `{"arguments":"{\"query\":\"2026年6月 热门新闻\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`
-	call2ArgsDone := `{"arguments":"{\"query\":\"科技 最新 热点 2026\"}","item_id":"call_2","type":"response.function_call_arguments.done"}`
+	call1Done := `{"item":{"arguments":"{\"query\":\"2026年6月 热门新闻\"}","call_id":"call_1","id":"call_1","name":"search_web","parameters":{"query":"2026年6月 热门新闻"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`
+	call2Done := `{"item":{"arguments":"{\"query\":\"科技 最新 热点 2026\"}","call_id":"call_2","id":"call_2","name":"search_web","parameters":{"query":"科技 最新 热点 2026"},"status":"completed","type":"function_call"},"output_index":1,"type":"response.output_item.done"}`
+	call1ArgsDone := `{"arguments":"{\"query\":\"2026年6月 热门新闻\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`
+	call2ArgsDone := `{"arguments":"{\"query\":\"科技 最新 热点 2026\"}","item_id":"call_2","output_index":1,"type":"response.function_call_arguments.done"}`
 
 	if !strings.Contains(body, call1Done) || !strings.Contains(body, call2Done) {
 		t.Fatalf("expected both consecutive tool calls to emit done events, got %s", body)
@@ -1168,13 +1252,13 @@ func TestResponsesStreamCompatibilityRepairsMalformedFunctionArgumentsDone(t *te
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	)
 
-	if !strings.Contains(body, `{"item":{"call_id":"call_1","id":"call_1","name":"scrape_web","type":"function_call"},"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"scrape_web","status":"in_progress","type":"function_call"},"output_index":0,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected repaired malformed tool call to emit added metadata item, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://github.com/k3ss-official/g0dm"},"type":"function_call"},"type":"response.output_item.done"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm\"}","call_id":"call_1","id":"call_1","name":"scrape_web","parameters":{"url":"https://github.com/k3ss-official/g0dm"},"status":"completed","type":"function_call"},"output_index":0,"type":"response.output_item.done"}`) {
 		t.Fatalf("expected repaired malformed arguments to emit completed function_call, got %s", body)
 	}
-	if !strings.Contains(body, `{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm\"}","item_id":"call_1","type":"response.function_call_arguments.done"}`) {
+	if !strings.Contains(body, `{"arguments":"{\"url\": \"https://github.com/k3ss-official/g0dm\"}","item_id":"call_1","output_index":0,"type":"response.function_call_arguments.done"}`) {
 		t.Fatalf("expected repaired arguments to emit function_call_arguments.done, got %s", body)
 	}
 }

@@ -14,9 +14,13 @@ import (
 )
 
 var responseCreatedIDPattern = regexp.MustCompile(`event: response\.created\s+data: \{"response":\{"id":"([^"]+)"[^}]*\}`)
+var responseCompletedIDPattern = regexp.MustCompile(`event: response\.completed\s+data: \{"response":\{[^\n]*?"id":"([^"]+)"`)
 
 func firstResponseIDFromStreamBody(t *testing.T, body string) string {
 	t.Helper()
+	if matches := responseCompletedIDPattern.FindStringSubmatch(body); len(matches) == 2 {
+		return matches[1]
+	}
 	matches := responseCreatedIDPattern.FindStringSubmatch(body)
 	if len(matches) != 2 {
 		t.Fatalf("expected stream body to expose a response id, got %s", body)

@@ -96,6 +96,10 @@ type responsesStreamState struct {
 	toolItems            map[string]*responsesToolItemState
 	toolIDAliases        map[string]string
 	toolOrder            []string
+	outputItems          map[string]map[string]any
+	outputItemOrder      []string
+	textItemStarted      bool
+	textOutput           strings.Builder
 	upstreamEndpointType string
 	requestID            string
 	terminalSeen         bool
@@ -134,6 +138,10 @@ type responseProjectionState struct {
 	toolIDAliases              map[string]string
 	toolItems                  map[string]*responsesToolItemState
 	toolOrder                  []string
+	outputItems                map[string]map[string]any
+	outputItemOrder            []string
+	textItemStarted            bool
+	textOutput                 *strings.Builder
 	reasoningStarted           bool
 	reasoningClosed            bool
 	realReasoningItemID        string
@@ -157,6 +165,10 @@ type responseEventWriterHelper struct {
 	toolIDAliases              map[string]string
 	toolItems                  map[string]*responsesToolItemState
 	toolOrder                  []string
+	outputItems                map[string]map[string]any
+	outputItemOrder            []string
+	textItemStarted            bool
+	textOutput                 *strings.Builder
 	reasoningStarted           bool
 	reasoningClosed            bool
 	realReasoningItemID        string
@@ -184,6 +196,12 @@ func (h *responseEventWriterHelper) ensureToolItemState(itemID string) *response
 	return toolState
 }
 
+func (h *responseEventWriterHelper) ensureOutputItems() {
+	if h.outputItems == nil {
+		h.outputItems = map[string]map[string]any{}
+	}
+}
+
 func (h *responseEventWriterHelper) canonicalToolItemID(itemID string) string {
 	if itemID == "" {
 		return itemID
@@ -201,30 +219,49 @@ func (h *responseEventWriterHelper) addEvent(event string, data map[string]any) 
 }
 
 func (h *responseEventWriterHelper) addToolItemAddedEvent(item map[string]any) {
+	item = cloneJSONValueForResponse(item).(map[string]any)
 	item = withParsedToolParameters(item)
-	h.addEvent("response.output_item.added", map[string]any{"item": item})
+	if isResponseToolCallItemType(stringValue(item["type"])) {
+		if _, ok := item["arguments"]; !ok {
+			item["arguments"] = ""
+		}
+		item["status"] = "in_progress"
+	}
+	h.ensureCreatedEvent()
+	h.addEvent("response.output_item.added", h.outputItemEventData(item, map[string]any{"item": item}))
 }
 
 func (h *responseEventWriterHelper) addToolItemDoneEvent(item map[string]any) {
+	item = cloneJSONValueForResponse(item).(map[string]any)
 	item = withParsedToolParameters(item)
-	h.addEvent("response.output_item.done", map[string]any{"item": item})
+	if isResponseToolCallItemType(stringValue(item["type"])) {
+		item["status"] = "completed"
+	}
+	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item}))
 }
 
 func (h *responseEventWriterHelper) addFunctionCallArgumentsDoneEvent(itemID, arguments string) {
-	h.addEvent("response.function_call_arguments.done", map[string]any{"item_id": itemID, "arguments": arguments})
+	h.addEvent("response.function_call_arguments.done", h.toolEventData(itemID, map[string]any{"item_id": itemID, "arguments": arguments}))
 }
 
 func (h *responseEventWriterHelper) addCreatedEvent(id string) {
 	if id == "" {
 		id = h.currentResponseID()
 	}
-	response := map[string]any{"id": id, "object": "response", "status": "in_progress"}
+	response := map[string]any{"id": id, "object": "response", "status": "in_progress", "output": []any{}}
 	if h.modelName != "" {
 		response["model"] = h.modelName
 	}
 	h.addEvent("response.created", map[string]any{"response": response})
 	h.createdSent = true
 	h.createdResponseID = id
+}
+
+func (h *responseEventWriterHelper) ensureCreatedEvent() {
+	if h.downstreamType != "responses" || h.createdSent {
+		return
+	}
+	h.addCreatedEvent("")
 }
 
 func (h *responseEventWriterHelper) currentResponseID() string {
@@ -244,6 +281,131 @@ func (h *responseEventWriterHelper) currentResponseID() string {
 		return "resp_" + h.requestID
 	}
 	return "resp_proxy"
+}
+
+func responseToolItemStateID(item map[string]any) string {
+	if item == nil {
+		return ""
+	}
+	if callID := stringValue(item["call_id"]); callID != "" {
+		return callID
+	}
+	return stringValue(item["id"])
+}
+
+func (h *responseEventWriterHelper) outputIndexForItem(itemID string) (int, bool) {
+	if itemID == "" {
+		return 0, false
+	}
+	canonicalID := h.canonicalToolItemID(itemID)
+	for index, existingID := range h.outputItemOrder {
+		if existingID == canonicalID || existingID == itemID {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func (h *responseEventWriterHelper) ensureOutputItemIndex(itemID string) (int, bool) {
+	if itemID == "" {
+		return 0, false
+	}
+	if index, ok := h.outputIndexForItem(itemID); ok {
+		return index, true
+	}
+	index := len(h.outputItemOrder)
+	h.outputItemOrder = append(h.outputItemOrder, h.canonicalToolItemID(itemID))
+	return index, true
+}
+
+func (h *responseEventWriterHelper) rememberOutputItem(item map[string]any) {
+	itemID := responseToolItemStateID(item)
+	if itemID == "" {
+		return
+	}
+	h.ensureOutputItems()
+	h.outputItems[h.canonicalToolItemID(itemID)] = cloneJSONValueForResponse(item).(map[string]any)
+}
+
+func (h *responseEventWriterHelper) responseOutputSnapshot() []any {
+	if len(h.outputItemOrder) == 0 {
+		return []any{}
+	}
+	out := make([]any, 0, len(h.outputItemOrder))
+	for _, itemID := range h.outputItemOrder {
+		item := h.outputItems[itemID]
+		if item == nil {
+			continue
+		}
+		out = append(out, cloneJSONValueForResponse(item))
+	}
+	return out
+}
+
+func (h *responseEventWriterHelper) outputItemEventData(item map[string]any, data map[string]any) map[string]any {
+	if h.downstreamType != "responses" {
+		return data
+	}
+	h.ensureCreatedEvent()
+	if _, exists := data["output_index"]; exists {
+		return data
+	}
+	if outputIndex, ok := h.ensureOutputItemIndex(responseToolItemStateID(item)); ok {
+		data["output_index"] = outputIndex
+	}
+	h.rememberOutputItem(item)
+	return data
+}
+
+func (h *responseEventWriterHelper) toolEventData(itemID string, data map[string]any) map[string]any {
+	if h.downstreamType != "responses" {
+		return data
+	}
+	if _, exists := data["output_index"]; exists {
+		return data
+	}
+	if outputIndex, ok := h.outputIndexForItem(itemID); ok {
+		data["output_index"] = outputIndex
+	}
+	return data
+}
+
+func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map[string]any {
+	if h.downstreamType != "responses" {
+		return data
+	}
+	h.ensureCreatedEvent()
+	if !h.textItemStarted {
+		item := map[string]any{
+			"id":     "msg_proxy",
+			"type":   "message",
+			"status": "in_progress",
+			"role":   "assistant",
+			"content": []any{
+				map[string]any{"type": "output_text", "text": ""},
+			},
+		}
+		h.addEvent("response.output_item.added", h.outputItemEventData(item, map[string]any{"item": item}))
+		h.textItemStarted = true
+	}
+	if delta := stringValue(data["delta"]); delta != "" {
+		if h.textOutput == nil {
+			h.textOutput = &strings.Builder{}
+		}
+		h.textOutput.WriteString(delta)
+		if item := h.outputItems["msg_proxy"]; item != nil {
+			item["content"] = []any{map[string]any{"type": "output_text", "text": h.textOutput.String()}}
+		}
+	}
+	if _, exists := data["output_index"]; !exists {
+		if outputIndex, ok := h.ensureOutputItemIndex("msg_proxy"); ok {
+			data["output_index"] = outputIndex
+		}
+	}
+	if _, exists := data["content_index"]; !exists {
+		data["content_index"] = 0
+	}
+	return data
 }
 
 func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
@@ -287,6 +449,8 @@ func newResponsesStreamState(requestID, upstreamEndpointType string) *responsesS
 	return &responsesStreamState{
 		toolItems:            map[string]*responsesToolItemState{},
 		toolIDAliases:        map[string]string{},
+		outputItems:          map[string]map[string]any{},
+		outputItemOrder:      []string{},
 		upstreamEndpointType: upstreamEndpointType,
 		requestID:            requestID,
 	}
@@ -296,6 +460,7 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state := &responsesStreamState{
 		toolItems:            map[string]*responsesToolItemState{},
 		toolIDAliases:        map[string]string{},
+		outputItems:          map[string]map[string]any{},
 		upstreamEndpointType: upstreamEndpointType,
 		requestID:            requestID,
 	}
@@ -315,6 +480,9 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state.toolItems = initialState.toolItems
 	state.toolIDAliases = initialState.toolIDAliases
 	state.toolOrder = initialState.toolOrder
+	state.outputItems = initialState.outputItems
+	state.outputItemOrder = append([]string(nil), initialState.outputItemOrder...)
+	state.textItemStarted = initialState.textItemStarted
 	state.terminalSeen = initialState.terminalSeen
 	state.terminalFailure = initialState.terminalFailure
 	if summary := initialState.syntheticSummary.String(); summary != "" {
@@ -328,6 +496,9 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	}
 	if state.toolIDAliases == nil {
 		state.toolIDAliases = map[string]string{}
+	}
+	if state.outputItems == nil {
+		state.outputItems = map[string]map[string]any{}
 	}
 	if state.requestID == "" {
 		state.requestID = requestID
@@ -359,11 +530,12 @@ func (h *responseEventWriterHelper) closeSyntheticReasoning() {
 		h.reasoningClosed = true
 		return
 	}
-	h.addEvent("response.output_item.done", map[string]any{"item": map[string]any{
+	item := map[string]any{
 		"id":      "rs_proxy",
 		"type":    "reasoning",
 		"summary": []any{},
-	}, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic})
+	}
+	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}))
 	h.reasoningClosed = true
 }
 
@@ -380,11 +552,12 @@ func (h *responseEventWriterHelper) ensureRealReasoningLifecycleStarted() {
 		return
 	}
 	h.realReasoningItemID = "rs_chat_reasoning"
-	h.addEvent("response.output_item.added", map[string]any{"item": map[string]any{
+	item := map[string]any{
 		"id":      h.realReasoningItemID,
 		"type":    "reasoning",
 		"summary": []any{},
-	}})
+	}
+	h.addEvent("response.output_item.added", h.outputItemEventData(item, map[string]any{"item": item}))
 	h.reasoningStarted = true
 }
 
@@ -398,11 +571,12 @@ func (h *responseEventWriterHelper) closeRealReasoningLifecycle() {
 			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
 		}
 	}
-	h.addEvent("response.output_item.done", map[string]any{"item": map[string]any{
+	item := map[string]any{
 		"id":      h.realReasoningItemID,
 		"type":    "reasoning",
 		"summary": summary,
-	}, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream})
+	}
+	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}))
 	h.reasoningClosed = true
 }
 
@@ -439,6 +613,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			if _, ok := response["object"]; !ok {
 				response["object"] = "response"
 			}
+			if _, ok := response["output"]; !ok {
+				response["output"] = []any{}
+			}
 			if _, ok := response["status"]; !ok {
 				response["status"] = "in_progress"
 			}
@@ -453,6 +630,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" {
 			if h.downstreamType == "responses" {
+				evt.Data = h.outputItemEventData(item, evt.Data)
+			}
+			if h.downstreamType == "responses" {
 				if _, ok := evt.Data[aggregate.InternalReasoningSourceKey]; !ok {
 					evt.Data[aggregate.InternalReasoningSourceKey] = aggregate.ReasoningSourceUpstream
 				}
@@ -462,8 +642,22 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		if itemType == "compaction" && h.downstreamType == "responses" {
 			h.beginCompactionLifecycle()
+			evt.Data = h.outputItemEventData(item, evt.Data)
 		}
 		if isResponseToolCallItemType(itemType) {
+			if evt.Event == "response.output_item.added" {
+				if _, ok := item["arguments"]; !ok {
+					item["arguments"] = ""
+				}
+				if _, ok := item["status"]; !ok {
+					item["status"] = "in_progress"
+				}
+			}
+			if evt.Event == "response.output_item.done" {
+				if _, ok := item["status"]; !ok {
+					item["status"] = "completed"
+				}
+			}
 			itemID, _ := item["id"].(string)
 			if itemID == "" {
 				itemID, _ = item["call_id"].(string)
@@ -489,6 +683,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					result.skipWrite = true
 					return result, nil
 				}
+				if h.downstreamType == "responses" {
+					evt.Data = h.outputItemEventData(item, evt.Data)
+				}
 			}
 		}
 	case "response.output_text.delta":
@@ -498,6 +695,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 		h.reasoningStarted = true
+		evt.Data = h.outputTextDeltaData(evt.Data)
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
@@ -540,6 +738,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			result.skipWrite = true
 			return result, nil
 		}
+		evt.Data = h.toolEventData(itemID, evt.Data)
 	case "response.completed":
 		h.terminalSeen = true
 		h.reasoningStarted = true
@@ -559,6 +758,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		if _, ok := response["status"]; !ok {
 			response["status"] = "completed"
+		}
+		if _, ok := response["output"]; !ok {
+			response["output"] = h.responseOutputSnapshot()
 		}
 		if model := stringValue(response["model"]); model != "" {
 			h.modelName = model
@@ -598,6 +800,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		if _, ok := response["status"]; !ok {
 			response["status"] = "completed"
+		}
+		if _, ok := response["output"]; !ok {
+			response["output"] = h.responseOutputSnapshot()
 		}
 		if model := stringValue(response["model"]); model != "" {
 			h.modelName = model
@@ -945,6 +1150,10 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		toolIDAliases:        state.toolIDAliases,
 		toolItems:            state.toolItems,
 		toolOrder:            state.toolOrder,
+		outputItems:          state.outputItems,
+		outputItemOrder:      state.outputItemOrder,
+		textItemStarted:      state.textItemStarted,
+		textOutput:           &state.textOutput,
 		reasoningStarted:     state.reasoningStarted,
 		reasoningClosed:      state.reasoningClosed,
 		realReasoningItemID:  state.realReasoningItemID,
@@ -969,6 +1178,9 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.modelName = h.modelName
 	state.toolItems = h.toolItems
 	state.toolOrder = h.toolOrder
+	state.outputItems = h.outputItems
+	state.outputItemOrder = h.outputItemOrder
+	state.textItemStarted = h.textItemStarted
 	state.reasoningStarted = h.reasoningStarted
 	state.reasoningClosed = h.reasoningClosed
 	state.realReasoningItemID = h.realReasoningItemID
@@ -1086,6 +1298,10 @@ func newResponseEventWriterHelper(downstreamType string, state responseProjectio
 		toolIDAliases:        state.toolIDAliases,
 		toolItems:            state.toolItems,
 		toolOrder:            state.toolOrder,
+		outputItems:          state.outputItems,
+		outputItemOrder:      state.outputItemOrder,
+		textItemStarted:      state.textItemStarted,
+		textOutput:           state.textOutput,
 		reasoningStarted:     state.reasoningStarted,
 		reasoningClosed:      state.reasoningClosed,
 		realReasoningItemID:  state.realReasoningItemID,
@@ -1105,22 +1321,32 @@ func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flushe
 
 func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, text string) error {
 	if state != nil && !state.reasoningStarted {
-		payload, err := responseStreamPayload("response.output_item.added", map[string]any{
-			"item": map[string]any{
-				"id":      "rs_proxy",
-				"type":    "reasoning",
-				"summary": []any{},
-			},
+		item := map[string]any{
+			"id":      "rs_proxy",
+			"type":    "reasoning",
+			"summary": []any{},
+		}
+		helper := newResponseEventWriterHelper("responses", responseProjectionState{createdSent: state.createdSent, createdResponseID: state.createdResponseID, modelName: state.modelName, requestID: state.requestID, outputItems: state.outputItems, outputItemOrder: state.outputItemOrder})
+		payloadData := helper.outputItemEventData(item, map[string]any{
+			"item":                               item,
 			aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic,
 		})
-		if err != nil {
-			return err
-		}
-		if _, err := fmt.Fprint(w, "event: response.output_item.added\n"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
-			return err
+		helper.addEvent("response.output_item.added", payloadData)
+		state.createdSent = helper.createdSent
+		state.createdResponseID = helper.createdResponseID
+		state.outputItems = helper.outputItems
+		state.outputItemOrder = helper.outputItemOrder
+		for _, cmd := range helper.events {
+			payload, err := responseStreamPayload(cmd.Event, cmd.Data)
+			if err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "event: %s\n", cmd.Event); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+				return err
+			}
 		}
 		if flusher != nil {
 			flusher.Flush()
