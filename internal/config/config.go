@@ -29,6 +29,8 @@ type Config struct {
 	MasqueradeTarget                  string
 	InjectClaudeCodeMetadataUserID    bool
 	InjectClaudeCodeSystemPrompt      bool
+	ClaudeCodeMetadataDeviceID        string
+	ClaudeCodeMetadataAccountUUID     string
 	ProvidersDir                      string
 	DefaultProvider                   string
 	V1ModelMap                        []ModelMapEntry
@@ -234,6 +236,12 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	if value, ok := lookup("UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT"); ok {
 		cfg.InjectClaudeCodeSystemPrompt = strings.ToLower(value) == "true"
 	}
+	if value, ok := lookup("UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID"); ok && value != "" {
+		cfg.ClaudeCodeMetadataDeviceID = strings.TrimSpace(value)
+	}
+	if value, ok := lookup("UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID"); ok && value != "" {
+		cfg.ClaudeCodeMetadataAccountUUID = strings.TrimSpace(value)
+	}
 	return cfg
 }
 
@@ -296,6 +304,12 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
+		return err
+	}
+	if err := ValidateClaudeCodeMetadataDeviceID(values["UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID"], "UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID"); err != nil {
+		return err
+	}
+	if err := ValidateClaudeCodeMetadataAccountUUID(values["UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID"], "UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID"); err != nil {
 		return err
 	}
 	if err := validateMinInt(values, "LOG_MAX_REQUESTS", 1); err != nil {
@@ -711,5 +725,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.UpstreamMasqueradeClientVersion == other.UpstreamMasqueradeClientVersion &&
 		c.MasqueradeTarget == other.MasqueradeTarget &&
 		c.InjectClaudeCodeMetadataUserID == other.InjectClaudeCodeMetadataUserID &&
-		c.InjectClaudeCodeSystemPrompt == other.InjectClaudeCodeSystemPrompt
+		c.InjectClaudeCodeSystemPrompt == other.InjectClaudeCodeSystemPrompt &&
+		c.ClaudeCodeMetadataDeviceID == other.ClaudeCodeMetadataDeviceID &&
+		c.ClaudeCodeMetadataAccountUUID == other.ClaudeCodeMetadataAccountUUID
 }

@@ -38,6 +38,10 @@ type ProviderConfig struct {
 	MasqueradeClientVersion                string
 	InjectClaudeCodeMetadataUserID         bool
 	InjectClaudeCodeMetadataUserIDSet      bool
+	ClaudeCodeMetadataDeviceID             string
+	ClaudeCodeMetadataDeviceIDSet          bool
+	ClaudeCodeMetadataAccountUUID          string
+	ClaudeCodeMetadataAccountUUIDSet       bool
 	InjectClaudeCodeSystemPrompt           bool
 	InjectClaudeCodeSystemPromptSet        bool
 	SupportsChat                           bool
@@ -407,6 +411,24 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.InjectClaudeCodeMetadataUserIDSet = true
 			provider.InjectClaudeCodeMetadataUserID = parsed
+		case "CLAUDE_CODE_METADATA_DEVICE_ID":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			if err := ValidateClaudeCodeMetadataDeviceID(value, key); err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.ClaudeCodeMetadataDeviceIDSet = true
+			provider.ClaudeCodeMetadataDeviceID = strings.TrimSpace(value)
+		case "CLAUDE_CODE_METADATA_ACCOUNT_UUID":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			if err := ValidateClaudeCodeMetadataAccountUUID(value, key); err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.ClaudeCodeMetadataAccountUUIDSet = true
+			provider.ClaudeCodeMetadataAccountUUID = strings.TrimSpace(value)
 		case "INJECT_CLAUDE_CODE_SYSTEM_PROMPT":
 			if strings.TrimSpace(value) == "" {
 				break

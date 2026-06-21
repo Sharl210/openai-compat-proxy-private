@@ -78,6 +78,18 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 		if !cfg.Providers[i].UpstreamCacheControlSet {
 			cfg.Providers[i].UpstreamCacheControl = cfg.UpstreamCacheControl
 		}
+		if !cfg.Providers[i].ClaudeCodeMetadataDeviceIDSet {
+			cfg.Providers[i].ClaudeCodeMetadataDeviceID = cfg.ClaudeCodeMetadataDeviceID
+		}
+		if !cfg.Providers[i].ClaudeCodeMetadataAccountUUIDSet {
+			cfg.Providers[i].ClaudeCodeMetadataAccountUUID = cfg.ClaudeCodeMetadataAccountUUID
+		}
+		if strings.TrimSpace(cfg.Providers[i].ClaudeCodeMetadataDeviceID) == "" {
+			cfg.Providers[i].ClaudeCodeMetadataDeviceID = DefaultClaudeCodeMetadataDeviceID(cfg.Providers[i].ID)
+		}
+		if strings.TrimSpace(cfg.Providers[i].ClaudeCodeMetadataAccountUUID) == "" {
+			cfg.Providers[i].ClaudeCodeMetadataAccountUUID = DefaultClaudeCodeMetadataAccountUUID(cfg.Providers[i].ID)
+		}
 	}
 }
 

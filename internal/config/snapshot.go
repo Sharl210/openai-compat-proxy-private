@@ -165,6 +165,18 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 		if !cfg.Providers[i].UpstreamCacheControlSet {
 			cfg.Providers[i].UpstreamCacheControl = cfg.UpstreamCacheControl
 		}
+		if !cfg.Providers[i].ClaudeCodeMetadataDeviceIDSet {
+			cfg.Providers[i].ClaudeCodeMetadataDeviceID = cfg.ClaudeCodeMetadataDeviceID
+		}
+		if !cfg.Providers[i].ClaudeCodeMetadataAccountUUIDSet {
+			cfg.Providers[i].ClaudeCodeMetadataAccountUUID = cfg.ClaudeCodeMetadataAccountUUID
+		}
+		if strings.TrimSpace(cfg.Providers[i].ClaudeCodeMetadataDeviceID) == "" {
+			cfg.Providers[i].ClaudeCodeMetadataDeviceID = DefaultClaudeCodeMetadataDeviceID(cfg.Providers[i].ID)
+		}
+		if strings.TrimSpace(cfg.Providers[i].ClaudeCodeMetadataAccountUUID) == "" {
+			cfg.Providers[i].ClaudeCodeMetadataAccountUUID = DefaultClaudeCodeMetadataAccountUUID(cfg.Providers[i].ID)
+		}
 	}
 }
 
@@ -512,6 +524,12 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateStrictBool(values, "UPSTREAM_INJECT_CLAUDE_SYSTEM_PROMPT"); err != nil {
+		return err
+	}
+	if err := ValidateClaudeCodeMetadataDeviceID(values["UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID"], "UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID"); err != nil {
+		return err
+	}
+	if err := ValidateClaudeCodeMetadataAccountUUID(values["UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID"], "UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID"); err != nil {
 		return err
 	}
 	if err := validatePositiveDuration(values, "CONNECT_TIMEOUT"); err != nil {

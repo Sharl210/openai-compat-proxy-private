@@ -1044,6 +1044,8 @@ func TestLoadProviderFileTreatsBlankClaudeInjectionFlagsAsInheritance(t *testing
 	providerBody := strings.Join([]string{
 		"PROVIDER_ID=openai",
 		"INJECT_CLAUDE_CODE_METADATA_USER_ID=",
+		"CLAUDE_CODE_METADATA_DEVICE_ID=",
+		"CLAUDE_CODE_METADATA_ACCOUNT_UUID=",
 		"INJECT_CLAUDE_CODE_SYSTEM_PROMPT=",
 		"",
 	}, "\n")
@@ -1058,6 +1060,12 @@ func TestLoadProviderFileTreatsBlankClaudeInjectionFlagsAsInheritance(t *testing
 	if provider.InjectClaudeCodeMetadataUserIDSet {
 		t.Fatalf("expected blank metadata injection flag to inherit root config")
 	}
+	if provider.ClaudeCodeMetadataDeviceIDSet {
+		t.Fatalf("expected blank metadata device_id to inherit root config")
+	}
+	if provider.ClaudeCodeMetadataAccountUUIDSet {
+		t.Fatalf("expected blank metadata account_uuid to inherit root config")
+	}
 	if provider.InjectClaudeCodeSystemPromptSet {
 		t.Fatalf("expected blank system prompt injection flag to inherit root config")
 	}
@@ -1066,9 +1074,13 @@ func TestLoadProviderFileTreatsBlankClaudeInjectionFlagsAsInheritance(t *testing
 func TestLoadProviderFileParsesExplicitClaudeInjectionFlags(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	deviceID := strings.Repeat("b", 64)
+	accountUUID := "00000000-0000-4000-8000-000000000001"
 	providerBody := strings.Join([]string{
 		"PROVIDER_ID=openai",
 		"INJECT_CLAUDE_CODE_METADATA_USER_ID=true",
+		"CLAUDE_CODE_METADATA_DEVICE_ID=" + deviceID,
+		"CLAUDE_CODE_METADATA_ACCOUNT_UUID=" + accountUUID,
 		"INJECT_CLAUDE_CODE_SYSTEM_PROMPT=false",
 		"",
 	}, "\n")
@@ -1083,8 +1095,41 @@ func TestLoadProviderFileParsesExplicitClaudeInjectionFlags(t *testing.T) {
 	if !provider.InjectClaudeCodeMetadataUserIDSet || !provider.InjectClaudeCodeMetadataUserID {
 		t.Fatalf("expected explicit true metadata injection override, got %#v", provider)
 	}
+	if !provider.ClaudeCodeMetadataDeviceIDSet || provider.ClaudeCodeMetadataDeviceID != deviceID {
+		t.Fatalf("expected explicit metadata device_id override, got %#v", provider)
+	}
+	if !provider.ClaudeCodeMetadataAccountUUIDSet || provider.ClaudeCodeMetadataAccountUUID != accountUUID {
+		t.Fatalf("expected explicit metadata account_uuid override, got %#v", provider)
+	}
 	if !provider.InjectClaudeCodeSystemPromptSet || provider.InjectClaudeCodeSystemPrompt {
 		t.Fatalf("expected explicit false system prompt injection override, got %#v", provider)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidClaudeCodeMetadataDeviceAndAccount(t *testing.T) {
+	rootDir := t.TempDir()
+	tests := map[string][]string{
+		"invalid_device_id": {
+			"PROVIDER_ID=openai",
+			"CLAUDE_CODE_METADATA_DEVICE_ID=not-hex",
+		},
+		"invalid_account_uuid": {
+			"PROVIDER_ID=openai",
+			"CLAUDE_CODE_METADATA_ACCOUNT_UUID=not-a-uuid",
+		},
+	}
+
+	for name, lines := range tests {
+		t.Run(name, func(t *testing.T) {
+			providerEnvPath := filepath.Join(rootDir, name+".env")
+			providerBody := strings.Join(append(lines, ""), "\n")
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+			if _, err := loadProviderFile(providerEnvPath); err == nil {
+				t.Fatalf("expected invalid Claude metadata field to fail validation")
+			}
+		})
 	}
 }
 

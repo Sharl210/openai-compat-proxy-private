@@ -130,6 +130,63 @@ func TestLoadFromValuesAllowsExplicitlyDisablingClaudeMasqueradeInjection(t *tes
 	}
 }
 
+func TestLoadFromValuesParsesClaudeCodeMetadataDeviceAndAccount(t *testing.T) {
+	deviceID := strings.Repeat("a", 64)
+	accountUUID := "00000000-0000-4000-8000-000000000000"
+	cfg := LoadFromValues(map[string]string{
+		"UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID":    deviceID,
+		"UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID": accountUUID,
+	})
+
+	if cfg.ClaudeCodeMetadataDeviceID != deviceID {
+		t.Fatalf("expected root Claude Code metadata device_id to be parsed, got %q", cfg.ClaudeCodeMetadataDeviceID)
+	}
+	if cfg.ClaudeCodeMetadataAccountUUID != accountUUID {
+		t.Fatalf("expected root Claude Code metadata account_uuid to be parsed, got %q", cfg.ClaudeCodeMetadataAccountUUID)
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidClaudeCodeMetadataDeviceAndAccount(t *testing.T) {
+	tests := map[string]map[string]string{
+		"invalid_device_id": {
+			"UPSTREAM_CLAUDE_CODE_METADATA_DEVICE_ID": "not-hex",
+		},
+		"invalid_account_uuid": {
+			"UPSTREAM_CLAUDE_CODE_METADATA_ACCOUNT_UUID": "not-a-uuid",
+		},
+	}
+
+	for name, values := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateRootEnvValues(values); err == nil {
+				t.Fatalf("expected invalid Claude Code metadata values to fail validation: %#v", values)
+			}
+		})
+	}
+}
+
+func TestDefaultClaudeCodeMetadataDeviceAndAccountAreStablePerProvider(t *testing.T) {
+	deviceOne := DefaultClaudeCodeMetadataDeviceID("openai")
+	deviceTwo := DefaultClaudeCodeMetadataDeviceID("openai")
+	deviceOther := DefaultClaudeCodeMetadataDeviceID("anthropic")
+	accountOne := DefaultClaudeCodeMetadataAccountUUID("openai")
+	accountTwo := DefaultClaudeCodeMetadataAccountUUID("openai")
+	accountOther := DefaultClaudeCodeMetadataAccountUUID("anthropic")
+
+	if deviceOne != deviceTwo || accountOne != accountTwo {
+		t.Fatalf("expected default identity fields to be stable for same provider, got %q/%q and %q/%q", deviceOne, accountOne, deviceTwo, accountTwo)
+	}
+	if deviceOne == deviceOther || accountOne == accountOther {
+		t.Fatalf("expected default identity fields to differ across provider IDs, got %q/%q and %q/%q", deviceOne, accountOne, deviceOther, accountOther)
+	}
+	if err := ValidateClaudeCodeMetadataDeviceID(deviceOne, "device"); err != nil {
+		t.Fatalf("expected generated device_id to validate: %v", err)
+	}
+	if err := ValidateClaudeCodeMetadataAccountUUID(accountOne, "account"); err != nil {
+		t.Fatalf("expected generated account_uuid to validate: %v", err)
+	}
+}
+
 func TestLoadFromValuesParsesV1ModelMap(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
 		"V1_MODEL_MAP": "alias-alpha:alpha-chat, #re:alias-(.*):owned-$1",
