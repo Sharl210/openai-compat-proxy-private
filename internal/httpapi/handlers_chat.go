@@ -82,7 +82,7 @@ func handleChat() http.HandlerFunc {
 			BaseEstimate:       baseEstimate,
 			Canon:              canon,
 		}))
-		if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 			if writeRequestValidationError(w, err) {
 				return
 			}

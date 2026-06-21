@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -160,6 +161,118 @@ func TestRouteObservabilityHeadersExposeEmptyMasqueradeUserAgentWhenDisabled(t *
 	assertHeaderPresence(t, rec, headerProxyToUpstreamMasqueradeUserAgent)
 	if got := rec.Header().Get(headerProxyToUpstreamMasqueradeUserAgent); got != "" {
 		t.Fatalf("expected disabled masquerade user-agent observability header to be empty, got %q", got)
+	}
+}
+
+func TestRouteObservabilityHeadersExposeClaudeMetadataIdentityWhenClaudeMasqueradeEnabled(t *testing.T) {
+	configuredDeviceID := strings.Repeat("d", 64)
+	configuredAccountUUID := "00000000-0000-4000-8000-000000000003"
+	var upstreamMetadata struct {
+		DeviceID    string `json:"device_id"`
+		AccountUUID string `json:"account_uuid"`
+		SessionID   string `json:"session_id"`
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		metadata, _ := payload["metadata"].(map[string]any)
+		userID, _ := metadata["user_id"].(string)
+		if err := json.Unmarshal([]byte(userID), &upstreamMetadata); err != nil {
+			t.Fatalf("decode metadata.user_id %q: %v", userID, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:                "openai",
+		EnableLegacyV1Routes:           true,
+		DownstreamNonStreamStrategy:    config.DownstreamNonStreamStrategyUpstreamNonStream,
+		UpstreamEndpointType:           config.UpstreamEndpointTypeAnthropic,
+		MasqueradeTarget:               config.MasqueradeTargetClaude,
+		InjectClaudeCodeMetadataUserID: true,
+		ClaudeCodeMetadataDeviceID:     configuredDeviceID,
+		ClaudeCodeMetadataAccountUUID:  configuredAccountUUID,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			MasqueradeTarget:          config.MasqueradeTargetClaude,
+			SupportsAnthropicMessages: true,
+			ManualModels:              []string{"claude-sonnet-4-5"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataDeviceID)
+	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataAccountUUID)
+	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataSessionID)
+	if got := rec.Header().Get(headerProxyToUpstreamClaudeMetadataDeviceID); got != configuredDeviceID || got != upstreamMetadata.DeviceID {
+		t.Fatalf("expected metadata device header/body %q, got header=%q body=%q", configuredDeviceID, got, upstreamMetadata.DeviceID)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamClaudeMetadataAccountUUID); got != configuredAccountUUID || got != upstreamMetadata.AccountUUID {
+		t.Fatalf("expected metadata account header/body %q, got header=%q body=%q", configuredAccountUUID, got, upstreamMetadata.AccountUUID)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamClaudeMetadataSessionID); got == "" || got != upstreamMetadata.SessionID || !validUUIDForHTTPAPITest(got) {
+		t.Fatalf("expected metadata session header to match valid body UUID, got header=%q body=%q", got, upstreamMetadata.SessionID)
+	}
+}
+
+func TestRouteObservabilityHeadersExposeEmptyClaudeMetadataWhenClaudeMasqueradeDisabled(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		MasqueradeTarget:            config.MasqueradeTargetNone,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			MasqueradeTarget:          config.MasqueradeTargetNone,
+			SupportsAnthropicMessages: true,
+			ManualModels:              []string{"claude-sonnet-4-5"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, header := range []string{
+		headerProxyToUpstreamClaudeMetadataDeviceID,
+		headerProxyToUpstreamClaudeMetadataAccountUUID,
+		headerProxyToUpstreamClaudeMetadataSessionID,
+	} {
+		assertHeaderPresence(t, rec, header)
+		if got := rec.Header().Get(header); got != "" {
+			t.Fatalf("expected disabled Claude metadata header %s to be empty, got %q", header, got)
+		}
 	}
 }
 
@@ -851,6 +964,9 @@ func assertDirectionalObservabilityHeaders(t *testing.T, rec *httptest.ResponseR
 	assertHeaderPresence(t, rec, headerClientToProxyReasoningEffort)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamReasoningEffort)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamReasoningParameters)
+	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataDeviceID)
+	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataAccountUUID)
+	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataSessionID)
 	if got := rec.Header().Get(headerClientToProxyModel); got != expected.clientModel {
 		t.Fatalf("expected %s %q, got %q", headerClientToProxyModel, expected.clientModel, got)
 	}
@@ -881,6 +997,10 @@ func assertHeaderPresence(t *testing.T, rec *httptest.ResponseRecorder, header s
 	if _, exists := rec.Result().Header[http.CanonicalHeaderKey(header)]; !exists {
 		t.Fatalf("expected header %s to be present", header)
 	}
+}
+
+func validUUIDForHTTPAPITest(value string) bool {
+	return regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(value)
 }
 
 func assertJSONHeaderEquals(t *testing.T, raw string, expected map[string]any) {

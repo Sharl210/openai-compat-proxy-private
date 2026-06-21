@@ -14,29 +14,32 @@ import (
 )
 
 const (
-	headerClientToProxyModel                 = "X-Client-To-Proxy-Model"
-	headerClientToProxyServiceTier           = "X-Client-To-Proxy-Service-Tier"
-	headerClientToProxyReasoningParameters   = "X-Client-To-Proxy-Reasoning-Parameters"
-	headerClientToProxyReasoningEffort       = "X-Client-To-Proxy-Reasoning-Effort"
-	headerClientToProxyNoPrompt              = "X-Client-To-Proxy-NoPrompt"
-	headerSystemPromptAttach                 = "X-SYSTEM-PROMPT-ATTACH"
-	headerCacheInfoTimezone                  = "X-Cache-Info-Timezone"
-	headerThisUsageTokens                    = "X-This-Usage-Tokens"
-	headerProxyToUpstreamModel               = "X-Proxy-To-Upstream-Model"
-	headerProxyEstimatedInputTokens          = "X-Proxy-Estimated-Input-Tokens"
-	headerProxyModelLimitContextTokens       = "X-Proxy-Model-Limit-Context-Tokens"
-	headerProxyToUpstreamServiceTier         = "X-Proxy-To-Upstream-Service-Tier"
-	headerProxyToUpstreamMaxOutputTokens     = "X-Proxy-To-Upstream-Max-Output-Tokens"
-	headerProxyToUpstreamMasqueradeUserAgent = "X-Proxy-To-Upstream-Masquerade-User-Agent"
-	headerProxyToUpstreamReasoningEffort     = "X-Proxy-To-Upstream-Reasoning-Effort"
-	headerProxyToUpstreamReasoningParameters = "X-Proxy-To-Upstream-Reasoning-Parameters"
-	headerProxyUpstreamRetryCount            = "X-Proxy-Upstream-Retry-Count"
-	headerProxyUpstreamRetryDelay            = "X-Proxy-Upstream-Retry-Delay"
-	headerProxyUpstreamAnthropicCacheControl = "X-Proxy-Upstream-Anthropic-Cache-Control"
-	headerProviderTodayCacheRate             = "X-Provider-Today-Cache-Rate"
-	headerProviderHistoryCacheRate           = "X-Provider-History-Cache-Rate"
-	headerRootProviderTodayCacheRate         = "X-Root-Provider-Today-Cache-Rate"
-	headerRootProviderHistoryCacheRate       = "X-Root-Provider-History-Cache-Rate"
+	headerClientToProxyModel                       = "X-Client-To-Proxy-Model"
+	headerClientToProxyServiceTier                 = "X-Client-To-Proxy-Service-Tier"
+	headerClientToProxyReasoningParameters         = "X-Client-To-Proxy-Reasoning-Parameters"
+	headerClientToProxyReasoningEffort             = "X-Client-To-Proxy-Reasoning-Effort"
+	headerClientToProxyNoPrompt                    = "X-Client-To-Proxy-NoPrompt"
+	headerSystemPromptAttach                       = "X-SYSTEM-PROMPT-ATTACH"
+	headerCacheInfoTimezone                        = "X-Cache-Info-Timezone"
+	headerThisUsageTokens                          = "X-This-Usage-Tokens"
+	headerProxyToUpstreamModel                     = "X-Proxy-To-Upstream-Model"
+	headerProxyEstimatedInputTokens                = "X-Proxy-Estimated-Input-Tokens"
+	headerProxyModelLimitContextTokens             = "X-Proxy-Model-Limit-Context-Tokens"
+	headerProxyToUpstreamServiceTier               = "X-Proxy-To-Upstream-Service-Tier"
+	headerProxyToUpstreamMaxOutputTokens           = "X-Proxy-To-Upstream-Max-Output-Tokens"
+	headerProxyToUpstreamMasqueradeUserAgent       = "X-Proxy-To-Upstream-Masquerade-User-Agent"
+	headerProxyToUpstreamClaudeMetadataDeviceID    = "X-Proxy-To-Upstream-Claude-Metadata-Device-Id"
+	headerProxyToUpstreamClaudeMetadataAccountUUID = "X-Proxy-To-Upstream-Claude-Metadata-Account-Uuid"
+	headerProxyToUpstreamClaudeMetadataSessionID   = "X-Proxy-To-Upstream-Claude-Metadata-Session-Id"
+	headerProxyToUpstreamReasoningEffort           = "X-Proxy-To-Upstream-Reasoning-Effort"
+	headerProxyToUpstreamReasoningParameters       = "X-Proxy-To-Upstream-Reasoning-Parameters"
+	headerProxyUpstreamRetryCount                  = "X-Proxy-Upstream-Retry-Count"
+	headerProxyUpstreamRetryDelay                  = "X-Proxy-Upstream-Retry-Delay"
+	headerProxyUpstreamAnthropicCacheControl       = "X-Proxy-Upstream-Anthropic-Cache-Control"
+	headerProviderTodayCacheRate                   = "X-Provider-Today-Cache-Rate"
+	headerProviderHistoryCacheRate                 = "X-Provider-History-Cache-Rate"
+	headerRootProviderTodayCacheRate               = "X-Root-Provider-Today-Cache-Rate"
+	headerRootProviderHistoryCacheRate             = "X-Root-Provider-History-Cache-Rate"
 )
 
 const (
@@ -286,12 +289,16 @@ func applyProviderOpenAIServiceTierOverride(canon *modelpkg.CanonicalRequest, pr
 	canon.PreservedTopLevelFields["service_tier"] = provider.OpenAIServiceTier
 }
 
-func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, providerID string, canon modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
-	preview, err := upstream.PreviewRequestObservability(canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
+func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, providerID string, canon *modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
+	if canon == nil {
+		return nil
+	}
+	upstream.PrepareClaudeMetadataForRequest(canon, providerCfg)
+	preview, err := upstream.PreviewRequestObservability(*canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
 	if err != nil {
 		return err
 	}
-	setProviderSystemPromptAttachHeader(w, provider, canon)
+	setProviderSystemPromptAttachHeader(w, provider, *canon)
 	w.Header().Set(headerClientToProxyModel, strings.TrimSpace(clientModel))
 	w.Header().Set(headerClientToProxyServiceTier, strings.TrimSpace(clientServiceTier))
 	w.Header().Set(headerClientToProxyReasoningParameters, strings.TrimSpace(clientReasoningParameters))
@@ -302,23 +309,36 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
 	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
-	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokens(canon)))
-	setProxyModelLimitContextHeader(w, provider, canon)
+	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokens(*canon)))
+	setProxyModelLimitContextHeader(w, provider, *canon)
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {
 		w.Header().Set(headerProxyToUpstreamMaxOutputTokens, strconv.Itoa(*canon.MaxOutputTokens))
 	} else {
 		w.Header().Set(headerProxyToUpstreamMaxOutputTokens, "")
 	}
-	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(canon, preview)))
+	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(*canon, preview)))
 	w.Header().Set(headerProxyToUpstreamReasoningParameters, strings.TrimSpace(preview.ReasoningParameters))
 	w.Header().Set(headerThisUsageTokens, "")
 	w.Header().Set(headerProxyUpstreamRetryCount, strconv.Itoa(providerCfg.UpstreamRetryCount))
 	w.Header().Set(headerProxyUpstreamRetryDelay, providerCfg.UpstreamRetryDelay.String())
 	w.Header().Set(headerProxyUpstreamAnthropicCacheControl, strings.TrimSpace(providerCfg.UpstreamCacheControl))
 	w.Header().Set(headerProxyToUpstreamMasqueradeUserAgent, upstream.FinalMasqueradeUserAgent(providerCfg.UpstreamUserAgent, providerCfg.MasqueradeTarget, providerCfg.UpstreamMasqueradeClientVersion))
+	setClaudeMetadataObservabilityHeaders(w, providerCfg, *canon)
 	setCacheRateHeaders(w, r, providerID)
 	return nil
+}
+
+func setClaudeMetadataObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest) {
+	if providerCfg.MasqueradeTarget != config.MasqueradeTargetClaude || !providerCfg.InjectClaudeCodeMetadataUserID || canon.ClaudeMetadata == nil {
+		w.Header().Set(headerProxyToUpstreamClaudeMetadataDeviceID, "")
+		w.Header().Set(headerProxyToUpstreamClaudeMetadataAccountUUID, "")
+		w.Header().Set(headerProxyToUpstreamClaudeMetadataSessionID, "")
+		return
+	}
+	w.Header().Set(headerProxyToUpstreamClaudeMetadataDeviceID, strings.TrimSpace(canon.ClaudeMetadata.DeviceID))
+	w.Header().Set(headerProxyToUpstreamClaudeMetadataAccountUUID, strings.TrimSpace(canon.ClaudeMetadata.AccountUUID))
+	w.Header().Set(headerProxyToUpstreamClaudeMetadataSessionID, strings.TrimSpace(canon.ClaudeMetadata.SessionID))
 }
 
 func formatThisUsageTokens(usage map[string]any) string {
@@ -496,6 +516,9 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerProxyUpstreamRetryDelay,
 		headerProxyUpstreamAnthropicCacheControl,
 		headerProxyToUpstreamMasqueradeUserAgent,
+		headerProxyToUpstreamClaudeMetadataDeviceID,
+		headerProxyToUpstreamClaudeMetadataAccountUUID,
+		headerProxyToUpstreamClaudeMetadataSessionID,
 	} {
 		w.Header().Del(header)
 	}

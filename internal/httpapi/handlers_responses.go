@@ -424,7 +424,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		Canon:              canon,
 	})
 	*r = *r.Clone(observationCtx)
-	if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+	if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
 		if writeRequestValidationError(w, err) {
 			return nil, false
 		}
