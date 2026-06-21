@@ -1,8 +1,8 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
@@ -48,6 +48,7 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 	if rawEstimatedTokens <= effectiveLimit {
 		return false
 	}
+	clearClaudeMetadataObservabilityHeaders(w)
 	message := buildContextLimitExceededMessage(displayedEstimateText, strconv.Itoa(limit))
 	switch protocol {
 	case clientReasoningProtocolMessages:
@@ -103,7 +104,6 @@ func formatDisplayedEstimatedTokens(tokens int, confidence string) string {
 	return strconv.Itoa(tokens) + "(置信度:" + confidence + ")"
 }
 
-
 func conservativeContextAdmissionLimit(ctx context.Context, configuredLimit int, canon modelpkg.CanonicalRequest) int {
 	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
 	if mgr == nil {
@@ -126,7 +126,6 @@ func conservativeContextAdmissionLimit(ctx context.Context, configuredLimit int,
 	}
 	return configuredLimit
 }
-
 
 func buildContextLimitExceededMessage(estimatedTokens string, limit string) string {
 	if strings.TrimSpace(estimatedTokens) == "" || strings.TrimSpace(limit) == "" {

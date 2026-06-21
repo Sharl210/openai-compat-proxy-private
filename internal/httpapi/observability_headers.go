@@ -330,7 +330,7 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 }
 
 func setClaudeMetadataObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest) {
-	if providerCfg.MasqueradeTarget != config.MasqueradeTargetClaude || !providerCfg.InjectClaudeCodeMetadataUserID || canon.ClaudeMetadata == nil {
+	if !shouldExposeClaudeMetadataObservabilityHeaders(providerCfg, canon) {
 		w.Header().Set(headerProxyToUpstreamClaudeMetadataDeviceID, "")
 		w.Header().Set(headerProxyToUpstreamClaudeMetadataAccountUUID, "")
 		w.Header().Set(headerProxyToUpstreamClaudeMetadataSessionID, "")
@@ -339,6 +339,19 @@ func setClaudeMetadataObservabilityHeaders(w http.ResponseWriter, providerCfg co
 	w.Header().Set(headerProxyToUpstreamClaudeMetadataDeviceID, strings.TrimSpace(canon.ClaudeMetadata.DeviceID))
 	w.Header().Set(headerProxyToUpstreamClaudeMetadataAccountUUID, strings.TrimSpace(canon.ClaudeMetadata.AccountUUID))
 	w.Header().Set(headerProxyToUpstreamClaudeMetadataSessionID, strings.TrimSpace(canon.ClaudeMetadata.SessionID))
+}
+
+func shouldExposeClaudeMetadataObservabilityHeaders(providerCfg config.Config, canon modelpkg.CanonicalRequest) bool {
+	return strings.TrimSpace(providerCfg.UpstreamEndpointType) == config.UpstreamEndpointTypeAnthropic &&
+		providerCfg.MasqueradeTarget == config.MasqueradeTargetClaude &&
+		providerCfg.InjectClaudeCodeMetadataUserID &&
+		canon.ClaudeMetadata != nil
+}
+
+func clearClaudeMetadataObservabilityHeaders(w http.ResponseWriter) {
+	w.Header().Set(headerProxyToUpstreamClaudeMetadataDeviceID, "")
+	w.Header().Set(headerProxyToUpstreamClaudeMetadataAccountUUID, "")
+	w.Header().Set(headerProxyToUpstreamClaudeMetadataSessionID, "")
 }
 
 func formatThisUsageTokens(usage map[string]any) string {

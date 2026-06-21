@@ -231,6 +231,74 @@ func TestRouteObservabilityHeadersExposeClaudeMetadataIdentityWhenClaudeMasquera
 	}
 }
 
+func TestRouteObservabilityHeadersLeaveClaudeMetadataEmptyForNonAnthropicUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:                "openai",
+		EnableLegacyV1Routes:           true,
+		DownstreamNonStreamStrategy:    config.DownstreamNonStreamStrategyUpstreamNonStream,
+		MasqueradeTarget:               config.MasqueradeTargetClaude,
+		InjectClaudeCodeMetadataUserID: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			MasqueradeTarget:     config.MasqueradeTargetClaude,
+			SupportsResponses:    true,
+			ManualModels:         []string{"claude-sonnet-4-5"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-sonnet-4-5","input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertEmptyClaudeMetadataHeaders(t, rec)
+}
+
+func TestRouteObservabilityHeadersLeaveClaudeMetadataEmptyForContextLimitRejection(t *testing.T) {
+	server := NewServer(config.Config{
+		DefaultProvider:                "anthropic",
+		EnableLegacyV1Routes:           true,
+		DownstreamNonStreamStrategy:    config.DownstreamNonStreamStrategyUpstreamNonStream,
+		MasqueradeTarget:               config.MasqueradeTargetClaude,
+		InjectClaudeCodeMetadataUserID: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           "https://upstream.example.com",
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			MasqueradeTarget:          config.MasqueradeTargetClaude,
+			SupportsAnthropicMessages: true,
+			ManualModels:              []string{"claude-sonnet-4-5"},
+			ModelLimitContextTokens:   1,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":128,"messages":[{"role":"user","content":"hello hello hello hello hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected context limit status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertEmptyClaudeMetadataHeaders(t, rec)
+}
+
 func TestRouteObservabilityHeadersExposeEmptyClaudeMetadataWhenClaudeMasqueradeDisabled(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -996,6 +1064,20 @@ func assertHeaderPresence(t *testing.T, rec *httptest.ResponseRecorder, header s
 	t.Helper()
 	if _, exists := rec.Result().Header[http.CanonicalHeaderKey(header)]; !exists {
 		t.Fatalf("expected header %s to be present", header)
+	}
+}
+
+func assertEmptyClaudeMetadataHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	for _, header := range []string{
+		headerProxyToUpstreamClaudeMetadataDeviceID,
+		headerProxyToUpstreamClaudeMetadataAccountUUID,
+		headerProxyToUpstreamClaudeMetadataSessionID,
+	} {
+		assertHeaderPresence(t, rec, header)
+		if got := rec.Header().Get(header); got != "" {
+			t.Fatalf("expected Claude metadata header %s to be empty, got %q", header, got)
+		}
 	}
 }
 
