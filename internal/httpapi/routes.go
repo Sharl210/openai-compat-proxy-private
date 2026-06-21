@@ -237,6 +237,9 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	if provider.UpstreamFirstByteTimeout > 0 {
 		providerCfg.FirstByteTimeout = provider.UpstreamFirstByteTimeout
 	}
+	if provider.UpstreamStreamOpenTimeout > 0 {
+		providerCfg.StreamOpenTimeout = provider.UpstreamStreamOpenTimeout
+	}
 	providerCfg.UpstreamRetryCount = provider.UpstreamRetryCount
 	providerCfg.UpstreamRetryDelay = provider.UpstreamRetryDelay
 	providerCfg.UpstreamCacheControl = provider.UpstreamCacheControl
