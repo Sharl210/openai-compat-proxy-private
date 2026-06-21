@@ -117,6 +117,88 @@ func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesOfficialCodexToolShapes(t *testing.T) {
+	req := `{
+		"model":"gpt-5.5",
+		"stream":true,
+		"tools":[
+			{
+				"type":"function",
+				"name":"shell_command",
+				"description":"Run a shell command",
+				"strict":true,
+				"parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"],"additionalProperties":false}
+			},
+			{
+				"type":"custom",
+				"name":"apply_patch",
+				"description":"Apply a patch",
+				"format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+			},
+			{
+				"type":"namespace",
+				"name":"mcp__node_repl",
+				"description":"Node REPL tools",
+				"tools":[{"type":"function","name":"execute","description":"Execute code","parameters":{"type":"object","properties":{"code":{"type":"string"}},"required":["code"],"additionalProperties":false}}]
+			},
+			{
+				"type":"tool_search",
+				"description":"Search installed tools",
+				"execution":{"type":"server"},
+				"parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}
+			},
+			{
+				"type":"web_search",
+				"external_web_access":true,
+				"search_content_types":["webpage"]
+			}
+		],
+		"input":[{"role":"user","content":"hello"}]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Tools) != 5 {
+		t.Fatalf("expected 5 tools, got %#v", canon.Tools)
+	}
+
+	functionTool := canon.Tools[0]
+	if got, _ := functionTool.Raw["strict"].(bool); !got {
+		t.Fatalf("expected function tool strict=true to survive, got %#v", functionTool.Raw)
+	}
+
+	customTool := canon.Tools[1]
+	format, _ := customTool.Raw["format"].(map[string]any)
+	if got, _ := format["type"].(string); got != "grammar" {
+		t.Fatalf("expected custom tool format grammar to survive, got %#v", customTool.Raw)
+	}
+
+	namespaceTool := canon.Tools[2]
+	nestedTools, _ := namespaceTool.Raw["tools"].([]any)
+	if len(nestedTools) != 1 {
+		t.Fatalf("expected namespace nested tools to survive, got %#v", namespaceTool.Raw)
+	}
+
+	toolSearch := canon.Tools[3]
+	if got, _ := toolSearch.Raw["name"].(string); got != "" {
+		t.Fatalf("expected tool_search not to synthesize a name, got %#v", toolSearch.Raw)
+	}
+	execution, _ := toolSearch.Raw["execution"].(map[string]any)
+	if got, _ := execution["type"].(string); got != "server" {
+		t.Fatalf("expected tool_search execution to survive, got %#v", toolSearch.Raw)
+	}
+
+	webSearch := canon.Tools[4]
+	if _, exists := webSearch.Raw["name"]; exists {
+		t.Fatalf("expected web_search without name to remain nameless, got %#v", webSearch.Raw)
+	}
+	if got, _ := webSearch.Raw["external_web_access"].(bool); !got {
+		t.Fatalf("expected web_search external_web_access to survive, got %#v", webSearch.Raw)
+	}
+}
+
 func TestDecodeRequestDropsSyntheticProxyReasoningWhitespaceResidue(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

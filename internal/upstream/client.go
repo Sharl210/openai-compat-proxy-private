@@ -1500,6 +1500,11 @@ func buildPreservedResponsesToolPayload(tool model.CanonicalTool) map[string]any
 		trimmedType = tool.Type
 	}
 	if trimmedType == "function" {
+		if len(tool.Raw) > 0 {
+			preserved := cloneMap(tool.Raw)
+			preserved["type"] = tool.Type
+			return preserved
+		}
 		return map[string]any{
 			"type":        tool.Type,
 			"name":        tool.Name,

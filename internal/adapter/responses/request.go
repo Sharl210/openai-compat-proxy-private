@@ -62,6 +62,22 @@ type tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
+	Raw         map[string]any `json:"-"`
+}
+
+func (t *tool) UnmarshalJSON(data []byte) error {
+	type alias tool
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*t = tool(decoded)
+	t.Raw = raw
+	return nil
 }
 
 type reasoning struct {
@@ -133,17 +149,21 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	for _, t := range req.Tools {
+		rawTool := cloneMapAny(t.Raw)
+		if len(rawTool) == 0 {
+			rawTool = map[string]any{
+				"type":        t.Type,
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  cloneMapAny(t.Parameters),
+			}
+		}
 		canon.Tools = append(canon.Tools, model.CanonicalTool{
 			Type:        t.Type,
 			Name:        t.Name,
 			Description: t.Description,
 			Parameters:  t.Parameters,
-			Raw: map[string]any{
-				"type":        t.Type,
-				"name":        t.Name,
-				"description": t.Description,
-				"parameters":  cloneMapAny(t.Parameters),
-			},
+			Raw:         rawTool,
 		})
 	}
 	if req.ToolChoice != nil {
