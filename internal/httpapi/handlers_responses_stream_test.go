@@ -908,7 +908,7 @@ func TestProviderResponsesRouteTreatsChatFinishReasonWithoutDoneAsIncomplete(t *
 
 func TestProviderResponsesRouteTreatsAnthropicStopReasonWithoutMessageStopAsIncomplete(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
+		if r.URL.Path != "/messages" {
 			http.NotFound(w, r)
 			return
 		}

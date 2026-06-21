@@ -39,18 +39,29 @@ func TestResponsesStreamFirstByteTimeoutReturnsGatewayTimeoutJSON(t *testing.T) 
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200 after SSE prelude starts, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected pre-open first-byte timeout to return 504 JSON before SSE starts, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.output_item.added`) || !strings.Contains(body, `"id":"rs_proxy"`) {
-		t.Fatalf("expected timeout path to keep early synthetic reasoning lifecycle, got %s", body)
+	if strings.Contains(body, `event: response.output_item.added`) || strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected pre-open first-byte timeout not to start synthetic SSE prelude, got %s", body)
 	}
-	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
-		t.Fatalf("expected timeout path not to expose proxy placeholder reasoning text, got %s", body)
+	if strings.Contains(body, `event: response.incomplete`) || strings.Contains(body, `"health_flag":"upstream_timeout"`) {
+		t.Fatalf("expected pre-open first-byte timeout not to be converted into terminal SSE event, got %s", body)
 	}
-	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_timeout"`) {
-		t.Fatalf("expected SSE timeout terminal event after prelude, got %s", body)
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode timeout body: %v body=%s", err, rec.Body.String())
+	}
+	errMap, _ := payload["error"].(map[string]any)
+	if got, _ := errMap["code"].(string); got != "upstream_timeout" {
+		t.Fatalf("expected upstream_timeout code, got %#v", payload)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("expected JSON content type before SSE starts, got %q", got)
+	}
+	if got := rec.Header().Get("X-Accel-Buffering"); got != "" {
+		t.Fatalf("expected SSE headers not to be set before upstream opens, got X-Accel-Buffering=%q", got)
 	}
 }
 
@@ -83,12 +94,26 @@ func TestResponsesStreamUsesProviderScopedFirstByteTimeoutOverride(t *testing.T)
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected provider-scoped timeout to stay in SSE after prelude, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected provider-scoped pre-open timeout to return 504 JSON before SSE starts, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.incomplete`) || !strings.Contains(body, `"health_flag":"upstream_timeout"`) {
-		t.Fatalf("expected provider-scoped first-byte timeout to emit SSE terminal timeout, got %s", body)
+	if strings.Contains(body, `event: response.incomplete`) || strings.Contains(body, `"health_flag":"upstream_timeout"`) || strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected provider-scoped pre-open timeout not to start SSE protocol, got %s", body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode timeout body: %v body=%s", err, rec.Body.String())
+	}
+	errMap, _ := payload["error"].(map[string]any)
+	if got, _ := errMap["code"].(string); got != "upstream_timeout" {
+		t.Fatalf("expected upstream_timeout code, got %#v", payload)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("expected JSON content type before SSE starts, got %q", got)
+	}
+	if got := rec.Header().Get("X-Accel-Buffering"); got != "" {
+		t.Fatalf("expected SSE headers not to be set before upstream opens, got X-Accel-Buffering=%q", got)
 	}
 }
 
