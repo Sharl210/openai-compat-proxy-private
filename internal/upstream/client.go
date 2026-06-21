@@ -24,6 +24,7 @@ import (
 type Client struct {
 	baseURL                        string
 	httpClient                     *http.Client
+	streamOpenHTTPClient           *http.Client
 	retryCount                     int
 	retryDelay                     time.Duration
 	upstreamEndpointType           string
@@ -122,6 +123,7 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 	return &Client{
 		baseURL:                        strings.TrimRight(baseURL, "/"),
 		httpClient:                     newHTTPClient(cfg),
+		streamOpenHTTPClient:           newStreamOpenHTTPClient(cfg),
 		retryCount:                     cfg.UpstreamRetryCount,
 		retryDelay:                     cfg.UpstreamRetryDelay,
 		upstreamEndpointType:           normalizeEndpointType(cfg.UpstreamEndpointType),
@@ -172,6 +174,19 @@ func PassThrough(ctx context.Context, cfg config.Config, authorization string, m
 
 func newHTTPClient(cfg config.Config) *http.Client {
 	return &http.Client{Transport: newTransport(cfg)}
+}
+
+func newStreamOpenHTTPClient(cfg config.Config) *http.Client {
+	streamCfg := cfg
+	streamOpenTimeout := streamCfg.StreamOpenTimeout
+	if streamOpenTimeout <= 0 {
+		streamOpenTimeout = config.Default().StreamOpenTimeout
+	}
+	if streamCfg.FirstByteTimeout > 0 && streamCfg.FirstByteTimeout < streamOpenTimeout {
+		streamOpenTimeout = streamCfg.FirstByteTimeout
+	}
+	streamCfg.FirstByteTimeout = streamOpenTimeout
+	return newHTTPClient(streamCfg)
 }
 
 func (c *Client) configuredRetryCount() int {
@@ -676,7 +691,11 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 	}
 	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget, c.masqueradeClientVersion)
 
-	resp, err := c.httpClient.Do(httpReq)
+	httpClient := c.httpClient
+	if !primeFirstEvent && c.streamOpenHTTPClient != nil {
+		httpClient = c.streamOpenHTTPClient
+	}
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}

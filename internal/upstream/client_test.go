@@ -713,7 +713,7 @@ func TestBuildAnthropicRequestBodySkipsSyntheticReasoningOnlyAssistantHistory(t 
 		Messages: []model.CanonicalMessage{{
 			Role: "assistant",
 			ReasoningBlocks: []map[string]any{{
-				"type":             "reasoning",
+				"type":              "reasoning",
 				"encrypted_content": "enc_payload",
 			}},
 		}},
@@ -4221,6 +4221,37 @@ func TestStreamLogsTimeoutFailureBeforeFirstEvent(t *testing.T) {
 	assertHasLogRecord(t, records, "upstreamRequestFailed", func(record map[string]any) bool {
 		return record["request_id"] == "req-timeout" && record["health_flag"] == "upstream_timeout" && record["streaming"] == true
 	})
+}
+
+func TestOpenEventStreamLazyUsesStreamOpenTimeoutForResponseHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{
+		FirstByteTimeout:  5 * time.Second,
+		StreamOpenTimeout: 50 * time.Millisecond,
+	})
+	started := time.Now()
+	_, err := client.OpenEventStreamLazy(context.Background(), model.CanonicalRequest{RequestID: "req-stream-open-timeout", Model: "gpt-5"}, "")
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatalf("expected stream-open timeout error")
+	}
+	if !isTimeoutError(err) {
+		t.Fatalf("expected timeout-classified error, got %T %v", err, err)
+	}
+	if elapsed >= 140*time.Millisecond {
+		t.Fatalf("expected stream-open timeout before upstream headers arrive, elapsed=%s", elapsed)
+	}
 }
 
 func TestStreamEventsLogsBrokenStreamAfterFirstEvent(t *testing.T) {
