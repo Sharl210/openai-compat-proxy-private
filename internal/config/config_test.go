@@ -485,6 +485,7 @@ func TestConfigCacheInfoLocationResolvesTimezone(t *testing.T) {
 func TestLoadFromEnvParsesTimeouts(t *testing.T) {
 	t.Setenv("CONNECT_TIMEOUT", "11s")
 	t.Setenv("FIRST_BYTE_TIMEOUT", "45s")
+	t.Setenv("STREAM_OPEN_TIMEOUT", "9s")
 	t.Setenv("IDLE_TIMEOUT", "75s")
 	t.Setenv("TOTAL_TIMEOUT", "12m")
 
@@ -494,6 +495,9 @@ func TestLoadFromEnvParsesTimeouts(t *testing.T) {
 	}
 	if cfg.FirstByteTimeout != 45*time.Second {
 		t.Fatalf("expected FirstByteTimeout 45s, got %v", cfg.FirstByteTimeout)
+	}
+	if cfg.StreamOpenTimeout != 9*time.Second {
+		t.Fatalf("expected StreamOpenTimeout 9s, got %v", cfg.StreamOpenTimeout)
 	}
 	if cfg.IdleTimeout != 75*time.Second {
 		t.Fatalf("expected IdleTimeout 75s, got %v", cfg.IdleTimeout)
@@ -524,9 +528,13 @@ func TestLoadFromValuesParsesDebugArchiveMaxRequestsIndependently(t *testing.T) 
 }
 
 func TestValidateRootEnvValuesRejectsInvalidTimeout(t *testing.T) {
-	err := ValidateRootEnvValues(map[string]string{"TOTAL_TIMEOUT": "abc"})
-	if err == nil {
-		t.Fatalf("expected invalid TOTAL_TIMEOUT to fail validation")
+	for _, key := range []string{"STREAM_OPEN_TIMEOUT", "TOTAL_TIMEOUT"} {
+		t.Run(key, func(t *testing.T) {
+			err := ValidateRootEnvValues(map[string]string{key: "abc"})
+			if err == nil {
+				t.Fatalf("expected invalid %s to fail validation", key)
+			}
+		})
 	}
 }
 
@@ -627,6 +635,12 @@ func TestValidateRootEnvValuesIgnoresUnknownLegacyVariables(t *testing.T) {
 func TestDefaultFirstByteTimeoutIsThirtyMinutes(t *testing.T) {
 	if got := Default().FirstByteTimeout; got != 30*time.Minute {
 		t.Fatalf("expected default FirstByteTimeout 30m, got %v", got)
+	}
+}
+
+func TestDefaultStreamOpenTimeoutIsThirtySeconds(t *testing.T) {
+	if got := Default().StreamOpenTimeout; got != 30*time.Second {
+		t.Fatalf("expected default StreamOpenTimeout 30s, got %v", got)
 	}
 }
 

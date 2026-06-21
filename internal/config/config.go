@@ -43,6 +43,7 @@ type Config struct {
 	LogEnable                         bool
 	ConnectTimeout                    time.Duration
 	FirstByteTimeout                  time.Duration
+	StreamOpenTimeout                 time.Duration
 	IdleTimeout                       time.Duration
 	TotalTimeout                      time.Duration
 	UpstreamRetryCount                int
@@ -69,6 +70,7 @@ func Default() Config {
 		LogEnable:                      true,
 		ConnectTimeout:                 30 * time.Second,
 		FirstByteTimeout:               30 * time.Minute,
+		StreamOpenTimeout:              30 * time.Second,
 		IdleTimeout:                    3 * time.Minute,
 		TotalTimeout:                   time.Hour,
 		UpstreamRetryCount:             DefaultUpstreamRetryCount,
@@ -196,6 +198,11 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 			cfg.FirstByteTimeout = parsed
 		}
 	}
+	if value, ok := lookup("STREAM_OPEN_TIMEOUT"); ok && value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
+			cfg.StreamOpenTimeout = parsed
+		}
+	}
 	if value, ok := lookup("IDLE_TIMEOUT"); ok && value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
 			cfg.IdleTimeout = parsed
@@ -253,6 +260,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validatePositiveDuration(values, "FIRST_BYTE_TIMEOUT"); err != nil {
+		return err
+	}
+	if err := validatePositiveDuration(values, "STREAM_OPEN_TIMEOUT"); err != nil {
 		return err
 	}
 	if err := validatePositiveDuration(values, "IDLE_TIMEOUT"); err != nil {
@@ -716,6 +726,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.DownstreamNonStreamStrategy == other.DownstreamNonStreamStrategy &&
 		c.ConnectTimeout == other.ConnectTimeout &&
 		c.FirstByteTimeout == other.FirstByteTimeout &&
+		c.StreamOpenTimeout == other.StreamOpenTimeout &&
 		c.IdleTimeout == other.IdleTimeout &&
 		c.TotalTimeout == other.TotalTimeout &&
 		c.UpstreamRetryCount == other.UpstreamRetryCount &&

@@ -538,6 +538,9 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 	if err := validatePositiveDuration(values, "FIRST_BYTE_TIMEOUT"); err != nil {
 		return err
 	}
+	if err := validatePositiveDuration(values, "STREAM_OPEN_TIMEOUT"); err != nil {
+		return err
+	}
 	if err := validatePositiveDuration(values, "IDLE_TIMEOUT"); err != nil {
 		return err
 	}

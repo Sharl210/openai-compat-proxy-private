@@ -1301,6 +1301,31 @@ func TestLoadProviderFileParsesFirstByteTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesStreamOpenTimeoutOverride(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nUPSTREAM_STREAM_OPEN_TIMEOUT=15s\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.UpstreamStreamOpenTimeout != 15*time.Second {
+		t.Fatalf("expected provider stream open timeout 15s, got %v", provider.UpstreamStreamOpenTimeout)
+	}
+
+	providerBody = "PROVIDER_ID=openai\nUPSTREAM_STREAM_OPEN_TIMEOUT=bad\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("rewrite provider env: %v", err)
+	}
+	if _, err := loadProviderFile(providerEnvPath); err == nil {
+		t.Fatalf("expected invalid provider stream open timeout to fail validation")
+	}
+}
+
 func TestLoadProviderFileParsesRetryOverrides(t *testing.T) {
 	rootDir := t.TempDir()
 	providerEnvPath := filepath.Join(rootDir, "openai.env")

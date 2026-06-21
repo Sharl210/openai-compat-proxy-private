@@ -58,6 +58,9 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 	if cfg.AnthropicMaxThinkingBudget == 0 {
 		cfg.AnthropicMaxThinkingBudget = Default().AnthropicMaxThinkingBudget
 	}
+	if cfg.StreamOpenTimeout == 0 {
+		cfg.StreamOpenTimeout = Default().StreamOpenTimeout
+	}
 	if strings.TrimSpace(cfg.UpstreamCacheControl) == "" {
 		cfg.UpstreamCacheControl = Default().UpstreamCacheControl
 	}

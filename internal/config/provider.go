@@ -59,6 +59,7 @@ type ProviderConfig struct {
 	EnableNoPromptModelSuffix              bool
 	EnableNoPromptModelSuffixSet           bool
 	UpstreamFirstByteTimeout               time.Duration
+	UpstreamStreamOpenTimeout              time.Duration
 	UpstreamRetryCount                     int
 	UpstreamRetryCountSet                  bool
 	UpstreamRetryDelay                     time.Duration
@@ -344,6 +345,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, err
 			}
 			provider.UpstreamFirstByteTimeout = parsed
+		case "UPSTREAM_STREAM_OPEN_TIMEOUT":
+			parsed, err := parseProviderPositiveDuration(value, "UPSTREAM_STREAM_OPEN_TIMEOUT", path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.UpstreamStreamOpenTimeout = parsed
 		case "UPSTREAM_RETRY_COUNT":
 			if strings.TrimSpace(value) == "" {
 				break
