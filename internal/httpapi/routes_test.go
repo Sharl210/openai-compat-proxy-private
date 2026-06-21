@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,14 +197,24 @@ func TestProviderConfigForRequestCarriesProviderUpstreamEndpointType(t *testing.
 }
 
 func TestProviderConfigForRequestCarriesProviderClaudeInjectionOverrides(t *testing.T) {
+	rootDeviceID := strings.Repeat("a", 64)
+	rootAccountUUID := "00000000-0000-4000-8000-000000000000"
+	providerDeviceID := strings.Repeat("b", 64)
+	providerAccountUUID := "00000000-0000-4000-8000-000000000001"
 	snapshot := &config.RuntimeSnapshot{Config: config.Config{
 		InjectClaudeCodeMetadataUserID: false,
 		InjectClaudeCodeSystemPrompt:   false,
+		ClaudeCodeMetadataDeviceID:     rootDeviceID,
+		ClaudeCodeMetadataAccountUUID:  rootAccountUUID,
 		Providers: []config.ProviderConfig{{
 			ID:                                "openai",
 			Enabled:                           true,
 			InjectClaudeCodeMetadataUserID:    true,
 			InjectClaudeCodeMetadataUserIDSet: true,
+			ClaudeCodeMetadataDeviceID:        providerDeviceID,
+			ClaudeCodeMetadataDeviceIDSet:     true,
+			ClaudeCodeMetadataAccountUUID:     providerAccountUUID,
+			ClaudeCodeMetadataAccountUUIDSet:  true,
 			InjectClaudeCodeSystemPrompt:      true,
 			InjectClaudeCodeSystemPromptSet:   true,
 			UpstreamEndpointType:              config.UpstreamEndpointTypeAnthropic,
@@ -217,8 +228,35 @@ func TestProviderConfigForRequestCarriesProviderClaudeInjectionOverrides(t *test
 	if !providerCfg.InjectClaudeCodeMetadataUserID {
 		t.Fatalf("expected provider metadata injection override to be applied")
 	}
+	if providerCfg.ClaudeCodeMetadataDeviceID != providerDeviceID {
+		t.Fatalf("expected provider metadata device_id override, got %q", providerCfg.ClaudeCodeMetadataDeviceID)
+	}
+	if providerCfg.ClaudeCodeMetadataAccountUUID != providerAccountUUID {
+		t.Fatalf("expected provider metadata account_uuid override, got %q", providerCfg.ClaudeCodeMetadataAccountUUID)
+	}
 	if !providerCfg.InjectClaudeCodeSystemPrompt {
 		t.Fatalf("expected provider system prompt injection override to be applied")
+	}
+}
+
+func TestProviderConfigForRequestDerivesClaudeMetadataDeviceAndAccountFromProviderID(t *testing.T) {
+	snapshot := &config.RuntimeSnapshot{Config: config.Config{
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic,
+		}},
+	}}
+
+	req := httptest.NewRequest("GET", "/openai/v1/responses", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", CanonicalPath: "/v1/responses"}), snapshot))
+
+	providerCfg := providerConfigForRequest(req)
+	if got, want := providerCfg.ClaudeCodeMetadataDeviceID, config.DefaultClaudeCodeMetadataDeviceID("openai"); got != want {
+		t.Fatalf("expected provider-specific default metadata device_id %q, got %q", want, got)
+	}
+	if got, want := providerCfg.ClaudeCodeMetadataAccountUUID, config.DefaultClaudeCodeMetadataAccountUUID("openai"); got != want {
+		t.Fatalf("expected provider-specific default metadata account_uuid %q, got %q", want, got)
 	}
 }
 

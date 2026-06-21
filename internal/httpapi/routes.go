@@ -252,6 +252,18 @@ func providerConfigForID(snapshot *config.RuntimeSnapshot, providerID string) co
 	if provider.InjectClaudeCodeMetadataUserIDSet {
 		providerCfg.InjectClaudeCodeMetadataUserID = provider.InjectClaudeCodeMetadataUserID
 	}
+	if provider.ClaudeCodeMetadataDeviceIDSet || provider.ClaudeCodeMetadataDeviceID != "" {
+		providerCfg.ClaudeCodeMetadataDeviceID = provider.ClaudeCodeMetadataDeviceID
+	}
+	if provider.ClaudeCodeMetadataAccountUUIDSet || provider.ClaudeCodeMetadataAccountUUID != "" {
+		providerCfg.ClaudeCodeMetadataAccountUUID = provider.ClaudeCodeMetadataAccountUUID
+	}
+	if strings.TrimSpace(providerCfg.ClaudeCodeMetadataDeviceID) == "" {
+		providerCfg.ClaudeCodeMetadataDeviceID = config.DefaultClaudeCodeMetadataDeviceID(providerID)
+	}
+	if strings.TrimSpace(providerCfg.ClaudeCodeMetadataAccountUUID) == "" {
+		providerCfg.ClaudeCodeMetadataAccountUUID = config.DefaultClaudeCodeMetadataAccountUUID(providerID)
+	}
 	if provider.InjectClaudeCodeSystemPromptSet {
 		providerCfg.InjectClaudeCodeSystemPrompt = provider.InjectClaudeCodeSystemPrompt
 	}
