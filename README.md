@@ -311,9 +311,9 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Proxy-To-Upstream-Model` | 代理最终实际发给上游的模型名；如果启用了 `MODEL_MAP`，这里会直接展示映射后的结果 | `claude-sonnet-4-5` |
 | `X-Proxy-To-Upstream-Service-Tier` | 代理最终实际发给上游的服务层级；如果 provider 配置覆写了该值，这里会显示覆写后的结果；没有值时为空字符串 | `priority` |
 | `X-Proxy-To-Upstream-Masquerade-User-Agent` | 伪装启用时，代理最终实际发给上游的 User-Agent；未启用伪装时为空字符串 | `claude-cli/2.1.183 (external, cli)` |
-| `X-Proxy-To-Upstream-Claude-Metadata-Device-Id` | Claude 伪装且注入 `metadata.user_id` 时，代理最终装配的 `device_id`；未启用 Claude metadata 注入时为空字符串 | `a3f...` |
-| `X-Proxy-To-Upstream-Claude-Metadata-Account-Uuid` | Claude 伪装且注入 `metadata.user_id` 时，代理最终装配的 `account_uuid`；未启用 Claude metadata 注入时为空字符串 | `00000000-0000-4000-8000-000000000003` |
-| `X-Proxy-To-Upstream-Claude-Metadata-Session-Id` | Claude 伪装且注入 `metadata.user_id` 时，代理本次请求动态生成的 `session_id`；未启用 Claude metadata 注入时为空字符串 | `11111111-1111-4111-8111-111111111111` |
+| `X-Proxy-To-Upstream-Claude-Metadata-Device-Id` | Anthropic 上游、Claude 伪装且本次会实际向上游请求体注入 `metadata.user_id` 时，代理最终装配的 `device_id`；未实际注入时为空字符串 | `a3f...` |
+| `X-Proxy-To-Upstream-Claude-Metadata-Account-Uuid` | Anthropic 上游、Claude 伪装且本次会实际向上游请求体注入 `metadata.user_id` 时，代理最终装配的 `account_uuid`；未实际注入时为空字符串 | `00000000-0000-4000-8000-000000000003` |
+| `X-Proxy-To-Upstream-Claude-Metadata-Session-Id` | Anthropic 上游、Claude 伪装且本次会实际向上游请求体注入 `metadata.user_id` 时，代理动态生成的 `session_id`；未实际注入时为空字符串 | `11111111-1111-4111-8111-111111111111` |
 | `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
 | `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前最终上游模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
@@ -333,7 +333,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 - `X-Client-To-Proxy-*` 关注的是**客户端 → 代理**这段链路。
 - `X-Proxy-To-Upstream-*` 关注的是**代理 → 上游**这段链路。
 - 服务层级和 reasoning 透明度响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置对应链路参数”。
-- Claude metadata 三个透明度响应头只在有效伪装目标为 `claude` 且启用 `metadata.user_id` 注入时填值；它们展示的是代理最终装配到上游请求体里的值，不区分这些值来自用户显式配置还是 provider ID 默认派生。
+- Claude metadata 三个透明度响应头只在有效伪装目标为 `claude`、上游协议为 `anthropic`，且本次请求没有被代理层提前拦截、会实际向上游请求体注入 `metadata.user_id` 时填值；它们展示的是代理最终装配到上游请求体里的值，不区分这些值来自用户显式配置还是 provider ID 默认派生。
 - `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
 - `X-Client-To-Proxy-Reasoning-Effort` 是客户端侧的**摘要值**；如果同一请求里模型 suffix 和请求体参数同时存在，代理会按本地优先级先决出最终强度，再把这个摘要值写进来。
 - `X-SYSTEM-PROMPT-ATTACH` 是本次请求的提示词附加透明度字段：正常注入 provider prompt 时显示 `prepend:prompt.md` 或 `append:...`；当 `-noprompt` 真正生效且 `X-Client-To-Proxy-NoPrompt=true` 时，这个 header 仍会存在但值为空，表示本次已明确跳过 provider prompt 注入；如果 `-noprompt` 没有生效，则继续按实际注入状态显示文件串。
