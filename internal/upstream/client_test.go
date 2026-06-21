@@ -707,6 +707,76 @@ func TestBuildAnthropicRequestBodyKeepsStringSystemWhenNoInstructionParts(t *tes
 	}
 }
 
+func TestBuildAnthropicRequestBodySkipsSyntheticReasoningOnlyAssistantHistory(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ReasoningBlocks: []map[string]any{{
+				"type":             "reasoning",
+				"encrypted_content": "enc_payload",
+			}},
+		}},
+	}, "", false, false, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildAnthropicRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	for i, raw := range messages {
+		msg, _ := raw.(map[string]any)
+		if msg == nil {
+			t.Fatalf("message %d is nil", i)
+		}
+		if got, exists := msg["content"]; exists && got == nil {
+			t.Fatalf("expected anthropic assistant history without content:null, got %#v", msg)
+		}
+	}
+}
+
+func TestBuildAnthropicRequestBodyKeepsAssistantToolCallWithoutText(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []model.CanonicalToolCall{{
+				ID:        "call_123",
+				Type:      "function",
+				Name:      "search_web",
+				Arguments: `{"query":"weather"}`,
+			}},
+		}},
+	}, "", false, false, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildAnthropicRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("expected one anthropic assistant message, got %#v", payload["messages"])
+	}
+	msg, _ := messages[0].(map[string]any)
+	content, ok := msg["content"].([]any)
+	if !ok {
+		t.Fatalf("expected assistant content array, got %#v", msg["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected one tool_use block, got %#v", content)
+	}
+	toolUse, _ := content[0].(map[string]any)
+	if got := toolUse["type"]; got != "tool_use" {
+		t.Fatalf("expected tool_use block, got %#v", toolUse)
+	}
+}
+
 func TestBuildAnthropicRequestBodyUsesHoistedInstructionsAsSystem(t *testing.T) {
 	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
 		Model:        "claude-sonnet-4-5",
@@ -2878,6 +2948,40 @@ func TestBuildChatRequestBodyPreservesFileContentPart(t *testing.T) {
 	fileRaw, _ := part["file"].(map[string]any)
 	if got := fileRaw["file_id"]; got != "file_123" {
 		t.Fatalf("expected file_id preserved, got %#v", part)
+	}
+}
+
+func TestBuildChatRequestBodyKeepsAssistantToolCallsWithoutText(t *testing.T) {
+	body, err := buildRequestBodyForEndpoint(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []model.CanonicalToolCall{{
+				ID:        "call_123",
+				Type:      "function",
+				Name:      "search_web",
+				Arguments: `{"query":"weather"}`,
+			}},
+		}},
+	}, config.UpstreamEndpointTypeChat, "", false, false, config.UpstreamCacheControlNoChange)
+	if err != nil {
+		t.Fatalf("buildRequestBodyForEndpoint error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	messages, _ := payload["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("expected one chat assistant message, got %#v", payload["messages"])
+	}
+	msg, _ := messages[0].(map[string]any)
+	if _, exists := msg["tool_calls"]; !exists {
+		t.Fatalf("expected assistant tool_calls to survive, got %#v", msg)
+	}
+	if content, exists := msg["content"]; exists && content == nil {
+		t.Fatalf("expected no content:null in chat payload, got %#v", msg)
 	}
 }
 

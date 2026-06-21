@@ -1915,6 +1915,9 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 			}
 			content = append(content, map[string]any{"type": "tool_use", "id": callID, "name": call.Name, "input": parseJSONArguments(call.Arguments)})
 		}
+		if len(content) == 0 {
+			continue
+		}
 		messages = append(messages, map[string]any{"role": msg.Role, "content": content})
 	}
 	pendingToolResults = appendPendingToolResults(pendingToolResults)
