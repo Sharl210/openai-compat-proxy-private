@@ -24,6 +24,13 @@ type CanonicalRequest struct {
 	AuthMode                    string
 	SkipProviderSystemPrompt    bool
 	HasSyntheticReasoningReplay bool
+	ClaudeMetadata              *CanonicalClaudeMetadata
+}
+
+type CanonicalClaudeMetadata struct {
+	DeviceID    string
+	AccountUUID string
+	SessionID   string
 }
 
 type CanonicalMessage struct {

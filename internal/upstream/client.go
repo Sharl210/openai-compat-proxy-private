@@ -34,6 +34,8 @@ type Client struct {
 	masqueradeClientVersion        string
 	injectClaudeCodeMetadataUserID bool
 	injectClaudeCodeSystemPrompt   bool
+	claudeCodeMetadataDeviceID     string
+	claudeCodeMetadataAccountUUID  string
 	upstreamThinkingTagStyle       string
 	upstreamXMLToolCallStyle       string
 	upstreamCacheControl           string
@@ -130,6 +132,8 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 		masqueradeClientVersion:        strings.TrimSpace(cfg.UpstreamMasqueradeClientVersion),
 		injectClaudeCodeMetadataUserID: cfg.InjectClaudeCodeMetadataUserID,
 		injectClaudeCodeSystemPrompt:   cfg.InjectClaudeCodeSystemPrompt,
+		claudeCodeMetadataDeviceID:     strings.TrimSpace(cfg.ClaudeCodeMetadataDeviceID),
+		claudeCodeMetadataAccountUUID:  strings.TrimSpace(cfg.ClaudeCodeMetadataAccountUUID),
 		upstreamThinkingTagStyle:       cfg.UpstreamThinkingTagStyle,
 		upstreamXMLToolCallStyle:       cfg.UpstreamXMLToolCallStyle,
 		upstreamCacheControl:           cfg.UpstreamCacheControl,
@@ -230,6 +234,12 @@ func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 }
 
 func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointType string, stream bool) ([]byte, error) {
+	PrepareClaudeMetadataForRequest(&req, config.Config{
+		MasqueradeTarget:               c.masqueradeTarget,
+		InjectClaudeCodeMetadataUserID: c.injectClaudeCodeMetadataUserID,
+		ClaudeCodeMetadataDeviceID:     c.claudeCodeMetadataDeviceID,
+		ClaudeCodeMetadataAccountUUID:  c.claudeCodeMetadataAccountUUID,
+	})
 	if normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses {
 		req.Stream = stream
 		return buildResponsesRequestBodyWithMasquerade(req, c.responsesToolCompatMode, c.masqueradeTarget)
@@ -238,6 +248,28 @@ func (c *Client) buildUpstreamRequestBody(req model.CanonicalRequest, endpointTy
 		return buildStreamingRequestBody(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamCacheControl, c.upstreamXMLToolCallStyle)
 	}
 	return buildRequestBodyForEndpoint(req, endpointType, c.masqueradeTarget, c.injectClaudeCodeMetadataUserID, c.injectClaudeCodeSystemPrompt, c.upstreamCacheControl, c.upstreamXMLToolCallStyle)
+}
+
+func PrepareClaudeMetadataForRequest(req *model.CanonicalRequest, cfg config.Config) {
+	if req == nil || !cfg.InjectClaudeCodeMetadataUserID || cfg.MasqueradeTarget != config.MasqueradeTargetClaude {
+		return
+	}
+	if req.ClaudeMetadata != nil {
+		return
+	}
+	deviceID := strings.TrimSpace(cfg.ClaudeCodeMetadataDeviceID)
+	accountUUID := strings.TrimSpace(cfg.ClaudeCodeMetadataAccountUUID)
+	if deviceID == "" {
+		deviceID = config.DefaultClaudeCodeMetadataDeviceID(req.Model)
+	}
+	if accountUUID == "" {
+		accountUUID = config.DefaultClaudeCodeMetadataAccountUUID(req.Model)
+	}
+	req.ClaudeMetadata = &model.CanonicalClaudeMetadata{
+		DeviceID:    deviceID,
+		AccountUUID: accountUUID,
+		SessionID:   newUUIDString(),
+	}
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {

@@ -3,6 +3,8 @@ package upstream
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
@@ -34,7 +37,6 @@ const (
 	claudeCodeBeta                = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
 	claudeCodeSystemPrompt        = "You are Claude Code, Anthropic's official CLI for Claude."
 	claudeCodeBillingSystemMarker = "x-anthropic-billing-header\ncc_entrypoint=cli"
-	claudeCodeMetadataUserID      = `{"device_id":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","account_uuid":"00000000-0000-4000-8000-000000000000","session_id":"11111111-1111-4111-8111-111111111111"}`
 
 	// codex 伪装：来自 codex-rs/login/src/auth/default_client.rs 的 get_codex_user_agent() 与 default_headers()
 	// 格式：codex_cli_rs/{version} ({OS_TYPE} {OS_VERSION}; {ARCHITECTURE}) {TERMINAL_INFO}
@@ -1677,12 +1679,56 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 	applyAnthropicCacheControlMode(payload, upstreamCacheControl)
 
 	if injectMetadataUserID && masqueradeTarget == config.MasqueradeTargetClaude {
+		userID, err := claudeMetadataUserID(req.ClaudeMetadata)
+		if err != nil {
+			return nil, err
+		}
 		payload["metadata"] = map[string]any{
-			"user_id": claudeCodeMetadataUserID,
+			"user_id": userID,
 		}
 	}
 
 	return json.Marshal(payload)
+}
+
+func claudeMetadataUserID(metadata *model.CanonicalClaudeMetadata) (string, error) {
+	if metadata == nil {
+		metadata = &model.CanonicalClaudeMetadata{
+			DeviceID:    config.DefaultClaudeCodeMetadataDeviceID("root"),
+			AccountUUID: config.DefaultClaudeCodeMetadataAccountUUID("root"),
+			SessionID:   newUUIDString(),
+		}
+	}
+	payload := map[string]string{
+		"device_id":    strings.TrimSpace(metadata.DeviceID),
+		"account_uuid": strings.TrimSpace(metadata.AccountUUID),
+		"session_id":   strings.TrimSpace(metadata.SessionID),
+	}
+	if payload["device_id"] == "" {
+		payload["device_id"] = config.DefaultClaudeCodeMetadataDeviceID("root")
+	}
+	if payload["account_uuid"] == "" {
+		payload["account_uuid"] = config.DefaultClaudeCodeMetadataAccountUUID("root")
+	}
+	if payload["session_id"] == "" {
+		payload["session_id"] = newUUIDString()
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func newUUIDString() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		fallback := sha256.Sum256([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+		copy(b[:], fallback[:16])
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func sortedCanonicalTools(tools []model.CanonicalTool) []model.CanonicalTool {

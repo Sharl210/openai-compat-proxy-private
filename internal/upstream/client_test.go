@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -3548,9 +3549,114 @@ func TestBuildAnthropicRequestBodyInjectsClaudeMetadataUserID(t *testing.T) {
 	if err := json.Unmarshal([]byte(userID), &parsedUserID); err != nil {
 		t.Fatalf("expected sub2api-compatible JSON metadata.user_id, got %q: %v", userID, err)
 	}
-	if parsedUserID.DeviceID != strings.Repeat("deadbeef", 8) || parsedUserID.SessionID == "" {
+	if err := config.ValidateClaudeCodeMetadataDeviceID(parsedUserID.DeviceID, "device_id"); err != nil || parsedUserID.SessionID == "" {
 		t.Fatalf("expected claude metadata.user_id device/session fields, got %#v", parsedUserID)
 	}
+	if err := config.ValidateClaudeCodeMetadataAccountUUID(parsedUserID.AccountUUID, "account_uuid"); err != nil {
+		t.Fatalf("expected claude metadata.user_id account_uuid field, got %#v", parsedUserID)
+	}
+}
+
+func TestClientBuildAnthropicRequestBodyUsesConfiguredStableIdentityAndDynamicSessionID(t *testing.T) {
+	client := NewClient("https://upstream.example.com", config.Config{
+		UpstreamEndpointType:           config.UpstreamEndpointTypeAnthropic,
+		MasqueradeTarget:               config.MasqueradeTargetClaude,
+		InjectClaudeCodeMetadataUserID: true,
+		ClaudeCodeMetadataDeviceID:     strings.Repeat("c", 64),
+		ClaudeCodeMetadataAccountUUID:  "00000000-0000-4000-8000-000000000002",
+	})
+	req := model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}
+
+	first := claudeMetadataUserIDFromBody(t, client, req)
+	second := claudeMetadataUserIDFromBody(t, client, req)
+
+	if first.DeviceID != strings.Repeat("c", 64) || second.DeviceID != first.DeviceID {
+		t.Fatalf("expected stable configured device_id, got %#v and %#v", first, second)
+	}
+	if first.AccountUUID != "00000000-0000-4000-8000-000000000002" || second.AccountUUID != first.AccountUUID {
+		t.Fatalf("expected stable configured account_uuid, got %#v and %#v", first, second)
+	}
+	if first.SessionID == "" || second.SessionID == "" || first.SessionID == second.SessionID {
+		t.Fatalf("expected dynamic non-empty session_id per body build, got %#v and %#v", first, second)
+	}
+	if !validUUIDForClientTest(first.SessionID) || !validUUIDForClientTest(second.SessionID) {
+		t.Fatalf("expected valid UUID session_id values, got %#v and %#v", first, second)
+	}
+}
+
+func TestClientBuildAnthropicRequestBodyDerivesDefaultIdentityFromProviderSeed(t *testing.T) {
+	openaiClient := NewClient("https://upstream.example.com", config.Config{
+		UpstreamEndpointType:           config.UpstreamEndpointTypeAnthropic,
+		MasqueradeTarget:               config.MasqueradeTargetClaude,
+		InjectClaudeCodeMetadataUserID: true,
+		ClaudeCodeMetadataDeviceID:     config.DefaultClaudeCodeMetadataDeviceID("openai"),
+		ClaudeCodeMetadataAccountUUID:  config.DefaultClaudeCodeMetadataAccountUUID("openai"),
+	})
+	otherClient := NewClient("https://upstream.example.com", config.Config{
+		UpstreamEndpointType:           config.UpstreamEndpointTypeAnthropic,
+		MasqueradeTarget:               config.MasqueradeTargetClaude,
+		InjectClaudeCodeMetadataUserID: true,
+		ClaudeCodeMetadataDeviceID:     config.DefaultClaudeCodeMetadataDeviceID("anthropic"),
+		ClaudeCodeMetadataAccountUUID:  config.DefaultClaudeCodeMetadataAccountUUID("anthropic"),
+	})
+	req := model.CanonicalRequest{
+		Model:           "claude-sonnet-4-5",
+		MaxOutputTokens: intPtrForClientTest(128),
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+	}
+
+	openaiIdentity := claudeMetadataUserIDFromBody(t, openaiClient, req)
+	openaiAgain := claudeMetadataUserIDFromBody(t, openaiClient, req)
+	otherIdentity := claudeMetadataUserIDFromBody(t, otherClient, req)
+
+	if openaiIdentity.DeviceID != openaiAgain.DeviceID || openaiIdentity.AccountUUID != openaiAgain.AccountUUID {
+		t.Fatalf("expected stable default identity for same provider seed, got %#v and %#v", openaiIdentity, openaiAgain)
+	}
+	if openaiIdentity.DeviceID == otherIdentity.DeviceID || openaiIdentity.AccountUUID == otherIdentity.AccountUUID {
+		t.Fatalf("expected different default identity for different provider seeds, got %#v and %#v", openaiIdentity, otherIdentity)
+	}
+	if openaiIdentity.SessionID == openaiAgain.SessionID {
+		t.Fatalf("expected dynamic session_id even when stable identity seed matches, got %#v and %#v", openaiIdentity, openaiAgain)
+	}
+}
+
+type claudeMetadataUserIDForClientTest struct {
+	DeviceID    string `json:"device_id"`
+	AccountUUID string `json:"account_uuid"`
+	SessionID   string `json:"session_id"`
+}
+
+func claudeMetadataUserIDFromBody(t *testing.T, client *Client, req model.CanonicalRequest) claudeMetadataUserIDForClientTest {
+	t.Helper()
+	body, err := client.buildUpstreamRequestBody(req, config.UpstreamEndpointTypeAnthropic, false)
+	if err != nil {
+		t.Fatalf("buildUpstreamRequestBody error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	metadata, _ := payload["metadata"].(map[string]any)
+	userID, _ := metadata["user_id"].(string)
+	var parsed claudeMetadataUserIDForClientTest
+	if err := json.Unmarshal([]byte(userID), &parsed); err != nil {
+		t.Fatalf("expected sub2api-compatible JSON metadata.user_id, got %q: %v", userID, err)
+	}
+	return parsed
+}
+
+func validUUIDForClientTest(value string) bool {
+	return regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(value)
 }
 
 func TestBuildAnthropicRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testing.T) {
