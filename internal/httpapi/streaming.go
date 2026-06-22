@@ -2457,6 +2457,10 @@ func chatStreamFinishReason(state *chatStreamState, data map[string]any) string 
 	return "stop"
 }
 
+func shouldBufferChatToolArguments(name string) bool {
+	return name == "attempt_completion"
+}
+
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder usageRecorderFunc) error {
 	if state.toolIDAliases == nil {
 		state.toolIDAliases = map[string]string{}
@@ -2558,6 +2562,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 					state.pendingToolArgs[itemID] = directArgs
 				}
 				if state.pendingToolArgs[itemID] != "" {
+					if shouldBufferChatToolArguments(state.toolMeta[itemID]["name"]) && evt.Event != "response.output_item.done" {
+						return nil
+					}
 					if err := flushPendingToolCall(itemID); err != nil {
 						return err
 					}
@@ -2620,6 +2627,9 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if !state.toolSent[itemID] {
 			state.pendingToolArgs[itemID] += delta
 			if _, ok := state.toolMeta[itemID]; !ok {
+				return nil
+			}
+			if shouldBufferChatToolArguments(state.toolMeta[itemID]["name"]) {
 				return nil
 			}
 			if err := ensureRoleSent(); err != nil {

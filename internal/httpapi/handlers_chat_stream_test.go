@@ -628,6 +628,97 @@ func TestChatEventWriterKeepsLaterToolArgumentDeltaAfterReasoningAndTextInCompat
 	}
 }
 
+func TestChatEventWriterBuffersAttemptCompletionArgumentsUntilDone(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	fullArgs := `{"command":"","result":"第一段\n第二段","task_progress":"- [x] done"}`
+
+	for _, evt := range []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "attempt_completion"}}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"command":""`}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"result":"第一段\n`}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `第二段","task_progress":"- [x] done"}`}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "attempt_completion", "arguments": fullArgs}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}}}},
+	} {
+		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
+			t.Fatalf("writer.WriteEvent error: %v", err)
+		}
+	}
+	body := rec.Body.String()
+	var toolArgs []string
+	for _, chunk := range collectChatStreamChunks(t, body) {
+		choices, _ := chunk["choices"].([]any)
+		for _, choiceValue := range choices {
+			choice, _ := choiceValue.(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
+			calls, _ := delta["tool_calls"].([]any)
+			for _, callValue := range calls {
+				call, _ := callValue.(map[string]any)
+				function, _ := call["function"].(map[string]any)
+				if name, _ := function["name"].(string); name != "" && name != "attempt_completion" {
+					t.Fatalf("expected attempt_completion tool call, got %s in %s", name, body)
+				}
+				if args, _ := function["arguments"].(string); args != "" {
+					toolArgs = append(toolArgs, args)
+				}
+			}
+		}
+	}
+	if len(toolArgs) != 1 {
+		t.Fatalf("expected attempt_completion arguments to be emitted once, got %d argument chunks: %s", len(toolArgs), body)
+	}
+	if toolArgs[0] != fullArgs {
+		t.Fatalf("expected final attempt_completion arguments in one tool chunk, got %q from %s", toolArgs[0], body)
+	}
+	if !strings.Contains(body, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("expected attempt_completion turn to finish with tool_calls, got %s", body)
+	}
+}
+
+func TestChatEventWriterFlushesBufferedAttemptCompletionArgumentsWithoutDoneArgs(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	fullArgs := `{"command":"","result":"只靠 delta 累积","task_progress":"- [x] done"}`
+
+	for _, evt := range []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "attempt_completion"}}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"command":""`}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"result":"只靠 delta 累积"`}},
+		{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `,"task_progress":"- [x] done"}`}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "attempt_completion"}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}}}},
+	} {
+		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
+			t.Fatalf("writer.WriteEvent error: %v", err)
+		}
+	}
+	body := rec.Body.String()
+	var toolArgs []string
+	for _, chunk := range collectChatStreamChunks(t, body) {
+		choices, _ := chunk["choices"].([]any)
+		for _, choiceValue := range choices {
+			choice, _ := choiceValue.(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
+			calls, _ := delta["tool_calls"].([]any)
+			for _, callValue := range calls {
+				call, _ := callValue.(map[string]any)
+				function, _ := call["function"].(map[string]any)
+				if args, _ := function["arguments"].(string); args != "" {
+					toolArgs = append(toolArgs, args)
+				}
+			}
+		}
+	}
+	if len(toolArgs) != 1 || toolArgs[0] != fullArgs {
+		t.Fatalf("expected buffered attempt_completion delta to flush once as %q, got %#v from %s", fullArgs, toolArgs, body)
+	}
+}
+
 func TestChatStreamMapsReasoningSummaryDeltaToReasoningContent(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
