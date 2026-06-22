@@ -248,8 +248,38 @@ func handleResponsesCompact() http.HandlerFunc {
 			defer cancel()
 		}
 
-		payload, err := prepared.client.Compact(ctx, canon, prepared.authorization)
+		if prepared.providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeResponses {
+			payload, err := prepared.client.Compact(ctx, canon, prepared.authorization)
+			if err != nil {
+				if isUpstreamTimeout(err, ctx) {
+					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+					return
+				}
+				if writeUpstreamError(w, err) {
+					return
+				}
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			if err := writeJSON(w, payload); err != nil {
+				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
+				return
+			}
+			if prepared.usageRecorder != nil {
+				if usage, _ := payload["usage"].(map[string]any); len(usage) > 0 {
+					prepared.usageRecorder(usage)
+				}
+			}
+			return
+		}
+
+		payload, err := prepared.client.Response(ctx, canon, prepared.authorization)
 		if err != nil {
+			if writeRequestValidationError(w, err) {
+				return
+			}
 			if isUpstreamTimeout(err, ctx) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
@@ -260,16 +290,33 @@ func handleResponsesCompact() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
-
+		result, err := aggregate.ResultFromResponsePayload(payload)
+		if err != nil {
+			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_response", err.Error())
+			return
+		}
+		if len(result.UnsupportedContentTypes) > 0 {
+			message := "upstream returned unsupported chat output content"
+			if prepared.providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				message = "upstream returned unsupported anthropic output content"
+			}
+			errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", message)
+			return
+		}
+		normalized := responsesadapter.BuildResponse(result)
+		logNonStreamResponsesOutput(canon.RequestID, normalized)
+		if responseID, _ := normalized["id"].(string); responseID != "" {
+			globalResponsesHistory.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
+		}
+		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
+		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 		w.Header().Set("Content-Type", "application/json")
-		if err := writeJSON(w, payload); err != nil {
+		if err := writeJSON(w, normalized); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
 		}
 		if prepared.usageRecorder != nil {
-			if usage, _ := payload["usage"].(map[string]any); len(usage) > 0 {
-				prepared.usageRecorder(usage)
-			}
+			prepared.usageRecorder(result.Usage)
 		}
 	}
 }
@@ -290,11 +337,6 @@ func prepareResponsesCompactRequest(w http.ResponseWriter, r *http.Request) (*pr
 	if initial.canon.Stream {
 		clearTransparencyHeaders(w)
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "responses compact does not support stream=true")
-		return nil, false
-	}
-	if initial.providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
-		clearTransparencyHeaders(w)
-		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "responses compact requires a responses upstream endpoint")
 		return nil, false
 	}
 	return finalizePreparedResponsesRequest(w, r, initial, true)

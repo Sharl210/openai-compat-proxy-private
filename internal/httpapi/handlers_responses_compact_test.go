@@ -41,9 +41,24 @@ func TestResponsesCompactRejectsStream(t *testing.T) {
 	}
 }
 
-func TestResponsesCompactRejectsNonResponsesUpstream(t *testing.T) {
-	cfg := testResponsesConfigWithEndpoint("http://127.0.0.1:1", config.UpstreamEndpointTypeChat)
+func TestResponsesCompactFallsBackToChatUpstream(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_compact","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"text","text":"compact summary from chat"}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeChat)
+	cfg.UpstreamThinkingTagStyle = config.UpstreamThinkingTagStyleOff
 	cfg.Providers[0].SupportsModels = false
+	cfg.Providers[0].UpstreamThinkingTagStyle = config.UpstreamThinkingTagStyleOff
+	cfg.Providers[0].SupportsChat = true
 	cfg.Providers[0].ManualModels = []string{"gpt-5"}
 	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
@@ -53,13 +68,47 @@ func TestResponsesCompactRejectsNonResponsesUpstream(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 
-	assertErrorResponse(t, rec, http.StatusBadRequest, "invalid_request", "responses compact requires a responses upstream endpoint")
-	if got := rec.Header().Get(headerClientToProxyModel); got != "" {
-		t.Fatalf("expected non-responses compact rejection to avoid client observability headers, got %q", got)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "" {
-		t.Fatalf("expected non-responses compact rejection to avoid upstream observability headers, got %q", got)
+	if !called {
+		t.Fatal("expected chat compact fallback to call upstream")
 	}
+	assertResponsesCompactContainsText(t, rec, "compact summary from chat")
+}
+
+func TestResponsesCompactFallsBackToAnthropicUpstream(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.URL.Path != "/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_compact","type":"message","role":"assistant","content":[{"type":"text","text":"compact summary from anthropic"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":5,"total_tokens":9}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeAnthropic)
+	cfg.Providers[0].SupportsModels = false
+	cfg.Providers[0].SupportsAnthropicMessages = true
+	cfg.Providers[0].ManualModels = []string{"gpt-5"}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Upstream-Authorization", "Bearer upstream-token")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !called {
+		t.Fatal("expected anthropic compact fallback to call upstream")
+	}
+	assertResponsesCompactContainsText(t, rec, "compact summary from anthropic")
 }
 
 func TestResponsesCompactRejectsUnsupportedProvider(t *testing.T) {
@@ -239,5 +288,35 @@ func assertErrorResponse(t *testing.T, rec *httptest.ResponseRecorder, statusCod
 	}
 	if got, _ := errMap["message"].(string); got != message {
 		t.Fatalf("expected error message %q, got %#v", message, payload)
+	}
+}
+
+func assertResponsesCompactContainsText(t *testing.T, rec *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode compact response: %v body=%s", err, rec.Body.String())
+	}
+	if got, _ := payload["object"].(string); got != "response" {
+		t.Fatalf("expected response object, got %#v body=%s", payload["object"], rec.Body.String())
+	}
+	output, _ := payload["output"].([]any)
+	if len(output) == 0 {
+		t.Fatalf("expected output items, got body=%s", rec.Body.String())
+	}
+	item, _ := output[0].(map[string]any)
+	if got, _ := item["type"].(string); got != "message" {
+		t.Fatalf("expected message output item, got %#v body=%s", item, rec.Body.String())
+	}
+	content, _ := item["content"].([]any)
+	if len(content) == 0 {
+		t.Fatalf("expected message content, got %#v body=%s", item, rec.Body.String())
+	}
+	part, _ := content[0].(map[string]any)
+	if got, _ := part["type"].(string); got != "output_text" {
+		t.Fatalf("expected output_text content part, got %#v body=%s", part, rec.Body.String())
+	}
+	if got, _ := part["text"].(string); got != want {
+		t.Fatalf("expected compact text %q, got %#v body=%s", want, part["text"], rec.Body.String())
 	}
 }
