@@ -347,10 +347,20 @@ func (h *responseEventWriterHelper) outputItemEventData(item map[string]any, dat
 		return data
 	}
 	h.ensureCreatedEvent()
-	if _, exists := data["output_index"]; exists {
+	itemID := responseToolItemStateID(item)
+	if outputIndex, exists := intValue(data["output_index"]); exists {
+		if itemID != "" {
+			h.ensureOutputItems()
+			canonicalID := h.canonicalToolItemID(itemID)
+			for len(h.outputItemOrder) <= outputIndex {
+				h.outputItemOrder = append(h.outputItemOrder, "")
+			}
+			h.outputItemOrder[outputIndex] = canonicalID
+			h.rememberOutputItem(item)
+		}
 		return data
 	}
-	if outputIndex, ok := h.ensureOutputItemIndex(responseToolItemStateID(item)); ok {
+	if outputIndex, ok := h.ensureOutputItemIndex(itemID); ok {
 		data["output_index"] = outputIndex
 	}
 	h.rememberOutputItem(item)
@@ -375,7 +385,11 @@ func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map
 		return data
 	}
 	h.ensureCreatedEvent()
-	if !h.textItemStarted {
+	itemID := stringValue(data["item_id"])
+	if itemID == "" {
+		itemID = "msg_proxy"
+	}
+	if !h.textItemStarted && itemID == "msg_proxy" {
 		item := map[string]any{
 			"id":     "msg_proxy",
 			"type":   "message",
@@ -393,12 +407,12 @@ func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map
 			h.textOutput = &strings.Builder{}
 		}
 		h.textOutput.WriteString(delta)
-		if item := h.outputItems["msg_proxy"]; item != nil {
+		if item := h.outputItems[itemID]; item != nil {
 			item["content"] = []any{map[string]any{"type": "output_text", "text": h.textOutput.String()}}
 		}
 	}
 	if _, exists := data["output_index"]; !exists {
-		if outputIndex, ok := h.ensureOutputItemIndex("msg_proxy"); ok {
+		if outputIndex, ok := h.ensureOutputItemIndex(itemID); ok {
 			data["output_index"] = outputIndex
 		}
 	}
@@ -406,6 +420,77 @@ func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map
 		data["content_index"] = 0
 	}
 	return data
+}
+
+func stripStreamingTextSnapshots(event string, data map[string]any) map[string]any {
+	switch event {
+	case "response.output_text.done":
+		if _, ok := data["text"]; ok {
+			data = cloneMap(data)
+			delete(data, "text")
+		}
+	case "response.content_part.done":
+		part, _ := data["part"].(map[string]any)
+		if stringValue(part["type"]) == "output_text" {
+			data = cloneMap(data)
+			clonedPart := cloneMap(part)
+			delete(clonedPart, "text")
+			data["part"] = clonedPart
+		}
+	case "response.output_item.done":
+		item, _ := data["item"].(map[string]any)
+		if stringValue(item["type"]) == "message" {
+			data = cloneMap(data)
+			data["item"] = stripMessageOutputText(item)
+		}
+	case "response.completed", "response.done":
+		response, _ := data["response"].(map[string]any)
+		if response != nil {
+			data = cloneMap(data)
+			data["response"] = stripResponseOutputText(response)
+		}
+	}
+	return data
+}
+
+func stripResponseOutputText(response map[string]any) map[string]any {
+	cloned := cloneMap(response)
+	items, ok := cloned["output"].([]any)
+	if !ok {
+		return cloned
+	}
+	out := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if stringValue(item["type"]) == "message" {
+			out = append(out, stripMessageOutputText(item))
+			continue
+		}
+		out = append(out, cloneJSONValueForResponse(raw))
+	}
+	cloned["output"] = out
+	return cloned
+}
+
+func stripMessageOutputText(item map[string]any) map[string]any {
+	cloned := cloneMap(item)
+	content, ok := cloned["content"].([]any)
+	if !ok {
+		return cloned
+	}
+	out := make([]any, 0, len(content))
+	for _, rawPart := range content {
+		part, _ := rawPart.(map[string]any)
+		if stringValue(part["type"]) == "output_text" {
+			clonedPart := cloneMap(part)
+			delete(clonedPart, "text")
+			out = append(out, clonedPart)
+			continue
+		}
+		out = append(out, cloneJSONValueForResponse(rawPart))
+	}
+	cloned["content"] = out
+	return cloned
 }
 
 func (h *responseEventWriterHelper) flushPendingFunctionCalls() {
@@ -642,6 +727,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		if itemType == "compaction" && h.downstreamType == "responses" {
 			h.beginCompactionLifecycle()
+			evt.Data = h.outputItemEventData(item, evt.Data)
+		}
+		if itemType == "message" && h.downstreamType == "responses" {
 			evt.Data = h.outputItemEventData(item, evt.Data)
 		}
 		if isResponseToolCallItemType(itemType) {
@@ -1255,6 +1343,10 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 			evt.Data["health_flag"] = state.terminalFailure.HealthFlag
 			evt.Data["message"] = state.terminalFailure.Message
 		}
+	}
+
+	if writer.DownstreamType() == "responses" {
+		evt.Data = stripStreamingTextSnapshots(evt.Event, evt.Data)
 	}
 
 	if usageRecorder != nil && (evt.Event == "response.completed" || evt.Event == "response.done") {
@@ -2737,6 +2829,22 @@ func chatToolDelta(index int, callID, name, arguments string, includeMetadata bo
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func intValue(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, typed >= 0
+	case int64:
+		return int(typed), typed >= 0
+	case float64:
+		if typed < 0 || typed != float64(int(typed)) {
+			return 0, false
+		}
+		return int(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func isResponseToolCallItemType(itemType string) bool {

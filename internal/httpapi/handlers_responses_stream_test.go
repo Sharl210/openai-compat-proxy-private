@@ -637,6 +637,82 @@ func TestResponsesStreamOmitsPartialFunctionCallArgumentDeltasForCompatibility(t
 	}
 }
 
+func TestResponsesStreamUsesUpstreamMessageLifecycleWithoutSyntheticProxyMessage(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_native"}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "msg_native", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.content_part.added", Data: map[string]any{"output_index": 1, "content_index": 0, "item_id": "msg_native", "part": map[string]any{"type": "output_text", "text": ""}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 1, "content_index": 0, "item_id": "msg_native", "delta": "你好"}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 1, "content_index": 0, "item_id": "msg_native", "delta": "，我在。"}},
+		upstream.Event{Event: "response.output_text.done", Data: map[string]any{"output_index": 1, "content_index": 0, "item_id": "msg_native", "text": "你好，我在。"}},
+		upstream.Event{Event: "response.content_part.done", Data: map[string]any{"output_index": 1, "content_index": 0, "item_id": "msg_native", "part": map[string]any{"type": "output_text", "text": "你好，我在。"}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "msg_native", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "你好，我在。"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "你好，我在。"}}}}}}},
+	)
+
+	if strings.Contains(body, `"id":"msg_proxy"`) {
+		t.Fatalf("expected native responses message lifecycle not to synthesize msg_proxy, got %s", body)
+	}
+	if strings.Count(body, `"type":"response.output_text.delta"`) != 2 {
+		t.Fatalf("expected text to be streamed only through delta events, got %s", body)
+	}
+	if strings.Contains(body, `你好，我在。`) {
+		t.Fatalf("expected completed text snapshots to be stripped from streaming responses, got %s", body)
+	}
+}
+
+func TestResponsesStreamDoneStripsTextSnapshotsLikeCompleted(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_native", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "content_index": 0, "item_id": "msg_native", "delta": "hello"}},
+		upstream.Event{Event: "response.done", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "hello"}}}}}}},
+	)
+
+	if strings.Contains(body, `"id":"msg_proxy"`) {
+		t.Fatalf("expected native responses done path not to synthesize msg_proxy, got %s", body)
+	}
+	if strings.Contains(body, `"text":"hello"`) {
+		t.Fatalf("expected response.done text snapshot to be stripped, got %s", body)
+	}
+}
+
+func TestResponsesStreamTextSnapshotStrippingPreservesToolAndReasoningItems(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "reasoning summary"}}}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "fc_native", "type": "function_call", "call_id": "call_native", "name": "lookup", "arguments": `{"query":"hello"}`}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed", "usage": map[string]any{"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}, "output": []any{
+			map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "hello"}}},
+			map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "reasoning summary"}}},
+			map[string]any{"id": "fc_native", "type": "function_call", "call_id": "call_native", "name": "lookup", "arguments": `{"query":"hello"}`},
+		}}}},
+	)
+
+	if strings.Contains(body, `"type":"output_text","text":"hello"`) {
+		t.Fatalf("expected message output text snapshot to be stripped, got %s", body)
+	}
+	for _, want := range []string{`"type":"reasoning"`, `"text":"reasoning summary"`, `"type":"function_call"`, `"arguments":"{\"query\":\"hello\"}"`, `"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %s to survive snapshot stripping, got %s", want, body)
+		}
+	}
+}
+
+func TestResponsesStreamCompletedWithoutOutputUsesNativeMessageMetadataWithoutText(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_native", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "content_index": 0, "item_id": "msg_native", "delta": "hello"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_native", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "hello"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	if !strings.Contains(body, `"output":[{"content":[{"type":"output_text"}],"id":"msg_native","role":"assistant","status":"completed","type":"message"}]`) {
+		t.Fatalf("expected synthesized completed output to preserve native message metadata without text, got %s", body)
+	}
+	if strings.Contains(body, `"text":"hello"`) {
+		t.Fatalf("expected synthesized completed output to omit duplicate text snapshot, got %s", body)
+	}
+}
+
 func TestResponsesStreamCompatibilityKeepsOriginalItemIDWhilePreservingCallID(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
