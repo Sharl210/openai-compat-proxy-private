@@ -2493,12 +2493,24 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if err := ensureRoleSent(); err != nil {
 			return err
 		}
-		toolDelta := chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], state.pendingToolArgs[itemID], true)
+		arguments := state.pendingToolArgs[itemID]
 		if repaired, ok := syntaxrepair.RepairJSON(state.pendingToolArgs[itemID]); ok {
-			toolDelta = chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], repaired, true)
+			arguments = repaired
 		}
-		if err := writeChatChunk(w, flusher, state, toolDelta, "", nil); err != nil {
-			return err
+		if shouldBufferChatToolArguments(meta["name"]) {
+			if err := writeChatChunk(w, flusher, state, chatToolMetadataDelta(state.toolIndex[itemID], meta["call_id"], meta["name"]), "", nil); err != nil {
+				return err
+			}
+			if arguments != "" {
+				if err := writeChatChunk(w, flusher, state, chatToolDelta(state.toolIndex[itemID], "", "", arguments, false), "", nil); err != nil {
+					return err
+				}
+			}
+		} else {
+			toolDelta := chatToolDelta(state.toolIndex[itemID], meta["call_id"], meta["name"], arguments, true)
+			if err := writeChatChunk(w, flusher, state, toolDelta, "", nil); err != nil {
+				return err
+			}
 		}
 		state.toolSent[itemID] = true
 		delete(state.pendingToolArgs, itemID)
@@ -2834,6 +2846,17 @@ func chatToolDelta(index int, callID, name, arguments string, includeMetadata bo
 		toolCall["function"].(map[string]any)["name"] = name
 	}
 	return map[string]any{"tool_calls": []map[string]any{toolCall}}
+}
+
+func chatToolMetadataDelta(index int, callID, name string) map[string]any {
+	return map[string]any{"tool_calls": []map[string]any{{
+		"index": index,
+		"id":    callID,
+		"type":  "function",
+		"function": map[string]any{
+			"name": name,
+		},
+	}}}
 }
 
 func stringValue(value any) string {

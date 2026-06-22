@@ -34,6 +34,106 @@ func collectChatStreamChunks(t *testing.T, body string) []map[string]any {
 	return chunks
 }
 
+func chatChoiceFromChunk(t *testing.T, chunk map[string]any, body string) map[string]any {
+	t.Helper()
+	choices, ok := chunk["choices"].([]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("expected one chat choice in chunk %#v from %s", chunk, body)
+	}
+	choice, ok := choices[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chat choice object in chunk %#v from %s", chunk, body)
+	}
+	return choice
+}
+
+func chatDeltaFromChunk(t *testing.T, chunk map[string]any, body string) map[string]any {
+	t.Helper()
+	choice := chatChoiceFromChunk(t, chunk, body)
+	delta, ok := choice["delta"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected chat delta object in chunk %#v from %s", chunk, body)
+	}
+	return delta
+}
+
+func onlyToolCallFromDelta(t *testing.T, delta map[string]any, body string) map[string]any {
+	t.Helper()
+	calls, ok := delta["tool_calls"].([]any)
+	if !ok || len(calls) != 1 {
+		t.Fatalf("expected one tool call in delta %#v from %s", delta, body)
+	}
+	call, ok := calls[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected tool call object in delta %#v from %s", delta, body)
+	}
+	return call
+}
+
+func assertAttemptCompletionOfficialToolCallChunks(t *testing.T, body, fullArgs string) {
+	t.Helper()
+	chunks := collectChatStreamChunks(t, body)
+	if len(chunks) != 4 {
+		t.Fatalf("expected attempt_completion stream chunks in order role -> metadata -> arguments -> finish, got %d chunks: %s", len(chunks), body)
+	}
+
+	roleDelta := chatDeltaFromChunk(t, chunks[0], body)
+	if got, _ := roleDelta["role"].(string); got != "assistant" {
+		t.Fatalf("expected first chunk to set assistant role, got %#v from %s", roleDelta, body)
+	}
+	if _, ok := roleDelta["tool_calls"]; ok {
+		t.Fatalf("expected role chunk not to include tool_calls, got %#v from %s", roleDelta, body)
+	}
+
+	metadataCall := onlyToolCallFromDelta(t, chatDeltaFromChunk(t, chunks[1], body), body)
+	if got := metadataCall["index"]; got != float64(0) {
+		t.Fatalf("expected metadata chunk tool index 0, got %#v from %s", got, body)
+	}
+	if got, _ := metadataCall["id"].(string); got != "call_1" {
+		t.Fatalf("expected metadata chunk tool id call_1, got %#v from %s", metadataCall, body)
+	}
+	if got, _ := metadataCall["type"].(string); got != "function" {
+		t.Fatalf("expected metadata chunk tool type function, got %#v from %s", metadataCall, body)
+	}
+	metadataFunction, _ := metadataCall["function"].(map[string]any)
+	if got, _ := metadataFunction["name"].(string); got != "attempt_completion" {
+		t.Fatalf("expected metadata chunk function name attempt_completion, got %#v from %s", metadataFunction, body)
+	}
+	if _, ok := metadataFunction["arguments"]; ok {
+		t.Fatalf("expected metadata chunk not to include function.arguments, got %#v from %s", metadataFunction, body)
+	}
+
+	argumentsCall := onlyToolCallFromDelta(t, chatDeltaFromChunk(t, chunks[2], body), body)
+	if len(argumentsCall) != 2 {
+		t.Fatalf("expected arguments chunk to include only index and function, got %#v from %s", argumentsCall, body)
+	}
+	if got := argumentsCall["index"]; got != float64(0) {
+		t.Fatalf("expected arguments chunk tool index 0, got %#v from %s", got, body)
+	}
+	if _, ok := argumentsCall["id"]; ok {
+		t.Fatalf("expected arguments chunk not to repeat id, got %#v from %s", argumentsCall, body)
+	}
+	if _, ok := argumentsCall["type"]; ok {
+		t.Fatalf("expected arguments chunk not to repeat type, got %#v from %s", argumentsCall, body)
+	}
+	argumentsFunction, _ := argumentsCall["function"].(map[string]any)
+	if len(argumentsFunction) != 1 {
+		t.Fatalf("expected arguments chunk function to include only arguments, got %#v from %s", argumentsFunction, body)
+	}
+	if got, _ := argumentsFunction["arguments"].(string); got != fullArgs {
+		t.Fatalf("expected one full attempt_completion arguments chunk %q, got %q from %s", fullArgs, got, body)
+	}
+
+	finishChoice := chatChoiceFromChunk(t, chunks[3], body)
+	if got, _ := finishChoice["finish_reason"].(string); got != "tool_calls" {
+		t.Fatalf("expected final chunk finish_reason tool_calls, got %#v from %s", finishChoice, body)
+	}
+	finishDelta, _ := finishChoice["delta"].(map[string]any)
+	if len(finishDelta) != 0 {
+		t.Fatalf("expected final chunk to have empty delta, got %#v from %s", finishDelta, body)
+	}
+}
+
 func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
@@ -648,34 +748,7 @@ func TestChatEventWriterBuffersAttemptCompletionArgumentsUntilDone(t *testing.T)
 		}
 	}
 	body := rec.Body.String()
-	var toolArgs []string
-	for _, chunk := range collectChatStreamChunks(t, body) {
-		choices, _ := chunk["choices"].([]any)
-		for _, choiceValue := range choices {
-			choice, _ := choiceValue.(map[string]any)
-			delta, _ := choice["delta"].(map[string]any)
-			calls, _ := delta["tool_calls"].([]any)
-			for _, callValue := range calls {
-				call, _ := callValue.(map[string]any)
-				function, _ := call["function"].(map[string]any)
-				if name, _ := function["name"].(string); name != "" && name != "attempt_completion" {
-					t.Fatalf("expected attempt_completion tool call, got %s in %s", name, body)
-				}
-				if args, _ := function["arguments"].(string); args != "" {
-					toolArgs = append(toolArgs, args)
-				}
-			}
-		}
-	}
-	if len(toolArgs) != 1 {
-		t.Fatalf("expected attempt_completion arguments to be emitted once, got %d argument chunks: %s", len(toolArgs), body)
-	}
-	if toolArgs[0] != fullArgs {
-		t.Fatalf("expected final attempt_completion arguments in one tool chunk, got %q from %s", toolArgs[0], body)
-	}
-	if !strings.Contains(body, `"finish_reason":"tool_calls"`) {
-		t.Fatalf("expected attempt_completion turn to finish with tool_calls, got %s", body)
-	}
+	assertAttemptCompletionOfficialToolCallChunks(t, body, fullArgs)
 }
 
 func TestChatEventWriterFlushesBufferedAttemptCompletionArgumentsWithoutDoneArgs(t *testing.T) {
@@ -698,25 +771,7 @@ func TestChatEventWriterFlushesBufferedAttemptCompletionArgumentsWithoutDoneArgs
 		}
 	}
 	body := rec.Body.String()
-	var toolArgs []string
-	for _, chunk := range collectChatStreamChunks(t, body) {
-		choices, _ := chunk["choices"].([]any)
-		for _, choiceValue := range choices {
-			choice, _ := choiceValue.(map[string]any)
-			delta, _ := choice["delta"].(map[string]any)
-			calls, _ := delta["tool_calls"].([]any)
-			for _, callValue := range calls {
-				call, _ := callValue.(map[string]any)
-				function, _ := call["function"].(map[string]any)
-				if args, _ := function["arguments"].(string); args != "" {
-					toolArgs = append(toolArgs, args)
-				}
-			}
-		}
-	}
-	if len(toolArgs) != 1 || toolArgs[0] != fullArgs {
-		t.Fatalf("expected buffered attempt_completion delta to flush once as %q, got %#v from %s", fullArgs, toolArgs, body)
-	}
+	assertAttemptCompletionOfficialToolCallChunks(t, body, fullArgs)
 }
 
 func TestChatStreamMapsReasoningSummaryDeltaToReasoningContent(t *testing.T) {
