@@ -355,7 +355,7 @@ func TestAnthropicInvalidRequestMarksFailedTerminalStatus(t *testing.T) {
 	_ = rec.Header().Get("X-Request-Id")
 }
 
-func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *testing.T) {
+func TestResponsesStreamFailureWritesTerminalFailedEventAndFailedStatus(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -387,12 +387,12 @@ func TestResponsesStreamFailureWritesTerminalIncompleteEventAndFailedStatus(t *t
 	server.ServeHTTP(rec, req)
 
 	_ = rec.Header().Get("X-Request-Id")
-	if !strings.Contains(rec.Body.String(), "event: response.incomplete") {
-		t.Fatalf("expected response.incomplete terminal event, got %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "event: response.failed") {
+		t.Fatalf("expected response.failed terminal event, got %s", rec.Body.String())
 	}
 }
 
-func TestResponsesStreamUpstreamIncompleteTimeoutPreservesTimeoutStatus(t *testing.T) {
+func TestResponsesStreamUpstreamIncompleteTimeoutConvertsToFailedStatus(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -423,7 +423,7 @@ func TestResponsesStreamUpstreamIncompleteTimeoutPreservesTimeoutStatus(t *testi
 	server.ServeHTTP(rec, req)
 
 	_ = rec.Header().Get("X-Request-Id")
-	if strings.Count(rec.Body.String(), "event: response.incomplete") != 1 {
-		t.Fatalf("expected exactly one response.incomplete passthrough event, got %s", rec.Body.String())
+	if strings.Count(rec.Body.String(), "event: response.failed") != 1 {
+		t.Fatalf("expected exactly one response.failed passthrough event, got %s", rec.Body.String())
 	}
 }

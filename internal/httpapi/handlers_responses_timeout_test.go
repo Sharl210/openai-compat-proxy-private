@@ -247,7 +247,10 @@ func TestResponsesStreamIdleTimeoutStoresUpstreamTimeoutStatus(t *testing.T) {
 	server.ServeHTTP(rec, req)
 
 	if !strings.Contains(rec.Body.String(), `"health_flag":"upstream_timeout"`) {
-		t.Fatalf("expected response.incomplete timeout health flag, got %s", rec.Body.String())
+		t.Fatalf("expected response.failed timeout health flag, got %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `event: response.failed`) {
+		t.Fatalf("expected timeout to surface as response.failed, got %s", rec.Body.String())
 	}
 }
 

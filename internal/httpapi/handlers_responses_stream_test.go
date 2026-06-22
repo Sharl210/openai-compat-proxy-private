@@ -722,17 +722,17 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, "event: response.incomplete") {
-		t.Fatalf("expected response.incomplete terminal SSE event, got %s", body)
+	if !strings.Contains(body, "event: response.failed") {
+		t.Fatalf("expected response.failed terminal SSE event, got %s", body)
 	}
-	if strings.Count(body, "event: response.incomplete") != 1 {
-		t.Fatalf("expected exactly one response.incomplete terminal SSE event, got %s", body)
+	if strings.Count(body, "event: response.failed") != 1 {
+		t.Fatalf("expected exactly one response.failed terminal SSE event, got %s", body)
 	}
 	if !strings.Contains(body, `"health_flag":"upstream_error","message":"boom"`) {
 		t.Fatalf("expected terminal failure payload in SSE body, got %s", body)
 	}
-	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
-		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	if !strings.Contains(body, `"response":{"error"`) {
+		t.Fatalf("expected response.failed to carry a response error object after SSE start, got %s", body)
 	}
 }
 
@@ -757,17 +757,17 @@ func TestResponsesStreamUpstreamDisconnectsWithoutTerminalEventStaysInSSEProtoco
 	if !strings.Contains(body, `"delta":"hello"`) {
 		t.Fatalf("expected streamed content before upstream disconnect, got %s", body)
 	}
-	if !strings.Contains(body, `event: response.incomplete`) {
-		t.Fatalf("expected response.incomplete terminal SSE event on upstream disconnect, got %s", body)
+	if !strings.Contains(body, `event: response.failed`) {
+		t.Fatalf("expected response.failed terminal SSE event on upstream disconnect, got %s", body)
 	}
 	if !strings.Contains(body, `"health_flag":"upstreamStreamBroken","message":"unexpected EOF"`) {
-		t.Fatalf("expected unexpected EOF to surface in response.incomplete event, got %s", body)
+		t.Fatalf("expected unexpected EOF to surface in response.failed event, got %s", body)
 	}
-	if strings.Count(body, `event: response.incomplete`) != 1 {
-		t.Fatalf("expected exactly one response.incomplete terminal SSE event, got %s", body)
+	if strings.Count(body, `event: response.failed`) != 1 {
+		t.Fatalf("expected exactly one response.failed terminal SSE event, got %s", body)
 	}
-	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"type":"proxy_error"`) {
-		t.Fatalf("expected no JSON error body after SSE start, got %s", body)
+	if !strings.Contains(body, `"response":{"error"`) {
+		t.Fatalf("expected response.failed to carry a response error object after SSE start, got %s", body)
 	}
 }
 
@@ -861,7 +861,7 @@ func TestProviderResponsesRouteForcesUsageForChatStreamingUpstream(t *testing.T)
 	}
 }
 
-func TestProviderResponsesRouteTreatsChatFinishReasonWithoutDoneAsIncomplete(t *testing.T) {
+func TestProviderResponsesRouteTreatsChatFinishReasonWithoutDoneAsFailed(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
@@ -898,15 +898,15 @@ func TestProviderResponsesRouteTreatsChatFinishReasonWithoutDoneAsIncomplete(t *
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.incomplete`) {
-		t.Fatalf("expected missing raw [DONE] to surface as response.incomplete, got %s", body)
+	if !strings.Contains(body, `event: response.failed`) {
+		t.Fatalf("expected missing raw [DONE] to surface as response.failed, got %s", body)
 	}
 	if strings.Contains(body, `"type":"response.completed"`) {
 		t.Fatalf("expected missing raw [DONE] to avoid synthetic completed success, got %s", body)
 	}
 }
 
-func TestProviderResponsesRouteTreatsAnthropicStopReasonWithoutMessageStopAsIncomplete(t *testing.T) {
+func TestProviderResponsesRouteTreatsAnthropicStopReasonWithoutMessageStopAsFailed(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" {
 			http.NotFound(w, r)
@@ -946,8 +946,8 @@ func TestProviderResponsesRouteTreatsAnthropicStopReasonWithoutMessageStopAsInco
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.incomplete`) {
-		t.Fatalf("expected missing message_stop to surface as response.incomplete, got %s", body)
+	if !strings.Contains(body, `event: response.failed`) {
+		t.Fatalf("expected missing message_stop to surface as response.failed, got %s", body)
 	}
 	if strings.Contains(body, `"type":"response.completed"`) {
 		t.Fatalf("expected missing message_stop to avoid synthetic completed success, got %s", body)

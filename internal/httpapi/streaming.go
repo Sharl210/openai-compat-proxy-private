@@ -824,8 +824,18 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		terminalFailure := terminalFailureFromEventData(evt.Data)
 		h.terminalFailure = terminalFailure
-		evt.Data["health_flag"] = terminalFailure.HealthFlag
-		evt.Data["message"] = terminalFailure.Message
+		if evt.Event == "response.incomplete" {
+			evt.Event = responsesTerminalFailureEvent(terminalFailure.HealthFlag)
+			if evt.Event == "response.failed" {
+				evt.Data = responsesTerminalFailureData(evt.Event, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
+			} else {
+				evt.Data["health_flag"] = terminalFailure.HealthFlag
+				evt.Data["message"] = terminalFailure.Message
+			}
+		} else {
+			evt.Data["health_flag"] = terminalFailure.HealthFlag
+			evt.Data["message"] = terminalFailure.Message
+		}
 		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 	}
@@ -1032,15 +1042,11 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 }
 
 func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, requestID string, healthFlag string, message string) error {
-	if _, err := fmt.Fprint(w, "event: response.incomplete\n"); err != nil {
+	event := responsesTerminalFailureEvent(healthFlag)
+	if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
 		return err
 	}
-	payload, err := responseStreamPayload("response.incomplete", map[string]any{
-		"type":        "response.incomplete",
-		"request_id":  requestID,
-		"health_flag": healthFlag,
-		"message":     message,
-	})
+	payload, err := responseStreamPayload(event, responsesTerminalFailureData(event, requestID, healthFlag, message, nil))
 	if err != nil {
 		return err
 	}
@@ -1051,6 +1057,47 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 		flusher.Flush()
 	}
 	return nil
+}
+
+func responsesTerminalFailureEvent(healthFlag string) string {
+	switch healthFlag {
+	case "upstream_max_tokens", "upstream_length":
+		return "response.incomplete"
+	default:
+		return "response.failed"
+	}
+}
+
+func responsesTerminalFailureData(event string, requestID string, healthFlag string, message string, upstreamError map[string]any) map[string]any {
+	data := map[string]any{
+		"type":        event,
+		"request_id":  requestID,
+		"health_flag": healthFlag,
+		"message":     message,
+	}
+	if event != "response.failed" {
+		return data
+	}
+	errObj := cloneMap(upstreamError)
+	if len(errObj) == 0 {
+		errObj = map[string]any{
+			"type":    "proxy_error",
+			"code":    healthFlag,
+			"message": message,
+		}
+	} else {
+		if _, ok := errObj["code"]; !ok && healthFlag != "" {
+			errObj["code"] = healthFlag
+		}
+		if _, ok := errObj["message"]; !ok && message != "" {
+			errObj["message"] = message
+		}
+	}
+	data["response"] = map[string]any{
+		"status": "failed",
+		"error":  errObj,
+	}
+	return data
 }
 
 func shouldInjectSyntheticResponsesReasoning(upstreamEndpointType, thinkingTagStyle string) bool {
@@ -1198,6 +1245,16 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 
 	if result.skipWrite {
 		return nil
+	}
+
+	if evt.Event == "response.incomplete" && state.terminalFailure != nil {
+		evt.Event = responsesTerminalFailureEvent(state.terminalFailure.HealthFlag)
+		if evt.Event == "response.failed" {
+			evt.Data = responsesTerminalFailureData(evt.Event, stringValue(evt.Data["request_id"]), state.terminalFailure.HealthFlag, state.terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
+		} else {
+			evt.Data["health_flag"] = state.terminalFailure.HealthFlag
+			evt.Data["message"] = state.terminalFailure.Message
+		}
 	}
 
 	if usageRecorder != nil && (evt.Event == "response.completed" || evt.Event == "response.done") {
