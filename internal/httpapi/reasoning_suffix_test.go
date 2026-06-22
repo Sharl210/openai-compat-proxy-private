@@ -99,6 +99,39 @@ func TestMapResolvedReasoningEffortToAnthropicThinkingDisabledByDefault(t *testi
 	}
 }
 
+func TestFinalizeAnthropicReasoningDisablesThinkingForUnsignedResponsesReasoningReplay(t *testing.T) {
+	canon := &modelpkg.CanonicalRequest{
+		Model: "claude-sonnet-4-5",
+		Reasoning: &modelpkg.CanonicalReasoning{
+			Effort:  "high",
+			Summary: "auto",
+			Raw:     map[string]any{"effort": "high", "summary": "auto"},
+		},
+		Messages: []modelpkg.CanonicalMessage{{
+			Role:             "assistant",
+			ReasoningContent: "上游不可回放的推理摘要",
+			ReasoningBlocks: []map[string]any{{
+				"type":    "reasoning",
+				"id":      "rs_proxy",
+				"summary": []map[string]any{{"type": "summary_text", "text": "上游不可回放的推理摘要"}},
+			}},
+			Parts: []modelpkg.CanonicalContentPart{{Type: "text", Text: "final answer"}},
+		}},
+	}
+
+	finalizeAnthropicReasoningForUpstream(canon, config.ProviderConfig{MapReasoningSuffixToAnthropicThinking: true}, config.Config{
+		UpstreamEndpointType:       config.UpstreamEndpointTypeAnthropic,
+		AnthropicMaxThinkingBudget: 32000,
+	})
+
+	if canon.Reasoning == nil {
+		t.Fatalf("expected reasoning to remain present")
+	}
+	if _, ok := canon.Reasoning.Raw["thinking"]; ok {
+		t.Fatalf("expected unsigned responses reasoning replay not to enable anthropic thinking, got %#v", canon.Reasoning.Raw)
+	}
+}
+
 func TestMapResolvedReasoningEffortToAnthropicThinkingUsesAdaptiveOnSupportedModels(t *testing.T) {
 	reasoning := &modelpkg.CanonicalReasoning{Effort: "high", Summary: "auto", Raw: map[string]any{"effort": "high", "summary": "auto"}}
 

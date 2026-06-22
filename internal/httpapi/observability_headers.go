@@ -198,9 +198,6 @@ func hasRealAnthropicThinkingHistory(messages []modelpkg.CanonicalMessage) bool 
 		if msg.Role != "assistant" {
 			continue
 		}
-		if strings.TrimSpace(msg.ReasoningContent) != "" && !isSyntheticReasoningSummary(msg.ReasoningContent) {
-			return true
-		}
 		for _, block := range msg.ReasoningBlocks {
 			if len(block) == 0 || isSyntheticReasoningBlock(block) {
 				continue

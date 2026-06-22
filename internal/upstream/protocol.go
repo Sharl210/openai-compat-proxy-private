@@ -2007,15 +2007,17 @@ func normalizeAnthropicReasoningBlock(block map[string]any) map[string]any {
 	if stringValue(cloned["type"]) != "reasoning" {
 		return cloned
 	}
+	signature := stringValue(cloned["encrypted_content"])
+	if signature == "" {
+		return nil
+	}
 	text := reasoningTextFromResponsesBlock(cloned)
 	if text == "" {
 		return nil
 	}
 	normalized := map[string]any{"type": "thinking"}
 	normalized["thinking"] = text
-	if signature := stringValue(cloned["encrypted_content"]); signature != "" {
-		normalized["signature"] = signature
-	}
+	normalized["signature"] = signature
 	return normalized
 }
 
