@@ -824,6 +824,9 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 		evt := s.pendingEvents[0]
 		s.pendingEvents = s.pendingEvents[1:]
 		s.recordEvent(evt, evt)
+		if evt.ArchiveOnly {
+			continue
+		}
 		if err := onEvent(evt); err != nil {
 			return err
 		}
@@ -833,6 +836,9 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 	}
 	return consumeSSEScannerWithReader(s.scanner, s.readNext, func(evt Event) error {
 		s.recordEvent(evt, evt)
+		if evt.ArchiveOnly {
+			return nil
+		}
 		return onEvent(evt)
 	})
 }
@@ -867,7 +873,11 @@ func (s *EventStream) recordEvent(rawEvt Event, canonicalEvt Event) {
 	if s == nil || s.archive == nil {
 		return
 	}
-	_ = s.archive.WriteRawEvent(debugarchive.RawEventEnvelope{EventName: rawEvt.Event, Raw: rawEvt.Raw})
+	rawEventName := rawEvt.Event
+	if rawEvt.RawEventName != "" {
+		rawEventName = rawEvt.RawEventName
+	}
+	_ = s.archive.WriteRawEvent(debugarchive.RawEventEnvelope{EventName: rawEventName, Raw: rawEvt.Raw})
 	s.seq++
 	canonical := model.CanonicalEvent{
 		Seq:          s.seq,
@@ -909,6 +919,11 @@ func populateCanonicalArchiveEvent(canonical *model.CanonicalEvent, evt Event) {
 		if usage := anyMap(response["usage"]); len(usage) > 0 {
 			canonical.UsageDelta = cloneMap(usage)
 		} else if usage := anyMap(evt.Data["usage"]); len(usage) > 0 {
+			canonical.UsageDelta = cloneMap(usage)
+		}
+	case "usage.update":
+		canonical.RawEventName = firstNonEmptyString(evt.RawEventName, stringValue(evt.Data["raw_event_name"]))
+		if usage := anyMap(evt.Data["usage"]); len(usage) > 0 {
 			canonical.UsageDelta = cloneMap(usage)
 		}
 	case "response.incomplete":

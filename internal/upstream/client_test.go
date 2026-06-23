@@ -167,6 +167,91 @@ func TestClientStreamEvents_WritesAnthropicToolUseFieldsToCanonicalArchive(t *te
 	assertCanonicalArchiveToolFields(t, events, "toolu_1", "toolu_1", "lookup", `{"q":"apk"}`)
 }
 
+func TestClientStreamEvents_ArchivesAnthropicUsageOnlyMessageDeltaFrames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n"))
+		_, _ = w.Write([]byte("data: {\"message\":{\"id\":\"msg_usage\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n\n"))
+		_, _ = w.Write([]byte("event: message_delta\n"))
+		_, _ = w.Write([]byte("data: {\"usage\":{\"input_tokens\":12,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_creation_input_tokens\":3},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"))
+		_, _ = w.Write([]byte("event: message_stop\n"))
+		_, _ = w.Write([]byte("data: {}\n\n"))
+	}))
+	defer server.Close()
+
+	const requestID = "req-archive-anthropic-usage-delta"
+	root := t.TempDir()
+	writer := debugarchive.NewArchiveWriter(root, requestID)
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	var downstreamEvents []Event
+	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: requestID, Model: "claude-opus-4-6"}, "", func(evt Event) error {
+		downstreamEvents = append(downstreamEvents, evt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamEvents error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	for _, event := range downstreamEvents {
+		if event.Event == "usage.update" || event.Event == "message_delta" {
+			t.Fatalf("usage-only message_delta must not leak downstream, got %#v", downstreamEvents)
+		}
+	}
+
+	rawBytes, err := os.ReadFile(filepath.Join(root, requestID, "raw.ndjson"))
+	if err != nil {
+		t.Fatalf("read raw archive: %v", err)
+	}
+	var sawRawMessageDelta bool
+	for _, line := range bytes.Split(bytes.TrimSpace(rawBytes), []byte("\n")) {
+		var envelope debugarchive.RawEventEnvelope
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			t.Fatalf("unmarshal raw archive event: %v", err)
+		}
+		if envelope.EventName == "message_delta" && bytes.Contains(envelope.Raw, []byte("cache_read_input_tokens")) {
+			sawRawMessageDelta = true
+		}
+	}
+	if !sawRawMessageDelta {
+		t.Fatalf("expected raw archive to preserve anthropic message_delta usage frame, got %s", rawBytes)
+	}
+
+	canonicalBytes, err := os.ReadFile(filepath.Join(root, requestID, "canonical.ndjson"))
+	if err != nil {
+		t.Fatalf("read canonical archive: %v", err)
+	}
+	var sawUsageUpdate bool
+	for _, line := range bytes.Split(bytes.TrimSpace(canonicalBytes), []byte("\n")) {
+		var event model.CanonicalEvent
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("unmarshal canonical archive event: %v", err)
+		}
+		if event.Type != "usage.update" {
+			continue
+		}
+		sawUsageUpdate = true
+		if event.RawEventName != "message_delta" {
+			t.Fatalf("expected raw event name message_delta, got %#v", event)
+		}
+		if got := event.UsageDelta["input_tokens"]; got != float64(20) {
+			t.Fatalf("expected canonical input_tokens 20, got %#v event=%#v", got, event)
+		}
+		details, _ := event.UsageDelta["input_tokens_details"].(map[string]any)
+		if got := details["cached_tokens"]; got != float64(5) {
+			t.Fatalf("expected cached_tokens 5, got %#v event=%#v", got, event)
+		}
+		if got := details["cache_creation_tokens"]; got != float64(3) {
+			t.Fatalf("expected cache_creation_tokens 3, got %#v event=%#v", got, event)
+		}
+	}
+	if !sawUsageUpdate {
+		t.Fatalf("expected canonical archive usage.update event, got %s", canonicalBytes)
+	}
+}
+
 func TestClientStreamEvents_WritesSemanticFieldsToCanonicalArchive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

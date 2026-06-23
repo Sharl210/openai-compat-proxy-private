@@ -1136,7 +1136,10 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 			}
 		}
 	case "message_delta":
-		mergeUsage(state.usage, normalizeAnthropicUsage(payload["usage"]))
+		if usage := normalizeAnthropicUsage(payload["usage"]); len(usage) > 0 {
+			mergeUsage(state.usage, usage)
+			events = append(events, Event{Event: "usage.update", Data: map[string]any{"usage": usage}, ArchiveOnly: true, RawEventName: frame.Event})
+		}
 		delta, _ := payload["delta"].(map[string]any)
 		if stopReason := stringValue(delta["stop_reason"]); stopReason != "" && !state.completed {
 			state.pendingFinish = stopReason
