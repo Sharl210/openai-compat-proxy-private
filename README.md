@@ -536,6 +536,7 @@ tools prompt
   - `raw.ndjson`
   - `canonical.ndjson`
   - `final.ndjson`
+  - 当 Anthropic / Claude 流式上游在 `message_delta.usage` 中返回最终用量时，归档会额外保留一条 `canonical.ndjson` 的 `usage.update` 记录，并在 `raw.ndjson` 中保留原始 `message_delta` 帧；这只用于排查 `cache_read_input_tokens` / `cache_creation_input_tokens` 来源，不会作为下游 SSE 事件发给客户端
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
 - 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**
 
