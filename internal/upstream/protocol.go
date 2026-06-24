@@ -1891,6 +1891,15 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 			if _, exists := emittedOrderedToolResults[msg.ToolCallID]; exists {
 				continue
 			}
+			if msg.RecoveredToolCall != nil && strings.TrimSpace(msg.RecoveredToolCall.Name) != "" {
+				pendingToolResults = appendPendingToolResults(pendingToolResults)
+				recovered := *msg.RecoveredToolCall
+				callID := recovered.ID
+				if callID == "" {
+					callID = msg.ToolCallID
+				}
+				messages = append(messages, map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": callID, "name": recovered.Name, "input": parseJSONArguments(recovered.Arguments)}}})
+			}
 			pendingToolResults = append(pendingToolResults, map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": buildAnthropicToolResultContent(msg.Parts)})
 			continue
 		}

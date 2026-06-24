@@ -1806,6 +1806,42 @@ func TestBuildAnthropicMessagesMergesAdjacentToolResultsIntoSingleUserMessage(t 
 	}
 }
 
+func TestBuildAnthropicMessagesReplaysRecoveredToolUseForResponsesToolOutput(t *testing.T) {
+	recovered := model.CanonicalToolCall{ID: "call_recovered", Type: "function", Name: "run_in_terminal", Arguments: `{"cmd":"pwd"}`}
+	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{
+		{Role: "tool", ToolCallID: "call_recovered", RecoveredToolCall: &recovered, Parts: []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}}},
+	}})
+
+	if len(messages) != 2 {
+		t.Fatalf("expected recovered assistant tool_use plus user tool_result, got %#v", messages)
+	}
+	assistantMsg, _ := messages[0].(map[string]any)
+	if got, _ := assistantMsg["role"].(string); got != "assistant" {
+		t.Fatalf("expected first message role assistant, got %#v", assistantMsg)
+	}
+	assistantContent, _ := assistantMsg["content"].([]any)
+	if len(assistantContent) != 1 {
+		t.Fatalf("expected one recovered tool_use block, got %#v", assistantMsg)
+	}
+	toolUse, _ := assistantContent[0].(map[string]any)
+	if toolUse["type"] != "tool_use" || toolUse["id"] != "call_recovered" || toolUse["name"] != "run_in_terminal" {
+		t.Fatalf("expected recovered tool_use block, got %#v", toolUse)
+	}
+
+	userMsg, _ := messages[1].(map[string]any)
+	if got, _ := userMsg["role"].(string); got != "user" {
+		t.Fatalf("expected second message role user, got %#v", userMsg)
+	}
+	userContent, _ := userMsg["content"].([]any)
+	if len(userContent) != 1 {
+		t.Fatalf("expected one tool_result block, got %#v", userMsg)
+	}
+	toolResult, _ := userContent[0].(map[string]any)
+	if toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != "call_recovered" {
+		t.Fatalf("expected matching tool_result block, got %#v", toolResult)
+	}
+}
+
 func TestBuildAnthropicMessagesRepairsMalformedToolArguments(t *testing.T) {
 	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
 		Role: "assistant",
