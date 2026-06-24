@@ -2239,6 +2239,56 @@ func TestResponsesRouteRecoversAnthropicToolUseByCallIDWithoutPreviousResponseID
 	}
 }
 
+func TestResponsesRouteRecoversAnthropicThinkingByCallIDWithoutPreviousResponseID(t *testing.T) {
+	previousGlobalHistory := globalResponsesHistory
+	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize}
+	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
+
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"need tool result","signature":"sig_1"},{"type":"tool_use","id":"call_1","name":"read_file","input":{"filePath":"/tmp/a"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"type":"function_call_output","call_id":"call_1","output":"file contents"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"need tool result"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected recovered anthropic request to replay previous thinking block, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) || !strings.Contains(secondBody, `"name":"read_file"`) {
+		t.Fatalf("expected recovered anthropic request to replay previous tool_use, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
+		t.Fatalf("expected recovered anthropic request to include current tool_result, got %s", secondBody)
+	}
+}
+
 func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *testing.T) {
 	requestCount := 0
 	var secondBody string

@@ -1898,7 +1898,9 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 				if callID == "" {
 					callID = msg.ToolCallID
 				}
-				messages = append(messages, map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": callID, "name": recovered.Name, "input": parseJSONArguments(recovered.Arguments)}}})
+				content := cloneAnySliceOfMaps(msg.ReasoningBlocks)
+				content = append(content, map[string]any{"type": "tool_use", "id": callID, "name": recovered.Name, "input": parseJSONArguments(recovered.Arguments)})
+				messages = append(messages, map[string]any{"role": "assistant", "content": content})
 			}
 			pendingToolResults = append(pendingToolResults, map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": buildAnthropicToolResultContent(msg.Parts)})
 			continue
