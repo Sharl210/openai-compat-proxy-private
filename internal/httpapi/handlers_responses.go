@@ -113,7 +113,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
-				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
+				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
 			}
 			return
 		}
@@ -139,7 +139,7 @@ func handleResponses() http.HandlerFunc {
 			normalized := responsesadapter.BuildResponse(result)
 			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
-				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
+				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -198,7 +198,7 @@ func handleResponses() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
+			globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -306,7 +306,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			globalResponsesHistory.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)))
+			globalResponsesHistory.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(prepared.providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, prepared.authorization))
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -442,6 +442,10 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	}
 	applyProviderSystemPrompt(&canon, provider)
 	normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
+	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
+		canon.Messages = recoverToolCallsForMessages(canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
+	}
 	applyProviderMaxOutputTokens(&canon, provider)
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
@@ -464,7 +468,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		return nil, false
 	}
 	canon.RequestID = requestID
-	canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
+	canon.AuthMode = authMode
 	usageRecorder := combinedUsageRecorder(
 		cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType),
 		tokenEstimatorUsageRecorder(observationCtx, requestID, providerCfg.UpstreamEndpointType, bypassProviderModelAllowanceForRequest(r) || shouldBypassUsageRecorderForRequest(r)),
