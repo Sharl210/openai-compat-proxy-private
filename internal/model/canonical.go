@@ -34,13 +34,14 @@ type CanonicalClaudeMetadata struct {
 }
 
 type CanonicalMessage struct {
-	Role             string
-	OrderedContent   []CanonicalContentBlock
-	Parts            []CanonicalContentPart
-	ToolCalls        []CanonicalToolCall
-	ToolCallID       string
-	ReasoningContent string
-	ReasoningBlocks  []map[string]any
+	Role              string
+	OrderedContent    []CanonicalContentBlock
+	Parts             []CanonicalContentPart
+	ToolCalls         []CanonicalToolCall
+	ToolCallID        string
+	RecoveredToolCall *CanonicalToolCall
+	ReasoningContent  string
+	ReasoningBlocks   []map[string]any
 }
 
 type CanonicalContentBlock struct {

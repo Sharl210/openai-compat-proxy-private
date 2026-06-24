@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ type responsesHistoryStore struct {
 	mu           sync.RWMutex
 	entries      map[string]responsesConversationSnapshot
 	byResponseID map[string]string
+	toolCalls    map[string]responsesHistoryToolCallEntry
 	order        []string
 	maxSize      int
 }
@@ -21,12 +24,51 @@ type responsesConversationSnapshot struct {
 	Messages []model.CanonicalMessage
 }
 
+type responsesHistoryToolCallEntry struct {
+	SnapshotKey string
+	Call        model.CanonicalToolCall
+}
+
 const defaultResponsesHistoryMaxSize = 512
 
-var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, maxSize: defaultResponsesHistoryMaxSize}
+var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize}
 
 func responsesHistoryKey(providerID, responseID string) string {
 	return providerID + "::" + responseID
+}
+
+func responsesHistoryToolCallKey(providerID, callID string) string {
+	return providerID + "::" + callID
+}
+
+func responsesHistoryScopedToolCallKey(providerID, callID, scope string) string {
+	if scope == "" {
+		return responsesHistoryToolCallKey(providerID, callID)
+	}
+	return providerID + "::" + scope + "::" + callID
+}
+
+func responsesHistoryToolCallScope(upstreamBaseURL, modelName, authMode, authorization string) string {
+	parts := []string{strings.TrimSpace(upstreamBaseURL), strings.TrimSpace(modelName), strings.TrimSpace(authMode), authorizationFingerprint(authorization)}
+	return strings.Join(parts, "|")
+}
+
+func authorizationFingerprint(authorization string) string {
+	trimmed := strings.TrimSpace(authorization)
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return hex.EncodeToString(sum[:16])
+}
+
+func firstString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
@@ -40,6 +82,10 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 			reasoningContent = ""
 		}
 		clone := model.CanonicalMessage{Role: msg.Role, ToolCallID: msg.ToolCallID, ReasoningContent: reasoningContent}
+		if msg.RecoveredToolCall != nil {
+			recovered := *msg.RecoveredToolCall
+			clone.RecoveredToolCall = &recovered
+		}
 		if len(msg.Parts) > 0 {
 			clone.Parts = append([]model.CanonicalContentPart(nil), msg.Parts...)
 		}
@@ -54,7 +100,7 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 	return cloned
 }
 
-func (s *responsesHistoryStore) Save(providerID, responseID string, messages []model.CanonicalMessage) {
+func (s *responsesHistoryStore) Save(providerID, responseID string, messages []model.CanonicalMessage, scopes ...string) {
 	if s == nil || providerID == "" || responseID == "" || len(messages) == 0 {
 		return
 	}
@@ -69,11 +115,17 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 	if s.byResponseID == nil {
 		s.byResponseID = map[string]string{}
 	}
+	if s.toolCalls == nil {
+		s.toolCalls = map[string]responsesHistoryToolCallEntry{}
+	}
 	if _, exists := s.entries[key]; exists {
 		s.removeKeyLocked(key)
+		s.deleteToolCallsForKeyLocked(key)
 	}
-	s.entries[key] = responsesConversationSnapshot{Messages: cloneCanonicalMessages(messages)}
+	storedMessages := cloneCanonicalMessages(messages)
+	s.entries[key] = responsesConversationSnapshot{Messages: storedMessages}
 	s.byResponseID[responseID] = key
+	s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...))
 	s.order = append(s.order, key)
 	for len(s.order) > s.maxSize {
 		oldest := s.order[0]
@@ -94,6 +146,19 @@ func (s *responsesHistoryStore) Load(providerID, responseID string) []model.Cano
 		return nil
 	}
 	return cloneCanonicalMessages(stored.Messages)
+}
+
+func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes ...string) (model.CanonicalToolCall, bool) {
+	if s == nil || providerID == "" || callID == "" {
+		return model.CanonicalToolCall{}, false
+	}
+	s.mu.RLock()
+	entry, ok := s.toolCalls[responsesHistoryScopedToolCallKey(providerID, callID, firstString(scopes...))]
+	s.mu.RUnlock()
+	if !ok || entry.Call.ID == "" || entry.Call.Name == "" {
+		return model.CanonicalToolCall{}, false
+	}
+	return entry.Call, true
 }
 
 func (s *responsesHistoryStore) LoadAny(responseID string) []model.CanonicalMessage {
@@ -122,10 +187,39 @@ func (s *responsesHistoryStore) removeKeyLocked(target string) {
 
 func (s *responsesHistoryStore) deleteKeyLocked(key string) {
 	delete(s.entries, key)
+	s.deleteToolCallsForKeyLocked(key)
 	for responseID, indexedKey := range s.byResponseID {
 		if indexedKey == key {
 			delete(s.byResponseID, responseID)
 			return
+		}
+	}
+}
+
+func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey string, messages []model.CanonicalMessage, scope string) {
+	if providerID == "" || snapshotKey == "" || len(messages) == 0 {
+		return
+	}
+	for _, msg := range messages {
+		if len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.ID == "" || call.Name == "" {
+				continue
+			}
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call}
+		}
+	}
+}
+
+func (s *responsesHistoryStore) deleteToolCallsForKeyLocked(snapshotKey string) {
+	if snapshotKey == "" || len(s.toolCalls) == 0 {
+		return
+	}
+	for key, entry := range s.toolCalls {
+		if entry.SnapshotKey == snapshotKey {
+			delete(s.toolCalls, key)
 		}
 	}
 }
@@ -153,6 +247,46 @@ func shouldRestorePreviousConversation(messages []model.CanonicalMessage) bool {
 		}
 	}
 	return true
+}
+
+func recoverToolCallsForMessages(messages []model.CanonicalMessage, providerID string, scopes ...string) []model.CanonicalMessage {
+	if len(messages) == 0 || providerID == "" || globalResponsesHistory == nil {
+		return messages
+	}
+	existingToolCallIDs := currentToolCallIDs(messages)
+	recovered := append([]model.CanonicalMessage(nil), messages...)
+	for idx := range recovered {
+		msg := &recovered[idx]
+		if msg.Role != "tool" || msg.ToolCallID == "" || msg.RecoveredToolCall != nil {
+			continue
+		}
+		if existingToolCallIDs[msg.ToolCallID] {
+			continue
+		}
+		call, ok := globalResponsesHistory.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		if !ok {
+			continue
+		}
+		msg.RecoveredToolCall = &call
+	}
+	return recovered
+}
+
+func currentToolCallIDs(messages []model.CanonicalMessage) map[string]bool {
+	ids := map[string]bool{}
+	for _, msg := range messages {
+		for _, call := range msg.ToolCalls {
+			if call.ID != "" {
+				ids[call.ID] = true
+			}
+		}
+		for _, block := range msg.OrderedContent {
+			if block.Type == "tool_call" && block.ToolCall.ID != "" {
+				ids[block.ToolCall.ID] = true
+			}
+		}
+	}
+	return ids
 }
 
 func assistantHistoryMessagesFromResult(result aggregate.Result) []model.CanonicalMessage {

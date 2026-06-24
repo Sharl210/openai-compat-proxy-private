@@ -63,6 +63,89 @@ func TestResponsesHistoryLoadReturnsClone(t *testing.T) {
 	}
 }
 
+func TestResponsesHistoryLoadToolCallByCallIDReturnsClone(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 2}
+	store.Save("anthropic", "resp-1", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "run_in_terminal", Arguments: `{"cmd":"pwd"}`}},
+	}})
+
+	loaded, ok := store.LoadToolCall("anthropic", "call_1")
+	if !ok {
+		t.Fatal("expected tool call to be indexed by call_id")
+	}
+	if loaded.ID != "call_1" || loaded.Name != "run_in_terminal" || loaded.Arguments != `{"cmd":"pwd"}` {
+		t.Fatalf("expected stored tool call metadata, got %#v", loaded)
+	}
+
+	loaded.Name = "mutated"
+	reloaded, ok := store.LoadToolCall("anthropic", "call_1")
+	if !ok || reloaded.Name != "run_in_terminal" {
+		t.Fatalf("expected tool call lookup to return a clone, got ok=%t call=%#v", ok, reloaded)
+	}
+}
+
+func TestResponsesHistoryEvictsToolCallIndexWithSnapshot(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 1}
+	store.Save("anthropic", "resp-1", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_old", Type: "function", Name: "old", Arguments: `{}`}},
+	}})
+	store.Save("anthropic", "resp-2", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_new", Type: "function", Name: "new", Arguments: `{}`}},
+	}})
+
+	if _, ok := store.LoadToolCall("anthropic", "call_old"); ok {
+		t.Fatal("expected evicted snapshot tool call to be removed from index")
+	}
+	if call, ok := store.LoadToolCall("anthropic", "call_new"); !ok || call.Name != "new" {
+		t.Fatalf("expected newest tool call to remain indexed, got ok=%t call=%#v", ok, call)
+	}
+}
+
+func TestResponsesHistoryToolCallLookupIsProviderScoped(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 3}
+	store.Save("anthropic-a", "resp-1", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "tool_a", Arguments: `{}`}},
+	}})
+	store.Save("anthropic-b", "resp-1", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "tool_b", Arguments: `{}`}},
+	}})
+
+	callA, okA := store.LoadToolCall("anthropic-a", "call_1")
+	callB, okB := store.LoadToolCall("anthropic-b", "call_1")
+	if !okA || callA.Name != "tool_a" {
+		t.Fatalf("expected provider A scoped tool call, got ok=%t call=%#v", okA, callA)
+	}
+	if !okB || callB.Name != "tool_b" {
+		t.Fatalf("expected provider B scoped tool call, got ok=%t call=%#v", okB, callB)
+	}
+}
+
+func TestResponsesHistoryToolCallLookupIsConversationScoped(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 3}
+	store.Save("anthropic", "resp-a", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "tool_a", Arguments: `{}`}},
+	}}, "scope-a")
+	store.Save("anthropic", "resp-b", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "tool_b", Arguments: `{}`}},
+	}}, "scope-b")
+
+	callA, okA := store.LoadToolCall("anthropic", "call_1", "scope-a")
+	callB, okB := store.LoadToolCall("anthropic", "call_1", "scope-b")
+	if !okA || callA.Name != "tool_a" {
+		t.Fatalf("expected scope A tool call, got ok=%t call=%#v", okA, callA)
+	}
+	if !okB || callB.Name != "tool_b" {
+		t.Fatalf("expected scope B tool call, got ok=%t call=%#v", okB, callB)
+	}
+}
+
 func TestResponsesHistoryLoadAnyReturnsLatestProviderSnapshot(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 3}
 
