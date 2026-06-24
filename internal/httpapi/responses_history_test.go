@@ -146,6 +146,25 @@ func TestResponsesHistoryToolCallLookupIsConversationScoped(t *testing.T) {
 	}
 }
 
+func TestResponsesHistoryIndexesRecoveredToolCallFromStoredToolMessage(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 2}
+	recovered := model.CanonicalToolCall{ID: "call_recovered", Type: "function", Name: "run_in_terminal", Arguments: `{"cmd":"pwd"}`}
+	store.Save("anthropic", "resp-1", []model.CanonicalMessage{{
+		Role:              "tool",
+		ToolCallID:        "call_recovered",
+		RecoveredToolCall: &recovered,
+		Parts:             []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}},
+	}})
+
+	loaded, ok := store.LoadToolCall("anthropic", "call_recovered")
+	if !ok {
+		t.Fatal("expected recovered tool call to be indexed from stored tool message")
+	}
+	if loaded.Name != "run_in_terminal" || loaded.Arguments != `{"cmd":"pwd"}` {
+		t.Fatalf("expected recovered tool call metadata, got %#v", loaded)
+	}
+}
+
 func TestResponsesHistoryLoadAnyReturnsLatestProviderSnapshot(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 3}
 

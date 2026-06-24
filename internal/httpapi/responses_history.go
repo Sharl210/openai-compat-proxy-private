@@ -201,6 +201,10 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 		return
 	}
 	for _, msg := range messages {
+		if msg.RecoveredToolCall != nil && msg.RecoveredToolCall.ID != "" && msg.RecoveredToolCall.Name != "" {
+			call := *msg.RecoveredToolCall
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call}
+		}
 		if len(msg.ToolCalls) == 0 {
 			continue
 		}
