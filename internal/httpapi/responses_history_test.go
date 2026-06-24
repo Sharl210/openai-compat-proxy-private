@@ -70,7 +70,7 @@ func TestResponsesHistoryLoadToolCallByCallIDReturnsClone(t *testing.T) {
 		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "run_in_terminal", Arguments: `{"cmd":"pwd"}`}},
 	}})
 
-	loaded, ok := store.LoadToolCall("anthropic", "call_1")
+	loaded, _, ok := store.LoadToolCall("anthropic", "call_1")
 	if !ok {
 		t.Fatal("expected tool call to be indexed by call_id")
 	}
@@ -79,7 +79,7 @@ func TestResponsesHistoryLoadToolCallByCallIDReturnsClone(t *testing.T) {
 	}
 
 	loaded.Name = "mutated"
-	reloaded, ok := store.LoadToolCall("anthropic", "call_1")
+	reloaded, _, ok := store.LoadToolCall("anthropic", "call_1")
 	if !ok || reloaded.Name != "run_in_terminal" {
 		t.Fatalf("expected tool call lookup to return a clone, got ok=%t call=%#v", ok, reloaded)
 	}
@@ -96,10 +96,10 @@ func TestResponsesHistoryEvictsToolCallIndexWithSnapshot(t *testing.T) {
 		ToolCalls: []model.CanonicalToolCall{{ID: "call_new", Type: "function", Name: "new", Arguments: `{}`}},
 	}})
 
-	if _, ok := store.LoadToolCall("anthropic", "call_old"); ok {
+	if _, _, ok := store.LoadToolCall("anthropic", "call_old"); ok {
 		t.Fatal("expected evicted snapshot tool call to be removed from index")
 	}
-	if call, ok := store.LoadToolCall("anthropic", "call_new"); !ok || call.Name != "new" {
+	if call, _, ok := store.LoadToolCall("anthropic", "call_new"); !ok || call.Name != "new" {
 		t.Fatalf("expected newest tool call to remain indexed, got ok=%t call=%#v", ok, call)
 	}
 }
@@ -115,8 +115,8 @@ func TestResponsesHistoryToolCallLookupIsProviderScoped(t *testing.T) {
 		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "tool_b", Arguments: `{}`}},
 	}})
 
-	callA, okA := store.LoadToolCall("anthropic-a", "call_1")
-	callB, okB := store.LoadToolCall("anthropic-b", "call_1")
+	callA, _, okA := store.LoadToolCall("anthropic-a", "call_1")
+	callB, _, okB := store.LoadToolCall("anthropic-b", "call_1")
 	if !okA || callA.Name != "tool_a" {
 		t.Fatalf("expected provider A scoped tool call, got ok=%t call=%#v", okA, callA)
 	}
@@ -136,8 +136,8 @@ func TestResponsesHistoryToolCallLookupIsConversationScoped(t *testing.T) {
 		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "tool_b", Arguments: `{}`}},
 	}}, "scope-b")
 
-	callA, okA := store.LoadToolCall("anthropic", "call_1", "scope-a")
-	callB, okB := store.LoadToolCall("anthropic", "call_1", "scope-b")
+	callA, _, okA := store.LoadToolCall("anthropic", "call_1", "scope-a")
+	callB, _, okB := store.LoadToolCall("anthropic", "call_1", "scope-b")
 	if !okA || callA.Name != "tool_a" {
 		t.Fatalf("expected scope A tool call, got ok=%t call=%#v", okA, callA)
 	}
@@ -156,12 +156,33 @@ func TestResponsesHistoryIndexesRecoveredToolCallFromStoredToolMessage(t *testin
 		Parts:             []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}},
 	}})
 
-	loaded, ok := store.LoadToolCall("anthropic", "call_recovered")
+	loaded, _, ok := store.LoadToolCall("anthropic", "call_recovered")
 	if !ok {
 		t.Fatal("expected recovered tool call to be indexed from stored tool message")
 	}
 	if loaded.Name != "run_in_terminal" || loaded.Arguments != `{"cmd":"pwd"}` {
 		t.Fatalf("expected recovered tool call metadata, got %#v", loaded)
+	}
+}
+
+func TestResponsesHistoryReturnsReasoningBlocksWithToolCall(t *testing.T) {
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 2}
+	store.Save("anthropic", "resp-1", []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":      "thinking",
+			"thinking":  "need tool result",
+			"signature": "sig_1",
+		}},
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "read_file", Arguments: `{"filePath":"/tmp/a"}`}},
+	}})
+
+	_, reasoningBlocks, ok := store.LoadToolCall("anthropic", "call_1")
+	if !ok {
+		t.Fatal("expected tool call to be indexed")
+	}
+	if len(reasoningBlocks) != 1 || reasoningBlocks[0]["thinking"] != "need tool result" || reasoningBlocks[0]["signature"] != "sig_1" {
+		t.Fatalf("expected reasoning blocks to be returned with tool call, got %#v", reasoningBlocks)
 	}
 }
 

@@ -25,8 +25,9 @@ type responsesConversationSnapshot struct {
 }
 
 type responsesHistoryToolCallEntry struct {
-	SnapshotKey string
-	Call        model.CanonicalToolCall
+	SnapshotKey     string
+	Call            model.CanonicalToolCall
+	ReasoningBlocks []map[string]any
 }
 
 const defaultResponsesHistoryMaxSize = 512
@@ -148,17 +149,17 @@ func (s *responsesHistoryStore) Load(providerID, responseID string) []model.Cano
 	return cloneCanonicalMessages(stored.Messages)
 }
 
-func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes ...string) (model.CanonicalToolCall, bool) {
+func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes ...string) (model.CanonicalToolCall, []map[string]any, bool) {
 	if s == nil || providerID == "" || callID == "" {
-		return model.CanonicalToolCall{}, false
+		return model.CanonicalToolCall{}, nil, false
 	}
 	s.mu.RLock()
 	entry, ok := s.toolCalls[responsesHistoryScopedToolCallKey(providerID, callID, firstString(scopes...))]
 	s.mu.RUnlock()
 	if !ok || entry.Call.ID == "" || entry.Call.Name == "" {
-		return model.CanonicalToolCall{}, false
+		return model.CanonicalToolCall{}, nil, false
 	}
-	return entry.Call, true
+	return entry.Call, cloneReasoningBlocks(entry.ReasoningBlocks), true
 }
 
 func (s *responsesHistoryStore) LoadAny(responseID string) []model.CanonicalMessage {
@@ -203,7 +204,7 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 	for _, msg := range messages {
 		if msg.RecoveredToolCall != nil && msg.RecoveredToolCall.ID != "" && msg.RecoveredToolCall.Name != "" {
 			call := *msg.RecoveredToolCall
-			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call}
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
 		}
 		if len(msg.ToolCalls) == 0 {
 			continue
@@ -212,7 +213,7 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
-			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call}
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
 		}
 	}
 }
@@ -267,11 +268,14 @@ func recoverToolCallsForMessages(messages []model.CanonicalMessage, providerID s
 		if existingToolCallIDs[msg.ToolCallID] {
 			continue
 		}
-		call, ok := globalResponsesHistory.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		call, reasoningBlocks, ok := globalResponsesHistory.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
 		if !ok {
 			continue
 		}
 		msg.RecoveredToolCall = &call
+		if len(reasoningBlocks) > 0 && len(msg.ReasoningBlocks) == 0 {
+			msg.ReasoningBlocks = reasoningBlocks
+		}
 	}
 	return recovered
 }
