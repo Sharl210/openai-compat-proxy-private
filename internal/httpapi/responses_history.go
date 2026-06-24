@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -18,6 +21,9 @@ type responsesHistoryStore struct {
 	toolCalls    map[string]responsesHistoryToolCallEntry
 	order        []string
 	maxSize      int
+
+	toolCallRecoveryIndexPath   string
+	toolCallRecoveryIndexLoaded bool
 }
 
 type responsesConversationSnapshot struct {
@@ -32,7 +38,40 @@ type responsesHistoryToolCallEntry struct {
 
 const defaultResponsesHistoryMaxSize = 512
 
+const responsesHistoryToolCallRecoveryIndexVersion = 1
+
+type responsesHistoryToolCallRecoveryIndexFile struct {
+	Version   int                                      `json:"version"`
+	Order     []string                                 `json:"order,omitempty"`
+	ToolCalls map[string]responsesHistoryToolCallEntry `json:"tool_calls"`
+}
+
 var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize}
+
+func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *responsesHistoryStore {
+	if maxSize <= 0 {
+		maxSize = defaultResponsesHistoryMaxSize
+	}
+	return &responsesHistoryStore{
+		entries:                   map[string]responsesConversationSnapshot{},
+		byResponseID:              map[string]string{},
+		toolCalls:                 map[string]responsesHistoryToolCallEntry{},
+		maxSize:                   maxSize,
+		toolCallRecoveryIndexPath: strings.TrimSpace(toolCallRecoveryIndexPath),
+	}
+}
+
+func ConfigureResponsesHistoryPersistence(providersDir string) {
+	globalResponsesHistory = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, responsesHistoryToolCallRecoveryIndexPath(providersDir))
+}
+
+func responsesHistoryToolCallRecoveryIndexPath(providersDir string) string {
+	providersDir = strings.TrimSpace(providersDir)
+	if providersDir == "" {
+		return ""
+	}
+	return filepath.Join(providersDir, "Responses_History", "tool_call_recovery_index.json")
+}
 
 func responsesHistoryKey(providerID, responseID string) string {
 	return providerID + "::" + responseID
@@ -119,6 +158,9 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 	if s.toolCalls == nil {
 		s.toolCalls = map[string]responsesHistoryToolCallEntry{}
 	}
+	if err := s.loadToolCallRecoveryIndexLocked(); err != nil {
+		log.Printf("warning: failed to load responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
+	}
 	if _, exists := s.entries[key]; exists {
 		s.removeKeyLocked(key)
 		s.deleteToolCallsForKeyLocked(key)
@@ -132,6 +174,9 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 		oldest := s.order[0]
 		s.order = s.order[1:]
 		s.deleteKeyLocked(oldest)
+	}
+	if err := s.saveToolCallRecoveryIndexLocked(); err != nil {
+		log.Printf("warning: failed to save responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
 	}
 	s.mu.Unlock()
 }
@@ -153,9 +198,12 @@ func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes .
 	if s == nil || providerID == "" || callID == "" {
 		return model.CanonicalToolCall{}, nil, false
 	}
-	s.mu.RLock()
+	s.mu.Lock()
+	if err := s.loadToolCallRecoveryIndexLocked(); err != nil {
+		log.Printf("warning: failed to load responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
+	}
 	entry, ok := s.toolCalls[responsesHistoryScopedToolCallKey(providerID, callID, firstString(scopes...))]
-	s.mu.RUnlock()
+	s.mu.Unlock()
 	if !ok || entry.Call.ID == "" || entry.Call.Name == "" {
 		return model.CanonicalToolCall{}, nil, false
 	}
@@ -216,6 +264,91 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
 		}
 	}
+}
+
+func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
+	if s == nil || s.toolCallRecoveryIndexLoaded || s.toolCallRecoveryIndexPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.toolCallRecoveryIndexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.toolCallRecoveryIndexLoaded = true
+			return nil
+		}
+		return err
+	}
+	var file responsesHistoryToolCallRecoveryIndexFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return err
+	}
+	s.toolCallRecoveryIndexLoaded = true
+	if file.Version != 0 && file.Version != responsesHistoryToolCallRecoveryIndexVersion {
+		return nil
+	}
+	if s.toolCalls == nil {
+		s.toolCalls = map[string]responsesHistoryToolCallEntry{}
+	}
+	for key, entry := range file.ToolCalls {
+		if key == "" || entry.Call.ID == "" || entry.Call.Name == "" {
+			continue
+		}
+		s.toolCalls[key] = responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks)}
+	}
+	if len(s.order) == 0 && len(file.Order) > 0 {
+		s.order = append([]string(nil), file.Order...)
+	}
+	return nil
+}
+
+func (s *responsesHistoryStore) saveToolCallRecoveryIndexLocked() error {
+	if s == nil || s.toolCallRecoveryIndexPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.toolCallRecoveryIndexPath), 0o755); err != nil {
+		return err
+	}
+	toolCalls := make(map[string]responsesHistoryToolCallEntry, len(s.toolCalls))
+	for key, entry := range s.toolCalls {
+		if key == "" || entry.Call.ID == "" || entry.Call.Name == "" {
+			continue
+		}
+		toolCalls[key] = responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks)}
+	}
+	if len(toolCalls) == 0 {
+		if err := os.Remove(s.toolCallRecoveryIndexPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	data, err := json.MarshalIndent(responsesHistoryToolCallRecoveryIndexFile{Version: responsesHistoryToolCallRecoveryIndexVersion, Order: append([]string(nil), s.order...), ToolCalls: toolCalls}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteResponsesHistoryFile(s.toolCallRecoveryIndexPath, data)
+}
+
+func atomicWriteResponsesHistoryFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (s *responsesHistoryStore) deleteToolCallsForKeyLocked(snapshotKey string) {

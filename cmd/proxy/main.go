@@ -20,6 +20,9 @@ func main() {
 		log.Fatal(err)
 	}
 	cfg := store.Active().Config
+	if cfg.ProvidersDir != "" {
+		httpapi.ConfigureResponsesHistoryPersistence(cfg.ProvidersDir)
+	}
 	closeFn, err := logging.Init(cfg, os.Stdout)
 	if err != nil {
 		log.Fatal(err)

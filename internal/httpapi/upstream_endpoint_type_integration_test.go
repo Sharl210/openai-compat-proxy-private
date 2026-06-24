@@ -2289,6 +2289,66 @@ func TestResponsesRouteRecoversAnthropicThinkingByCallIDWithoutPreviousResponseI
 	}
 }
 
+func TestResponsesRouteRecoversAnthropicToolUsesByCallIDAfterHistoryStoreRestart(t *testing.T) {
+	previousGlobalHistory := globalResponsesHistory
+	indexPath := t.TempDir() + "/tool_call_recovery_index.json"
+	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize, toolCallRecoveryIndexPath: indexPath}
+	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
+
+	requestCount := 0
+	var secondBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			secondBody = string(bodyBytes)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"need three tool results","signature":"sig_1"},{"type":"tool_use","id":"call_1","name":"read_file","input":{"filePath":"/tmp/a"}},{"type":"tool_use","id":"call_2","name":"glob","input":{"pattern":"*.go"}},{"type":"tool_use","id":"call_3","name":"grep","input":{"pattern":"TODO"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+
+	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize, toolCallRecoveryIndexPath: indexPath}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"type":"function_call_output","call_id":"call_1","output":"file contents"},{"type":"function_call_output","call_id":"call_2","output":"glob output"},{"type":"function_call_output","call_id":"call_3","output":"grep output"}]}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	}
+	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"need three tool results"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected restarted recovery to replay previous thinking block, got %s", secondBody)
+	}
+	for _, want := range []string{`"id":"call_1"`, `"id":"call_2"`, `"id":"call_3"`} {
+		if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, want) {
+			t.Fatalf("expected restarted recovery to replay tool_use %s, got %s", want, secondBody)
+		}
+	}
+	for _, want := range []string{`"tool_use_id":"call_1"`, `"tool_use_id":"call_2"`, `"tool_use_id":"call_3"`} {
+		if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, want) {
+			t.Fatalf("expected second request to include tool_result %s, got %s", want, secondBody)
+		}
+	}
+	if strings.Contains(secondBody, "hello") {
+		t.Fatalf("expected restarted tool-call recovery not to persist full prior prompt context, got %s", secondBody)
+	}
+}
+
 func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *testing.T) {
 	requestCount := 0
 	var secondBody string

@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/aggregate"
@@ -183,6 +186,105 @@ func TestResponsesHistoryReturnsReasoningBlocksWithToolCall(t *testing.T) {
 	}
 	if len(reasoningBlocks) != 1 || reasoningBlocks[0]["thinking"] != "need tool result" || reasoningBlocks[0]["signature"] != "sig_1" {
 		t.Fatalf("expected reasoning blocks to be returned with tool call, got %#v", reasoningBlocks)
+	}
+}
+
+func TestResponsesHistoryReloadsPersistentToolCallRecoveryIndex(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
+	store.Save("anthropic", "resp-1", []model.CanonicalMessage{
+		{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "do not persist this prompt"}},
+		},
+		{
+			Role: "assistant",
+			ReasoningBlocks: []map[string]any{{
+				"type":      "thinking",
+				"thinking":  "need three tool results",
+				"signature": "sig_1",
+			}},
+			ToolCalls: []model.CanonicalToolCall{
+				{ID: "call_1", Type: "function", Name: "read_file", Arguments: `{"filePath":"/tmp/a"}`},
+				{ID: "call_2", Type: "function", Name: "glob", Arguments: `{"pattern":"*.go"}`},
+				{ID: "call_3", Type: "function", Name: "grep", Arguments: `{"pattern":"TODO"}`},
+			},
+		},
+	}, "scope-a")
+
+	reloaded := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
+	if got := reloaded.Load("anthropic", "resp-1"); got != nil {
+		t.Fatalf("expected full previous-response snapshot to stay memory-only, got %#v", got)
+	}
+
+	for _, want := range []struct {
+		id   string
+		name string
+	}{
+		{id: "call_1", name: "read_file"},
+		{id: "call_2", name: "glob"},
+		{id: "call_3", name: "grep"},
+	} {
+		call, reasoningBlocks, ok := reloaded.LoadToolCall("anthropic", want.id, "scope-a")
+		if !ok {
+			t.Fatalf("expected persisted tool call %s to reload", want.id)
+		}
+		if call.Name != want.name || call.ID != want.id {
+			t.Fatalf("expected persisted tool call metadata for %s, got %#v", want.id, call)
+		}
+		if len(reasoningBlocks) != 1 || reasoningBlocks[0]["thinking"] != "need three tool results" || reasoningBlocks[0]["signature"] != "sig_1" {
+			t.Fatalf("expected persisted reasoning blocks for %s, got %#v", want.id, reasoningBlocks)
+		}
+	}
+
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read persisted recovery index: %v", err)
+	}
+	if strings.Contains(string(data), "do not persist this prompt") {
+		t.Fatalf("expected recovery index not to persist prompt text, got %s", data)
+	}
+}
+
+func TestResponsesHistorySavePreservesPreviouslyPersistedToolCallRecoveryIndex(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	oldProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
+	oldProcess.Save("anthropic", "resp-old", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_old", Type: "function", Name: "read_file", Arguments: `{"filePath":"/tmp/old"}`}},
+	}}, "scope-a")
+
+	newProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
+	newProcess.Save("anthropic", "resp-new", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_new", Type: "function", Name: "glob", Arguments: `{"pattern":"*.go"}`}},
+	}}, "scope-a")
+
+	if call, _, ok := newProcess.LoadToolCall("anthropic", "call_old", "scope-a"); !ok || call.Name != "read_file" {
+		t.Fatalf("expected first save in new process to preserve old persisted tool call, got ok=%t call=%#v", ok, call)
+	}
+	if call, _, ok := newProcess.LoadToolCall("anthropic", "call_new", "scope-a"); !ok || call.Name != "glob" {
+		t.Fatalf("expected new tool call to remain indexed, got ok=%t call=%#v", ok, call)
+	}
+}
+
+func TestResponsesHistoryReloadedPersistentToolCallRecoveryIndexKeepsEvictionBound(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	oldProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
+	oldProcess.Save("anthropic", "resp-1", []model.CanonicalMessage{{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "one", Arguments: `{}`}}}}, "scope-a")
+	oldProcess.Save("anthropic", "resp-2", []model.CanonicalMessage{{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_2", Type: "function", Name: "two", Arguments: `{}`}}}}, "scope-a")
+
+	newProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
+	newProcess.Save("anthropic", "resp-3", []model.CanonicalMessage{{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_3", Type: "function", Name: "three", Arguments: `{}`}}}}, "scope-a")
+
+	if _, _, ok := newProcess.LoadToolCall("anthropic", "call_1", "scope-a"); ok {
+		t.Fatal("expected oldest persisted tool call to be evicted after reload")
+	}
+	if call, _, ok := newProcess.LoadToolCall("anthropic", "call_2", "scope-a"); !ok || call.Name != "two" {
+		t.Fatalf("expected second persisted tool call to remain, got ok=%t call=%#v", ok, call)
+	}
+	if call, _, ok := newProcess.LoadToolCall("anthropic", "call_3", "scope-a"); !ok || call.Name != "three" {
+		t.Fatalf("expected newest tool call to remain, got ok=%t call=%#v", ok, call)
 	}
 }
 

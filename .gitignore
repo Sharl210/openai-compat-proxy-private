@@ -3,6 +3,7 @@
 bin/
 providers/*.env
 providers/Cache_Info/
+providers/Responses_History/
 docs/
 tests/
 # Local worktrees
