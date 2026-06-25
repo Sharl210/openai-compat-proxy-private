@@ -450,6 +450,11 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
 		canon.Messages = recoverToolCallsForMessages(canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
 	}
+	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeResponses && providerCfg.MasqueradeTarget == config.MasqueradeTargetOpenCode {
+		if previousResponseIDFromItems(canon.ResponseInputItems) != "" {
+			canon.ResponseItemReferencesByCallID = recoverResponseItemReferencesForMessages(canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
+		}
+	}
 	applyProviderMaxOutputTokens(&canon, provider)
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)

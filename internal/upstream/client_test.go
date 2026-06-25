@@ -3639,6 +3639,100 @@ func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testin
 	}
 }
 
+func TestBuildResponsesRequestBodyPreservesPreviousResponseIDForResponsesHTTPUpstream(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model:  "gpt-5.5",
+		Stream: true,
+		ResponseInputItems: []map[string]any{{
+			preservedResponsesTopLevelFieldsKey: map[string]any{
+				"previous_response_id": "resp_456",
+				"truncation":           "auto",
+			},
+		}},
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+		PreservedTopLevelFields: map[string]any{
+			"previous_response_id": "resp_123",
+			"prompt_cache_key":     "cache-key",
+			"truncation":           "auto",
+		},
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got := payload["previous_response_id"]; got != "resp_456" {
+		t.Fatalf("expected HTTP responses upstream payload to preserve previous_response_id, got %#v", payload)
+	}
+	if got := payload["prompt_cache_key"]; got != "cache-key" {
+		t.Fatalf("expected prompt_cache_key to remain available for HTTP responses upstream, got %#v", payload)
+	}
+	if got := payload["truncation"]; got != "auto" {
+		t.Fatalf("expected truncation to remain available for HTTP responses upstream, got %#v", payload)
+	}
+}
+
+func TestBuildResponsesRequestBodyDropsPreviousResponseIDForOpenCodeMasquerade(t *testing.T) {
+	body, err := buildResponsesRequestBodyWithMasquerade(model.CanonicalRequest{
+		Model:  "gpt-5.5",
+		Stream: true,
+		ResponseItemReferencesByCallID: map[string]string{
+			"call_1": "fc_1",
+		},
+		ResponseInputItems: []map[string]any{{
+			preservedResponsesTopLevelFieldsKey: map[string]any{
+				"previous_response_id": "resp_456",
+				"truncation":           "auto",
+			},
+		}},
+		Messages: []model.CanonicalMessage{{
+			Role:       "tool",
+			ToolCallID: "call_1",
+			Parts:      []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}},
+		}},
+		PreservedTopLevelFields: map[string]any{
+			"previous_response_id": "resp_123",
+			"prompt_cache_key":     "cache-key",
+			"truncation":           "auto",
+		},
+	}, config.ResponsesToolCompatModePreserve, config.MasqueradeTargetOpenCode)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBodyWithMasquerade error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, exists := payload["previous_response_id"]; exists {
+		t.Fatalf("expected opencode masquerade responses payload to drop previous_response_id, got %#v", payload)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected item_reference plus function_call_output, got %#v", payload)
+	}
+	reference, _ := input[0].(map[string]any)
+	if reference["type"] != "item_reference" || reference["id"] != "call_1" {
+		t.Fatalf("expected item_reference call_1 before function output, got %#v", input)
+	}
+	output, _ := input[1].(map[string]any)
+	if output["type"] != "function_call_output" || output["call_id"] != "call_1" {
+		t.Fatalf("expected original function_call_output after item_reference, got %#v", input)
+	}
+	if got := payload["prompt_cache_key"]; got != "cache-key" {
+		t.Fatalf("expected prompt_cache_key to remain available for opencode masquerade responses upstream, got %#v", payload)
+	}
+	if got := payload["truncation"]; got != "auto" {
+		t.Fatalf("expected truncation to remain available for opencode masquerade responses upstream, got %#v", payload)
+	}
+}
+
 func TestPreviewRequestObservabilityForResponses(t *testing.T) {
 	preview, err := PreviewRequestObservability(model.CanonicalRequest{
 		Model:                   "gpt-5-mini",

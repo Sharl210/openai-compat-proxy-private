@@ -1091,6 +1091,9 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 	mergeResponsesPreservedTopLevelFields(payload, filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeResponses))
 	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
 	mergeResponsesPreservedTopLevelFields(payload, preservedTopLevelFields)
+	if masqueradeTarget == config.MasqueradeTargetOpenCode {
+		delete(payload, "previous_response_id")
+	}
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
 	}
@@ -1199,6 +1202,9 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 				})
 			}
 		}
+		if masqueradeTarget == config.MasqueradeTargetOpenCode {
+			input = injectResponsesItemReferences(input, req.ResponseItemReferencesByCallID)
+		}
 		payload["input"] = input
 	}
 	if len(req.Tools) > 0 {
@@ -1240,6 +1246,22 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 	return json.Marshal(payload)
 }
 
+func injectResponsesItemReferences(input []map[string]any, referencesByCallID map[string]string) []map[string]any {
+	if len(input) == 0 || len(referencesByCallID) == 0 {
+		return input
+	}
+	withReferences := make([]map[string]any, 0, len(input)+len(referencesByCallID))
+	for _, item := range input {
+		if itemType, _ := item["type"].(string); itemType == "function_call_output" {
+			callID, _ := item["call_id"].(string)
+			if strings.TrimSpace(referencesByCallID[callID]) != "" {
+				withReferences = append(withReferences, map[string]any{"type": "item_reference", "id": callID})
+			}
+		}
+		withReferences = append(withReferences, item)
+	}
+	return withReferences
+}
 func ensureCodexReasoningInclude(payload map[string]any) {
 	if payload == nil {
 		return
