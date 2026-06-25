@@ -29,6 +29,7 @@ const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 const tokenEstimatorManagerKey routeContextKey = "token-estimator-manager"
 const routeRequestEffortKey routeContextKey = "route-request-effort"
+const routeProviderSelectionEffortKey routeContextKey = "route-provider-selection-effort"
 const runtimeStoreKey routeContextKey = "runtime-store"
 const legacyRoutingModelKey routeContextKey = "legacy-routing-model"
 
@@ -191,6 +192,16 @@ func requestEffortFromRouteContext(r *http.Request) string {
 	return ""
 }
 
+func providerSelectionEffortFromRouteContext(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if value, ok := r.Context().Value(routeProviderSelectionEffortKey).(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
 func runtimeSnapshotFromRequest(r *http.Request) (*config.RuntimeSnapshot, bool) {
 	snapshot, ok := r.Context().Value(runtimeSnapshotKey).(*config.RuntimeSnapshot)
 	return snapshot, ok
@@ -297,7 +308,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, canonicalModel))
 			refreshDefaultProviderOverlayCacheFromRequest(r)
 			snapshot, _ = runtimeSnapshotFromRequest(r)
-			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelection(canonicalModel); ok {
+			if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelectionForRequestEffort(canonicalModel, providerSelectionEffortFromRouteContext(r)); ok {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
 				resolvedModelIsInternal = true
@@ -305,7 +316,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				providerID = resolvedID
 				refreshDefaultProviderOverlayCacheFromRequest(r)
 				snapshot, _ = runtimeSnapshotFromRequest(r)
-				if refreshedID, refreshedModel, refreshedOK := snapshot.ResolveDefaultProviderSelection(canonicalModel); refreshedOK {
+				if refreshedID, refreshedModel, refreshedOK := snapshot.ResolveDefaultProviderSelectionForRequestEffort(canonicalModel, providerSelectionEffortFromRouteContext(r)); refreshedOK {
 					providerID = refreshedID
 					resolvedModel = refreshedModel
 					resolvedModelIsInternal = true

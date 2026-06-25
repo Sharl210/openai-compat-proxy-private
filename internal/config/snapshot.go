@@ -323,6 +323,10 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderIDForModel(model string) (string
 }
 
 func (s *RuntimeSnapshot) resolveDefaultProviderSelectionFromTemplate(model string) (string, string, bool) {
+	return s.resolveDefaultProviderSelectionFromTemplateWithEffort(model, "")
+}
+
+func (s *RuntimeSnapshot) resolveDefaultProviderSelectionFromTemplateWithEffort(model string, requestEffort string) (string, string, bool) {
 	if s == nil || strings.TrimSpace(model) == "" {
 		return "", model, false
 	}
@@ -332,12 +336,41 @@ func (s *RuntimeSnapshot) resolveDefaultProviderSelectionFromTemplate(model stri
 			continue
 		}
 		internalModel, ok := provider.InternalModelID(model, true)
-		if !ok || !providerAllowsInternalVisibleModel(provider, internalModel, s.Config.EnableNoPromptModelSuffix) {
+		if !ok {
 			continue
 		}
-		return providerID, internalModel, true
+		if providerAllowsModelMapAlias(provider, internalModel, requestEffort) || providerAllowsInternalVisibleModel(provider, internalModel, s.Config.EnableNoPromptModelSuffix) {
+			return providerID, internalModel, true
+		}
 	}
 	return "", model, false
+}
+
+func providerAllowsModelMapAlias(provider ProviderConfig, model string, requestEffort string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" || provider.HidesModel(model) {
+		return false
+	}
+	mapped, _ := provider.resolveModelMapAliasWithRequestEffort(model, requestEffort)
+	if strings.TrimSpace(mapped) == "" || provider.HidesModel(mapped) {
+		return false
+	}
+	return true
+}
+
+func (p ProviderConfig) resolveModelMapAliasWithRequestEffort(model string, requestEffort string) (string, ModelMapEntry) {
+	model = strings.TrimSpace(model)
+	requestEffort = normalizeReasoningEffort(requestEffort)
+	if requestEffort != "" {
+		requestedModel := model
+		if base, _, ok := splitReasoningSuffix(model); ok {
+			requestedModel = base
+		}
+		if mapped, entry := p.resolveModelEntryWithOrder(requestedModel+"-"+requestEffort, true); mapped != "" {
+			return mapped, entry
+		}
+	}
+	return p.resolveModelEntryWithOrder(model, true)
 }
 
 func providerAllowsInternalVisibleModel(provider ProviderConfig, model string, enableNoPrompt bool) bool {
@@ -411,7 +444,7 @@ func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (
 	if err != nil {
 		return "", "", false
 	}
-	if internalModel, ok := provider.InternalModelID(baseModel, true); ok && providerAllowsInternalVisibleModel(provider, internalModel, s.Config.EnableNoPromptModelSuffix) {
+	if internalModel, ok := provider.InternalModelID(baseModel, true); ok && (providerAllowsModelMapAlias(provider, internalModel, "") || providerAllowsInternalVisibleModel(provider, internalModel, s.Config.EnableNoPromptModelSuffix)) {
 		return providerID, internalModel, true
 	}
 	if s.DefaultTaggedModelOwners[formatTaggedModelID(providerID, baseModel)] != providerID {
@@ -429,6 +462,10 @@ func (s *RuntimeSnapshot) ResolveTaggedDefaultProviderIDForModel(model string) (
 }
 
 func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string, string, bool) {
+	return s.ResolveDefaultProviderSelectionForRequestEffort(model, "")
+}
+
+func (s *RuntimeSnapshot) ResolveDefaultProviderSelectionForRequestEffort(model string, requestEffort string) (string, string, bool) {
 	if s == nil {
 		return "", model, false
 	}
@@ -446,11 +483,11 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 			}
 			return providerID, s.rawDefaultModelID(model), true
 		}
-		if providerID, internalModel, ok := s.resolveDefaultProviderSelectionFromTemplate(model); ok {
+		if providerID, internalModel, ok := s.resolveDefaultProviderSelectionFromTemplateWithEffort(model, requestEffort); ok {
 			return providerID, internalModel, true
 		}
 		if baseModel, ok := stripNoPromptModelSuffix(model); ok {
-			if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
+			if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelectionForRequestEffort(baseModel, requestEffort); resolved {
 				provider, err := s.Config.ProviderByID(owner)
 				if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(baseModel) {
 					return owner, resolvedModel, true
@@ -462,11 +499,11 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelection(model string) (string,
 	if owner, ok := s.DefaultModelOwners[model]; ok {
 		return owner, s.rawDefaultModelID(model), true
 	}
-	if providerID, internalModel, ok := s.resolveDefaultProviderSelectionFromTemplate(model); ok {
+	if providerID, internalModel, ok := s.resolveDefaultProviderSelectionFromTemplateWithEffort(model, requestEffort); ok {
 		return providerID, internalModel, true
 	}
 	if baseModel, ok := stripNoPromptModelSuffix(model); ok {
-		if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelection(baseModel); resolved {
+		if owner, resolvedModel, resolved := s.ResolveDefaultProviderSelectionForRequestEffort(baseModel, requestEffort); resolved {
 			provider, err := s.Config.ProviderByID(owner)
 			if err == nil && provider.EffectiveNoPromptModelSuffix(s.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(baseModel) {
 				return owner, resolvedModel, true

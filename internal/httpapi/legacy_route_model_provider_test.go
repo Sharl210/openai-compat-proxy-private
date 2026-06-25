@@ -191,7 +191,7 @@ func TestLegacyChatRouteV1ModelMapTargetPassesSingleDefaultProviderModelAllowanc
 	}
 }
 
-func TestLegacyResponsesRouteRejectsModelOutsideVisibleModelsList(t *testing.T) {
+func TestLegacyResponsesRouteAllowsModelMapHitOutsideVisibleModelsList(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -204,11 +204,11 @@ func TestLegacyResponsesRouteRejectsModelOutsideVisibleModelsList(t *testing.T) 
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected regex-only model outside visible list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected MODEL_MAP hit outside visible list to be accepted, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit for model outside visible list, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	if alpha.Hits() != 1 || beta.Hits() != 0 {
+		t.Fatalf("expected only alpha upstream hit for MODEL_MAP hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
 	}
 }
 
@@ -327,7 +327,7 @@ func TestLegacyResponsesRouteTaggedVisibleModelChoosesTaggedProvider(t *testing.
 	}
 }
 
-func TestLegacyResponsesRouteRejectsTaggedModelOutsideVisibleModelsList(t *testing.T) {
+func TestLegacyResponsesRouteAllowsTaggedModelMapHitOutsideVisibleModelsList(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -342,11 +342,11 @@ func TestLegacyResponsesRouteRejectsTaggedModelOutsideVisibleModelsList(t *testi
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected tagged regex-only model outside visible list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected tagged MODEL_MAP hit outside visible list to be accepted, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit for tagged model outside visible list, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	if alpha.Hits() != 1 || beta.Hits() != 0 {
+		t.Fatalf("expected only alpha upstream hit for tagged MODEL_MAP hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
 	}
 }
 
@@ -723,7 +723,7 @@ func TestExplicitProviderResponsesModelList429SurfacesUpstreamError(t *testing.T
 	}
 }
 
-func TestLegacyResponsesRouteRejectsUntaggedOverlappingModelWhenTagModeEnabled(t *testing.T) {
+func TestLegacyResponsesRouteAllowsUntaggedModelMapHitWhenTagModeEnabled(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -741,11 +741,11 @@ func TestLegacyResponsesRouteRejectsUntaggedOverlappingModelWhenTagModeEnabled(t
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected untagged overlapping model to be rejected in tag mode, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected untagged MODEL_MAP hit to be accepted in tag mode, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit for ambiguous untagged model, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	if alpha.Hits() != 1 || beta.Hits() != 0 {
+		t.Fatalf("expected first matching provider to handle untagged MODEL_MAP hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
 	}
 }
 

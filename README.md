@@ -486,12 +486,13 @@ scoped 覆写的匹配规则：
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 翻译成 Anthropic 合法请求体字段 `thinking` / `output_config`，默认 `true`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。这个开关为 `false` 时，代理不做 Anthropic 风格转换，而是把客户端侧 `reasoning` / `reasoning_effort` 原样透传给上游；如果上游不兼容，应由上游明确返回错误，代理不会静默丢弃推理参数。内部档位是 `none/minimal/low/medium/high/xhigh/max`：`none` 关闭 thinking；旧式 manual thinking 会按 `ANTHROPIC_MAX_THINKING_BUDGET` 动态分配预算，并被 `max_tokens - 1` 夹紧；Claude adaptive thinking 原生支持 `max`，所以 `max` 会保留为 `output_config.effort=max`，而发往 OpenAI 风格上游时会降级成 `xhigh`。
 - `ANTHROPIC_MAX_THINKING_BUDGET`：控制 manual Anthropic `thinking.budget_tokens` 的最高预算，根级默认 `32000`，provider 留空继承、显式设置覆盖。Anthropic 官方只约束 `budget_tokens >= 1024` 且普通 manual thinking 下必须小于 `max_tokens`，没有公布全局独立最大值；`32000` 是通用工程默认值，不是官方 hard cap。举例：默认 32000 时，`minimal/low/medium/high/xhigh/max` 的 manual 预算分别约为 `2000/4000/8000/16000/32000/32000`，如果请求 `max_tokens=12000`，最终预算会被夹到 `11999`。
 
-当前实现里，**请求准入会遵循代理实际对外返回的 `/models` 列表**：
+当前实现里，**请求准入默认遵循代理实际对外返回的 `/models` 列表，但 provider 级 `MODEL_MAP` 命中是请求时 alias 例外**：
 
 - 默认分组 bare `/v1/*` 只允许请求当前 bare `/v1/models` 里可见的模型
 - 显式 `/{providerId}/v1/*` 也只允许请求该 provider 自己 `/models` 列表里可见的模型
 - 不在对应 `/models` 列表里的模型，请求会直接返回 `400 invalid_model`
-- `MODEL_MAP` 不是 `/models` 展示来源。举例：`MODEL_MAP=client-gpt:gpt-5.5` 只让请求 `client-gpt` 映射到上游 `gpt-5.5`；如果没有 `MANUAL_MODELS=client-gpt` 或上游 `/models` 自己返回 `client-gpt`，默认分组和显式 provider 的 `/models` 都不会显示这个 alias。
+- `MODEL_MAP` 不是 `/models` 展示来源，但只要 provider 级 `MODEL_MAP` 最终实际命中，请求就不会因为 source 不在 `/models` 里而被拦截。完整 MODEL_MAP 能力都适用，包括 `#re:` source、source reasoning suffix、请求体显式 reasoning 参数的等效命中，以及 `-noprompt` 与 suffix 的叠加。举例：`MODEL_MAP=client-gpt:gpt-5.5` 会允许客户端请求 `client-gpt` 并映射到上游 `gpt-5.5`；`MODEL_MAP=client-gpt-high:upstream-priority` 会允许 `model=client-gpt` + `reasoning.effort=high` 列表外命中；`MODEL_MAP=#re:client-(.*):upstream-$1` 也会允许 `client-xxx` 列表外命中。
+- 这类 alias 的 target 可以不出现在 `/models`，因为它是管理员显式配置的上游目标；但如果 target 被 `HIDDEN_MODELS` 命中，alias 也会被拒绝。例如 `MODEL_MAP=client-gpt:secret-model` + `HIDDEN_MODELS=secret-model` 时，请求 `client-gpt` 会返回 `400 invalid_model`。
 - suffix 变体是一个例外：只要 `ENABLE_REASONING_EFFORT_SUFFIX=true`、base model 已允许请求，且该 suffix 变体没有被 `HIDDEN_MODELS` 显式隐藏，客户端就可以直接请求 `model-high` / `model-none` 这类模型；`EXPOSE_REASONING_SUFFIX_MODELS=false` 只表示这些 suffix 变体不出现在 `/models` 里
 - `MODEL_MAP` 显式 suffix source 优先于 base source。举例：`MODEL_MAP=client-gpt-high:upstream-priority,client-gpt:upstream-base` 且请求 `model=client-gpt` + `reasoning.effort=high` 时，会先合成 `client-gpt-high` 命中第一条，发往 `upstream-priority`。
 - `MODEL_MAP` 的 source suffix 等效只作用于映射阶段，不改变模型列表。举例：`MODEL_MAP=client-gpt-high:upstream-gpt` 不会让 `/models` 出现 `client-gpt-high`；如果要展示它，仍要写 `MANUAL_MODELS=client-gpt-high`。

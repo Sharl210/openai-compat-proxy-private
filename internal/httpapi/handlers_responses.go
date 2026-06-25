@@ -352,6 +352,10 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
+	selectionEffort := clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false)
+	if selectionEffort != "" {
+		*r = *r.Clone(context.WithValue(r.Context(), routeProviderSelectionEffortKey, selectionEffort))
+	}
 	provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 	if !ok {
 		if hasNoPromptModelSuffix(canon.Model) {
@@ -410,6 +414,8 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
 		return nil, false
 	}
+	clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
+	*r = *r.Clone(context.WithValue(r.Context(), routeRequestEffortKey, clientReasoningEffort))
 	if err := ensureProviderModelAllowed(r.Context(), r, provider, providerCfg, clientModel, authorization); err != nil {
 		writeModelAllowanceError(w, err)
 		return nil, false
@@ -417,8 +423,6 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 	clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
-	clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
-	*r = *r.Clone(context.WithValue(r.Context(), routeRequestEffortKey, clientReasoningEffort))
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 		canon.IncludeUsage = true
 	}

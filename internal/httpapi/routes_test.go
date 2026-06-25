@@ -314,7 +314,7 @@ func TestLegacyImageRouteRefreshesDefaultProviderSelectionAfterModelChange(t *te
 	_ = server
 }
 
-func TestProviderSelectionForLegacyModelMapAliasRequiresVisibleModel(t *testing.T) {
+func TestProviderSelectionForLegacyModelMapAliasRoutesWithoutVisibleModel(t *testing.T) {
 	store := config.NewStaticRuntimeStore(config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
@@ -333,17 +333,20 @@ func TestProviderSelectionForLegacyModelMapAliasRequiresVisibleModel(t *testing.
 	}
 	req := httptest.NewRequest("POST", "/v1/responses", nil)
 	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
-	_, _, _, _, ok, err := providerSelectionForModelRequest(req, "client-alias")
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "client-alias")
 	if err != nil {
 		t.Fatalf("expected provider selection without error, got %v", err)
 	}
-	if ok {
-		t.Fatalf("expected hidden MODEL_MAP alias provider selection to fail until the model is added manually")
+	if !ok {
+		t.Fatalf("expected static MODEL_MAP alias provider selection to succeed without adding it to visible models")
+	}
+	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "client-alias" {
+		t.Fatalf("expected openai/client-alias selection before provider mapping, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
 	}
 	_ = server
 }
 
-func TestProviderSelectionForTaggedLegacyModelMapAliasRequiresVisibleModel(t *testing.T) {
+func TestProviderSelectionForTaggedLegacyModelMapAliasRoutesWithoutVisibleModel(t *testing.T) {
 	store := config.NewStaticRuntimeStore(config.Config{
 		DefaultProvider:                   "openai",
 		EnableLegacyV1Routes:              true,
@@ -363,12 +366,15 @@ func TestProviderSelectionForTaggedLegacyModelMapAliasRequiresVisibleModel(t *te
 	}
 	req := httptest.NewRequest("POST", "/v1/responses", nil)
 	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), store.Active()))
-	_, _, _, _, ok, err := providerSelectionForModelRequest(req, "[openai]client-alias")
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "[openai]client-alias")
 	if err != nil {
 		t.Fatalf("expected provider selection without error, got %v", err)
 	}
-	if ok {
-		t.Fatalf("expected hidden tagged MODEL_MAP alias provider selection to fail until the model is added manually")
+	if !ok {
+		t.Fatalf("expected tagged static MODEL_MAP alias provider selection to succeed without adding it to visible models")
+	}
+	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "client-alias" {
+		t.Fatalf("expected openai/client-alias selection before provider mapping, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
 	}
 	_ = server
 }

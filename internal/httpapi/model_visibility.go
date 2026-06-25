@@ -61,6 +61,9 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		}
 		return nil
 	}
+	if providerAllowsModelMapAliasForVisibleSet(provider, requestedModel, requestEffortFromRouteContext(r), allowed) {
+		return nil
+	}
 	if baseWithoutNoPrompt, ok := stripNoPromptModelSuffix(requestedModel); ok && providerCfg.EnableNoPromptModelSuffix {
 		if _, exists := allowed[baseWithoutNoPrompt]; exists && !provider.HidesModel(requestedModel) {
 			return nil
@@ -77,6 +80,59 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		}
 	}
 	return &modelAllowanceError{status: http.StatusBadRequest, code: "invalid_model", message: "requested model is not in models list"}
+}
+
+func providerAllowsModelMapAliasForVisibleSet(provider config.ProviderConfig, model string, requestEffort string, _ map[string]struct{}) bool {
+	model = strings.TrimSpace(model)
+	if model == "" || provider.HidesModel(model) {
+		return false
+	}
+	for _, candidate := range providerStaticModelMapAliasCandidates(model, requestEffort, provider.EnableReasoningEffortSuffix || provider.HasManualReasonSuffixForModel(model)) {
+		for i := len(provider.ModelMap) - 1; i >= 0; i-- {
+			entry := provider.ModelMap[i]
+			mapped := strings.TrimSpace(entry.Resolve(candidate))
+			if mapped == "" {
+				continue
+			}
+			return !provider.HidesModel(mapped)
+		}
+	}
+	return false
+}
+
+func providerStaticModelMapAliasCandidates(model string, requestEffort string, enableClientSuffix bool) []string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	requestEffort = strings.TrimSpace(requestEffort)
+	candidates := []string{}
+	seen := map[string]struct{}{}
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	if requestEffort != "" {
+		if baseModel, _, ok := reasoning.SplitSuffix(model); ok && enableClientSuffix {
+			add(baseModel + "-" + requestEffort)
+		} else {
+			add(model + "-" + requestEffort)
+		}
+	}
+	add(model)
+	if enableClientSuffix {
+		if baseModel, _, ok := reasoning.SplitSuffix(model); ok {
+			add(baseModel)
+		}
+	}
+	return candidates
 }
 
 func bypassProviderModelAllowanceForRequest(r *http.Request) bool {
