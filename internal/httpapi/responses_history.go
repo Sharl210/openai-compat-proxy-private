@@ -413,6 +413,27 @@ func recoverToolCallsForMessages(messages []model.CanonicalMessage, providerID s
 	return recovered
 }
 
+func recoverResponseItemReferencesForMessages(messages []model.CanonicalMessage, providerID string, scopes ...string) map[string]string {
+	if len(messages) == 0 || providerID == "" || globalResponsesHistory == nil {
+		return nil
+	}
+	references := map[string]string{}
+	for _, msg := range messages {
+		if msg.Role != "tool" || msg.ToolCallID == "" {
+			continue
+		}
+		call, _, ok := globalResponsesHistory.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		if !ok || strings.TrimSpace(call.ResponseItemID) == "" {
+			continue
+		}
+		references[msg.ToolCallID] = strings.TrimSpace(call.ResponseItemID)
+	}
+	if len(references) == 0 {
+		return nil
+	}
+	return references
+}
+
 func currentToolCallIDs(messages []model.CanonicalMessage) map[string]bool {
 	ids := map[string]bool{}
 	for _, msg := range messages {
@@ -445,7 +466,7 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 		if callID == "" {
 			callID = call.ID
 		}
-		toolCalls = append(toolCalls, model.CanonicalToolCall{ID: callID, Type: "function", Name: call.Name, Arguments: call.Arguments})
+		toolCalls = append(toolCalls, model.CanonicalToolCall{ID: callID, ResponseItemID: call.ID, Type: "function", Name: call.Name, Arguments: call.Arguments})
 	}
 	reasoningBlocks := cloneReasoningBlocks(result.ReasoningBlocks)
 	if len(parts) == 0 && len(toolCalls) == 0 && len(reasoningBlocks) == 0 {

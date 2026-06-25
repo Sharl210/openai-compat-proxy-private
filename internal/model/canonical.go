@@ -1,30 +1,31 @@
 package model
 
 type CanonicalRequest struct {
-	Model                       string
-	Stream                      bool
-	PreservedTopLevelFields     map[string]any
-	IncludeUsage                bool
-	ResponseStore               *bool
-	ResponseInclude             []string
-	Instructions                string
-	InstructionParts            []CanonicalContentPart
-	ResponseInputItems          []map[string]any
-	Messages                    []CanonicalMessage
-	Temperature                 *float64
-	TopP                        *float64
-	MaxOutputTokens             *int
-	OmitMaxOutputTokens         bool
-	Stop                        []string
-	Tools                       []CanonicalTool
-	ToolChoice                  CanonicalToolChoice
-	Reasoning                   *CanonicalReasoning
-	PassThroughRawReasoning     bool
-	RequestID                   string
-	AuthMode                    string
-	SkipProviderSystemPrompt    bool
-	HasSyntheticReasoningReplay bool
-	ClaudeMetadata              *CanonicalClaudeMetadata
+	Model                          string
+	Stream                         bool
+	PreservedTopLevelFields        map[string]any
+	IncludeUsage                   bool
+	ResponseStore                  *bool
+	ResponseInclude                []string
+	Instructions                   string
+	InstructionParts               []CanonicalContentPart
+	ResponseInputItems             []map[string]any
+	ResponseItemReferencesByCallID map[string]string
+	Messages                       []CanonicalMessage
+	Temperature                    *float64
+	TopP                           *float64
+	MaxOutputTokens                *int
+	OmitMaxOutputTokens            bool
+	Stop                           []string
+	Tools                          []CanonicalTool
+	ToolChoice                     CanonicalToolChoice
+	Reasoning                      *CanonicalReasoning
+	PassThroughRawReasoning        bool
+	RequestID                      string
+	AuthMode                       string
+	SkipProviderSystemPrompt       bool
+	HasSyntheticReasoningReplay    bool
+	ClaudeMetadata                 *CanonicalClaudeMetadata
 }
 
 type CanonicalClaudeMetadata struct {
@@ -54,10 +55,11 @@ type CanonicalContentBlock struct {
 }
 
 type CanonicalToolCall struct {
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
+	ID             string
+	ResponseItemID string
+	Type           string
+	Name           string
+	Arguments      string
 }
 
 type CanonicalContentPart struct {

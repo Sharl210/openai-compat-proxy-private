@@ -70,21 +70,46 @@ func TestResponsesHistoryLoadToolCallByCallIDReturnsClone(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 2}
 	store.Save("anthropic", "resp-1", []model.CanonicalMessage{{
 		Role:      "assistant",
-		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "run_in_terminal", Arguments: `{"cmd":"pwd"}`}},
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", ResponseItemID: "fc_1", Type: "function", Name: "run_in_terminal", Arguments: `{"cmd":"pwd"}`}},
 	}})
 
 	loaded, _, ok := store.LoadToolCall("anthropic", "call_1")
 	if !ok {
 		t.Fatal("expected tool call to be indexed by call_id")
 	}
-	if loaded.ID != "call_1" || loaded.Name != "run_in_terminal" || loaded.Arguments != `{"cmd":"pwd"}` {
+	if loaded.ID != "call_1" || loaded.ResponseItemID != "fc_1" || loaded.Name != "run_in_terminal" || loaded.Arguments != `{"cmd":"pwd"}` {
 		t.Fatalf("expected stored tool call metadata, got %#v", loaded)
 	}
 
 	loaded.Name = "mutated"
+	loaded.ResponseItemID = "mutated"
 	reloaded, _, ok := store.LoadToolCall("anthropic", "call_1")
-	if !ok || reloaded.Name != "run_in_terminal" {
+	if !ok || reloaded.Name != "run_in_terminal" || reloaded.ResponseItemID != "fc_1" {
 		t.Fatalf("expected tool call lookup to return a clone, got ok=%t call=%#v", ok, reloaded)
+	}
+}
+
+func TestRecoverResponseItemReferencesForMessagesUsesScopedToolCallIndex(t *testing.T) {
+	previous := globalResponsesHistory
+	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2}
+	t.Cleanup(func() { globalResponsesHistory = previous })
+
+	globalResponsesHistory.Save("codex-my", "resp-1", []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", ResponseItemID: "fc_1", Type: "function", Name: "bash", Arguments: `{}`}},
+	}}, "scope-a")
+
+	references := recoverResponseItemReferencesForMessages([]model.CanonicalMessage{{
+		Role:       "tool",
+		ToolCallID: "call_1",
+		Parts:      []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}},
+	}}, "codex-my", "scope-a")
+
+	if references["call_1"] != "fc_1" {
+		t.Fatalf("expected call_1 to resolve item_reference fc_1, got %#v", references)
+	}
+	if references["missing"] != "" {
+		t.Fatalf("expected only known calls to be mapped, got %#v", references)
 	}
 }
 
@@ -194,7 +219,7 @@ func TestResponsesHistoryReloadsPersistentToolCallRecoveryIndex(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}
 	store.Save("anthropic", "resp-1", []model.CanonicalMessage{
 		{
-			Role: "user",
+			Role:  "user",
 			Parts: []model.CanonicalContentPart{{Type: "text", Text: "do not persist this prompt"}},
 		},
 		{
@@ -538,7 +563,7 @@ func TestAssistantHistoryMessagesFromResultKeepsToolCalls(t *testing.T) {
 		t.Fatalf("expected tool call to be preserved, got %#v", messages[0])
 	}
 	call := messages[0].ToolCalls[0]
-	if call.ID != "call_1" || call.Name != "search_web" || call.Arguments != `{"query":"weather"}` {
+	if call.ID != "call_1" || call.ResponseItemID != "fc_1" || call.Name != "search_web" || call.Arguments != `{"query":"weather"}` {
 		t.Fatalf("expected call_1/search_web tool call preserved, got %#v", call)
 	}
 }
