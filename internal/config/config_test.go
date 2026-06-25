@@ -638,9 +638,9 @@ func TestDefaultFirstByteTimeoutIsThirtyMinutes(t *testing.T) {
 	}
 }
 
-func TestDefaultStreamOpenTimeoutIsThirtySeconds(t *testing.T) {
-	if got := Default().StreamOpenTimeout; got != 30*time.Second {
-		t.Fatalf("expected default StreamOpenTimeout 30s, got %v", got)
+func TestDefaultStreamOpenTimeoutIsSixMinutes(t *testing.T) {
+	if got := Default().StreamOpenTimeout; got != 6*time.Minute {
+		t.Fatalf("expected default StreamOpenTimeout 6m, got %v", got)
 	}
 }
 

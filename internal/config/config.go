@@ -70,7 +70,7 @@ func Default() Config {
 		LogEnable:                      true,
 		ConnectTimeout:                 30 * time.Second,
 		FirstByteTimeout:               30 * time.Minute,
-		StreamOpenTimeout:              30 * time.Second,
+		StreamOpenTimeout:              6 * time.Minute,
 		IdleTimeout:                    3 * time.Minute,
 		TotalTimeout:                   time.Hour,
 		UpstreamRetryCount:             DefaultUpstreamRetryCount,
