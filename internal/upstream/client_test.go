@@ -2985,6 +2985,42 @@ func TestApplyUpstreamHeadersCodexMasqueradeUsesLatestFingerprint(t *testing.T) 
 	if got := req.Header.Get("x-openai-internal-codex-residency"); got != "us" {
 		t.Fatalf("expected codex residency header, got %q", got)
 	}
+	if got := req.Header.Get("x-codex-window-id"); !validUUIDForClientTest(got) {
+		t.Fatalf("expected codex engine fingerprint x-codex-window-id UUID, got %q", got)
+	}
+}
+
+func TestApplyUpstreamHeadersCodexMasqueradeAddsEngineFingerprintToOpenAIEndpoints(t *testing.T) {
+	for _, endpointType := range []string{config.UpstreamEndpointTypeResponses, config.UpstreamEndpointTypeChat} {
+		t.Run(endpointType, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			applyUpstreamHeaders(req, endpointType, "Bearer key", "", "", "", config.MasqueradeTargetCodex, "")
+
+			if got := req.Header.Get("User-Agent"); !strings.HasPrefix(got, "codex_cli_rs/") {
+				t.Fatalf("expected strict official codex UA prefix, got %q", got)
+			}
+			if got := req.Header.Get("x-codex-window-id"); !validUUIDForClientTest(got) {
+				t.Fatalf("expected codex engine fingerprint x-codex-window-id UUID, got %q", got)
+			}
+		})
+	}
+}
+
+func TestApplyUpstreamHeadersCodexMasqueradeDoesNotLeakCodexFingerprintToAnthropicEndpoint(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/messages", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeAnthropic, "Bearer key", "", "", "", config.MasqueradeTargetCodex, "")
+
+	if got := req.Header.Get("x-codex-window-id"); got != "" {
+		t.Fatalf("expected anthropic endpoint not to receive codex engine fingerprint header, got %q", got)
+	}
 }
 
 func TestApplyUpstreamHeadersMasqueradeUsesCustomClientVersion(t *testing.T) {
@@ -3025,6 +3061,25 @@ func TestApplyUpstreamHeadersExplicitUserAgentOverridesMasqueradeGeneratedUserAg
 
 	if got := req.Header.Get("User-Agent"); got != "explicit-client/1.2.3" {
 		t.Fatalf("expected explicit user agent to override masquerade UA, got %q", got)
+	}
+}
+
+func TestApplyUpstreamHeadersExplicitUserAgentKeepsCodexFingerprint(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	applyUpstreamHeaders(req, config.UpstreamEndpointTypeResponses, "Bearer key", "", "", "explicit-client/1.2.3", config.MasqueradeTargetCodex, "")
+
+	if got := req.Header.Get("User-Agent"); got != "explicit-client/1.2.3" {
+		t.Fatalf("expected explicit user agent to override generated codex UA, got %q", got)
+	}
+	if got := req.Header.Get("originator"); got != "codex_cli_rs" {
+		t.Fatalf("expected codex originator to remain injected, got %q", got)
+	}
+	if got := req.Header.Get("x-codex-window-id"); !validUUIDForClientTest(got) {
+		t.Fatalf("expected codex engine fingerprint x-codex-window-id UUID, got %q", got)
 	}
 }
 

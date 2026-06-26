@@ -152,6 +152,9 @@ func applyUpstreamHeaders(httpReq *http.Request, endpointType string, authorizat
 		httpReq.Header.Set("User-Agent", EffectiveMasqueradeUserAgent(masqueradeTarget, masqueradeClientVersion))
 		httpReq.Header.Set("originator", "codex_cli_rs")
 		httpReq.Header.Set("x-openai-internal-codex-residency", "us")
+		if normalizeEndpointType(endpointType) != config.UpstreamEndpointTypeAnthropic {
+			httpReq.Header.Set("x-codex-window-id", newUUIDString())
+		}
 	case config.MasqueradeTargetNone:
 		// no-op：不注入任何伪装 header
 	}
