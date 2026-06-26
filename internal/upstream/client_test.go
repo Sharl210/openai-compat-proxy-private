@@ -4068,8 +4068,12 @@ func TestBuildAnthropicRequestBodyInjectsClaudeSystemPrompt(t *testing.T) {
 		t.Fatalf("expected injected claude system prompt block type text, got %#v", payload)
 	}
 	marker, _ := system[1].(map[string]any)
-	if got, _ := marker["text"].(string); !strings.Contains(got, "x-anthropic-billing-header") || !strings.Contains(got, "cc_entrypoint=cli") {
+	markerText, _ := marker["text"].(string)
+	if !strings.HasPrefix(markerText, "x-anthropic-billing-header: cc_version=") || !strings.Contains(markerText, "; cc_entrypoint=cli;") {
 		t.Fatalf("expected billing marker block to be present, got %#v", payload["system"])
+	}
+	if strings.Contains(markerText, "cch=") {
+		t.Fatalf("expected billing marker block to match new Claude Code CLI without cch signature, got %q", markerText)
 	}
 	if got, _ := marker["type"].(string); got != "text" {
 		t.Fatalf("expected billing marker block type text, got %#v", payload)
@@ -4107,8 +4111,12 @@ func TestBuildAnthropicRequestBodyClaudeSystemPromptPreservesExistingInstruction
 	if got, _ := first["text"].(string); got != claudeCodeSystemPrompt {
 		t.Fatalf("expected first system block to be claude prompt, got %#v", payload["system"])
 	}
-	if got, _ := second["text"].(string); !strings.Contains(got, "x-anthropic-billing-header") || !strings.Contains(got, "cc_entrypoint=cli") {
+	markerText, _ := second["text"].(string)
+	if !strings.HasPrefix(markerText, "x-anthropic-billing-header: cc_version=") || !strings.Contains(markerText, "; cc_entrypoint=cli;") {
 		t.Fatalf("expected second system block to be billing marker, got %#v", payload["system"])
+	}
+	if strings.Contains(markerText, "cch=") {
+		t.Fatalf("expected second system block to match new Claude Code CLI without cch signature, got %q", markerText)
 	}
 	if got, _ := third["text"].(string); got != "project-specific system" {
 		t.Fatalf("expected third system block to preserve existing instructions, got %#v", payload["system"])
@@ -4159,8 +4167,11 @@ func TestBuildAnthropicRequestBodyClaudeMasqueradeAddsSub2APIBillingSystemMarker
 		t.Fatalf("expected billing marker block to be text, got %#v", payload["system"])
 	}
 	markerText, _ := marker["text"].(string)
-	if !strings.Contains(markerText, "x-anthropic-billing-header") || !strings.Contains(markerText, "cc_entrypoint=cli") {
+	if !strings.HasPrefix(markerText, "x-anthropic-billing-header: cc_version=") || !strings.Contains(markerText, "; cc_entrypoint=cli;") {
 		t.Fatalf("expected billing marker text to include Claude Code billing marker, got %#v", payload["system"])
+	}
+	if strings.Contains(markerText, "cch=") {
+		t.Fatalf("expected billing marker text to match new Claude Code CLI without cch signature, got %q", markerText)
 	}
 	instruction, _ := system[2].(map[string]any)
 	if got, _ := instruction["text"].(string); got != "project instruction" {
