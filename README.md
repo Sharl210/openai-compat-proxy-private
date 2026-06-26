@@ -583,8 +583,8 @@ tools prompt
 | 值 | 作用 |
 |---|---|
 | `opencode` | 注入 OpenCode 风格 `User-Agent` + `originator` |
-| `claude` | 注入 Claude Code 风格 `User-Agent`、`X-App`、完整 `anthropic-beta`、`X-Stainless-*`，默认同时注入 `metadata.user_id` 和 system billing marker 以通过 sub2api Claude Code 检测 |
-| `codex` | 注入 Codex CLI 风格 `User-Agent`、`originator`、residency header；当请求带 reasoning 时自动补 `include=reasoning.encrypted_content` |
+| `claude` | 注入 Claude Code 风格 `User-Agent`、`X-App`、完整 `anthropic-beta`、`X-Stainless-*`，默认同时注入 `metadata.user_id` 和新版无 `cch` 的 system billing marker 以通过 sub2api Claude Code 检测 |
+| `codex` | 注入 Codex CLI 风格 `User-Agent`、`originator`、residency header；OpenAI 风格上游会额外补 `x-codex-*` 引擎指纹头；当请求带 reasoning 时自动补 `include=reasoning.encrypted_content` |
 | `none` | 显式禁用伪装 |
 | 留空 | provider 级留空表示继承根配置 |
 
@@ -616,12 +616,16 @@ provider 级这两个字段支持：
 - **留空 = 继承根配置**
 - **显式 true / false = 覆盖根配置**
 
+Claude Code system billing marker 会按新版 CLI 形态生成，例如 `x-anthropic-billing-header: cc_version=2.1.183.0; cc_entrypoint=cli;`。代理不会再生成旧版 `cch=` 签名字段，也不会把 `cch` 当作 Claude Code 伪装的必要特征。
+
 Claude Code metadata 身份字段的规则是：
 
 - `device_id` 和 `account_uuid` 可由根级统一配置，也可由 provider 级覆盖。
 - provider 字段留空时继承根级；根级也留空时，代理按 `PROVIDER_ID` 派生稳定默认值，同一 provider 固定，不同 provider 不同。
 - `session_id` 不提供配置项，每次请求都会动态生成合法 UUID，并写入同一个上游 `metadata.user_id` JSON。
 - 伪装启用后，可通过 `X-Proxy-To-Upstream-Claude-Metadata-*` 三个透明度响应头查看最终装配值。
+
+Codex 伪装默认使用 `codex_cli_rs/` 严格前缀形式的官方 UA，并继续注入 `originator: codex_cli_rs` 与 `x-openai-internal-codex-residency: us`。当上游协议是 `responses` 或 `chat` 时，代理还会生成 `x-codex-window-id`，让请求带上 `x-codex-*` 引擎指纹痕迹；Anthropic 上游不会携带这类 Codex 专属头。
 
 > 根级和 provider 级的 `UPSTREAM_USER_AGENT` 都会优先于伪装目标对 User-Agent 的修改，但不会改变其他伪装专属头。
 
