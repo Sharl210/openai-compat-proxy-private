@@ -337,7 +337,11 @@ func (h *responseEventWriterHelper) responseOutputSnapshot() []any {
 		if item == nil {
 			continue
 		}
-		out = append(out, cloneJSONValueForResponse(item))
+		cloned := cloneJSONValueForResponse(item)
+		if itemMap, _ := cloned.(map[string]any); itemID == "msg_proxy" && stringValue(itemMap["type"]) == "message" {
+			itemMap["status"] = "completed"
+		}
+		out = append(out, cloned)
 	}
 	return out
 }
@@ -442,12 +446,6 @@ func stripStreamingTextSnapshots(event string, data map[string]any) map[string]a
 		if stringValue(item["type"]) == "message" {
 			data = cloneMap(data)
 			data["item"] = stripMessageOutputText(item)
-		}
-	case "response.completed", "response.done":
-		response, _ := data["response"].(map[string]any)
-		if response != nil {
-			data = cloneMap(data)
-			data["response"] = stripResponseOutputText(response)
 		}
 	}
 	return data

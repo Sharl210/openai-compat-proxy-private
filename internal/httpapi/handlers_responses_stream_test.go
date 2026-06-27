@@ -56,6 +56,39 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamCompletedSnapshotCarriesFinalTextForResponsesClients(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello \"}\n\n",
+		"event: response.output_text.delta\n" +
+			"data: {\"delta\":\"world\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	if !strings.Contains(body, `"status":"completed","type":"message"`) {
+		t.Fatalf("expected completed snapshot to mark assistant message completed, got %s", body)
+	}
+	if !strings.Contains(body, `"text":"hello world","type":"output_text"`) {
+		t.Fatalf("expected completed snapshot to carry final output text for clients that render from response.output, got %s", body)
+	}
+}
+
 func TestResponsesStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
 	chatResponse := `{
 		"id": "chatcmpl_json",
@@ -656,12 +689,16 @@ func TestResponsesStreamUsesUpstreamMessageLifecycleWithoutSyntheticProxyMessage
 	if strings.Count(body, `"type":"response.output_text.delta"`) != 2 {
 		t.Fatalf("expected text to be streamed only through delta events, got %s", body)
 	}
-	if strings.Contains(body, `你好，我在。`) {
-		t.Fatalf("expected completed text snapshots to be stripped from streaming responses, got %s", body)
+	if strings.Contains(body, `event: response.output_text.done
+data: {"content_index":0,"item_id":"msg_native","output_index":1,"text":"你好，我在。"`) {
+		t.Fatalf("expected intermediate output_text.done text snapshot to be stripped, got %s", body)
+	}
+	if !strings.Contains(body, `"text":"你好，我在。","type":"output_text"`) {
+		t.Fatalf("expected terminal completed snapshot to retain final text, got %s", body)
 	}
 }
 
-func TestResponsesStreamDoneStripsTextSnapshotsLikeCompleted(t *testing.T) {
+func TestResponsesStreamDoneCarriesFinalTextSnapshot(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_native", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
 		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "content_index": 0, "item_id": "msg_native", "delta": "hello"}},
@@ -671,8 +708,8 @@ func TestResponsesStreamDoneStripsTextSnapshotsLikeCompleted(t *testing.T) {
 	if strings.Contains(body, `"id":"msg_proxy"`) {
 		t.Fatalf("expected native responses done path not to synthesize msg_proxy, got %s", body)
 	}
-	if strings.Contains(body, `"text":"hello"`) {
-		t.Fatalf("expected response.done text snapshot to be stripped, got %s", body)
+	if !strings.Contains(body, `"text":"hello","type":"output_text"`) {
+		t.Fatalf("expected response.done terminal snapshot to retain final text, got %s", body)
 	}
 }
 
@@ -687,8 +724,8 @@ func TestResponsesStreamTextSnapshotStrippingPreservesToolAndReasoningItems(t *t
 		}}}},
 	)
 
-	if strings.Contains(body, `"type":"output_text","text":"hello"`) {
-		t.Fatalf("expected message output text snapshot to be stripped, got %s", body)
+	if !strings.Contains(body, `"text":"hello","type":"output_text"`) {
+		t.Fatalf("expected terminal message output text snapshot to be retained, got %s", body)
 	}
 	for _, want := range []string{`"type":"reasoning"`, `"text":"reasoning summary"`, `"type":"function_call"`, `"arguments":"{\"query\":\"hello\"}"`, `"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}`} {
 		if !strings.Contains(body, want) {
@@ -705,11 +742,8 @@ func TestResponsesStreamCompletedWithoutOutputUsesNativeMessageMetadataWithoutTe
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
 	)
 
-	if !strings.Contains(body, `"output":[{"content":[{"type":"output_text"}],"id":"msg_native","role":"assistant","status":"completed","type":"message"}]`) {
-		t.Fatalf("expected synthesized completed output to preserve native message metadata without text, got %s", body)
-	}
-	if strings.Contains(body, `"text":"hello"`) {
-		t.Fatalf("expected synthesized completed output to omit duplicate text snapshot, got %s", body)
+	if !strings.Contains(body, `"output":[{"content":[{"text":"hello","type":"output_text"}],"id":"msg_native","role":"assistant","status":"completed","type":"message"}]`) {
+		t.Fatalf("expected synthesized completed output to preserve native message metadata with final text, got %s", body)
 	}
 }
 
