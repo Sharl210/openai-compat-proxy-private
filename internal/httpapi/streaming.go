@@ -847,6 +847,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if _, ok := response["status"]; !ok {
 			response["status"] = "completed"
 		}
+		normalizeResponsesCompletedFinishReason(response)
 		if _, ok := response["output"]; !ok {
 			response["output"] = h.responseOutputSnapshot()
 		}
@@ -889,6 +890,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if _, ok := response["status"]; !ok {
 			response["status"] = "completed"
 		}
+		normalizeResponsesCompletedFinishReason(response)
 		if _, ok := response["output"]; !ok {
 			response["output"] = h.responseOutputSnapshot()
 		}
@@ -912,7 +914,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 		terminalFailure := terminalFailureFromEventData(evt.Data)
 		h.terminalFailure = terminalFailure
-		if evt.Event == "response.incomplete" {
+		if evt.Event == "response.incomplete" || (evt.Event == "error" && isContextOverflowHealthFlag(terminalFailure.HealthFlag)) {
 			evt.Event = responsesTerminalFailureEvent(terminalFailure.HealthFlag)
 			if evt.Event == "response.failed" {
 				evt.Data = responsesTerminalFailureData(evt.Event, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
@@ -1148,6 +1150,9 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 }
 
 func responsesTerminalFailureEvent(healthFlag string) string {
+	if isContextOverflowHealthFlag(healthFlag) {
+		return "response.failed"
+	}
 	switch healthFlag {
 	case "upstream_max_tokens", "upstream_length":
 		return "response.incomplete"
@@ -1157,6 +1162,7 @@ func responsesTerminalFailureEvent(healthFlag string) string {
 }
 
 func responsesTerminalFailureData(event string, requestID string, healthFlag string, message string, upstreamError map[string]any) map[string]any {
+	healthFlag, message, upstreamError = normalizeContextOverflowTerminalFailure(healthFlag, message, upstreamError)
 	data := map[string]any{
 		"type":        event,
 		"request_id":  requestID,
@@ -1335,7 +1341,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		return nil
 	}
 
-	if evt.Event == "response.incomplete" && state.terminalFailure != nil {
+	if state.terminalFailure != nil && (evt.Event == "response.incomplete" || (evt.Event == "error" && isContextOverflowHealthFlag(state.terminalFailure.HealthFlag))) {
 		evt.Event = responsesTerminalFailureEvent(state.terminalFailure.HealthFlag)
 		if evt.Event == "response.failed" {
 			evt.Data = responsesTerminalFailureData(evt.Event, stringValue(evt.Data["request_id"]), state.terminalFailure.HealthFlag, state.terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
@@ -2716,6 +2722,12 @@ func terminalFailureFromEventData(data map[string]any) *aggregate.TerminalFailur
 	message, _ := data["message"].(string)
 	errObj := upstreamErrorObjectFromEventData(data)
 	if healthFlag == "" {
+		healthFlag = stringValue(data["code"])
+	}
+	if healthFlag == "" {
+		healthFlag = stringValue(data["type"])
+	}
+	if healthFlag == "" {
 		healthFlag = stringValue(errObj["code"])
 		if healthFlag == "" {
 			healthFlag = stringValue(errObj["type"])
@@ -2730,7 +2742,87 @@ func terminalFailureFromEventData(data map[string]any) *aggregate.TerminalFailur
 	if message == "" {
 		message = "upstream response incomplete"
 	}
+	healthFlag, message, errObj = normalizeContextOverflowTerminalFailure(healthFlag, message, errObj)
 	return &aggregate.TerminalFailureError{HealthFlag: healthFlag, Message: message}
+}
+
+func normalizeResponsesCompletedFinishReason(response map[string]any) {
+	if response == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(stringValue(response["finish_reason"]))) {
+	case "end_turn":
+		response["finish_reason"] = "stop"
+	case "tool_use":
+		response["finish_reason"] = "tool_calls"
+	}
+}
+
+func normalizeContextOverflowTerminalFailure(healthFlag string, message string, upstreamError map[string]any) (string, string, map[string]any) {
+	if !isContextOverflowSignal(healthFlag, message, upstreamError) {
+		return healthFlag, message, upstreamError
+	}
+	if strings.TrimSpace(message) == "" || !isClientRecognizedContextOverflowMessage(message) {
+		message = contextOverflowMessage
+	}
+	healthFlag = "context_length_exceeded"
+	if upstreamError == nil {
+		upstreamError = map[string]any{}
+	} else {
+		upstreamError = cloneMap(upstreamError)
+	}
+	upstreamError["type"] = "invalid_request_error"
+	upstreamError["code"] = "context_length_exceeded"
+	upstreamError["message"] = message
+	if _, ok := upstreamError["param"]; !ok {
+		upstreamError["param"] = "input"
+	}
+	return healthFlag, message, upstreamError
+}
+
+func isContextOverflowSignal(healthFlag string, message string, upstreamError map[string]any) bool {
+	if isContextOverflowHealthFlag(healthFlag) || isContextOverflowHealthFlag(stringValue(upstreamError["code"])) || isContextOverflowHealthFlag(stringValue(upstreamError["type"])) {
+		return true
+	}
+	return isContextOverflowMessage(message) || isContextOverflowMessage(stringValue(upstreamError["message"]))
+}
+
+func isContextOverflowHealthFlag(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "context_length_exceeded", "context_too_large", "model_context_window_exceeded":
+		return true
+	default:
+		return false
+	}
+}
+
+func isContextOverflowMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" {
+		return false
+	}
+	return strings.Contains(message, "context_length_exceeded") ||
+		strings.Contains(message, "prompt is too long") ||
+		strings.Contains(message, "context window") ||
+		strings.Contains(message, "context length") ||
+		strings.Contains(message, "context too large") ||
+		strings.Contains(message, "too many tokens") ||
+		strings.Contains(message, "token limit") ||
+		(strings.Contains(message, "input token") && strings.Contains(message, "exceed")) ||
+		(strings.Contains(message, "reduce the length") && strings.Contains(message, "messages"))
+}
+
+func isClientRecognizedContextOverflowMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "context_length_exceeded") ||
+		strings.Contains(message, "prompt is too long") ||
+		strings.Contains(message, "exceeds the context window") ||
+		strings.Contains(message, "context window") ||
+		(strings.Contains(message, "input token count") && strings.Contains(message, "exceeds the maximum")) ||
+		strings.Contains(message, "reduce the length of the messages") ||
+		strings.Contains(message, "maximum context length") ||
+		strings.Contains(message, "too many tokens") ||
+		strings.Contains(message, "token limit")
 }
 
 func upstreamErrorObjectFromEventData(data map[string]any) map[string]any {

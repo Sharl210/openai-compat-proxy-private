@@ -763,6 +763,44 @@ func TestResponsesStreamCompletedMirrorsTopLevelUsageIntoResponseUsageForCompati
 	}
 }
 
+func TestResponsesStreamNormalizesAnthropicEndTurnFinishReasonForResponsesClients(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "done"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{
+			"response": map[string]any{"finish_reason": "end_turn"},
+		}},
+	)
+
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	if !strings.Contains(body, `"finish_reason":"stop"`) {
+		t.Fatalf("expected responses-facing finish_reason stop for Anthropic end_turn, got %s", body)
+	}
+	if strings.Contains(body, `"finish_reason":"end_turn"`) {
+		t.Fatalf("expected Anthropic end_turn not to leak to responses clients, got %s", body)
+	}
+}
+
+func TestResponsesStreamNormalizesAnthropicToolUseFinishReasonForResponsesClients(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeAnthropic,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "search_web"}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{
+			"response": map[string]any{"finish_reason": "tool_use"},
+		}},
+	)
+
+	if !strings.Contains(body, `event: response.completed`) {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	if !strings.Contains(body, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("expected responses-facing finish_reason tool_calls for Anthropic tool_use, got %s", body)
+	}
+	if strings.Contains(body, `"finish_reason":"tool_use"`) {
+		t.Fatalf("expected Anthropic tool_use not to leak to responses clients, got %s", body)
+	}
+}
+
 func TestResponsesStreamDoneMirrorsTopLevelUsageIntoResponseUsageForCompatibility(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
 		upstream.Event{Event: "response.done", Data: map[string]any{
@@ -809,6 +847,64 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 	}
 	if !strings.Contains(body, `"response":{"error"`) {
 		t.Fatalf("expected response.failed to carry a response error object after SSE start, got %s", body)
+	}
+}
+
+func TestResponsesStreamNormalizesContextTooLargeForClientCompaction(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: error\n" +
+			"data: {\"type\":\"error\",\"code\":\"context_too_large\",\"message\":\"context too large\"}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.failed`) {
+		t.Fatalf("expected context-too-large upstream error to surface as response.failed, got %s", body)
+	}
+	if !strings.Contains(body, `"code":"context_length_exceeded"`) {
+		t.Fatalf("expected client-compatible context_length_exceeded code, got %s", body)
+	}
+	if !strings.Contains(body, `prompt is too long`) || !strings.Contains(body, `context_length_exceeded`) {
+		t.Fatalf("expected client-compatible compact trigger message, got %s", body)
+	}
+}
+
+func TestResponsesStreamNormalizesTopLevelContextTooLargeCodeForClientCompaction(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: error\n" +
+			"data: {\"type\":\"error\",\"code\":\"context_too_large\",\"message\":\"request rejected\"}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: response.failed`) {
+		t.Fatalf("expected top-level context-too-large code to surface as response.failed, got %s", body)
+	}
+	if !strings.Contains(body, `"code":"context_length_exceeded"`) {
+		t.Fatalf("expected top-level context-too-large code to normalize to context_length_exceeded, got %s", body)
+	}
+	if !strings.Contains(body, `prompt is too long`) || !strings.Contains(body, `context_length_exceeded`) {
+		t.Fatalf("expected top-level context-too-large code to keep compact trigger message, got %s", body)
 	}
 }
 
