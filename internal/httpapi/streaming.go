@@ -392,6 +392,7 @@ func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map
 	itemID := stringValue(data["item_id"])
 	if itemID == "" {
 		itemID = "msg_proxy"
+		data["item_id"] = itemID
 	}
 	if !h.textItemStarted && itemID == "msg_proxy" {
 		item := map[string]any{

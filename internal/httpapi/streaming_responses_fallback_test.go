@@ -233,7 +233,7 @@ func TestResponsesStreamInjectsSyntheticReasoningForChatWithoutReasoningWhenThin
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 	proxyIdx := strings.Index(body, `"id":"rs_proxy"`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final answer","output_index":1,"type":"response.output_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final answer","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
 	if proxyIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected synthetic reasoning lifecycle and final text, got %s", body)
 	}
@@ -273,7 +273,7 @@ func TestResponsesStreamKeepsChatThinkTagsInRealReasoningBlock(t *testing.T) {
 	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
 	realReasoningIdx := strings.Index(body, `{"delta":"internal reasoning","type":"response.reasoning_summary_text.delta"}`)
 	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final answer","output_index":1,"type":"response.output_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final answer","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
 	if proxyAddedIdx == -1 || realReasoningIdx == -1 || proxyDoneIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected synthetic lifecycle, real reasoning and final text, got %s", body)
 	}
@@ -326,7 +326,7 @@ func TestResponsesStreamProgressivelyEmitsThinkReasoningBeforeClosingTag(t *test
 
 	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
 	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","output_index":1,"type":"response.output_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
 	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected progressive reasoning deltas before final text, got %s", body)
 	}
@@ -367,7 +367,7 @@ func TestResponsesStreamProgressivelyEmitsReasoningTagBeforeClosingTag(t *testin
 
 	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
 	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","output_index":1,"type":"response.output_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
 	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected progressive <reasoning> deltas before final text, got %s", body)
 	}
@@ -411,7 +411,7 @@ func TestResponsesStreamDefaultsToReasoningUntilClosingTagWhenStyleEnabled(t *te
 
 	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
 	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","output_index":1,"type":"response.output_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
 	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected implicit reasoning deltas before final text, got %s", body)
 	}
@@ -451,8 +451,8 @@ func TestResponsesStreamDoesNotReenterImplicitReasoningAfterFirstClose(t *testin
 	body := rec.Body.String()
 
 	alphaIdx := strings.Index(body, `{"delta":"alpha","type":"response.reasoning_summary_text.delta"}`)
-	finalIdx := strings.Index(body, `{"content_index":0,"delta":"final","output_index":1,"type":"response.output_text.delta"}`)
-	trailingIdx := strings.Index(body, `{"content_index":0,"delta":" trailing text","output_index":1,"type":"response.output_text.delta"}`)
+	finalIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
+	trailingIdx := strings.Index(body, `{"content_index":0,"delta":" trailing text","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
 	if alphaIdx == -1 || finalIdx == -1 || trailingIdx == -1 {
 		t.Fatalf("expected one implicit reasoning phase followed by stable output text, got %s", body)
 	}

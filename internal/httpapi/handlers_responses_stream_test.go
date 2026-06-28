@@ -54,6 +54,9 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	if !strings.Contains(body, `"type":"response.output_text.delta"`) {
 		t.Fatalf("expected output_text chunk type in stream body, got %s", body)
 	}
+	if !strings.Contains(body, `"item_id":"msg_proxy"`) {
+		t.Fatalf("expected synthetic text delta to include item_id for Responses clients, got %s", body)
+	}
 }
 
 func TestResponsesStreamCompletedSnapshotCarriesFinalTextForResponsesClients(t *testing.T) {
@@ -451,8 +454,10 @@ func TestResponsesStreamAddsIndexesToNativeOutputTextDeltaForCodex(t *testing.T)
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `{"content_index":0,"delta":"hello","output_index":1,"type":"response.output_text.delta"}`) {
-		t.Fatalf("expected output_text.delta to include output_index/content_index for Codex, got %s", body)
+	for _, want := range []string{`"type":"response.output_text.delta"`, `"delta":"hello"`, `"item_id":"msg_proxy"`, `"output_index":1`, `"content_index":0`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected output_text.delta to include %s for Responses clients, got %s", want, body)
+		}
 	}
 }
 
