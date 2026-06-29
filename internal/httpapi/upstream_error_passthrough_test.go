@@ -60,6 +60,120 @@ func TestResponsesNonStreamPassesThroughPlainTextUpstreamError(t *testing.T) {
 	}
 }
 
+func TestResponsesNonStreamReturnsRequestValidationErrorAsInvalidRequest(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("expected request validation to fail before upstream call, got %s", r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "anthropic",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"claude-sonnet-4-5",
+		"input":[{"role":"user","content":"hello"}],
+		"context_management":{"edits":[{"type":"unsupported_edit"}]}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected request validation error to return 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"invalid_request"`) || !strings.Contains(body, "unsupported context_management edit type: unsupported_edit") {
+		t.Fatalf("expected concrete invalid_request validation error, got %s", body)
+	}
+	if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"code":"upstream_timeout"`) {
+		t.Fatalf("expected validation error not to be collapsed into generic upstream error, got %s", body)
+	}
+}
+
+func TestResponsesNonStreamPreservesSpecificUpstreamJSONErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		status       int
+		body         string
+		wantContains string
+	}{
+		{
+			name:         "model not found",
+			status:       http.StatusNotFound,
+			body:         `{"error":{"message":"model not found","type":"invalid_request_error","code":"model_not_found"}}`,
+			wantContains: "model_not_found",
+		},
+		{
+			name:         "unsupported parameter",
+			status:       http.StatusBadRequest,
+			body:         `{"error":{"message":"unsupported parameter: response_format","type":"invalid_request_error","code":"unsupported_parameter"}}`,
+			wantContains: "unsupported_parameter",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/responses" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer upstream.Close()
+
+			server := NewServer(config.Config{
+				DefaultProvider:             "openai",
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{{
+					ID:                    "openai",
+					Enabled:               true,
+					UpstreamBaseURL:       upstream.URL,
+					UpstreamAPIKey:        "test-key",
+					UpstreamEndpointType:   config.UpstreamEndpointTypeResponses,
+					SupportsResponses:     true,
+					UpstreamRetryCountSet: true,
+					UpstreamRetryCount:    1,
+					UpstreamRetryDelaySet: true,
+					UpstreamRetryDelay:    10 * time.Millisecond,
+				}},
+			})
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+				"model":"gpt-5",
+				"input":[{"role":"user","content":"hello"}]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != tc.status {
+				t.Fatalf("expected upstream status %d to be preserved, got %d body=%s", tc.status, rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, tc.wantContains) {
+				t.Fatalf("expected concrete upstream error to be preserved, got %s", body)
+			}
+			if strings.Contains(body, `"code":"upstream_error"`) || strings.Contains(body, `"code":"upstream_timeout"`) {
+				t.Fatalf("expected specific upstream error not to be collapsed into generic upstream error, got %s", body)
+			}
+		})
+	}
+}
+
 func TestResponsesStreamReturnsUpstreamErrorBeforeStartingSSE(t *testing.T) {
 	var attempts atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
