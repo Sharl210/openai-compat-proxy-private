@@ -269,6 +269,59 @@ func TestSecurity_DefaultGroupAllowsModelMapAliasFromExplicitReasoningEffortOuts
 	}
 }
 
+func TestSecurity_DefaultGroupRejectsNoPromptModelMapAliasWithoutReasoningButAllowsWithReasoning(t *testing.T) {
+	upstream, responsesHits, seenModel := newModelVisibilityAliasUpstream(t)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		EnableNoPromptModelSuffix:   true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                       "openai",
+			Enabled:                  true,
+			UpstreamBaseURL:          upstream.URL,
+			UpstreamAPIKey:           "test-key",
+			UpstreamEndpointType:     config.UpstreamEndpointTypeResponses,
+			SupportsResponses:        true,
+			SupportsModels:           true,
+			EnableReasoningEffortSuffix: true,
+			ModelMap: []config.ModelMapEntry{
+				config.NewModelMapEntry("client-gpt-high", "upstream-priority"),
+			},
+			ManualModels: []string{"listed-model"},
+		}},
+	})
+
+	noReasonReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"client-gpt-noprompt","input":"hello"}`))
+	noReasonReq.Header.Set("Content-Type", "application/json")
+	noReasonRec := httptest.NewRecorder()
+	server.ServeHTTP(noReasonRec, noReasonReq)
+
+	if noReasonRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected noprompt alias without reasoning to be rejected by visible-set logic, got %d body=%s", noReasonRec.Code, noReasonRec.Body.String())
+	}
+	if !strings.Contains(noReasonRec.Body.String(), "invalid_model") {
+		t.Fatalf("expected invalid_model without reasoning, got %s", noReasonRec.Body.String())
+	}
+
+	reasonReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"client-gpt-noprompt","input":"hello","reasoning":{"effort":"high"}}`))
+	reasonReq.Header.Set("Content-Type", "application/json")
+	reasonRec := httptest.NewRecorder()
+	server.ServeHTTP(reasonRec, reasonReq)
+
+	if reasonRec.Code != http.StatusOK {
+		t.Fatalf("expected noprompt alias with reasoning to be accepted, got %d body=%s", reasonRec.Code, reasonRec.Body.String())
+	}
+	if responsesHits.Load() != 1 {
+		t.Fatalf("expected one upstream responses hit after allowing reasoning case, got %d", responsesHits.Load())
+	}
+	if gotModel := seenModel(); gotModel != "upstream-priority" {
+		t.Fatalf("expected upstream request model upstream-priority, got %q", gotModel)
+	}
+}
+
 func TestSecurity_DefaultGroupAllowsModelMapAliasWithNoPromptSuffixOutsideVisibleModels(t *testing.T) {
 	upstream, responsesHits, seenModel := newModelVisibilityAliasUpstream(t)
 	defer upstream.Close()
@@ -308,6 +361,46 @@ func TestSecurity_DefaultGroupAllowsModelMapAliasWithNoPromptSuffixOutsideVisibl
 	}
 	if gotModel := seenModel(); gotModel != "upstream-priority" {
 		t.Fatalf("expected upstream request model upstream-priority, got %q", gotModel)
+	}
+}
+
+func TestSecurity_DefaultGroupAllowsBaseNoPromptModelWithoutReasoningOutsideVisibleModels(t *testing.T) {
+	upstream, responsesHits, seenModel := newModelVisibilityAliasUpstream(t)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		EnableNoPromptModelSuffix:   true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"gpt-5.4-mini"},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4-mini-noprompt","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected base noprompt model without reasoning to be accepted, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get(headerClientToProxyNoPrompt) != "true" {
+		t.Fatalf("expected noprompt header true, got %q", rec.Header().Get(headerClientToProxyNoPrompt))
+	}
+	if responsesHits.Load() != 1 {
+		t.Fatalf("expected one upstream responses hit, got %d", responsesHits.Load())
+	}
+	if gotModel := seenModel(); gotModel != "gpt-5.4-mini" {
+		t.Fatalf("expected upstream request model gpt-5.4-mini, got %q", gotModel)
 	}
 }
 

@@ -361,6 +361,9 @@ func providerAllowsModelMapAlias(provider ProviderConfig, model string, requestE
 func (p ProviderConfig) resolveModelMapAliasWithRequestEffort(model string, requestEffort string) (string, ModelMapEntry) {
 	model = strings.TrimSpace(model)
 	requestEffort = normalizeReasoningEffort(requestEffort)
+	if strippedModel, stripped := stripProviderNoPromptModelSuffix(model); stripped {
+		model = strippedModel
+	}
 	if requestEffort != "" {
 		requestedModel := model
 		if base, _, ok := splitReasoningSuffix(model); ok {

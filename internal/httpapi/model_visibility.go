@@ -106,6 +106,9 @@ func providerStaticModelMapAliasCandidates(model string, requestEffort string, e
 		return nil
 	}
 	requestEffort = strings.TrimSpace(requestEffort)
+	if baseModel, stripped := stripNoPromptModelSuffix(model); stripped {
+		model = baseModel
+	}
 	candidates := []string{}
 	seen := map[string]struct{}{}
 	add := func(candidate string) {
