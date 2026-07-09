@@ -450,6 +450,44 @@ scoped 覆写的匹配规则：
 
 `MODEL_LIMIT_CONTEXT_TOKENS` 和 `UPSTREAM_MAX_OUTPUT_TOKENS` 是两种不同功能：前者限制的是代理估算的**输入上下文窗口**，用于在请求进上游前模拟超限；后者控制的是发给上游的**输出上限请求参数** `max_tokens` / `max_output_tokens`。两者可以同时配置，互不替代，也不会互相抵消。上下文限制主要用于让 OpenCode 这类客户端在本地代理层就触发自动压缩；它不是 tokenizer 精确计数，也不会扩大真实上游上下文，真实上游仍可能更早或更晚返回自己的超限错误。命中限制时，OpenAI 风格入口返回 OpenAI 兼容错误外壳，Anthropic `/v1/messages` 返回 Anthropic 风格错误外壳；当前代理层会保留 `context_length_exceeded` / `prompt is too long` 这些关键词，并在 message 里附带 `estimated input tokens <current> exceed maximum <limit>`，以便 OpenCode / OMO 更稳定地识别为 token-limit 触发源。
 
+### 3.8 推理摘要详细度继承配置
+
+根 `.env` 和 provider `.env` 现在都支持 `REASONING_SUMMARY_DETAIL`：
+
+- 根级默认值：`detailed`
+- provider 留空：继承根级
+- provider 显式写值：覆盖根级
+
+允许值只有三个：
+
+- `none`：尽量不请求 reasoning summary
+- `auto`：请求上游默认/最佳可用摘要档位
+- `detailed`：尽量请求最详细摘要；对于只有 summarized/auto 两档的上游，会自动降级成其可用的显示摘要档位
+
+示例：
+
+```env
+REASONING_SUMMARY_DETAIL=detailed
+```
+
+```env
+REASONING_SUMMARY_DETAIL=
+```
+
+这个字段当前支持热加载。
+
+### 3.9 动态 token estimator 的快速纠偏
+
+当前 token estimator 仍保留 cold-start 的静态估算兜底，但一旦已经拿到该 provider / endpoint / 最终上游模型的真实 usage 样本，后续 admission estimate 会直接吸收历史修正，而不再长期停留在原始 `chars/4` 基线附近。
+
+当前行为可以概括为：
+
+- cold-start：继续走静态估算基线
+- 有历史 observation：优先按历史样本修正下一次 estimate
+- 只有没有历史修正时，才继续单独依赖保守 guard 去压低 limit
+
+这会让 `MODEL_LIMIT_CONTEXT_TOKENS` 的提前拦截，更快贴近同模型/同形态请求的真实上下文消耗，而不是只靠一次次撞线后慢慢把 limit 收紧。
+
 ### 4. 模型映射与 reasoning suffix
 
 支持：
