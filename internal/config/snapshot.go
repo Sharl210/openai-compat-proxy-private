@@ -153,6 +153,9 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
 			cfg.Providers[i].ModelLimitContextTokenRules = append([]ScopedIntRule(nil), cfg.ModelLimitContextTokenRules...)
 		}
+		if !cfg.Providers[i].ReasoningSummaryDetailSet {
+			cfg.Providers[i].ReasoningSummaryDetail = cfg.ReasoningSummaryDetail
+		}
 		if !cfg.Providers[i].ForceUpstreamMaxOutputTokensSet {
 			cfg.Providers[i].ForceUpstreamMaxOutputTokens = cfg.ForceUpstreamMaxOutputTokens
 		}
@@ -597,6 +600,9 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 		return err
 	}
 	if err := validateRootModelLimitContextTokens(values, "MODEL_LIMIT_CONTEXT_TOKENS"); err != nil {
+		return err
+	}
+	if err := validateRootReasoningSummaryDetail(values, "REASONING_SUMMARY_DETAIL"); err != nil {
 		return err
 	}
 	if err := validateStrictBool(values, "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {

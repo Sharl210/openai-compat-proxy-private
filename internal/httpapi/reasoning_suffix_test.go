@@ -298,3 +298,63 @@ func TestMapResolvedReasoningEffortNoneToAnthropicDisabledThinking(t *testing.T)
 		t.Fatalf("expected none suffix to map to disabled thinking, got %#v", updated.Raw)
 	}
 }
+
+func TestNormalizeCanonicalModelAppliesRootReasoningSummaryDetailWhenMissing(t *testing.T) {
+	provider := config.ProviderConfig{}
+	canon := &modelpkg.CanonicalRequest{Model: "client-gpt", Reasoning: &modelpkg.CanonicalReasoning{Effort: "high"}}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "", provider, config.Config{
+		UpstreamEndpointType:   config.UpstreamEndpointTypeResponses,
+		ReasoningSummaryDetail: config.ReasoningSummaryDetailDetailed,
+	})
+
+	if canon.Reasoning == nil {
+		t.Fatalf("expected reasoning to remain present")
+	}
+	if canon.Reasoning.Summary != config.ReasoningSummaryDetailDetailed {
+		t.Fatalf("expected root reasoning summary detail %q, got %#v", config.ReasoningSummaryDetailDetailed, canon.Reasoning)
+	}
+	if got := canon.Reasoning.Raw["summary"]; got != config.ReasoningSummaryDetailDetailed {
+		t.Fatalf("expected raw summary to inherit root default detailed, got %#v", canon.Reasoning.Raw)
+	}
+}
+
+func TestNormalizeCanonicalModelAppliesProviderReasoningSummaryDetailOverride(t *testing.T) {
+	provider := config.ProviderConfig{ReasoningSummaryDetail: config.ReasoningSummaryDetailNone}
+	canon := &modelpkg.CanonicalRequest{Model: "client-gpt", Reasoning: &modelpkg.CanonicalReasoning{Effort: "high"}}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "", provider, config.Config{
+		UpstreamEndpointType:   config.UpstreamEndpointTypeResponses,
+		ReasoningSummaryDetail: config.ReasoningSummaryDetailDetailed,
+	})
+
+	if canon.Reasoning == nil {
+		t.Fatalf("expected reasoning to remain present")
+	}
+	if canon.Reasoning.Summary != config.ReasoningSummaryDetailNone {
+		t.Fatalf("expected provider reasoning summary detail override %q, got %#v", config.ReasoningSummaryDetailNone, canon.Reasoning)
+	}
+	if got := canon.Reasoning.Raw["summary"]; got != config.ReasoningSummaryDetailNone {
+		t.Fatalf("expected raw summary to use provider override none, got %#v", canon.Reasoning.Raw)
+	}
+}
+
+func TestNormalizeCanonicalModelCreatesReasoningFromConfiguredSummaryDetailWhenMissing(t *testing.T) {
+	provider := config.ProviderConfig{ReasoningSummaryDetail: config.ReasoningSummaryDetailDetailed}
+	canon := &modelpkg.CanonicalRequest{Model: "client-gpt"}
+
+	normalizeCanonicalModelAndReasoningForProvider(canon, canon.Model, "", provider, config.Config{
+		UpstreamEndpointType:   config.UpstreamEndpointTypeResponses,
+		ReasoningSummaryDetail: config.ReasoningSummaryDetailDetailed,
+	})
+
+	if canon.Reasoning == nil {
+		t.Fatalf("expected configured reasoning summary detail to materialize a canonical reasoning object")
+	}
+	if canon.Reasoning.Summary != config.ReasoningSummaryDetailDetailed {
+		t.Fatalf("expected canonical reasoning summary %q, got %#v", config.ReasoningSummaryDetailDetailed, canon.Reasoning)
+	}
+	if got := canon.Reasoning.Raw["summary"]; got != config.ReasoningSummaryDetailDetailed {
+		t.Fatalf("expected raw summary detailed, got %#v", canon.Reasoning.Raw)
+	}
+}

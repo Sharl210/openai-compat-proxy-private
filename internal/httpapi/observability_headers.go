@@ -158,6 +158,36 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 	mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(sourceModel, requestEffort, provider.EnableReasoningEffortSuffix)
 	canon.Model = mappedModel
 	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
+	if canon.Reasoning == nil {
+		summary := strings.TrimSpace(provider.ReasoningSummaryDetail)
+		if summary == "" {
+			summary = strings.TrimSpace(providerCfg.ReasoningSummaryDetail)
+		}
+		if summary != "" {
+			canon.Reasoning = &modelpkg.CanonicalReasoning{
+				Summary: summary,
+				Raw:     map[string]any{"summary": summary},
+			}
+		}
+	}
+	if canon.Reasoning != nil {
+		summary := strings.TrimSpace(canon.Reasoning.Summary)
+		if summary == "" {
+			summary = strings.TrimSpace(provider.ReasoningSummaryDetail)
+			if summary == "" {
+				summary = strings.TrimSpace(providerCfg.ReasoningSummaryDetail)
+			}
+			if summary != "" {
+				canon.Reasoning.Summary = summary
+			}
+		}
+		if canon.Reasoning.Raw == nil {
+			canon.Reasoning.Raw = map[string]any{}
+		}
+		if strings.TrimSpace(canon.Reasoning.Summary) != "" {
+			canon.Reasoning.Raw["summary"] = canon.Reasoning.Summary
+		}
+	}
 	canon.PassThroughRawReasoning = providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !provider.MapReasoningSuffixToAnthropicThinking
 }
 
