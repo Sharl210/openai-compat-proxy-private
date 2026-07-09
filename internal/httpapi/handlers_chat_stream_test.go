@@ -168,8 +168,8 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
 		t.Fatalf("expected chat stream not to expose proxy placeholder reasoning text, got %s", body)
 	}
-	if !strings.Contains(body, `"reasoning_content":"`+invisibleSyntheticReasoningDelta+`"`) {
-		t.Fatalf("expected chat stream to keep reasoning lifecycle with invisible delta, got %s", body)
+	if strings.Contains(body, `"reasoning_content":"`+invisibleSyntheticReasoningDelta+`"`) {
+		t.Fatalf("expected chat stream not to emit invisible placeholder reasoning delta, got %s", body)
 	}
 }
 

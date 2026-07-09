@@ -793,9 +793,8 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			}
 		}
 		h.markRealReasoningSeen()
-		// Convert response.reasoning.delta (summary format) to response.reasoning_summary_text.delta (delta format) for responses SSE
 		if evt.Event == "response.reasoning.delta" {
-			if summary, ok := evt.Data["summary"].(string); ok && summary != "" {
+			if summary := reasoningContentValue(evt.Data); summary != "" {
 				h.ensureRealReasoningLifecycleStarted()
 				if h.realReasoningSummary != nil && h.realReasoningItemID != "" {
 					h.realReasoningSummary.WriteString(summary)
@@ -1519,6 +1518,9 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 	if state != nil && !isInvisibleSyntheticReasoningText(text) {
 		state.syntheticSummary.WriteString(text)
 	}
+	if isInvisibleSyntheticReasoningText(text) {
+		return nil
+	}
 	payload := map[string]any{"type": "response.reasoning.delta", "summary": text, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -1551,20 +1553,6 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 }
 
 func writeSyntheticResponsesReasoningTick(w http.ResponseWriter, flusher http.Flusher) error {
-	payload := map[string]any{"type": "response.reasoning_summary_text.delta", "delta": invisibleSyntheticReasoningDelta}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprint(w, "event: response.reasoning_summary_text.delta\n"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", encoded); err != nil {
-		return err
-	}
-	if flusher != nil {
-		flusher.Flush()
-	}
 	return nil
 }
 
@@ -1618,14 +1606,7 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			if state.textStarted || state.realThinkingSeen {
 				return nil
 			}
-			if err := startAnthropicUnreasonedPlaceholder(w, flusher, state); err != nil {
-				return err
-			}
-			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
-				"type":  "content_block_delta",
-				"index": state.thinkingIndex,
-				"delta": map[string]any{"type": "thinking_delta", "thinking": "\u200b"},
-			})
+			return startAnthropicUnreasonedPlaceholder(w, flusher, state)
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {
@@ -1669,11 +1650,7 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 	}); err != nil {
 		return err
 	}
-	return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
-		"type":  "content_block_delta",
-		"index": state.thinkingIndex,
-		"delta": map[string]any{"type": "thinking_delta", "thinking": invisibleSyntheticReasoningPrelude()},
-	})
+	return nil
 }
 
 func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
@@ -2312,16 +2289,13 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	if err := writeSSEPadding(w, flusher); err != nil {
 		return err
 	}
-	if err := writeChatChunk(w, flusher, &state, map[string]any{"reasoning_content": invisibleSyntheticReasoningPrelude()}, "", nil); err != nil {
-		return err
-	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realReasoningSeen },
 		func() error {
 			if state.textStarted || state.realReasoningSeen {
 				return nil
 			}
-			return writeChatChunk(w, flusher, &state, map[string]any{"reasoning_content": "\u200b"}, "", nil)
+			return nil
 		},
 		func() error { return writeSSEComment(w, flusher, "keep-alive") },
 		func(evt upstream.Event) error {

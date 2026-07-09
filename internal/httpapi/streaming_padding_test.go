@@ -60,7 +60,7 @@ func TestWithRequestIDFlushesStreamingPreludeImmediately(t *testing.T) {
 			n, err := resp.Body.Read(buf)
 			if n > 0 {
 				out.Write(buf[:n])
-				if strings.Contains(out.String(), `"type":"response.reasoning.delta"`) {
+				if strings.Contains(out.String(), ": ") {
 					readDone <- out.String()
 					return
 				}
@@ -74,14 +74,11 @@ func TestWithRequestIDFlushesStreamingPreludeImmediately(t *testing.T) {
 
 	select {
 	case body := <-readDone:
-		if !strings.Contains(body, `"type":"response.reasoning.delta"`) {
-			t.Fatalf("expected early synthetic reasoning delta bytes, got %q", body)
-		}
-		if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
-			t.Fatalf("expected early bytes not to expose proxy placeholder reasoning text, got %q", body)
+		if !strings.Contains(body, ": ") {
+			t.Fatalf("expected early SSE padding bytes, got %q", body)
 		}
 	case <-time.After(200 * time.Millisecond):
 		_ = resp.Body.Close()
-		t.Fatal("expected streaming lifecycle bytes before handler finished sleeping")
+		t.Fatal("expected SSE prelude bytes before handler finished sleeping")
 	}
 }

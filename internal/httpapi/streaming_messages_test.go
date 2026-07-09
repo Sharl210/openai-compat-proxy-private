@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
@@ -46,8 +47,8 @@ func TestMessagesStreamClosesThinkingBeforeTextAndEmitsSignature(t *testing.T) {
 	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
 		t.Fatalf("expected anthropic stream not to expose proxy placeholder thinking text, got %s", body)
 	}
-	if !strings.Contains(body, `"thinking":"`+invisibleSyntheticReasoningDelta+`"`) {
-		t.Fatalf("expected anthropic stream to keep thinking lifecycle with invisible delta, got %s", body)
+	if strings.Contains(body, `"thinking":"`+invisibleSyntheticReasoningDelta+`"`) {
+		t.Fatalf("expected anthropic stream not to emit invisible placeholder thinking delta, got %s", body)
 	}
 
 	sigIdx := strings.Index(body, `"type":"signature_delta"`)
@@ -785,5 +786,61 @@ func TestMessagesStreamForwardsReasoningSummaryTextDelta(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `"thinking":"alpha"`) {
 		t.Fatalf("expected reasoning summary text delta to be forwarded as thinking, got %s", body)
+	}
+}
+
+func TestMessagesStreamSlowUpstreamDoesNotEmitInvisibleThinkingPlaceholderDelta(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: message_start\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_slow\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(600 * time.Millisecond)
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"real thinking\"}}\n\n"))
+		_, _ = w.Write([]byte("event: message_delta\n"))
+		_, _ = w.Write([]byte("data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":1},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"))
+		_, _ = w.Write([]byte("event: message_stop\n"))
+		_, _ = w.Write([]byte("data: {}\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, `"thinking":"`+invisibleSyntheticReasoningDelta+`"`) {
+		t.Fatalf("expected no invisible thinking placeholder delta during slow upstream stream, got %s", body)
+	}
+	if !strings.Contains(body, `event: content_block_start`) {
+		t.Fatalf("expected thinking lifecycle to still start for slow upstream stream, got %s", body)
 	}
 }

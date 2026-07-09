@@ -42,14 +42,11 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	if !strings.Contains(body, `"id":"rs_proxy"`) || !strings.Contains(body, `"type":"reasoning"`) {
 		t.Fatalf("expected synthetic reasoning item payload in stream body, got %s", body)
 	}
-	if !strings.Contains(body, `"type":"response.reasoning.delta"`) {
-		t.Fatalf("expected synthetic reasoning chunk type in stream body, got %s", body)
-	}
-	if !strings.Contains(body, `"type":"response.reasoning_summary_text.delta"`) {
-		t.Fatalf("expected synthetic reasoning summary chunk type in stream body, got %s", body)
-	}
 	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
 		t.Fatalf("expected responses stream not to expose proxy placeholder reasoning text, got %s", body)
+	}
+	if strings.Contains(body, invisibleSyntheticReasoningDelta) {
+		t.Fatalf("expected responses stream not to emit invisible placeholder reasoning delta, got %s", body)
 	}
 	if !strings.Contains(body, `"type":"response.output_text.delta"`) {
 		t.Fatalf("expected output_text chunk type in stream body, got %s", body)
