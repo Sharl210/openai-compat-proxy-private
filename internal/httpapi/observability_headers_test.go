@@ -69,6 +69,45 @@ func TestResponsesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	}
 }
 
+func TestResponsesRouteConfiguredSummaryDetailOverridesImplicitAutoInProxyHeader(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_implicit_auto","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		ReasoningSummaryDetail:      config.ReasoningSummaryDetailDetailed,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","reasoning":{"effort":"high"},"input":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertJSONHeaderEquals(t, rec.Header().Get(headerProxyToUpstreamReasoningParameters), map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "detailed"}})
+}
+
 func TestProviderConfigForIDMasqueradeClientVersionOverridesRootAndInheritsEmpty(t *testing.T) {
 	snapshot := &config.RuntimeSnapshot{Config: config.Config{
 		UpstreamMasqueradeClientVersion: "root-version",

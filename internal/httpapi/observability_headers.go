@@ -171,14 +171,14 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 		}
 	}
 	if canon.Reasoning != nil {
+		configuredSummary := strings.TrimSpace(provider.ReasoningSummaryDetail)
+		if configuredSummary == "" {
+			configuredSummary = strings.TrimSpace(providerCfg.ReasoningSummaryDetail)
+		}
 		summary := strings.TrimSpace(canon.Reasoning.Summary)
-		if summary == "" {
-			summary = strings.TrimSpace(provider.ReasoningSummaryDetail)
-			if summary == "" {
-				summary = strings.TrimSpace(providerCfg.ReasoningSummaryDetail)
-			}
-			if summary != "" {
-				canon.Reasoning.Summary = summary
+		if summary == "" || (summary == config.ReasoningSummaryDetailAuto && configuredSummary != "" && configuredSummary != config.ReasoningSummaryDetailAuto) {
+			if configuredSummary != "" {
+				canon.Reasoning.Summary = configuredSummary
 			}
 		}
 		if canon.Reasoning.Raw == nil {
