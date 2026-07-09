@@ -33,11 +33,13 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 		w.Header().Del(headerProxyEstimatedInputTokens)
 		return false
 	}
-	rawEstimatedTokens := estimateCanonicalInputTokens(canon)
+	rawEstimatedTokens := estimateCanonicalInputTokensWithContext(ctx, canon)
 	effectiveLimit := limit
 	confidence := "cold"
 	if ctx != nil {
-		effectiveLimit = conservativeContextAdmissionLimit(ctx, limit, canon)
+		if rawEstimatedTokens == estimateCanonicalInputTokens(canon) {
+			effectiveLimit = conservativeContextAdmissionLimit(ctx, limit, canon)
+		}
 		if current := currentEstimatorConfidence(ctx, canon); current != "" {
 			confidence = current
 		}
