@@ -67,6 +67,12 @@ func TestDefaultUpstreamXMLToolCallStyleIsLegacy(t *testing.T) {
 	}
 }
 
+func TestDefaultReasoningSummaryDetailIsDetailed(t *testing.T) {
+	if got := Default().ReasoningSummaryDetail; got != ReasoningSummaryDetailDetailed {
+		t.Fatalf("expected default reasoning summary detail %q, got %q", ReasoningSummaryDetailDetailed, got)
+	}
+}
+
 func TestDefaultLogMaxRequestsIsTwoHundred(t *testing.T) {
 	if got := Default().LogMaxRequests; got != 200 {
 		t.Fatalf("expected default log max requests 200, got %d", got)
@@ -105,6 +111,29 @@ func TestLoadFromValuesParsesNoPromptModelSuffixFlag(t *testing.T) {
 
 	if !cfg.EnableNoPromptModelSuffix {
 		t.Fatalf("expected ENABLE_NOPROMPT_MODEL_SUFFIX=true to enable noprompt suffix parsing")
+	}
+}
+
+func TestLoadFromValuesParsesRootReasoningSummaryDetail(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "empty uses default", value: "", want: ReasoningSummaryDetailDetailed},
+		{name: "auto", value: "auto", want: ReasoningSummaryDetailAuto},
+		{name: "none", value: "none", want: ReasoningSummaryDetailNone},
+		{name: "detailed", value: "detailed", want: ReasoningSummaryDetailDetailed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := LoadFromValues(map[string]string{"REASONING_SUMMARY_DETAIL": tt.value})
+
+			if got := cfg.ReasoningSummaryDetail; got != tt.want {
+				t.Fatalf("expected root reasoning summary detail %q, got %q", tt.want, got)
+			}
+		})
 	}
 }
 
@@ -296,6 +325,13 @@ func TestValidateRootEnvValuesRejectsInvalidModelLimitContextTokens(t *testing.T
 				t.Fatalf("expected invalid MODEL_LIMIT_CONTEXT_TOKENS=%q to fail validation", value)
 			}
 		})
+	}
+}
+
+func TestValidateRootEnvValuesRejectsInvalidReasoningSummaryDetail(t *testing.T) {
+	err := ValidateRootEnvValues(map[string]string{"REASONING_SUMMARY_DETAIL": "verbose"})
+	if err == nil {
+		t.Fatalf("expected invalid REASONING_SUMMARY_DETAIL to fail validation")
 	}
 }
 

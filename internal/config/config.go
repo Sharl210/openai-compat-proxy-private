@@ -24,6 +24,7 @@ type Config struct {
 	ForceUpstreamMaxOutputTokens      bool
 	ModelLimitContextTokens           int
 	ModelLimitContextTokenRules       []ScopedIntRule
+	ReasoningSummaryDetail            string
 	UpstreamUserAgent                 string
 	UpstreamMasqueradeClientVersion   string
 	MasqueradeTarget                  string
@@ -79,6 +80,7 @@ func Default() Config {
 		UpstreamEndpointType:           UpstreamEndpointTypeResponses,
 		ResponsesToolCompatMode:        ResponsesToolCompatModePreserve,
 		AnthropicMaxThinkingBudget:     32000,
+		ReasoningSummaryDetail:         ReasoningSummaryDetailDetailed,
 		UpstreamThinkingTagStyle:       UpstreamThinkingTagStyleOff,
 		UpstreamXMLToolCallStyle:       UpstreamXMLToolCallStyleLegacy,
 		InjectClaudeCodeMetadataUserID: true,
@@ -159,6 +161,11 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 		if parsed, rules, err := parseScopedModelLimitContextTokens(value, "MODEL_LIMIT_CONTEXT_TOKENS", "root env MODEL_LIMIT_CONTEXT_TOKENS"); err == nil {
 			cfg.ModelLimitContextTokens = parsed
 			cfg.ModelLimitContextTokenRules = rules
+		}
+	}
+	if value, ok := lookup("REASONING_SUMMARY_DETAIL"); ok {
+		if normalized, err := normalizeReasoningSummaryDetail(value, true); err == nil {
+			cfg.ReasoningSummaryDetail = normalized
 		}
 	}
 	if value, ok := lookup("FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); ok && value != "" {
@@ -295,6 +302,9 @@ func ValidateRootEnvValues(values map[string]string) error {
 	if err := validateRootModelLimitContextTokens(values, "MODEL_LIMIT_CONTEXT_TOKENS"); err != nil {
 		return err
 	}
+	if err := validateRootReasoningSummaryDetail(values, "REASONING_SUMMARY_DETAIL"); err != nil {
+		return err
+	}
 	if err := validateStrictBool(values, "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS"); err != nil {
 		return err
 	}
@@ -412,6 +422,17 @@ func validateRootModelLimitContextTokens(values map[string]string, key string) e
 	}
 	_, _, err := parseScopedModelLimitContextTokens(value, key, "root env "+key)
 	return err
+}
+
+func validateRootReasoningSummaryDetail(values map[string]string, key string) error {
+	value := strings.TrimSpace(values[key])
+	if value == "" {
+		return nil
+	}
+	if _, err := normalizeReasoningSummaryDetail(value, true); err != nil {
+		return ErrInvalidConfig(fmt.Sprintf("invalid %s: %q (allowed: none, auto, detailed)", key, value))
+	}
+	return nil
 }
 
 func validateRootScopedIntRules(values map[string]string, key string) error {
@@ -719,6 +740,7 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.ForceUpstreamMaxOutputTokens == other.ForceUpstreamMaxOutputTokens &&
 		c.ModelLimitContextTokens == other.ModelLimitContextTokens &&
 		scopedIntRulesEqual(c.ModelLimitContextTokenRules, other.ModelLimitContextTokenRules) &&
+		c.ReasoningSummaryDetail == other.ReasoningSummaryDetail &&
 		c.EnableDefaultProviderModelTags == other.EnableDefaultProviderModelTags &&
 		c.EnableAllDefaultProviderModelTags == other.EnableAllDefaultProviderModelTags &&
 		c.EnableNoPromptModelSuffix == other.EnableNoPromptModelSuffix &&

@@ -29,6 +29,49 @@ func TestLoadProviderFileParsesMasqueradeClientVersion(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesReasoningSummaryDetail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "provider.env")
+	if err := os.WriteFile(path, []byte(strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://upstream.example.com",
+		"REASONING_SUMMARY_DETAIL=auto",
+	}, "\n")+"\n"), 0600); err != nil {
+		t.Fatalf("write provider file: %v", err)
+	}
+
+	provider, err := loadProviderFile(path)
+	if err != nil {
+		t.Fatalf("load provider file: %v", err)
+	}
+	if got := provider.ReasoningSummaryDetail; got != ReasoningSummaryDetailAuto {
+		t.Fatalf("expected provider reasoning summary detail %q, got %q", ReasoningSummaryDetailAuto, got)
+	}
+	if !provider.ReasoningSummaryDetailSet {
+		t.Fatalf("expected provider reasoning summary detail to be marked as explicitly set")
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidReasoningSummaryDetail(t *testing.T) {
+	providerEnvPath := filepath.Join(t.TempDir(), "provider.env")
+	if err := os.WriteFile(providerEnvPath, []byte(strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"PROVIDER_ENABLED=true",
+		"UPSTREAM_BASE_URL=https://upstream.example.com",
+		"REASONING_SUMMARY_DETAIL=verbose",
+	}, "\n")+"\n"), 0600); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	_, err := loadProviderFile(providerEnvPath)
+	if err == nil {
+		t.Fatalf("expected invalid REASONING_SUMMARY_DETAIL to fail validation")
+	}
+	if err.Error() != "invalid REASONING_SUMMARY_DETAIL in "+providerEnvPath+": \"verbose\" (allowed: none, auto, detailed)" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveModelAndEffortPrefersRequestSuffixOverMappedSuffix(t *testing.T) {
 	p := ProviderConfig{ModelMap: []ModelMapEntry{{Key: "gpt-5", Target: "claude-sonnet-4-5-low"}}}
 

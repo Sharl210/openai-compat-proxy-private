@@ -475,6 +475,96 @@ func TestBuildRuntimeSnapshotProviderModelLimitContextTokensOverrideRoot(t *test
 	}
 }
 
+func TestBuildRuntimeSnapshotBlankProviderReasoningSummaryDetailInheritsRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nREASONING_SUMMARY_DETAIL=auto\n", time.Date(2026, 3, 26, 10, 25, 40, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nREASONING_SUMMARY_DETAIL=\n", time.Date(2026, 3, 26, 10, 25, 50, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if got := provider.ReasoningSummaryDetail; got != ReasoningSummaryDetailAuto {
+		t.Fatalf("expected blank provider reasoning summary detail to inherit root %q, got %q", ReasoningSummaryDetailAuto, got)
+	}
+}
+
+func TestBuildRuntimeSnapshotProviderReasoningSummaryDetailOverridesRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nREASONING_SUMMARY_DETAIL=auto\n", time.Date(2026, 3, 26, 10, 25, 55, 111000000, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\nREASONING_SUMMARY_DETAIL=none\n", time.Date(2026, 3, 26, 10, 26, 5, 0, time.UTC))
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("BuildRuntimeSnapshot returned error: %v", err)
+	}
+	provider, err := snapshot.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+
+	if got := provider.ReasoningSummaryDetail; got != ReasoningSummaryDetailNone {
+		t.Fatalf("expected provider reasoning summary detail override %q, got %q", ReasoningSummaryDetailNone, got)
+	}
+}
+
+func TestRuntimeStoreRefreshAppliesHotReloadableRootReasoningSummaryDetail(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 3, 26, 10, 27, 30, 111000000, time.UTC)
+	updatedRootMTime := time.Date(2026, 3, 26, 10, 28, 30, 222000000, time.UTC)
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nREASONING_SUMMARY_DETAIL=detailed\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 3, 26, 10, 27, 45, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nREASONING_SUMMARY_DETAIL=auto\n", updatedRootMTime)
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("expected reasoning summary detail refresh to succeed, got %v", err)
+	}
+
+	active := store.Active()
+	if got := active.RootEnvVersion; got != formatVersionTime(updatedRootMTime) {
+		t.Fatalf("expected root version to update to %q, got %q", formatVersionTime(updatedRootMTime), got)
+	}
+	provider, err := active.Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("ProviderByID returned error: %v", err)
+	}
+	if got := provider.ReasoningSummaryDetail; got != ReasoningSummaryDetailAuto {
+		t.Fatalf("expected provider to inherit refreshed root reasoning summary detail %q, got %q", ReasoningSummaryDetailAuto, got)
+	}
+}
+
 func TestRuntimeStoreRefreshAppliesHotReloadableRootModelLimitContextTokens(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

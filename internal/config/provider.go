@@ -31,6 +31,8 @@ type ProviderConfig struct {
 	ModelLimitContextTokens                int
 	ModelLimitContextTokensSet             bool
 	ModelLimitContextTokenRules            []ScopedIntRule
+	ReasoningSummaryDetail                 string
+	ReasoningSummaryDetailSet              bool
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
 	MasqueradeTarget                       string
@@ -114,6 +116,9 @@ const (
 	UpstreamCacheControlNoChange        = "nochange"
 	ResponsesToolCompatModePreserve     = "preserve"
 	ResponsesToolCompatModeFunctionOnly = "function_only"
+	ReasoningSummaryDetailNone          = "none"
+	ReasoningSummaryDetailAuto          = "auto"
+	ReasoningSummaryDetailDetailed      = "detailed"
 )
 
 const (
@@ -253,6 +258,16 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.ModelLimitContextTokensSet = true
 			provider.ModelLimitContextTokens = parsed
 			provider.ModelLimitContextTokenRules = rules
+		case "REASONING_SUMMARY_DETAIL":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			normalized, err := normalizeReasoningSummaryDetail(value, false)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid REASONING_SUMMARY_DETAIL in %s: %q (allowed: none, auto, detailed)", path, value))
+			}
+			provider.ReasoningSummaryDetailSet = true
+			provider.ReasoningSummaryDetail = normalized
 		case "FORCE_UPSTREAM_MAX_OUTPUT_TOKENS":
 			if strings.TrimSpace(value) == "" {
 				break
@@ -699,6 +714,26 @@ func normalizeResponsesToolCompatMode(value string) (string, error) {
 		return ResponsesToolCompatModeFunctionOnly, nil
 	default:
 		return "", ErrInvalidConfig(fmt.Sprintf("invalid responses tool compat mode: %q", value))
+	}
+}
+
+func normalizeReasoningSummaryDetail(value string, defaultDetailed bool) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		if defaultDetailed {
+			return ReasoningSummaryDetailDetailed, nil
+		}
+		return "", nil
+	}
+	switch strings.ToLower(trimmed) {
+	case ReasoningSummaryDetailNone:
+		return ReasoningSummaryDetailNone, nil
+	case ReasoningSummaryDetailAuto:
+		return ReasoningSummaryDetailAuto, nil
+	case ReasoningSummaryDetailDetailed:
+		return ReasoningSummaryDetailDetailed, nil
+	default:
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid reasoning summary detail: %q", value))
 	}
 }
 
