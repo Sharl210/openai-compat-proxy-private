@@ -127,6 +127,14 @@ func outwardReasoning(reasoning map[string]any) map[string]any {
 	}
 	cloned := cloneMap(reasoning)
 	delete(cloned, aggregate.InternalReasoningSourceKey)
+	if stringValue(cloned["summary"]) == "" {
+		for _, key := range []string{"reasoning_content", "content", "delta", "text"} {
+			if text := stringValue(cloned[key]); text != "" {
+				cloned["summary"] = text
+				break
+			}
+		}
+	}
 	if len(cloned) == 0 {
 		return nil
 	}
