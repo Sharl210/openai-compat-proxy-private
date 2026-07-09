@@ -3655,6 +3655,44 @@ func TestBuildChatRequestBodyMapsAnthropicAdaptiveThinkingToXHighChatReasoning(t
 	}
 }
 
+func TestBuildRequestBodyUsesConfiguredReasoningSummaryDetail(t *testing.T) {
+	body, err := buildRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Summary: config.ReasoningSummaryDetailDetailed, Raw: map[string]any{"effort": "high", "summary": config.ReasoningSummaryDetailDetailed}},
+	})
+	if err != nil {
+		t.Fatalf("buildRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["summary"]; got != config.ReasoningSummaryDetailDetailed {
+		t.Fatalf("expected configured summary detail detailed, got %#v", payload)
+	}
+}
+
+func TestBuildChatRequestBodyUsesConfiguredReasoningSummaryDetail(t *testing.T) {
+	body, err := buildChatRequestBody(model.CanonicalRequest{
+		Model:     "gpt-5",
+		Reasoning: &model.CanonicalReasoning{Effort: "high", Summary: config.ReasoningSummaryDetailNone, Raw: map[string]any{"effort": "high", "summary": config.ReasoningSummaryDetailNone}},
+	})
+	if err != nil {
+		t.Fatalf("buildChatRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got := reasoning["summary"]; got != config.ReasoningSummaryDetailNone {
+		t.Fatalf("expected configured summary detail none, got %#v", payload)
+	}
+}
+
 func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testing.T) {
 	body, err := buildChatRequestBody(model.CanonicalRequest{
 		Model: "gpt-5",
