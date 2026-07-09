@@ -163,3 +163,38 @@ func TestManagerConservativeAdmissionLimitDoesNotUseLastOverflowSampleAsGlobalCl
 		t.Fatalf("expected a single latest spike to not globally clamp later requests, got %d", limit)
 	}
 }
+
+func TestManagerCorrectedEstimateUsesMatchingShapeRatio(t *testing.T) {
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex"} })
+	obs := Observation{
+		Bucket:              BucketKey{ProviderID: "codex", EndpointType: "responses", Model: "gpt-5.4"},
+		BaseEstimate:        120,
+		InputTokens:         300,
+		CachedTokens:        0,
+		UncachedInputTokens: 300,
+		Shape:               ShapePlain,
+		ProtocolSignature:   "responses:v1",
+		EstimatorSignature:  "base-estimator:v1",
+	}
+	if err := mgr.RecordObservation("req-corrected-estimate", obs); err != nil {
+		t.Fatalf("RecordObservation error: %v", err)
+	}
+	got, ok := mgr.CorrectedEstimate(obs.Bucket, 120, ShapePlain)
+	if !ok {
+		t.Fatal("expected corrected estimate from prior observation")
+	}
+	if got != 300 {
+		t.Fatalf("expected corrected estimate 300, got %d", got)
+	}
+}
+
+func TestManagerCorrectedEstimateFallsBackWithoutSamples(t *testing.T) {
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex"} })
+	got, ok := mgr.CorrectedEstimate(BucketKey{ProviderID: "codex", EndpointType: "responses", Model: "gpt-5.4"}, 120, ShapePlain)
+	if ok {
+		t.Fatal("expected no corrected estimate without prior samples")
+	}
+	if got != 120 {
+		t.Fatalf("expected base estimate fallback 120, got %d", got)
+	}
+}

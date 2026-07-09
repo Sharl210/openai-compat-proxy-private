@@ -129,6 +129,26 @@ func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int,
 	return best, true
 }
 
+func (m *Manager) CorrectedEstimate(key BucketKey, baseEstimate int, currentShape ShapeClass) (int, bool) {
+	if baseEstimate <= 0 {
+		return 0, false
+	}
+	state := m.GetBucketState(key)
+	if state == nil {
+		return baseEstimate, false
+	}
+	samples := matchingRecentSamples(state, currentShape)
+	correction := correctedEstimateRatio(samples)
+	if correction <= 0 {
+		return baseEstimate, false
+	}
+	corrected := int(math.Round(float64(baseEstimate) * correction))
+	if corrected < 1 {
+		corrected = 1
+	}
+	return corrected, true
+}
+
 func matchingRecentSamples(state *BucketState, currentShape ShapeClass) []SampleSummary {
 	if state == nil || len(state.RecentSamples) == 0 {
 		return nil
@@ -180,24 +200,30 @@ func conservativeLearnedEstimateLimit(samples []SampleSummary, configuredLimit i
 	if configuredLimit <= 0 || len(samples) == 0 {
 		return 0
 	}
-	var ratioSum float64
-	var ratioCount int
-	for _, sample := range samples {
-		if sample.BaseEstimate <= 0 || sample.InputTokens <= 0 {
-			continue
-		}
-		ratioSum += clip(float64(sample.InputTokens)/float64(sample.BaseEstimate), 0.25, 8.0)
-		ratioCount++
-	}
-	if ratioCount == 0 {
+	ratio := correctedEstimateRatio(samples)
+	if ratio <= 0 {
 		return 0
 	}
-	ratio := ratioSum / float64(ratioCount)
 	if ratio <= 1 {
 		return 0
 	}
 	const safetyFactor = 0.95
 	return int(math.Floor(float64(configuredLimit) / ratio * safetyFactor))
+}
+
+func correctedEstimateRatio(samples []SampleSummary) float64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	var correction float64
+	for _, sample := range samples {
+		if sample.BaseEstimate <= 0 || sample.InputTokens <= 0 {
+			continue
+		}
+		ratio := clip(float64(sample.InputTokens)/float64(sample.BaseEstimate), 0.25, 8.0)
+		correction = ewma(correction, ratio)
+	}
+	return correction
 }
 
 func (m *Manager) RecordObservation(requestID string, obs Observation) error {

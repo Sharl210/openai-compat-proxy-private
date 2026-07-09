@@ -193,6 +193,31 @@ func recordTokenEstimatorUsage(ctx context.Context, requestID string, usage usag
 	return mgr.RecordObservation(requestID, buildTokenEstimatorObservation(input))
 }
 
+func estimateCanonicalInputTokensWithContext(ctx context.Context, canon modelpkg.CanonicalRequest) int {
+	baseEstimate := estimateCanonicalInputTokens(canon)
+	if ctx == nil || baseEstimate <= 0 {
+		return baseEstimate
+	}
+	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
+	if mgr == nil {
+		return baseEstimate
+	}
+	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
+	if input.ProviderID == "" || input.EndpointType == "" || input.FinalUpstreamModel == "" {
+		return baseEstimate
+	}
+	key := tokenestimator.BucketKey{
+		ProviderID:   input.ProviderID,
+		EndpointType: input.EndpointType,
+		Model:        input.FinalUpstreamModel,
+	}
+	shape := classifyEstimatorShape(buildEstimatorSnapshot(canon))
+	if corrected, ok := mgr.CorrectedEstimate(key, baseEstimate, shape); ok {
+		return corrected
+	}
+	return baseEstimate
+}
+
 func classifyEstimatorShape(snap estimatorSnapshot) tokenestimator.ShapeClass {
 	if snap.MultimodalItemCount > 0 {
 		return tokenestimator.ShapeMultimodal

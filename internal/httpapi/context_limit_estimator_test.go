@@ -79,3 +79,36 @@ func TestRecordObservationAfterSuccessfulUsage(t *testing.T) {
 		t.Fatalf("expected recorded state, got %#v", state)
 	}
 }
+
+func TestEstimateCanonicalInputTokensUsesPriorObservationCorrectionWhenAvailable(t *testing.T) {
+	mgr := tokenestimator.NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex-2"} })
+	canon := modelpkg.CanonicalRequest{
+		Model: "gpt-5.4",
+		Messages: []modelpkg.CanonicalMessage{{
+			Role:  "user",
+			Parts: []modelpkg.CanonicalContentPart{{Type: "text", Text: "hello world"}},
+		}},
+	}
+	baseEstimate := estimateCanonicalInputTokens(canon)
+	ctx := withTokenEstimatorManager(context.Background(), mgr)
+	ctx = withTokenEstimatorObservation(ctx, tokenEstimatorObservationInput{
+		ProviderID:         "codex-2",
+		EndpointType:       "responses",
+		FinalUpstreamModel: "gpt-5.4",
+		BaseEstimate:       int64(baseEstimate),
+		Canon:              canon,
+	})
+	if err := recordTokenEstimatorUsage(ctx, "req-correct-next", usageTotals{InputTokens: int64(baseEstimate * 3), CachedTokens: 0}); err != nil {
+		t.Fatalf("recordTokenEstimatorUsage error: %v", err)
+	}
+	got := estimateCanonicalInputTokensWithContext(ctx, canon)
+	if got <= baseEstimate {
+		t.Fatalf("expected corrected estimate above base estimate, got base=%d corrected=%d", baseEstimate, got)
+	}
+	if got != baseEstimate*3 {
+		t.Fatalf("expected corrected estimate %d, got %d", baseEstimate*3, got)
+	}
+	if cold := estimateCanonicalInputTokens(canon); cold != baseEstimate {
+		t.Fatalf("expected context-free cold fallback to remain %d, got %d", baseEstimate, cold)
+	}
+}
