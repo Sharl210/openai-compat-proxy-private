@@ -260,6 +260,22 @@ func TestNormalizeAnthropicFrame_Thinking(t *testing.T) {
 		dataStr, _ := json.Marshal(evt.Data)
 		t.Logf("  [%d] %s: %s", i, evt.Event, dataStr)
 	}
+
+	var reasoningEvents []Event
+	for _, evt := range allEvents {
+		if evt.Event == "response.reasoning.delta" && stringValue(evt.Data["reasoning_content"]) != "" {
+			reasoningEvents = append(reasoningEvents, evt)
+		}
+	}
+	if len(reasoningEvents) != 1 {
+		t.Fatalf("expected exactly one reasoning event, got %#v", allEvents)
+	}
+	if got := stringValue(reasoningEvents[0].Data["reasoning_content"]); got != "thinking..." {
+		t.Fatalf("expected anthropic thinking body to land in reasoning_content field, got %#v", reasoningEvents[0].Data)
+	}
+	if _, ok := reasoningEvents[0].Data["summary"]; ok {
+		t.Fatalf("expected anthropic thinking body not to be downgraded into summary field, got %#v", reasoningEvents[0].Data)
+	}
 }
 
 func TestNormalizeAnthropicFrame_PreservesSignatureDelta(t *testing.T) {

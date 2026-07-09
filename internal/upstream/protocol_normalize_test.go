@@ -598,6 +598,22 @@ func TestNormalizeChatFrame_ReasoningContent(t *testing.T) {
 		dataStr, _ := json.Marshal(evt.Data)
 		t.Logf("  [%d] %s: %s", i, evt.Event, dataStr)
 	}
+
+	var reasoningEvents []Event
+	for _, evt := range allEvents {
+		if evt.Event == "response.reasoning.delta" {
+			reasoningEvents = append(reasoningEvents, evt)
+		}
+	}
+	if len(reasoningEvents) != 1 {
+		t.Fatalf("expected exactly one reasoning event, got %#v", allEvents)
+	}
+	if got := stringValue(reasoningEvents[0].Data["reasoning_content"]); got != "thinking..." {
+		t.Fatalf("expected reasoning_content field to carry upstream reasoning body, got %#v", reasoningEvents[0].Data)
+	}
+	if _, ok := reasoningEvents[0].Data["summary"]; ok {
+		t.Fatalf("expected upstream reasoning_content not to be downgraded into summary field, got %#v", reasoningEvents[0].Data)
+	}
 }
 
 func TestNormalizeChatFrame_DoesNotExtractThinkTagsWhenStyleDisabled(t *testing.T) {
@@ -699,7 +715,7 @@ func TestNormalizeChatFrame_StreamsThinkReasoningBeforeClosingTag(t *testing.T) 
 	for _, evt := range allEvents {
 		switch evt.Event {
 		case "response.reasoning.delta":
-			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+			reasoning = append(reasoning, stringValue(evt.Data["reasoning_content"]))
 		case "response.output_text.delta":
 			text = append(text, stringValue(evt.Data["delta"]))
 		}
@@ -747,7 +763,7 @@ func TestNormalizeChatFrame_StreamsReasoningTagBeforeClosingTag(t *testing.T) {
 	for _, evt := range allEvents {
 		switch evt.Event {
 		case "response.reasoning.delta":
-			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+			reasoning = append(reasoning, stringValue(evt.Data["reasoning_content"]))
 		case "response.output_text.delta":
 			text = append(text, stringValue(evt.Data["delta"]))
 		}
@@ -801,7 +817,7 @@ func TestNormalizeChatFrame_DefaultsToReasoningUntilClosingTagWhenStyleEnabled(t
 	for _, evt := range allEvents {
 		switch evt.Event {
 		case "response.reasoning.delta":
-			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+			reasoning = append(reasoning, stringValue(evt.Data["reasoning_content"]))
 		case "response.output_text.delta":
 			text = append(text, stringValue(evt.Data["delta"]))
 		}
@@ -846,7 +862,7 @@ func TestNormalizeChatFrame_DoesNotReenterImplicitReasoningAfterFirstClose(t *te
 	for _, evt := range allEvents {
 		switch evt.Event {
 		case "response.reasoning.delta":
-			reasoning = append(reasoning, stringValue(evt.Data["summary"]))
+			reasoning = append(reasoning, stringValue(evt.Data["reasoning_content"]))
 		case "response.output_text.delta":
 			text = append(text, stringValue(evt.Data["delta"]))
 		}

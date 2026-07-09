@@ -685,7 +685,7 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				events = appendChatTextEvents(events, text, state)
 			}
 			if reasoning, _ := delta["reasoning_content"].(string); reasoning != "" {
-				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoning}})
+				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": reasoning}})
 			}
 			toolCalls, _ := delta["tool_calls"].([]any)
 			for _, rawTool := range toolCalls {
@@ -780,7 +780,7 @@ func appendChatTextEvents(events []Event, text string, state *chatNormalizationS
 	cleanText, reasoningContent := extractContentAndReasoningTagsWithState(text, state)
 	state.suppressBlankTextAfterThink = state.suppressBlankTextAfterThink || reasoningContent != ""
 	if reasoningContent != "" {
-		events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": reasoningContent}})
+		events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": reasoningContent}})
 	}
 	cleanText = suppressWhitespaceOnlyTextAfterThinkExtraction(cleanText, state.suppressBlankTextAfterThink)
 	if cleanText != "" {
@@ -1110,7 +1110,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 				if block := state.reasoningBlocks[index]; block != nil {
 					blocks = []any{cloneMap(block)}
 				}
-				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": text, "blocks": blocks}})
+				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": text, "blocks": blocks}})
 			}
 		case "signature_delta":
 			if signature := stringValue(delta["signature"]); signature != "" {
@@ -1262,7 +1262,7 @@ func normalizeChatPayload(payload map[string]any, thinkingTagStyle string, xmlTo
 		}
 	}
 	if reasoningContent != "" {
-		result["reasoning"] = map[string]any{"summary": reasoningContent}
+		result["reasoning"] = map[string]any{"reasoning_content": reasoningContent}
 	}
 	if finishReason := stringValue(choice["finish_reason"]); finishReason != "" {
 		result["finish_reason"] = finishReason
