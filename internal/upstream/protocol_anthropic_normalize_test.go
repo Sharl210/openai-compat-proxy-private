@@ -335,11 +335,12 @@ func TestNormalizeAnthropicFrame_Error(t *testing.T) {
 	if done {
 		t.Fatal("unexpected done")
 	}
-
-	t.Logf("=== Error Event ===")
-	for i, evt := range events {
-		dataStr, _ := json.Marshal(evt.Data)
-		t.Logf("  [%d] %s: %s", i, evt.Event, dataStr)
+	if len(events) != 1 || events[0].Event != "response.incomplete" {
+		t.Fatalf("expected normalized incomplete event, got %#v", events)
+	}
+	errMap, _ := events[0].Data["error"].(map[string]any)
+	if errMap["type"] != "invalid_request" || errMap["message"] != "bad request" {
+		t.Fatalf("expected Anthropic error object to survive normalization, got %#v", events[0].Data)
 	}
 }
 

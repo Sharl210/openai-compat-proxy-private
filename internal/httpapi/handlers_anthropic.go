@@ -128,6 +128,15 @@ func handleAnthropicMessages() http.HandlerFunc {
 				return
 			}
 			defer stream.Close()
+			overflow, err := stream.ProbeContextOverflowBeforeOutput()
+			if err != nil {
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+			if overflow != nil {
+				writeAnthropicContextLimitExceeded(w, overflow.Message)
+				return
+			}
 			flusher := startSSE(w)
 			streamState := &anthropicStreamState{}
 			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState, providerCfg.UpstreamEndpointType, usageRecorder); err != nil {

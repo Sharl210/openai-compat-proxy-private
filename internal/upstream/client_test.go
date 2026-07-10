@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -2224,6 +2225,118 @@ func TestParseSSEStreamingTreatsResponseFailedAsTerminal(t *testing.T) {
 	errorObj, _ := events[0].Data["error"].(map[string]any)
 	if errorObj["code"] != "context_length_exceeded" || errorObj["message"] != "too long" {
 		t.Fatalf("expected upstream error details to be preserved, got %#v", events[0].Data)
+	}
+}
+
+func TestEventStreamProbeContextOverflowBeforeOutput_replaysFirstVisibleBatchOnce(t *testing.T) {
+	// Given
+	readCount := 0
+	stream := &EventStream{
+		resp:    &http.Response{Body: io.NopCloser(strings.NewReader(""))},
+		scanner: bufio.NewScanner(strings.NewReader("")),
+		readNext: func(*bufio.Scanner) ([]Event, error) {
+			readCount++
+			if readCount > 1 {
+				return nil, nil
+			}
+			return []Event{
+				{Event: "usage.update", ArchiveOnly: true},
+				{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_1"}}},
+			}, nil
+		},
+	}
+
+	// When
+	overflow, err := stream.ProbeContextOverflowBeforeOutput()
+
+	// Then
+	if err != nil {
+		t.Fatalf("probe context overflow: %v", err)
+	}
+	if overflow != nil {
+		t.Fatalf("expected first visible batch to remain replayable, got overflow %#v", overflow)
+	}
+	if len(stream.pendingEvents) != 2 {
+		t.Fatalf("expected probe to retain one complete batch, got %#v", stream.pendingEvents)
+	}
+	var seen []string
+	if err := stream.Consume(func(evt Event) error {
+		seen = append(seen, evt.Event)
+		return nil
+	}); err != nil {
+		t.Fatalf("consume replayed stream: %v", err)
+	}
+	if !reflect.DeepEqual(seen, []string{"response.created"}) {
+		t.Fatalf("expected first visible event exactly once after probe, got %#v", seen)
+	}
+}
+
+func TestEventStreamProbeContextOverflowBeforeOutput_detectsPendingContextOverflow(t *testing.T) {
+	// Given
+	stream := &EventStream{
+		resp: &http.Response{Body: io.NopCloser(strings.NewReader(""))},
+		pendingEvents: []Event{{
+			Event: "error",
+			Data: map[string]any{"error": map[string]any{
+				"code":    "context_length_exceeded",
+				"message": "prompt is too long",
+			}},
+		}},
+	}
+
+	// When
+	overflow, err := stream.ProbeContextOverflowBeforeOutput()
+
+	// Then
+	if err != nil {
+		t.Fatalf("probe pending context overflow: %v", err)
+	}
+	if overflow == nil {
+		t.Fatal("expected pending context overflow to be detected")
+	}
+	if overflow.Error["code"] != "context_length_exceeded" {
+		t.Fatalf("expected normalized context overflow code, got %#v", overflow.Error)
+	}
+}
+
+func TestEventStreamProbeContextOverflowBeforeOutput_replaysArchiveOnlyPendingEventsBeforeVisibleOutput(t *testing.T) {
+	// Given
+	readCount := 0
+	stream := &EventStream{
+		resp:          &http.Response{Body: io.NopCloser(strings.NewReader(""))},
+		pendingEvents: []Event{{Event: "usage.update", ArchiveOnly: true}},
+		scanner:       bufio.NewScanner(strings.NewReader("")),
+		readNext: func(*bufio.Scanner) ([]Event, error) {
+			readCount++
+			if readCount == 1 {
+				return []Event{{Event: "response.output_text.delta", Data: map[string]any{"delta": "hello"}}}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	// When
+	overflow, err := stream.ProbeContextOverflowBeforeOutput()
+
+	// Then
+	if err != nil {
+		t.Fatalf("probe pending archive event: %v", err)
+	}
+	if overflow != nil {
+		t.Fatalf("expected visible output to remain replayable, got %#v", overflow)
+	}
+	if len(stream.pendingEvents) != 2 {
+		t.Fatalf("expected pending archive and visible events to be replayed, got %#v", stream.pendingEvents)
+	}
+	var visible []string
+	if err := stream.Consume(func(evt Event) error {
+		visible = append(visible, evt.Event)
+		return nil
+	}); err != nil {
+		t.Fatalf("consume replayed stream: %v", err)
+	}
+	if !reflect.DeepEqual(visible, []string{"response.output_text.delta"}) {
+		t.Fatalf("expected visible output exactly once after probe, got %#v", visible)
 	}
 }
 

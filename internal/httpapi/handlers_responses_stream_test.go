@@ -886,7 +886,7 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 	}
 }
 
-func TestResponsesStreamNormalizesContextTooLargeForClientCompaction(t *testing.T) {
+func TestResponsesStreamReturnsHTTP400ForEarlyContextTooLarge(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: error\n" +
 			"data: {\"type\":\"error\",\"code\":\"context_too_large\",\"message\":\"context too large\"}\n\n",
@@ -903,19 +903,19 @@ func TestResponsesStreamNormalizesContextTooLargeForClientCompaction(t *testing.
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected early context-too-large upstream error to return HTTP 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.failed`) {
-		t.Fatalf("expected context-too-large upstream error to surface as response.failed, got %s", body)
+	if strings.Contains(body, `event:`) || strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected early context overflow not to start SSE, got %s", body)
 	}
-	if !strings.Contains(body, `"code":"context_length_exceeded"`) {
-		t.Fatalf("expected client-compatible context_length_exceeded code, got %s", body)
-	}
-	if !strings.Contains(body, `prompt is too long`) || !strings.Contains(body, `context_length_exceeded`) {
-		t.Fatalf("expected client-compatible compact trigger message, got %s", body)
+	if !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected client-compatible context overflow body, got %s", body)
 	}
 }
 
-func TestResponsesStreamNormalizesTopLevelContextTooLargeCodeForClientCompaction(t *testing.T) {
+func TestResponsesStreamReturnsHTTP400ForEarlyTopLevelContextTooLargeCode(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: error\n" +
 			"data: {\"type\":\"error\",\"code\":\"context_too_large\",\"message\":\"request rejected\"}\n\n",
@@ -932,15 +932,15 @@ func TestResponsesStreamNormalizesTopLevelContextTooLargeCodeForClientCompaction
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected early top-level context-too-large code to return HTTP 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `event: response.failed`) {
-		t.Fatalf("expected top-level context-too-large code to surface as response.failed, got %s", body)
+	if strings.Contains(body, `event:`) || strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected early context overflow not to start SSE, got %s", body)
 	}
-	if !strings.Contains(body, `"code":"context_length_exceeded"`) {
-		t.Fatalf("expected top-level context-too-large code to normalize to context_length_exceeded, got %s", body)
-	}
-	if !strings.Contains(body, `prompt is too long`) || !strings.Contains(body, `context_length_exceeded`) {
-		t.Fatalf("expected top-level context-too-large code to keep compact trigger message, got %s", body)
+	if !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected client-compatible context overflow body, got %s", body)
 	}
 }
 
@@ -1471,7 +1471,7 @@ func TestResponsesStreamCompatibilityRepairsMalformedFunctionArgumentsDone(t *te
 	}
 }
 
-func TestProviderResponsesRouteEmitsPlaceholderBeforeFirstUpstreamEvent(t *testing.T) {
+func TestProviderResponsesRouteDefersPlaceholderUntilFirstUpstreamEvent(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
@@ -1517,16 +1517,11 @@ func TestProviderResponsesRouteEmitsPlaceholderBeforeFirstUpstreamEvent(t *testi
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	start := time.Now()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("proxy request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	if elapsed := time.Since(start); elapsed >= 250*time.Millisecond {
-		t.Fatalf("expected response headers before first upstream event, got %s", elapsed)
-	}
-
 	readDone := make(chan string, 1)
 	go func() {
 		buf := make([]byte, 8192)
@@ -1547,23 +1542,12 @@ func TestProviderResponsesRouteEmitsPlaceholderBeforeFirstUpstreamEvent(t *testi
 		}
 	}()
 
-	select {
-	case body := <-readDone:
-		if !strings.Contains(body, `"id":"rs_proxy"`) {
-			t.Fatalf("expected proxy reasoning lifecycle before first upstream event, got %q", body)
-		}
-		if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
-			t.Fatalf("expected early bytes not to expose proxy placeholder reasoning text, got %q", body)
-		}
-	case <-time.After(200 * time.Millisecond):
-		select {
-		case body := <-readDone:
-			_ = resp.Body.Close()
-			t.Fatalf("expected proxy reasoning lifecycle before upstream event, but only received later body %q", body)
-		case <-time.After(350 * time.Millisecond):
-			_ = resp.Body.Close()
-			t.Fatal("expected proxy reasoning lifecycle bytes to reach client before upstream event")
-		}
+	body := <-readDone
+	if !strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected proxy reasoning lifecycle after first upstream event, got %q", body)
+	}
+	if strings.Contains(body, "代理层占位") || strings.Contains(body, "**推理中**") {
+		t.Fatalf("expected proxy lifecycle not to expose placeholder reasoning text, got %q", body)
 	}
 }
 

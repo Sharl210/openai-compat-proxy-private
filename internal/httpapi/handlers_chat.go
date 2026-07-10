@@ -138,6 +138,15 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 			defer stream.Close()
+			overflow, err := stream.ProbeContextOverflowBeforeOutput()
+			if err != nil {
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+			if overflow != nil {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", overflow.Message)
+				return
+			}
 			flusher := startSSE(w)
 			if err := writeChatSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder); err != nil {
 				var terminalFailure *aggregate.TerminalFailureError

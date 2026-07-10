@@ -57,6 +57,99 @@ type EventStream struct {
 	seq           int64
 }
 
+type PreOutputContextOverflow struct {
+	Message string
+	Error   map[string]any
+}
+
+func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverflow, error) {
+	if s == nil {
+		return nil, nil
+	}
+	buffered := append([]Event(nil), s.pendingEvents...)
+	s.pendingEvents = nil
+	for {
+		for _, evt := range buffered {
+			if evt.ArchiveOnly {
+				continue
+			}
+			if overflow := contextOverflowFromEvent(evt); overflow != nil {
+				return overflow, nil
+			}
+			s.pendingEvents = append(s.pendingEvents, buffered...)
+			return nil, nil
+		}
+		if s.scanner == nil || s.readNext == nil {
+			s.pendingEvents = append(s.pendingEvents, buffered...)
+			return nil, nil
+		}
+		events, err := s.readNext(s.scanner)
+		if err != nil {
+			s.pendingEvents = append(s.pendingEvents, buffered...)
+			return nil, err
+		}
+		if len(events) == 0 {
+			s.pendingEvents = append(s.pendingEvents, buffered...)
+			return nil, nil
+		}
+		buffered = append(buffered, events...)
+	}
+}
+
+func contextOverflowFromEvent(evt Event) *PreOutputContextOverflow {
+	errObj := eventErrorObject(evt.Data)
+	code := strings.TrimSpace(stringValue(errObj["code"]))
+	if code == "" {
+		code = strings.TrimSpace(stringValue(evt.Data["code"]))
+	}
+	message := strings.TrimSpace(stringValue(errObj["message"]))
+	if message == "" {
+		message = strings.TrimSpace(stringValue(evt.Data["message"]))
+	}
+	if !isContextOverflowSignal(code, message) {
+		return nil
+	}
+	if message == "" {
+		message = "prompt is too long: context_length_exceeded"
+	}
+	if !strings.Contains(strings.ToLower(message), "prompt is too long") || !strings.Contains(strings.ToLower(message), "context_length_exceeded") {
+		message = "prompt is too long: context_length_exceeded: " + message
+	}
+	errObj = cloneMap(errObj)
+	errObj["type"] = "invalid_request_error"
+	errObj["code"] = "context_length_exceeded"
+	errObj["message"] = message
+	if _, ok := errObj["param"]; !ok {
+		errObj["param"] = "input"
+	}
+	return &PreOutputContextOverflow{Message: message, Error: errObj}
+}
+
+func eventErrorObject(data map[string]any) map[string]any {
+	if errObj, _ := data["error"].(map[string]any); len(errObj) > 0 {
+		return errObj
+	}
+	response, _ := data["response"].(map[string]any)
+	if errObj, _ := response["error"].(map[string]any); len(errObj) > 0 {
+		return errObj
+	}
+	return map[string]any{}
+}
+
+func isContextOverflowSignal(code, message string) bool {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "context_length_exceeded", "context_too_large", "model_context_window_exceeded":
+		return true
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "context_length_exceeded") ||
+		strings.Contains(message, "prompt is too long") ||
+		strings.Contains(message, "context window") ||
+		strings.Contains(message, "context length") ||
+		strings.Contains(message, "too many tokens") ||
+		strings.Contains(message, "token limit")
+}
+
 func (s *EventStream) FirstPendingResponseID() string {
 	if s == nil {
 		return ""

@@ -1175,7 +1175,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 		}
 	case "error":
 		errMap, _ := payload["error"].(map[string]any)
-		events = append(events, Event{Event: "response.incomplete", Data: map[string]any{"health_flag": "upstream_error", "message": stringValue(errMap["message"])}})
+		events = append(events, Event{Event: "response.incomplete", Data: map[string]any{"health_flag": "upstream_error", "message": stringValue(errMap["message"]), "error": cloneMap(errMap)}})
 		state.completed = true
 	}
 	shadowRecord(events, frame, state.provider)

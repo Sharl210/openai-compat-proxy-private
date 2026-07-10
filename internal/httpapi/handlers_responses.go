@@ -90,6 +90,15 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			defer stream.Close()
+			overflow, err := stream.ProbeContextOverflowBeforeOutput()
+			if err != nil {
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+			if overflow != nil {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", overflow.Message)
+				return
+			}
 			flusher := startSSE(w)
 			var initialState *responsesStreamState
 			if shouldInjectSyntheticResponsesReasoning(providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle) {
