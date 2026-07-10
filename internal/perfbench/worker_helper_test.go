@@ -9,7 +9,12 @@ import (
 	"testing"
 )
 
-const readySignal = "PERFBENCH_READY_V1\n"
+const (
+	readySignal          = "PERFBENCH_READY_V2\n"
+	operationStartSignal = "PERFBENCH_START_V2\n"
+	operationStopSignal  = "PERFBENCH_STOP_V2\n"
+	operationStopAck     = "PERFBENCH_STOP_ACK_V2\n"
+)
 
 var helperArgSentinel = flag.String("perfbench-helper-sentinel", "", "internal perfbench helper sentinel")
 
@@ -25,10 +30,23 @@ func TestPerfWorkerHelperProcess(t *testing.T) {
 	if _, err := io.WriteString(os.Stdout, readySignal); err != nil {
 		t.Fatalf("write ready signal: %v", err)
 	}
+	if request.Action == workerActionRoundTrip {
+		if err := readExactSignal(os.Stdin, operationStartSignal); err != nil {
+			t.Fatalf("read operation start signal: %v", err)
+		}
+	}
 
 	result, err := executeWorker(request)
 	if err != nil {
 		result.Error = err.Error()
+	}
+	if request.Action == workerActionRoundTrip {
+		if _, err := io.WriteString(os.Stdout, operationStopSignal); err != nil {
+			t.Fatalf("write operation stop signal: %v", err)
+		}
+		if err := readExactSignal(os.Stdin, operationStopAck); err != nil {
+			t.Fatalf("read operation stop acknowledgement: %v", err)
+		}
 	}
 	frame, err := encodeWorkerResultFrame(result)
 	if err != nil {
@@ -41,13 +59,17 @@ func TestPerfWorkerHelperProcess(t *testing.T) {
 }
 
 func readReadySignal(reader io.Reader) error {
-	ready := make([]byte, len(readySignal))
-	_, err := io.ReadFull(reader, ready)
+	return readExactSignal(reader, readySignal)
+}
+
+func readExactSignal(reader io.Reader, expected string) error {
+	actual := make([]byte, len(expected))
+	_, err := io.ReadFull(reader, actual)
 	if err != nil {
-		return fmt.Errorf("read helper ready signal: %w", err)
+		return fmt.Errorf("read signal %q: %w", expected, err)
 	}
-	if string(ready) != readySignal {
-		return fmt.Errorf("invalid helper ready signal %q", ready)
+	if string(actual) != expected {
+		return fmt.Errorf("invalid signal %q, want %q", actual, expected)
 	}
 	return nil
 }

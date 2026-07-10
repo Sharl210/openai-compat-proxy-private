@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -59,16 +58,10 @@ type roundTripEvidence struct {
 	connections          connectionMetrics
 }
 
-type memoryMeasurements struct {
-	idle     memorySnapshot
-	retained memorySnapshot
-	peak     memorySnapshot
-}
-
-func executeMeasuredRoundTrip(item scenario) (roundTripEvidence, memoryMeasurements, error) {
+func executeMeasuredRoundTrip(item scenario, mode measurementMode) (workerMetrics, error) {
 	body, err := buildScenarioRequest(item)
 	if err != nil {
-		return roundTripEvidence{}, memoryMeasurements{}, err
+		return workerMetrics{}, err
 	}
 	tracker := &connectionTracker{}
 	server := newObservedLoopbackServer(tracker)
@@ -79,25 +72,13 @@ func executeMeasuredRoundTrip(item scenario) (roundTripEvidence, memoryMeasureme
 			server.Close()
 		}
 	}()
-	idle, err := captureMemorySnapshot()
-	if err != nil {
-		return roundTripEvidence{}, memoryMeasurements{}, err
-	}
-	ticker := time.NewTicker(time.Millisecond)
-	sampler, err := startPeakSampler(captureMemorySnapshot, ticker.C)
-	if err != nil {
-		ticker.Stop()
-		return roundTripEvidence{}, memoryMeasurements{}, err
-	}
-	evidence, operationErr := performLoopbackRoundTrip(server, body)
-	server.Close()
-	serverClosed = true
-	ticker.Stop()
-	peak, sampleErr := sampler.Stop()
-	retained, retainedErr := captureMemorySnapshot()
-	evidence.connections = tracker.snapshot()
-	return evidence, memoryMeasurements{idle: idle, retained: retained, peak: peak},
-		errors.Join(operationErr, sampleErr, retainedErr)
+	return measureOperation(mode, func() (roundTripEvidence, error) {
+		evidence, operationErr := performLoopbackRoundTrip(server, body)
+		server.Close()
+		serverClosed = true
+		evidence.connections = tracker.snapshot()
+		return evidence, operationErr
+	}, defaultMeasurementHooks())
 }
 
 func newObservedLoopbackServer(tracker *connectionTracker) *httptest.Server {

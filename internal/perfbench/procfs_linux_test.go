@@ -8,7 +8,11 @@ import (
 )
 
 func readProcessMemory() (processMemory, bool, error) {
-	status, err := os.Open("/proc/self/status")
+	return readProcessMemoryPID(os.Getpid())
+}
+
+func readProcessMemoryPID(pid int) (processMemory, bool, error) {
+	status, err := os.Open(processStatusPath(pid))
 	if err != nil {
 		return processMemory{}, true, fmt.Errorf("open process status: %w", err)
 	}
@@ -18,4 +22,8 @@ func readProcessMemory() (processMemory, bool, error) {
 		return processMemory{}, true, err
 	}
 	return memory, true, nil
+}
+
+func processStatusPath(pid int) string {
+	return fmt.Sprintf("/proc/%d/status", pid)
 }

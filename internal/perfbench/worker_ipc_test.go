@@ -16,7 +16,7 @@ import (
 
 const (
 	helperTokenEnvironment = "PERFBENCH_HELPER_TOKEN"
-	resultFrameMarker      = "PERFBENCH_RESULT_V1 "
+	resultFrameMarker      = "PERFBENCH_RESULT_V2 "
 	maxResultFrameBytes    = 1 << 20
 	maxResultHeaderBytes   = 64
 )
@@ -50,6 +50,11 @@ func workerEnvironment(inherited []string, token string) []string {
 }
 
 func encodeWorkerResultFrame(result workerResult) ([]byte, error) {
+	if result.Error == "" {
+		if err := result.Metrics.validateModeContract(); err != nil {
+			return nil, err
+		}
+	}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		return nil, fmt.Errorf("marshal worker result: %w", err)
@@ -91,6 +96,11 @@ func decodeWorkerResultFrame(reader io.Reader) (workerResult, error) {
 	var result workerResult
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return workerResult{}, fmt.Errorf("decode worker result payload: %w", err)
+	}
+	if result.Error == "" {
+		if err := result.Metrics.validateModeContract(); err != nil {
+			return workerResult{}, err
+		}
 	}
 	canonical, err := json.Marshal(result)
 	if err != nil {
@@ -151,7 +161,7 @@ func TestWorkerEnvironment_strips_inherited_helper_values(t *testing.T) {
 
 func TestWorkerResultFrame_requires_exactly_one_clean_frame(t *testing.T) {
 	// Given
-	want := workerResult{ScenarioID: "scenario-v1"}
+	want := workerResult{ScenarioID: "scenario-v1", Error: "frame fixture"}
 	frame, err := encodeWorkerResultFrame(want)
 	if err != nil {
 		t.Fatalf("encode result frame: %v", err)

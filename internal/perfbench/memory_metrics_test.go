@@ -1,87 +1,104 @@
 package perfbench
 
 import (
-	"errors"
+	"fmt"
 	"runtime"
 	"time"
 )
 
-type memorySnapshot struct {
-	HeapAlloc              uint64 `json:"heap_alloc"`
-	HeapInuse              uint64 `json:"heap_inuse"`
-	TotalAlloc             uint64 `json:"total_alloc"`
-	Mallocs                uint64 `json:"mallocs"`
-	NumGC                  uint32 `json:"num_gc"`
-	RssAnon                uint64 `json:"rss_anon"`
-	VmRSS                  uint64 `json:"vm_rss"`
-	Goroutines             int    `json:"goroutines"`
-	ProcessMemorySupported bool   `json:"process_memory_supported"`
+type measurementMode string
+
+const (
+	measurementModeLatency            measurementMode = "latency"
+	measurementModeAllocationRetained measurementMode = "allocation_retained"
+	measurementModeSampledPeak        measurementMode = "sampled_peak"
+	measurementSampleInterval                         = time.Millisecond
+)
+
+type runtimeSnapshot struct {
+	HeapAlloc  uint64 `json:"heap_alloc"`
+	HeapInuse  uint64 `json:"heap_inuse"`
+	TotalAlloc uint64 `json:"total_alloc"`
+	Mallocs    uint64 `json:"mallocs"`
+	NumGC      uint32 `json:"num_gc"`
+	Goroutines int    `json:"goroutines"`
 }
 
-type memoryDelta struct {
-	HeapAlloc  int64 `json:"heap_alloc"`
-	HeapInuse  int64 `json:"heap_inuse"`
-	TotalAlloc int64 `json:"total_alloc"`
-	Mallocs    int64 `json:"mallocs"`
-	NumGC      int64 `json:"num_gc"`
-	RssAnon    int64 `json:"rss_anon"`
-	VmRSS      int64 `json:"vm_rss"`
-	Goroutines int64 `json:"goroutines"`
+type operationAllocationDelta struct {
+	TotalAlloc uint64 `json:"total_alloc"`
+	Mallocs    uint64 `json:"mallocs"`
+	NumGC      uint32 `json:"num_gc"`
+}
+
+type latencyMetrics struct {
+	TTFB          time.Duration `json:"ttfb_ns"`
+	TotalDuration time.Duration `json:"total_duration_ns"`
+}
+
+type allocationRetainedMetrics struct {
+	PreOperation             runtimeSnapshot          `json:"pre_operation"`
+	PostOperationBeforeGC    runtimeSnapshot          `json:"post_operation_before_gc"`
+	PostOperationAfterGC     runtimeSnapshot          `json:"post_operation_after_gc"`
+	OperationAllocationDelta operationAllocationDelta `json:"operation_allocation_delta"`
+}
+
+type sampledHeapPeak struct {
+	HeapAlloc   uint64        `json:"heap_alloc"`
+	HeapInuse   uint64        `json:"heap_inuse"`
+	Interval    time.Duration `json:"interval_ns"`
+	SampleCount uint64        `json:"sample_count"`
+}
+
+type sampledPeakMetrics struct {
+	WorkerHeap             sampledHeapPeak `json:"worker_heap"`
+	ParentProcess          processMemory   `json:"parent_process"`
+	ParentProcessSupported bool            `json:"parent_process_supported"`
+	ParentSampleInterval   time.Duration   `json:"parent_sample_interval_ns"`
+	ParentSampleCount      uint64          `json:"parent_sample_count"`
 }
 
 type workerMetrics struct {
-	Idle                      memorySnapshot    `json:"idle"`
-	Retained                  memorySnapshot    `json:"retained"`
-	PeakDuringOperation       memorySnapshot    `json:"peak_during_operation"`
-	RetainedDelta             memoryDelta       `json:"retained_delta"`
-	PeakDelta                 memoryDelta       `json:"peak_delta"`
-	TTFB                      time.Duration     `json:"ttfb_ns"`
-	TotalDuration             time.Duration     `json:"total_duration_ns"`
-	ObservedRequestBytes      int64             `json:"observed_request_bytes"`
-	ResponseBytes             int64             `json:"response_bytes"`
-	ObservedRequestBodySHA256 string            `json:"observed_request_body_sha256"`
-	ResponseBodySHA256        string            `json:"response_body_sha256"`
-	Connections               connectionMetrics `json:"connections"`
+	Mode                       measurementMode            `json:"mode"`
+	Latency                    *latencyMetrics            `json:"latency,omitempty"`
+	AllocationRetained         *allocationRetainedMetrics `json:"allocation_retained,omitempty"`
+	SampledPeakDuringOperation *sampledPeakMetrics        `json:"sampled_peak_during_operation,omitempty"`
+	ObservedRequestBytes       int64                      `json:"observed_request_bytes"`
+	ResponseBytes              int64                      `json:"response_bytes"`
+	ObservedRequestBodySHA256  string                     `json:"observed_request_body_sha256"`
+	ResponseBodySHA256         string                     `json:"response_body_sha256"`
+	Connections                connectionMetrics          `json:"connections"`
 }
 
-func captureMemorySnapshot() (memorySnapshot, error) {
-	var runtimeMemory runtime.MemStats
-	runtime.ReadMemStats(&runtimeMemory)
-	process, supported, err := readProcessMemory()
-	if err != nil && !errors.Is(err, errProcessMemoryUnsupported) {
-		return memorySnapshot{}, err
-	}
-	return memorySnapshot{
-		HeapAlloc: runtimeMemory.HeapAlloc, HeapInuse: runtimeMemory.HeapInuse,
-		TotalAlloc: runtimeMemory.TotalAlloc, Mallocs: runtimeMemory.Mallocs,
-		NumGC: runtimeMemory.NumGC, RssAnon: process.RssAnon, VmRSS: process.VmRSS,
-		Goroutines: runtime.NumGoroutine(), ProcessMemorySupported: supported,
-	}, nil
-}
-
-func memoryDeltaBetween(before, after memorySnapshot) memoryDelta {
-	return memoryDelta{
-		HeapAlloc:  int64(after.HeapAlloc) - int64(before.HeapAlloc),
-		HeapInuse:  int64(after.HeapInuse) - int64(before.HeapInuse),
-		TotalAlloc: int64(after.TotalAlloc) - int64(before.TotalAlloc),
-		Mallocs:    int64(after.Mallocs) - int64(before.Mallocs),
-		NumGC:      int64(after.NumGC) - int64(before.NumGC),
-		RssAnon:    int64(after.RssAnon) - int64(before.RssAnon),
-		VmRSS:      int64(after.VmRSS) - int64(before.VmRSS),
-		Goroutines: int64(after.Goroutines - before.Goroutines),
+func captureRuntimeSnapshot() runtimeSnapshot {
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	return runtimeSnapshot{
+		HeapAlloc: memory.HeapAlloc, HeapInuse: memory.HeapInuse,
+		TotalAlloc: memory.TotalAlloc, Mallocs: memory.Mallocs,
+		NumGC: memory.NumGC, Goroutines: runtime.NumGoroutine(),
 	}
 }
 
-func maxMemorySnapshot(left, right memorySnapshot) memorySnapshot {
-	return memorySnapshot{
-		HeapAlloc:              max(left.HeapAlloc, right.HeapAlloc),
-		HeapInuse:              max(left.HeapInuse, right.HeapInuse),
-		TotalAlloc:             max(left.TotalAlloc, right.TotalAlloc),
-		Mallocs:                max(left.Mallocs, right.Mallocs),
-		NumGC:                  max(left.NumGC, right.NumGC),
-		RssAnon:                max(left.RssAnon, right.RssAnon),
-		VmRSS:                  max(left.VmRSS, right.VmRSS),
-		Goroutines:             max(left.Goroutines, right.Goroutines),
-		ProcessMemorySupported: left.ProcessMemorySupported || right.ProcessMemorySupported,
+func allocationDelta(before, after runtimeSnapshot) operationAllocationDelta {
+	return operationAllocationDelta{
+		TotalAlloc: after.TotalAlloc - before.TotalAlloc,
+		Mallocs:    after.Mallocs - before.Mallocs,
+		NumGC:      after.NumGC - before.NumGC,
 	}
+}
+
+func (metrics workerMetrics) validateModeContract() error {
+	valid := false
+	switch metrics.Mode {
+	case measurementModeLatency:
+		valid = metrics.Latency != nil && metrics.AllocationRetained == nil && metrics.SampledPeakDuringOperation == nil
+	case measurementModeAllocationRetained:
+		valid = metrics.Latency == nil && metrics.AllocationRetained != nil && metrics.SampledPeakDuringOperation == nil
+	case measurementModeSampledPeak:
+		valid = metrics.Latency == nil && metrics.AllocationRetained == nil && metrics.SampledPeakDuringOperation != nil
+	}
+	if !valid {
+		return fmt.Errorf("ambiguous metrics for measurement mode %q", metrics.Mode)
+	}
+	return nil
 }

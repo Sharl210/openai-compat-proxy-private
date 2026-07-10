@@ -1,134 +1,126 @@
 package perfbench
 
 import (
-	"fmt"
-	"sync/atomic"
+	"runtime"
 	"testing"
 	"time"
 )
 
-type memorySampleFunc func() (memorySnapshot, error)
-
-type peakSampler struct {
-	stop    chan struct{}
-	stopped chan struct{}
-	result  chan peakSamplerResult
+type heapGauge struct {
+	heapAlloc uint64
+	heapInuse uint64
 }
 
-type peakSamplerResult struct {
-	peak memorySnapshot
-	err  error
+type heapPeakSampler interface {
+	Stop() (sampledHeapPeak, error)
 }
 
-func startPeakSampler(sample memorySampleFunc, ticks <-chan time.Time) (*peakSampler, error) {
-	initial, err := sample()
-	if err != nil {
-		return nil, fmt.Errorf("sample peak boundary: %w", err)
-	}
-	sampler := &peakSampler{
+type runtimeHeapSampler struct {
+	stop       chan struct{}
+	stopped    chan struct{}
+	result     chan sampledHeapPeak
+	stopTicker func()
+}
+
+type heapSamplerConfig struct {
+	sample     func() heapGauge
+	ticks      <-chan time.Time
+	interval   time.Duration
+	stopTicker func()
+}
+
+func newRuntimeHeapSampler() (heapPeakSampler, error) {
+	ticker := time.NewTicker(measurementSampleInterval)
+	return startHeapSampler(heapSamplerConfig{
+		sample: captureHeapGauge, ticks: ticker.C,
+		interval: measurementSampleInterval, stopTicker: ticker.Stop,
+	}), nil
+}
+
+func startHeapSampler(config heapSamplerConfig) *runtimeHeapSampler {
+	initial := config.sample()
+	sampler := &runtimeHeapSampler{
 		stop: make(chan struct{}), stopped: make(chan struct{}),
-		result: make(chan peakSamplerResult, 1),
+		result: make(chan sampledHeapPeak, 1), stopTicker: config.stopTicker,
 	}
 	go func() {
 		defer close(sampler.stopped)
 		peak := initial
+		count := uint64(1)
 		for {
 			select {
-			case <-ticks:
-				current, sampleErr := sample()
-				if sampleErr != nil {
-					sampler.result <- peakSamplerResult{err: fmt.Errorf("sample operation peak: %w", sampleErr)}
-					return
-				}
-				peak = maxMemorySnapshot(peak, current)
+			case <-config.ticks:
+				peak = maxHeapGauge(peak, config.sample())
+				count++
 			case <-sampler.stop:
-				final, sampleErr := sample()
-				if sampleErr != nil {
-					sampler.result <- peakSamplerResult{err: fmt.Errorf("sample stop boundary: %w", sampleErr)}
-					return
+				peak = maxHeapGauge(peak, config.sample())
+				count++
+				sampler.result <- sampledHeapPeak{
+					HeapAlloc: peak.heapAlloc, HeapInuse: peak.heapInuse,
+					Interval: config.interval, SampleCount: count,
 				}
-				peak = maxMemorySnapshot(peak, final)
-				sampler.result <- peakSamplerResult{peak: peak}
 				return
 			}
 		}
 	}()
-	return sampler, nil
+	return sampler
 }
 
-func (sampler *peakSampler) Stop() (memorySnapshot, error) {
+func (sampler *runtimeHeapSampler) Stop() (sampledHeapPeak, error) {
+	if sampler.stopTicker != nil {
+		sampler.stopTicker()
+	}
 	close(sampler.stop)
 	result := <-sampler.result
 	<-sampler.stopped
-	return result.peak, result.err
+	return result, nil
 }
 
-func TestPeakSampler_samples_only_between_start_and_stop(t *testing.T) {
-	// Given
-	values := [...]memorySnapshot{
-		{HeapAlloc: 10, HeapInuse: 20, RssAnon: 30},
-		{HeapAlloc: 40, HeapInuse: 50, RssAnon: 60},
-		{HeapAlloc: 70, HeapInuse: 80, RssAnon: 90},
+func captureHeapGauge() heapGauge {
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	return heapGauge{heapAlloc: memory.HeapAlloc, heapInuse: memory.HeapInuse}
+}
+
+func maxHeapGauge(left, right heapGauge) heapGauge {
+	return heapGauge{
+		heapAlloc: max(left.heapAlloc, right.heapAlloc),
+		heapInuse: max(left.heapInuse, right.heapInuse),
 	}
-	var calls atomic.Int64
+}
+
+func TestHeapSampler_stops_without_goroutine_leak_and_reports_only_gauges(t *testing.T) {
+	// Given
+	values := []heapGauge{{10, 20}, {40, 50}, {70, 80}}
+	index := 0
 	sampled := make(chan struct{}, len(values))
 	ticks := make(chan time.Time, len(values))
-	sample := func() (memorySnapshot, error) {
-		index := int(calls.Add(1) - 1)
-		sampled <- struct{}{}
-		return values[index], nil
-	}
-
-	// When
-	sampler, err := startPeakSampler(sample, ticks)
-	if err != nil {
-		t.Fatalf("start sampler: %v", err)
-	}
+	sampler := startHeapSampler(heapSamplerConfig{
+		sample: func() heapGauge {
+			value := values[index]
+			index++
+			sampled <- struct{}{}
+			return value
+		},
+		ticks: ticks, interval: time.Millisecond,
+	})
 	<-sampled
 	ticks <- time.Time{}
 	<-sampled
+
+	// When
 	peak, err := sampler.Stop()
-	if err != nil {
-		t.Fatalf("stop sampler: %v", err)
-	}
 
 	// Then
-	if peak != values[2] {
-		t.Fatalf("peak = %+v, want stop-boundary %+v", peak, values[2])
+	if err != nil {
+		t.Fatalf("stop heap sampler: %v", err)
+	}
+	if peak != (sampledHeapPeak{HeapAlloc: 70, HeapInuse: 80, Interval: time.Millisecond, SampleCount: 3}) {
+		t.Fatalf("heap peak = %+v", peak)
 	}
 	select {
 	case <-sampler.stopped:
 	default:
-		t.Fatal("sampler goroutine remained active after Stop")
-	}
-	ticks <- time.Time{}
-	if calls.Load() != 3 {
-		t.Fatalf("samples after Stop = %d, want 3", calls.Load())
-	}
-}
-
-func TestMemoryDelta_records_retained_and_peak_changes(t *testing.T) {
-	// Given
-	idle := memorySnapshot{
-		HeapAlloc: 10, HeapInuse: 20, TotalAlloc: 30, Mallocs: 40, NumGC: 2,
-		RssAnon: 50, VmRSS: 60, Goroutines: 3,
-	}
-	retained := memorySnapshot{
-		HeapAlloc: 7, HeapInuse: 25, TotalAlloc: 50, Mallocs: 70, NumGC: 3,
-		RssAnon: 45, VmRSS: 90, Goroutines: 4,
-	}
-
-	// When
-	delta := memoryDeltaBetween(idle, retained)
-
-	// Then
-	if delta.HeapAlloc != -3 || delta.HeapInuse != 5 || delta.TotalAlloc != 20 {
-		t.Fatalf("heap delta = %+v", delta)
-	}
-	if delta.Mallocs != 30 || delta.NumGC != 1 || delta.RssAnon != -5 || delta.VmRSS != 30 {
-		t.Fatalf("process delta = %+v", delta)
-	}
-	if delta.Goroutines != 1 {
-		t.Fatalf("goroutine delta = %d, want 1", delta.Goroutines)
+		t.Fatal("heap sampler goroutine remained active")
 	}
 }
