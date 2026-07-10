@@ -31,6 +31,142 @@ func TestResponsesHistoryEvictsOldestWhenLimitExceeded(t *testing.T) {
 	}
 }
 
+func TestResponsesHistoryEvictsOldestWhenByteLimitExceeded(t *testing.T) {
+	// Given
+	store := &responsesHistoryStore{
+		entries:  map[string]responsesConversationSnapshot{},
+		maxSize:  512,
+		maxBytes: 180,
+	}
+	largeText := strings.Repeat("x", 128)
+
+	// When
+	store.Save("openai", "resp-1", []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: largeText}}}})
+	store.Save("openai", "resp-2", []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: largeText}}}})
+
+	// Then
+	if got := store.Load("openai", "resp-1"); got != nil {
+		t.Fatalf("expected oldest byte-heavy entry to be evicted, got %#v", got)
+	}
+	if got := store.Load("openai", "resp-2"); len(got) != 1 {
+		t.Fatalf("expected newest entry to remain, got %#v", got)
+	}
+	if store.retainedBytes > store.maxBytes {
+		t.Fatalf("expected retained bytes within budget, got %d > %d", store.retainedBytes, store.maxBytes)
+	}
+}
+
+func TestResponsesHistorySkipsSnapshotLargerThanByteLimit(t *testing.T) {
+	// Given
+	store := &responsesHistoryStore{
+		entries:  map[string]responsesConversationSnapshot{},
+		maxSize:  512,
+		maxBytes: 64,
+	}
+	message := model.CanonicalMessage{
+		Role: "user",
+		Parts: []model.CanonicalContentPart{{
+			Type:     "image_url",
+			ImageURL: "data:image/png;base64," + strings.Repeat("A", 256),
+		}},
+	}
+
+	// When
+	store.Save("openai", "resp-large", []model.CanonicalMessage{message})
+
+	// Then
+	if got := store.Load("openai", "resp-large"); got != nil {
+		t.Fatalf("expected oversized snapshot not to remain cached, got %#v", got)
+	}
+	if store.retainedBytes != 0 {
+		t.Fatalf("expected no retained bytes for oversized snapshot, got %d", store.retainedBytes)
+	}
+}
+
+func TestResponsesHistoryKeepsToolRecoveryWhenSnapshotExceedsByteLimit(t *testing.T) {
+	// Given
+	store := &responsesHistoryStore{
+		entries:   map[string]responsesConversationSnapshot{},
+		toolCalls: map[string]responsesHistoryToolCallEntry{},
+		maxSize:   512,
+		maxBytes:  512,
+	}
+	messages := []model.CanonicalMessage{
+		{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type:     "image_url",
+				ImageURL: "data:image/png;base64," + strings.Repeat("A", 1024),
+			}},
+		},
+		{
+			Role:      "assistant",
+			ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "inspect_image", Arguments: `{}`}},
+		},
+	}
+
+	// When
+	store.Save("openai", "resp-large", messages)
+
+	// Then
+	if got := store.Load("openai", "resp-large"); got != nil {
+		t.Fatalf("expected oversized full snapshot not to remain cached, got %#v", got)
+	}
+	call, _, ok := store.LoadToolCall("openai", "call_1")
+	if !ok || call.Name != "inspect_image" {
+		t.Fatalf("expected lightweight tool recovery metadata to remain, got ok=%t call=%#v", ok, call)
+	}
+	if store.retainedBytes > store.maxBytes {
+		t.Fatalf("expected lightweight recovery metadata within budget, got %d > %d", store.retainedBytes, store.maxBytes)
+	}
+}
+
+func TestNewResponsesHistoryStoreUses256MiBByteBudget(t *testing.T) {
+	// Given
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	// When
+	configuredBudget := store.maxBytes
+
+	// Then
+	if configuredBudget != 256<<20 {
+		t.Fatalf("expected 256 MiB default history budget, got %d", configuredBudget)
+	}
+}
+
+func TestResponsesHistoryDropsOversizedToolRecoveryIndex(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := &responsesHistoryStore{
+		entries:                   map[string]responsesConversationSnapshot{},
+		byResponseID:              map[string]string{},
+		toolCalls:                 map[string]responsesHistoryToolCallEntry{},
+		maxSize:                   512,
+		maxBytes:                  64,
+		toolCallRecoveryIndexPath: indexPath,
+	}
+	messages := []model.CanonicalMessage{{
+		Role: "assistant",
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-large",
+			Type:      "function",
+			Name:      "inspect_image",
+			Arguments: strings.Repeat("x", 128),
+		}},
+	}}
+
+	// When
+	store.Save("openai", "resp-large-tool", messages)
+
+	// Then
+	if _, _, ok := store.LoadToolCall("openai", "call-large"); ok {
+		t.Fatal("expected oversized tool recovery entry to be dropped")
+	}
+	if _, err := os.Stat(indexPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no persisted oversized tool recovery index, got err=%v", err)
+	}
+}
+
 func TestResponsesHistorySaveSameKeyReplacesWithoutGrowingOrder(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: 2}
 
@@ -47,6 +183,27 @@ func TestResponsesHistorySaveSameKeyReplacesWithoutGrowingOrder(t *testing.T) {
 	}
 	if got := store.Load("openai", "resp-3"); len(got) != 1 {
 		t.Fatalf("expected resp-3 to remain, got %#v", got)
+	}
+}
+
+func TestResponsesHistorySaveSameKeyReplacesRetainedBytes(t *testing.T) {
+	// Given
+	store := &responsesHistoryStore{
+		entries:  map[string]responsesConversationSnapshot{},
+		maxSize:  2,
+		maxBytes: 1024,
+	}
+	first := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: strings.Repeat("a", 128)}}}}
+	second := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "short"}}}}
+
+	// When
+	store.Save("openai", "resp-1", first)
+	store.Save("openai", "resp-1", second)
+
+	// Then
+	want := estimateCanonicalMessagesBytes(second)
+	if store.retainedBytes != want {
+		t.Fatalf("expected replacement to retain %d bytes, got %d", want, store.retainedBytes)
 	}
 }
 
@@ -310,6 +467,74 @@ func TestResponsesHistoryReloadedPersistentToolCallRecoveryIndexKeepsEvictionBou
 	}
 	if call, _, ok := newProcess.LoadToolCall("anthropic", "call_3", "scope-a"); !ok || call.Name != "three" {
 		t.Fatalf("expected newest tool call to remain, got ok=%t call=%#v", ok, call)
+	}
+}
+
+func TestResponsesHistoryReloadedRecoveryIndexCountsTowardsByteBudget(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	oldMessages := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "image_url", ImageURL: "data:image/png;base64," + strings.Repeat("A", 256)}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_old", Type: "function", Name: "inspect_image", Arguments: `{}`}}},
+	}
+	newMessages := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: strings.Repeat("x", 96)}}}}
+	maxBytes := estimateToolRecoveryBytes(oldMessages) + estimateCanonicalMessagesBytes(newMessages) - 1
+	oldProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: maxBytes, toolCallRecoveryIndexPath: indexPath}
+	oldProcess.Save("anthropic", "resp-old", oldMessages, "scope-a")
+
+	// When
+	newProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: maxBytes, toolCallRecoveryIndexPath: indexPath}
+	newProcess.Save("anthropic", "resp-new", newMessages, "scope-a")
+	reloaded := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: maxBytes, toolCallRecoveryIndexPath: indexPath}
+
+	// Then
+	if _, _, ok := reloaded.LoadToolCall("anthropic", "call_old", "scope-a"); ok {
+		t.Fatal("expected persisted recovery entry to be evicted when its bytes plus the new snapshot exceed the budget")
+	}
+	if got := reloaded.Load("anthropic", "resp-new"); got != nil {
+		t.Fatalf("expected full snapshots to remain memory-only after restart, got %#v", got)
+	}
+}
+
+func TestResponsesHistoryReplacingOversizedSnapshotReplacesPersistedToolRecovery(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	oldProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: 256, toolCallRecoveryIndexPath: indexPath}
+	oldProcess.Save("anthropic", "resp-1", []model.CanonicalMessage{{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_old", Type: "function", Name: "read_file", Arguments: `{}`}}}}, "scope-a")
+	oversizedReplacement := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "image_url", ImageURL: "data:image/png;base64," + strings.Repeat("A", 512)}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_new", Type: "function", Name: "inspect_image", Arguments: `{}`}}},
+	}
+
+	// When
+	newProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: 256, toolCallRecoveryIndexPath: indexPath}
+	newProcess.Save("anthropic", "resp-1", oversizedReplacement, "scope-a")
+	reloaded := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: 256, toolCallRecoveryIndexPath: indexPath}
+
+	// Then
+	if _, _, ok := reloaded.LoadToolCall("anthropic", "call_old", "scope-a"); ok {
+		t.Fatal("expected replaced tool recovery entry to stay deleted after restart")
+	}
+	if call, _, ok := reloaded.LoadToolCall("anthropic", "call_new", "scope-a"); !ok || call.Name != "inspect_image" {
+		t.Fatalf("expected replacement recovery entry to persist, got ok=%t call=%#v", ok, call)
+	}
+}
+
+func TestResponsesHistoryReplacingWithToolFreeOversizedSnapshotDeletesPersistedRecovery(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	oldProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: 256, toolCallRecoveryIndexPath: indexPath}
+	oldProcess.Save("anthropic", "resp-1", []model.CanonicalMessage{{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{ID: "call_old", Type: "function", Name: "read_file", Arguments: `{}`}}}}, "scope-a")
+	toolFreeOversizedReplacement := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "image_url", ImageURL: "data:image/png;base64," + strings.Repeat("A", 512)}}}}
+
+	// When
+	newProcess := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: 256, toolCallRecoveryIndexPath: indexPath}
+	newProcess.Save("anthropic", "resp-1", toolFreeOversizedReplacement, "scope-a")
+	reloaded := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, maxBytes: 256, toolCallRecoveryIndexPath: indexPath}
+
+	// Then
+	if _, _, ok := reloaded.LoadToolCall("anthropic", "call_old", "scope-a"); ok {
+		t.Fatal("expected tool-free oversized replacement to delete persisted recovery data")
 	}
 }
 

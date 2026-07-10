@@ -15,12 +15,14 @@ import (
 )
 
 type responsesHistoryStore struct {
-	mu           sync.RWMutex
-	entries      map[string]responsesConversationSnapshot
-	byResponseID map[string]string
-	toolCalls    map[string]responsesHistoryToolCallEntry
-	order        []string
-	maxSize      int
+	mu            sync.RWMutex
+	entries       map[string]responsesConversationSnapshot
+	byResponseID  map[string]string
+	toolCalls     map[string]responsesHistoryToolCallEntry
+	order         []string
+	maxSize       int
+	maxBytes      int64
+	retainedBytes int64
 
 	toolCallRecoveryIndexPath   string
 	toolCallRecoveryIndexLoaded bool
@@ -28,6 +30,7 @@ type responsesHistoryStore struct {
 
 type responsesConversationSnapshot struct {
 	Messages []model.CanonicalMessage
+	Bytes    int64
 }
 
 type responsesHistoryToolCallEntry struct {
@@ -38,6 +41,8 @@ type responsesHistoryToolCallEntry struct {
 
 const defaultResponsesHistoryMaxSize = 512
 
+const defaultResponsesHistoryMaxBytes int64 = 256 << 20
+
 const responsesHistoryToolCallRecoveryIndexVersion = 1
 
 type responsesHistoryToolCallRecoveryIndexFile struct {
@@ -46,7 +51,7 @@ type responsesHistoryToolCallRecoveryIndexFile struct {
 	ToolCalls map[string]responsesHistoryToolCallEntry `json:"tool_calls"`
 }
 
-var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize}
+var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize, maxBytes: defaultResponsesHistoryMaxBytes}
 
 func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *responsesHistoryStore {
 	if maxSize <= 0 {
@@ -57,6 +62,7 @@ func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *re
 		byResponseID:              map[string]string{},
 		toolCalls:                 map[string]responsesHistoryToolCallEntry{},
 		maxSize:                   maxSize,
+		maxBytes:                  defaultResponsesHistoryMaxBytes,
 		toolCallRecoveryIndexPath: strings.TrimSpace(toolCallRecoveryIndexPath),
 	}
 }
@@ -161,16 +167,31 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 	if err := s.loadToolCallRecoveryIndexLocked(); err != nil {
 		log.Printf("warning: failed to load responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
 	}
-	if _, exists := s.entries[key]; exists {
-		s.removeKeyLocked(key)
-		s.deleteToolCallsForKeyLocked(key)
+	s.removeKeyLocked(key)
+	s.deleteKeyLocked(key)
+	snapshotBytes := estimateCanonicalMessagesBytes(messages)
+	recoveryBytes := estimateToolRecoveryBytes(messages)
+	if s.maxBytes > 0 && snapshotBytes+recoveryBytes > s.maxBytes {
+		if recoveryBytes == 0 || recoveryBytes > s.maxBytes {
+			if err := s.saveToolCallRecoveryIndexLocked(); err != nil {
+				log.Printf("warning: failed to save responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
+			}
+			s.mu.Unlock()
+			return
+		}
+		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes}
+		s.retainedBytes += recoveryBytes
+		s.indexToolCallsLocked(providerID, key, messages, firstString(scopes...))
+	} else {
+		storedMessages := cloneCanonicalMessages(messages)
+		storedBytes := snapshotBytes + recoveryBytes
+		s.entries[key] = responsesConversationSnapshot{Messages: storedMessages, Bytes: storedBytes}
+		s.retainedBytes += storedBytes
+		s.byResponseID[responseID] = key
+		s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...))
 	}
-	storedMessages := cloneCanonicalMessages(messages)
-	s.entries[key] = responsesConversationSnapshot{Messages: storedMessages}
-	s.byResponseID[responseID] = key
-	s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...))
 	s.order = append(s.order, key)
-	for len(s.order) > s.maxSize {
+	for len(s.order) > s.maxSize || (s.maxBytes > 0 && s.retainedBytes > s.maxBytes) {
 		oldest := s.order[0]
 		s.order = s.order[1:]
 		s.deleteKeyLocked(oldest)
@@ -235,6 +256,12 @@ func (s *responsesHistoryStore) removeKeyLocked(target string) {
 }
 
 func (s *responsesHistoryStore) deleteKeyLocked(key string) {
+	if snapshot, ok := s.entries[key]; ok {
+		s.retainedBytes -= snapshot.Bytes
+		if s.retainedBytes < 0 {
+			s.retainedBytes = 0
+		}
+	}
 	delete(s.entries, key)
 	s.deleteToolCallsForKeyLocked(key)
 	for responseID, indexedKey := range s.byResponseID {
@@ -289,14 +316,49 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 	if s.toolCalls == nil {
 		s.toolCalls = map[string]responsesHistoryToolCallEntry{}
 	}
+	if s.entries == nil {
+		s.entries = map[string]responsesConversationSnapshot{}
+	}
+	retainedBytesBySnapshot := map[string]int64{}
 	for key, entry := range file.ToolCalls {
-		if key == "" || entry.Call.ID == "" || entry.Call.Name == "" {
+		if key == "" || entry.SnapshotKey == "" || entry.Call.ID == "" || entry.Call.Name == "" {
 			continue
 		}
-		s.toolCalls[key] = responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks)}
+		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks)}
+		s.toolCalls[key] = stored
+		retainedBytesBySnapshot[stored.SnapshotKey] += estimateResponsesHistoryToolCallEntryBytes(stored)
 	}
-	if len(s.order) == 0 && len(file.Order) > 0 {
-		s.order = append([]string(nil), file.Order...)
+	if len(s.order) == 0 {
+		seen := map[string]bool{}
+		for _, key := range file.Order {
+			if key == "" || seen[key] || retainedBytesBySnapshot[key] == 0 {
+				continue
+			}
+			seen[key] = true
+			s.order = append(s.order, key)
+		}
+		for key := range retainedBytesBySnapshot {
+			if seen[key] {
+				continue
+			}
+			s.order = append(s.order, key)
+			seen[key] = true
+		}
+		for _, key := range s.order {
+			retainedBytes := retainedBytesBySnapshot[key]
+			s.entries[key] = responsesConversationSnapshot{Bytes: retainedBytes}
+			s.retainedBytes += retainedBytes
+		}
+		for len(s.order) > s.maxSize || (s.maxBytes > 0 && s.retainedBytes > s.maxBytes) {
+			oldest := s.order[0]
+			s.order = s.order[1:]
+			s.deleteKeyLocked(oldest)
+		}
+		if len(s.toolCalls) != len(file.ToolCalls) || len(s.order) != len(file.Order) {
+			if err := s.saveToolCallRecoveryIndexLocked(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
