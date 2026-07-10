@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
@@ -179,6 +180,40 @@ func TestLoggerRespectsMaxRequests(t *testing.T) {
 	}
 	if len(entries) > 3 {
 		t.Fatalf("expected at most 3 log files, got %d", len(entries))
+	}
+}
+
+func TestLoggerRecreatesPrunedRequestLogWhenRequestIDReturns(t *testing.T) {
+	// Given
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      tmpDir,
+		LogMaxRequests:   1,
+		LogMaxBodySizeMB: 1,
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	defer closeFn()
+
+	logger.Event("first_event", map[string]any{"request_id": "req-recreated"})
+	firstLogPath := filepath.Join(tmpDir, "req-recreated.txt")
+	olderThanNewerLog := time.Unix(1, 0)
+	if err := os.Chtimes(firstLogPath, olderThanNewerLog, olderThanNewerLog); err != nil {
+		t.Fatalf("age first request log: %v", err)
+	}
+	logger.Event("newer_event", map[string]any{"request_id": "req-newer"})
+
+	// When
+	logger.Event("recreated_event", map[string]any{"request_id": "req-recreated"})
+
+	// Then
+	content, err := os.ReadFile(filepath.Join(tmpDir, "req-recreated.txt"))
+	if err != nil {
+		t.Fatalf("read recreated request log: %v", err)
+	}
+	if !strings.Contains(string(content), "recreated_event") {
+		t.Fatalf("expected recreated event in log, got %s", content)
 	}
 }
 

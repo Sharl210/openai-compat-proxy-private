@@ -15,6 +15,7 @@ import (
 
 const (
 	defaultRecentSampleLimit = 64
+	defaultSeenRequestLimit  = 64
 	schemaVersion            = 1
 	estimatorVersion         = 1
 )
@@ -35,13 +36,15 @@ type Observation struct {
 }
 
 type Manager struct {
-	providersDir string
-	location     *time.Location
-	enabledFn    func() []string
-	mu           sync.RWMutex
-	buckets      map[BucketKey]*BucketState
-	seenRequests map[string]struct{}
-	recentLimit  int
+	providersDir     string
+	location         *time.Location
+	enabledFn        func() []string
+	mu               sync.RWMutex
+	buckets          map[BucketKey]*BucketState
+	seenRequests     map[string]struct{}
+	seenRequestOrder []string
+	recentLimit      int
+	seenRequestLimit int
 }
 
 func NewManager(providersDir string, location *time.Location, enabledFn func() []string) *Manager {
@@ -52,12 +55,13 @@ func NewManager(providersDir string, location *time.Location, enabledFn func() [
 		enabledFn = func() []string { return nil }
 	}
 	m := &Manager{
-		providersDir: providersDir,
-		location:     location,
-		enabledFn:    enabledFn,
-		buckets:      map[BucketKey]*BucketState{},
-		seenRequests: map[string]struct{}{},
-		recentLimit:  defaultRecentSampleLimit,
+		providersDir:     providersDir,
+		location:         location,
+		enabledFn:        enabledFn,
+		buckets:          map[BucketKey]*BucketState{},
+		seenRequests:     map[string]struct{}{},
+		recentLimit:      defaultRecentSampleLimit,
+		seenRequestLimit: defaultSeenRequestLimit,
 	}
 	_ = m.loadExistingBuckets()
 	return m
@@ -166,7 +170,7 @@ func matchingRecentSamples(state *BucketState, currentShape ShapeClass) []Sample
 		return nil
 	}
 	return matched
-	}
+}
 
 func conservativeObservedOverflowEstimateLimit(samples []SampleSummary, configuredLimit int) int {
 	if configuredLimit <= 0 || len(samples) == 0 {
@@ -285,9 +289,20 @@ func (m *Manager) RecordObservation(requestID string, obs Observation) error {
 	if len(state.RecentSamples) > m.recentLimit {
 		state.RecentSamples = state.RecentSamples[len(state.RecentSamples)-m.recentLimit:]
 	}
-	m.seenRequests[requestID] = struct{}{}
+	m.recordSeenRequestLocked(requestID)
 	clone := *state
 	return SaveBucketState(m.providersDir, obs.Bucket, &clone)
+}
+
+func (m *Manager) recordSeenRequestLocked(requestID string) {
+	m.seenRequests[requestID] = struct{}{}
+	m.seenRequestOrder = append(m.seenRequestOrder, requestID)
+	if len(m.seenRequestOrder) <= m.seenRequestLimit {
+		return
+	}
+	oldestRequestID := m.seenRequestOrder[0]
+	delete(m.seenRequests, oldestRequestID)
+	m.seenRequestOrder = m.seenRequestOrder[1:]
 }
 
 func (m *Manager) ensureBucketLocked(obs Observation) *BucketState {

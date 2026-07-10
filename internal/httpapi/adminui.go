@@ -31,6 +31,7 @@ import (
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/diagnostics"
 	"openai-compat-proxy/internal/errorsx"
 )
 
@@ -165,6 +166,7 @@ func (a *adminUI) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/_admin/api/cacheinfo/providers/clear", allowMethods(a.handleClearProviderCacheInfoHistory(), http.MethodPost))
 	mux.HandleFunc("/_admin/api/jobs", allowMethods(a.handleJob(), http.MethodGet))
 	mux.HandleFunc("/_admin/api/status", allowMethods(a.handleStatus(), http.MethodGet))
+	mux.HandleFunc("/_admin/api/diagnostics/memory", allowMethods(a.handleMemoryDiagnostics(), http.MethodGet))
 }
 
 func (a *adminUI) matchesPath(path string) bool {
@@ -231,6 +233,16 @@ func (a *adminUI) handleStatus() http.HandlerFunc {
 			"status":     a.runtimeStatus(),
 			"job":        a.runner.Current(),
 		})
+	}
+}
+
+func (a *adminUI) handleMemoryDiagnostics() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, _, err := a.requireSession(r); err != nil {
+			errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "admin login required")
+			return
+		}
+		writeAdminJSON(w, http.StatusOK, diagnostics.Snapshot())
 	}
 }
 

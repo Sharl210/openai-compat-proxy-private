@@ -16,13 +16,11 @@ import (
 )
 
 type Logger struct {
-	stdout       io.Writer
-	dir          string
-	maxRequests  int
-	maxBodySize  int
-	mu           sync.Mutex
-	pendingFiles map[string]*os.File
-	pendingMu    sync.Mutex
+	stdout      io.Writer
+	dir         string
+	maxRequests int
+	maxBodySize int
+	mu          sync.Mutex
 }
 
 var (
@@ -42,22 +40,12 @@ func New(cfg config.Config, stdout io.Writer) (*Logger, func() error, error) {
 		return nil, nil, err
 	}
 	logger := &Logger{
-		stdout:       stdout,
-		dir:          dir,
-		maxRequests:  cfg.LogMaxRequests,
-		maxBodySize:  int(cfg.LogMaxBodySizeMB * 1024 * 1024),
-		pendingFiles: make(map[string]*os.File),
+		stdout:      stdout,
+		dir:         dir,
+		maxRequests: cfg.LogMaxRequests,
+		maxBodySize: int(cfg.LogMaxBodySizeMB * 1024 * 1024),
 	}
-	return logger, func() error { return logger.closeAll() }, nil
-}
-
-func (l *Logger) closeAll() error {
-	l.pendingMu.Lock()
-	defer l.pendingMu.Unlock()
-	for _, f := range l.pendingFiles {
-		f.Close()
-	}
-	return nil
+	return logger, func() error { return nil }, nil
 }
 
 func Init(cfg config.Config, stdout io.Writer) (func() error, error) {
@@ -117,6 +105,7 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	if file == nil {
 		return
 	}
+	defer file.Close()
 	_, _ = file.Write(append(line, '\n'))
 	_, _ = fmt.Fprintf(l.stdout, "%s %s\n", name, summarize(record))
 
@@ -124,20 +113,11 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 }
 
 func (l *Logger) getFile(requestID string) *os.File {
-	l.pendingMu.Lock()
-	defer l.pendingMu.Unlock()
-
-	if f, ok := l.pendingFiles[requestID]; ok {
-		return f
-	}
-
 	filePath := filepath.Join(l.dir, requestID+".txt")
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil
 	}
-
-	l.pendingFiles[requestID] = file
 	return file
 }
 

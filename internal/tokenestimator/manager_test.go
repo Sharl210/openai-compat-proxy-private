@@ -2,6 +2,7 @@ package tokenestimator
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -50,6 +51,48 @@ func TestRecordObservationUpdatesRollingState(t *testing.T) {
 	}
 	if state.RollingUncachedCorrection <= 0 {
 		t.Fatalf("expected positive correction, got %#v", state)
+	}
+}
+
+func TestRecordObservationBoundsSeenRequestIDsAndAllowsEvictedIDs(t *testing.T) {
+	// Given
+	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex-2"} })
+	obs := Observation{
+		Bucket:              BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "gpt-5.4"},
+		BaseEstimate:        100,
+		InputTokens:         120,
+		CachedTokens:        20,
+		UncachedInputTokens: 100,
+		Shape:               ShapePlain,
+		ProtocolSignature:   "responses:v1",
+		EstimatorSignature:  "base-estimator:v1",
+	}
+	firstID := "req-0"
+	lastID := "req-" + strconv.Itoa(defaultRecentSampleLimit)
+
+	// When
+	for i := 0; i <= defaultRecentSampleLimit; i++ {
+		if err := mgr.RecordObservation("req-"+strconv.Itoa(i), obs); err != nil {
+			t.Fatalf("RecordObservation(%d) error: %v", i, err)
+		}
+	}
+	if err := mgr.RecordObservation(lastID, obs); err != nil {
+		t.Fatalf("RecordObservation recent duplicate error: %v", err)
+	}
+	if err := mgr.RecordObservation(firstID, obs); err != nil {
+		t.Fatalf("RecordObservation evicted ID error: %v", err)
+	}
+
+	// Then
+	if got := len(mgr.seenRequests); got != defaultRecentSampleLimit {
+		t.Fatalf("expected %d retained request IDs, got %d", defaultRecentSampleLimit, got)
+	}
+	if got := len(mgr.seenRequestOrder); got != defaultRecentSampleLimit {
+		t.Fatalf("expected %d retained request IDs in FIFO order, got %d", defaultRecentSampleLimit, got)
+	}
+	state := mgr.GetBucketState(obs.Bucket)
+	if state == nil || state.SampleCount != int64(defaultRecentSampleLimit+2) {
+		t.Fatalf("expected %d recorded observations, got %#v", defaultRecentSampleLimit+2, state)
 	}
 }
 
@@ -107,7 +150,6 @@ func TestRecordObservationPersistsStateImmediately(t *testing.T) {
 		t.Fatalf("expected persisted state, got %#v", loaded)
 	}
 }
-
 
 func TestManagerConservativeAdmissionLimitUsesSmallerLearnedBound(t *testing.T) {
 	mgr := NewManager(t.TempDir(), time.UTC, func() []string { return []string{"codex"} })

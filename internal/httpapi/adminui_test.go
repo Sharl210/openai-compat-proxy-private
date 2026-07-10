@@ -66,6 +66,73 @@ func TestAdminUIBootstrapRequiresSession(t *testing.T) {
 	}
 }
 
+func TestAdminUIStatusOmitsRuntimeMemory(t *testing.T) {
+	// Given
+	server := newAdminUITestServer(t)
+	cookie, _ := adminLogin(t, server)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/status", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, found := decodeAdminJSON(t, rec.Body.Bytes())["runtime_memory"]; found {
+		t.Fatalf("expected status payload without runtime_memory, got %s", rec.Body.String())
+	}
+}
+
+func TestAdminUIMemoryDiagnosticsRequiresSession(t *testing.T) {
+	// Given
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/diagnostics/memory", nil)
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated memory diagnostics, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminUIMemoryDiagnosticsReturnsAuthenticatedMetricWhitelist(t *testing.T) {
+	// Given
+	server := newAdminUITestServer(t)
+	cookie, _ := adminLogin(t, server)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/diagnostics/memory", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected memory diagnostics 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	metrics := decodeAdminJSON(t, rec.Body.Bytes())
+	expected := []string{"heap_alloc", "heap_inuse", "heap_idle", "heap_released", "sys", "stack_inuse", "num_gc", "goroutines", "vm_rss", "rss_anon"}
+	if len(metrics) != len(expected) {
+		t.Fatalf("expected fixed metric whitelist %v, got %#v", expected, metrics)
+	}
+	for _, key := range expected {
+		if _, ok := metrics[key]; !ok {
+			t.Fatalf("expected memory metric %q, got %#v", key, metrics)
+		}
+	}
+	for _, sensitive := range []string{"proxy_api_key", "upstream_api_key", "profile", "heap_dump", "secret", "token"} {
+		if _, ok := metrics[sensitive]; ok {
+			t.Fatalf("expected no sensitive field %q, got %#v", sensitive, metrics)
+		}
+	}
+}
+
 func TestAdminUILoginSetsSessionAndBootstrapAuthenticates(t *testing.T) {
 	server := newAdminUITestServer(t)
 	loginRec := adminJSONRequest(t, server, http.MethodPost, "/_admin/api/login", map[string]any{
