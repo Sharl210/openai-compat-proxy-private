@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/model"
@@ -256,6 +257,48 @@ func TestArchiveWriter_WriteFinalSnapshot_SingleLineNDJSON(t *testing.T) {
 	}
 	if decoded.StatusCode != 200 {
 		t.Errorf("expected StatusCode 200, got %d", decoded.StatusCode)
+	}
+}
+
+func TestArchiveWriterRedactsImageDataAcrossEveryArchiveFile(t *testing.T) {
+	// Given
+	const imageDataSentinel = "QXJjaGl2ZUltYWdlRGF0YVNlbnRpbmVs"
+	root := t.TempDir()
+	writer := NewArchiveWriter(root, "req-image-redaction")
+	if writer == nil {
+		t.Fatal("expected archive writer")
+	}
+	imageDataURL := "data:image/png;base64," + imageDataSentinel
+
+	// When
+	if err := writer.WriteRequest(map[string]any{"request_body": `{"image_url":"` + imageDataURL + `"}`}); err != nil {
+		t.Fatalf("write request archive: %v", err)
+	}
+	if err := writer.WriteRawEvent(RawEventEnvelope{EventName: "image", Raw: json.RawMessage(`{"image_url":"` + imageDataURL + `"}`)}); err != nil {
+		t.Fatalf("write raw archive: %v", err)
+	}
+	if err := writer.WriteCanonicalEvent(model.CanonicalEvent{Type: "image", RawPayload: json.RawMessage(`{"image_url":"` + imageDataURL + `"}`)}); err != nil {
+		t.Fatalf("write canonical archive: %v", err)
+	}
+	if err := writer.WriteFinalSnapshot(FinalSnapshot{StatusCode: 200, Response: map[string]any{"image_url": imageDataURL}}); err != nil {
+		t.Fatalf("write final archive: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+
+	// Then
+	for _, fileName := range []string{"request.ndjson", "raw.ndjson", "canonical.ndjson", "final.ndjson"} {
+		data, err := os.ReadFile(filepath.Join(root, "req-image-redaction", fileName))
+		if err != nil {
+			t.Fatalf("read %s: %v", fileName, err)
+		}
+		if strings.Contains(string(data), imageDataSentinel) || strings.Contains(string(data), "data:image/") {
+			t.Fatalf("expected %s to redact image data, got %s", fileName, data)
+		}
+		if !strings.Contains(string(data), "image") {
+			t.Fatalf("expected %s to retain image placeholder, got %s", fileName, data)
+		}
 	}
 }
 

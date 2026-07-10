@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -25,42 +24,46 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		id := fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestCounter, 1))
 		w.Header().Set("X-Request-Id", id)
 		started := time.Now()
-
-		var requestBody []byte
-		if r.Body != nil {
-			requestBody, _ = io.ReadAll(r.Body)
-			r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-		}
-
 		archiveWriter := archiveWriterForRequest(store, id, r.URL.Path)
+		shouldLog := shouldLogAPITraffic(r.URL.Path)
+		capturedRequestBody := ""
+		if r.Body != nil && (archiveWriter != nil || shouldLog) {
+			capturedRequestBody, r.Body = captureRequestBody(r.Body, requestCaptureLimit(store, archiveWriter != nil))
+		}
+		recordedRequestBody := redactCapturedImageDataURLs(capturedRequestBody)
+		if recordedRequestBody == capturedRequestBody {
+			recordedRequestBody = logging.RedactImageDataForLog([]byte(capturedRequestBody))
+		}
 		if archiveWriter != nil {
+			defer archiveWriter.Close()
+			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
 			_ = archiveWriter.WriteRequest(map[string]any{
 				"request_id":   id,
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
-				"request_body": string(requestBody),
+				"request_body": recordedRequestBody,
 			})
-			defer archiveWriter.Close()
-			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
 		}
-
-		shouldLog := shouldLogAPITraffic(r.URL.Path)
 		if shouldLog {
 			logging.Event("clientToProxyRequest", map[string]any{
 				"request_id":   id,
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
-				"request_body": truncateBody(requestBody, 512),
+				"request_body": truncateBody([]byte(recordedRequestBody), 512),
 			})
 		}
-		cw := &responseCaptureWriter{ResponseWriter: w, status: http.StatusOK}
+		cw := &responseCaptureWriter{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+			captureBody:    archiveWriter != nil,
+			captureLimit:   archiveCaptureLimit(store),
+		}
 		next.ServeHTTP(cw, r)
 		if archiveWriter != nil {
 			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status}
-			if body := bytes.TrimSpace(cw.body.Bytes()); len(body) > 0 {
+			if body := bytes.TrimSpace(cw.body.Bytes()); len(body) > 0 && !cw.truncated {
 				var payload map[string]any
 				if err := json.Unmarshal(body, &payload); err == nil {
 					if cw.status >= http.StatusBadRequest {
@@ -175,33 +178,4 @@ func setConfigVersionHeaders(w http.ResponseWriter, snapshot *config.RuntimeSnap
 	if version := snapshot.ProviderVersionByID[providerID]; version != "" {
 		w.Header().Set("X-Provider-Version", version)
 	}
-}
-
-type responseCaptureWriter struct {
-	http.ResponseWriter
-	status int
-	body   bytes.Buffer
-}
-
-func (w *responseCaptureWriter) WriteHeader(status int) {
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *responseCaptureWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *responseCaptureWriter) Flush() {
-	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
-	}
-}
-
-func truncateBody(body []byte, maxLen int) string {
-	if len(body) <= maxLen {
-		return string(body)
-	}
-	return string(body[:maxLen]) + "...[TRUNCATED]"
 }

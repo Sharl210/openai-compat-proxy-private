@@ -397,7 +397,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 		"endpoint_type": endpointType,
 		"stream":        true,
 		"body_size":     len(body),
-		"body_preview":  previewBodyForLog(body),
+		"body_preview":  previewBodyForLog([]byte(logging.RedactImageDataForLog(body))),
 		"tool_count":    len(req.Tools),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
@@ -496,14 +496,15 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 		return nil, err
 	}
 	originalToolIDs := extractOriginalToolIDs(req)
+	loggedBody := logging.RedactImageDataForLog(body)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
 		"model":         req.Model,
 		"stream":        true,
-		"body":          string(body),
+		"body":          loggedBody,
 		"body_probe":    "enabled",
-		"body_preview":  previewBodyForLog(body),
+		"body_preview":  previewBodyForLog([]byte(loggedBody)),
 		"body_hash":     hashBytes(body),
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
@@ -547,7 +548,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 		"endpoint_type": endpointType,
 		"stream":        true,
 		"body_size":     len(body),
-		"body_preview":  previewBodyForLog(body),
+		"body_preview":  previewBodyForLog([]byte(logging.RedactImageDataForLog(body))),
 		"tool_count":    len(req.Tools),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {

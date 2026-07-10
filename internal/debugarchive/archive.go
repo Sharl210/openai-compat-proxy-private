@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -94,6 +95,7 @@ func (w *ArchiveWriter) writeJSON(f *os.File, v any) error {
 	if err != nil {
 		return err
 	}
+	data = []byte(logging.RedactImageDataForLog(data))
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	_, err = f.Write(append(data, '\n'))

@@ -93,6 +93,66 @@ func TestLoggerTruncatesBody(t *testing.T) {
 	}
 }
 
+func TestLoggerRedactsImageDataURLsFromNestedAttributes(t *testing.T) {
+	// Given
+	const imageDataSentinel = "TmVzdGVkTG9nSW1hZ2VEYXRhU2VudGluZWw="
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	defer closeFn()
+
+	// When
+	logger.Event("canonical_request", map[string]any{
+		"request_id": "req-nested-image",
+		"canonical": map[string]any{
+			"image_url": "data:image/png;base64," + imageDataSentinel,
+		},
+	})
+
+	// Then
+	data, err := os.ReadFile(filepath.Join(tmpDir, "req-nested-image.txt"))
+	if err != nil {
+		t.Fatalf("read log record: %v", err)
+	}
+	if strings.Contains(string(data), imageDataSentinel) || strings.Contains(string(data), "data:image/") {
+		t.Fatalf("expected nested image data to be redacted, got %s", data)
+	}
+	if !strings.Contains(string(data), "image") {
+		t.Fatalf("expected nested image placeholder, got %s", data)
+	}
+}
+
+func TestLoggerRedactsImageDataURLFromBodyField(t *testing.T) {
+	// Given
+	const imageDataSentinel = "Qm9keUxvZ0ltYWdlRGF0YVNlbnRpbmVs"
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	defer closeFn()
+
+	// When
+	logger.Event("upstream_request", map[string]any{
+		"request_id": "req-body-image",
+		"body":       `{"image_url":"data:image/png;base64,` + imageDataSentinel + `"}`,
+	})
+
+	// Then
+	data, err := os.ReadFile(filepath.Join(tmpDir, "req-body-image.txt"))
+	if err != nil {
+		t.Fatalf("read log record: %v", err)
+	}
+	if strings.Contains(string(data), imageDataSentinel) || strings.Contains(string(data), "data:image/") {
+		t.Fatalf("expected body image data to be redacted, got %s", data)
+	}
+	if !strings.Contains(string(data), "image") {
+		t.Fatalf("expected body image placeholder, got %s", data)
+	}
+}
+
 func TestLoggerRespectsMaxRequests(t *testing.T) {
 	tmpDir := t.TempDir()
 	stdout := &bytes.Buffer{}

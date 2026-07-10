@@ -569,7 +569,9 @@ tools prompt
 
 ### 6. 调试归档与日志
 
-- `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS`：结构化日志；其中 `LOG_ENABLE` 也是调试归档的父开关
+- `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS`：结构化日志；其中 `LOG_ENABLE` 也是调试归档的父开关。`LOG_MAX_BODY_SIZE_MB` 同时限制 `request.ndjson` 的请求正文副本和非流式 final snapshot 的内存捕获；只限制记录副本，协议解析和上游转发仍使用完整请求。SSE 响应不会为了 final snapshot 在内存里累计整条流
+
+- 对会写入普通 `clientToProxyRequest` 结构化日志或 `request.ndjson` 的 JSON 请求，所有 `data:image/...;base64,...` 图片 URL 都会在记录副本中替换为 `image`；原始请求体不会被修改，handler 和上游仍接收完整字节内容
 - `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`：默认值是 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`；只有当 `LOG_ENABLE=true` 且该字段非空时，才会按 `request_id` 写出：
   - `request.ndjson`
   - `raw.ndjson`
@@ -578,6 +580,8 @@ tools prompt
   - 当 Anthropic / Claude 流式上游在 `message_delta.usage` 中返回最终用量时，归档会额外保留一条 `canonical.ndjson` 的 `usage.update` 记录，并在 `raw.ndjson` 中保留原始 `message_delta` 帧；这只用于排查 `cache_read_input_tokens` / `cache_creation_input_tokens` 来源，不会作为下游 SSE 事件发给客户端
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
 - 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**
+
+Responses 在非 Responses 上游场景下用于 `previous_response_id` 恢复的内存历史缓存，同时受 512 条和 256 MiB 总预算约束。超过预算时会优先驱逐最旧快照；单个快照本身超过预算时不缓存其完整多模态正文，但仍会在预算内保留工具调用恢复所需的轻量元数据。该限制只作用于跨请求缓存，不会裁剪当前请求发给模型的图片或文本。
 
 ### 7. OpenAI Images / Embeddings / Rerank 虚拟透传端口
 

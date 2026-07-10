@@ -179,7 +179,7 @@ func redactAttrs(attrs map[string]any, maxBodySize int) map[string]any {
 		case strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey"):
 			clean[k] = "[REDACTED]"
 		case lower == "body":
-			clean[k] = truncateBody(v, maxBodySize)
+			clean[k] = truncateBody(normalizeAttrValue(v), maxBodySize)
 		default:
 			clean[k] = normalizeAttrValue(v)
 		}
@@ -205,6 +205,9 @@ func truncateBody(v any, maxSize int) any {
 func normalizeAttrValue(v any) any {
 	if v == nil {
 		return nil
+	}
+	if text, ok := v.(string); ok {
+		return redactImageDataURLsInString(text)
 	}
 	if err, ok := v.(error); ok {
 		return err.Error()

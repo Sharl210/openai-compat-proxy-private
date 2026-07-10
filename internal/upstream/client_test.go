@@ -4742,6 +4742,60 @@ func TestStreamEventsLogsBrokenStreamAfterFirstEvent(t *testing.T) {
 	})
 }
 
+func TestOpenEventStreamLazyRedactsAnthropicBase64ImageFromLogWithoutChangingUpstreamBody(t *testing.T) {
+	// Given
+	logPath, cleanup := initUpstreamTestLogger(t)
+	defer cleanup()
+	const imageDataSentinel = "QW50aHJvcGljSW1hZ2VCYXNlNjRTZW50aW5lbA=="
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream request body: %v", err)
+		}
+		received = string(body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_stop\n" +
+			"data: {}\n\n"))
+	}))
+	defer server.Close()
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	req := model.CanonicalRequest{
+		RequestID: "req-anthropic-image-log",
+		Model:     "claude-test",
+		Messages: []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{
+				{Type: "text", Text: "keep-this-text"},
+				{Type: "image_url", ImageURL: "data:image/png;base64," + imageDataSentinel},
+			},
+		}},
+	}
+
+	// When
+	stream, err := client.OpenEventStreamLazy(context.Background(), req, "")
+	if err != nil {
+		t.Fatalf("open event stream: %v", err)
+	}
+	defer stream.Close()
+
+	// Then
+	if !strings.Contains(received, imageDataSentinel) {
+		t.Fatalf("expected upstream to receive original Anthropic image body, got %s", received)
+	}
+	records := readUpstreamTestLogRecords(t, logPath)
+	assertHasLogRecord(t, records, "proxyToUpstreamRequest", func(record map[string]any) bool {
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			t.Fatalf("encode log record: %v", err)
+		}
+		if strings.Contains(string(encoded), imageDataSentinel) {
+			t.Fatalf("expected proxyToUpstreamRequest log to redact Anthropic image data, got %s", encoded)
+		}
+		return strings.Contains(string(encoded), "image") && strings.Contains(string(encoded), "keep-this-text")
+	})
+}
+
 func initUpstreamTestLogger(t *testing.T) (string, func()) {
 	t.Helper()
 	logDir := t.TempDir()
