@@ -385,6 +385,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 首字节前失败可按 provider 配置重试；流式请求在还没开始 SSE 前会额外受 `STREAM_OPEN_TIMEOUT` / `UPSTREAM_STREAM_OPEN_TIMEOUT` 保护，避免上游几分钟后才返回 502 时让客户端一直无响应
 - 已开始 SSE 后出错会尽量保持下游流协议终态，而不是中途退化成 JSON 错误体
 - 上游流式返回 `error` / `response.failed` 时，代理会把上游错误码和错误消息映射到下游终态错误里，避免被泛化成单纯的 `unexpected EOF`
+- 如果上游在代理尚未写出任何下游事件前就报告 `context_length_exceeded` / `prompt is too long`，三套入口会直接返回各自协议的 HTTP `400` 错误外壳，避免 OpenCode / OMO 先进入 assistant 状态；一旦已有下游事件写出，仍按各自 SSE 终态错误结束流
 - chat 上游的 reasoning 标签、reasoning_content、tool_calls 会在代理层统一归一后再下发
 
 ### 3. responses 上游工具兼容模式
@@ -571,7 +572,7 @@ tools prompt
 
 - `LOG_ENABLE` / `LOG_FILE_PATH` / `LOG_MAX_BODY_SIZE_MB` / `LOG_MAX_REQUESTS`：结构化日志；其中 `LOG_ENABLE` 也是调试归档的父开关。`LOG_MAX_BODY_SIZE_MB` 同时限制 `request.ndjson` 的请求正文副本和非流式 final snapshot 的内存捕获；只限制记录副本，协议解析和上游转发仍使用完整请求。SSE 响应不会为了 final snapshot 在内存里累计整条流
 
-- 对会写入普通 `clientToProxyRequest` 结构化日志或 `request.ndjson` 的 JSON 请求，所有 `data:image/...;base64,...` 图片 URL 都会在记录副本中替换为 `image`；原始请求体不会被修改，handler 和上游仍接收完整字节内容
+- 所有结构化日志及 `request/raw/canonical/final.ndjson` 调试归档副本都会把图片 Base64 替换为 `image`，包括 `data:image/...;base64,...` URL 和 Anthropic `source.data`；原始请求体不会被修改，handler 和上游仍接收完整字节内容
 - `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`：默认值是 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR`；只有当 `LOG_ENABLE=true` 且该字段非空时，才会按 `request_id` 写出：
   - `request.ndjson`
   - `raw.ndjson`
