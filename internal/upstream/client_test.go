@@ -2811,6 +2811,214 @@ func TestBuildResponsesRequestBodyPrefersCanonicalMessagesForCacheStableToolSequ
 	assertJSONEqual(t, gotPayload["input"], wantPayload["input"])
 }
 
+func TestBuildResponsesRequestBodyPreservesRealReasoningReplayWhenCanonicalMessagesExist(t *testing.T) {
+	// Given
+	reasoningSummary := []map[string]any{
+		{"type": "summary_text", "text": "先检查调用链"},
+		{"type": "summary_text", "text": "再执行工具"},
+	}
+	req := model.CanonicalRequest{
+		Model:        "gpt-5",
+		Instructions: "保留这条指令",
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "检查状态"}}},
+			{
+				Role:             "assistant",
+				ReasoningContent: "先检查调用链\n再执行工具",
+				ReasoningBlocks: []map[string]any{{
+					"type":              "reasoning",
+					"id":                "rs_real",
+					"encrypted_content": "enc_real",
+					"status":            "completed",
+					"summary":           reasoningSummary,
+				}},
+				Parts: []model.CanonicalContentPart{{Type: "text", Text: "我会检查状态"}},
+			},
+		},
+		ResponseInputItems: []map[string]any{{
+			"type": "function_call", "call_id": "call_stale", "name": "stale_tool", "arguments": `{"command":"stale"}`,
+		}},
+	}
+
+	// When
+	body, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	// Then
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["instructions"].(string); got != "保留这条指令" {
+		t.Fatalf("expected instructions preserved, got %#v", payload)
+	}
+	input, _ := payload["input"].([]any)
+	var reasoning map[string]any
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "reasoning" {
+			reasoning = item
+		}
+		if item["call_id"] == "call_stale" {
+			t.Fatalf("expected canonical messages to replace stale responses items, got %#v", input)
+		}
+	}
+	if reasoning == nil {
+		t.Fatalf("expected replayed reasoning item, got %#v", input)
+	}
+	if got, _ := reasoning["id"].(string); got != "rs_real" {
+		t.Fatalf("expected reasoning id rs_real, got %#v", reasoning)
+	}
+	if got, _ := reasoning["encrypted_content"].(string); got != "enc_real" {
+		t.Fatalf("expected reasoning encrypted_content preserved, got %#v", reasoning)
+	}
+	if got, _ := reasoning["status"].(string); got != "completed" {
+		t.Fatalf("expected reasoning status completed, got %#v", reasoning)
+	}
+	assertJSONEqual(t, reasoning["summary"], reasoningSummary)
+}
+
+func TestBuildResponsesRequestBodyReplaysAllReasoningBlocksInOriginalOrder(t *testing.T) {
+	// Given
+	firstReasoning := map[string]any{
+		"type":              "reasoning",
+		"id":                "rs_first",
+		"encrypted_content": "enc_first",
+		"vendor_extension":  map[string]any{"opaque": "first"},
+		"summary":           []map[string]any{{"type": "summary_text", "text": "first real reasoning"}},
+	}
+	secondReasoning := map[string]any{
+		"type":              "reasoning",
+		"id":                "rs_proxy",
+		"encrypted_content": "enc_second",
+		"vendor_extension":  map[string]any{"opaque": "second"},
+		"summary":           []map[string]any{{"type": "summary_text", "text": "real rs_proxy reasoning that must replay"}},
+	}
+	req := model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "continue"}}},
+			{
+				Role:             "assistant",
+				ReasoningContent: "first real reasoning\nreal rs_proxy reasoning that must replay",
+				ReasoningBlocks:  []map[string]any{firstReasoning, secondReasoning},
+			},
+		},
+	}
+
+	// When
+	body, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	// Then
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	var replayed []map[string]any
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "reasoning" {
+			replayed = append(replayed, item)
+		}
+	}
+	if len(replayed) != 2 {
+		t.Fatalf("expected both reasoning blocks replayed, got %#v", replayed)
+	}
+	for index, want := range []map[string]any{firstReasoning, secondReasoning} {
+		got := replayed[index]
+		if got["id"] != want["id"] || got["encrypted_content"] != want["encrypted_content"] {
+			t.Fatalf("expected reasoning block %d identity preserved, got %#v", index, got)
+		}
+		assertJSONEqual(t, got["vendor_extension"], want["vendor_extension"])
+	}
+}
+
+func TestBuildResponsesRequestBodyPreservesEncryptedReasoningReplayWithoutSummary(t *testing.T) {
+	// Given
+	req := model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续"}}},
+			{
+				Role: "assistant",
+				ReasoningBlocks: []map[string]any{{
+					"type":              "reasoning",
+					"id":                "rs_encrypted_only",
+					"encrypted_content": "enc_encrypted_only",
+				}},
+			},
+		},
+	}
+
+	// When
+	body, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	// Then
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["id"] == "rs_encrypted_only" {
+			if got, _ := item["encrypted_content"].(string); got != "enc_encrypted_only" {
+				t.Fatalf("expected encrypted reasoning content preserved, got %#v", item)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected encrypted-only reasoning item preserved, got %#v", input)
+}
+
+func TestBuildResponsesRequestBodyDropsSyntheticReasoningPlaceholder(t *testing.T) {
+	// Given
+	placeholder := "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长"
+	req := model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{
+			{
+				Role:             "assistant",
+				ReasoningContent: placeholder,
+				ReasoningBlocks: []map[string]any{{
+					"type":    "reasoning",
+					"id":      "rs_proxy",
+					"summary": []map[string]any{{"type": "summary_text", "text": placeholder}},
+				}},
+			},
+			{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "继续"}}},
+		},
+	}
+
+	// When
+	body, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	// Then
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "reasoning" {
+			t.Fatalf("expected synthetic reasoning placeholder omitted, got %#v", input)
+		}
+	}
+}
+
 func TestBuildResponsesRequestBodyIgnoresInvisibleSyntheticReasoningResidueForCacheStableToolSequences(t *testing.T) {
 	cleanMessages := []model.CanonicalMessage{
 		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},

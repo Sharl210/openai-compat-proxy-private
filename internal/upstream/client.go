@@ -1244,9 +1244,7 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 				continue
 			}
 
-			if reasoningItem := buildReasoningInputItem(msg); len(reasoningItem) > 0 {
-				input = append(input, reasoningItem)
-			}
+			input = append(input, buildReasoningInputItems(msg)...)
 
 			item := map[string]any{"role": msg.Role}
 			var content []map[string]any
@@ -1825,9 +1823,18 @@ func intFromAny(value any) int {
 	return 0
 }
 
-func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
+func buildReasoningInputItems(msg model.CanonicalMessage) []map[string]any {
 	if msg.Role != "assistant" {
 		return nil
+	}
+	items := make([]map[string]any, 0, len(msg.ReasoningBlocks))
+	for _, block := range msg.ReasoningBlocks {
+		if isReplayableResponsesReasoningBlock(block) {
+			items = append(items, cloneMap(block))
+		}
+	}
+	if len(items) > 0 {
+		return items
 	}
 	reasoningContent := msg.ReasoningContent
 	if reasoningContent == "" {
@@ -1837,13 +1844,38 @@ func buildReasoningInputItem(msg model.CanonicalMessage) map[string]any {
 	if reasoningContent == "" {
 		return nil
 	}
-	return map[string]any{
+	if isSyntheticResponsesReasoningPlaceholder(msg.ReasoningBlocks, reasoningContent) {
+		return nil
+	}
+	return []map[string]any{{
 		"type": "reasoning",
 		"summary": []map[string]any{{
 			"type": "summary_text",
 			"text": reasoningContent,
 		}},
+	}}
+}
+
+func isReplayableResponsesReasoningBlock(block map[string]any) bool {
+	if stringValue(block["type"]) != "reasoning" {
+		return false
 	}
+	if stringValue(block["id"]) == "rs_proxy" && strings.Contains(strings.TrimSpace(reasoningTextFromResponsesBlock(block)), "代理层占位") {
+		return false
+	}
+	return stringValue(block["encrypted_content"]) != "" || normalizeResponsesReasoningInputText(reasoningTextFromResponsesBlock(block)) != ""
+}
+
+func isSyntheticResponsesReasoningPlaceholder(blocks []map[string]any, reasoningContent string) bool {
+	if !strings.Contains(strings.TrimSpace(reasoningContent), "代理层占位") {
+		return false
+	}
+	for _, block := range blocks {
+		if stringValue(block["type"]) == "reasoning" && stringValue(block["id"]) == "rs_proxy" {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeResponsesReasoningInputText(text string) string {
