@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/aggregate"
+	"openai-compat-proxy/internal/contextoverflow"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -28,6 +29,17 @@ func writeUpstreamError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+func writeUpstreamErrorForProtocol(w http.ResponseWriter, err error, protocol string) bool {
+	var httpErr *upstream.HTTPStatusError
+	if errors.As(err, &httpErr) {
+		if code, message, ok := normalizeUpstreamHTTPContextOverflow(httpErr); ok {
+			writeContextOverflowError(w, protocol, code, message)
+			return true
+		}
+	}
+	return writeUpstreamError(w, err)
+}
+
 func writeRequestValidationError(w http.ResponseWriter, err error) bool {
 	var validationErr *upstream.RequestValidationError
 	if !errors.As(err, &validationErr) {
@@ -37,12 +49,12 @@ func writeRequestValidationError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func writeTerminalFailureError(w http.ResponseWriter, terminalFailure *aggregate.TerminalFailureError) bool {
+func writeTerminalFailureError(w http.ResponseWriter, terminalFailure *aggregate.TerminalFailureError, protocol string) bool {
 	if terminalFailure == nil {
 		return false
 	}
-	if isContextLengthExceededTerminalFailure(terminalFailure) {
-		writeProxyContextOverflowFromTerminalFailure(w, terminalFailure)
+	if code, message, ok := normalizeContextOverflowSignal(terminalFailure.HealthFlag, terminalFailure.Message, terminalFailure.UpstreamError); ok {
+		writeContextOverflowError(w, protocol, code, message)
 		return true
 	}
 	statusCode := http.StatusBadGateway
@@ -53,35 +65,41 @@ func writeTerminalFailureError(w http.ResponseWriter, terminalFailure *aggregate
 	return true
 }
 
-func isContextLengthExceededTerminalFailure(terminalFailure *aggregate.TerminalFailureError) bool {
-	if terminalFailure == nil {
-		return false
+func writeContextOverflowError(w http.ResponseWriter, protocol string, code string, message string) {
+	if protocol == clientReasoningProtocolMessages {
+		writeAnthropicContextLimitExceeded(w, message)
+		return
 	}
-	if terminalFailure.HealthFlag == "context_length_exceeded" {
-		return true
-	}
-	message := strings.ToLower(strings.TrimSpace(terminalFailure.Message))
-	if strings.Contains(message, "context_length_exceeded") || strings.Contains(message, "context window") || strings.Contains(message, "prompt is too long") || strings.Contains(message, "maximum context length") {
-		return true
-	}
-	if len(terminalFailure.UpstreamError) == 0 {
-		return false
-	}
-	code := strings.ToLower(strings.TrimSpace(stringValue(terminalFailure.UpstreamError["code"])))
-	msg := strings.ToLower(strings.TrimSpace(stringValue(terminalFailure.UpstreamError["message"])))
-	return code == "context_length_exceeded" || strings.Contains(msg, "context window") || strings.Contains(msg, "prompt is too long") || strings.Contains(msg, "maximum context length")
+	errorsx.WriteJSON(w, http.StatusBadRequest, code, message)
 }
 
-func writeProxyContextOverflowFromTerminalFailure(w http.ResponseWriter, terminalFailure *aggregate.TerminalFailureError) {
-	message := contextOverflowMessage
-	if terminalFailure != nil {
-		if upstreamMessage := strings.TrimSpace(stringValue(terminalFailure.UpstreamError["message"])); upstreamMessage != "" {
-			message = upstreamMessage
-		} else if text := strings.TrimSpace(terminalFailure.Message); text != "" {
-			message = text
-		}
+func normalizeUpstreamHTTPContextOverflow(httpErr *upstream.HTTPStatusError) (string, string, bool) {
+	if httpErr == nil {
+		return "", "", false
 	}
-	errorsx.WriteJSON(w, http.StatusBadRequest, "context_length_exceeded", message)
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Code    string `json:"code"`
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(httpErr.BodyBytes, &payload); err != nil {
+		return "", "", false
+	}
+	message := strings.TrimSpace(payload.Error.Message)
+	if message == "" {
+		message = strings.TrimSpace(payload.Message)
+	}
+	return contextoverflow.NormalizeCandidates([]string{
+		strings.TrimSpace(payload.Error.Code),
+		strings.TrimSpace(payload.Error.Type),
+		strings.TrimSpace(payload.Code),
+		strings.TrimSpace(payload.Type),
+	}, message)
 }
 
 func detectRawErrorContentType(body []byte) string {

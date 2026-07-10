@@ -631,6 +631,12 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 	if err := json.Unmarshal([]byte(frame.Data), &payload); err != nil {
 		return nil, false, fmt.Errorf("parse chat sse frame: %w", err)
 	}
+	if errorPayload, _ := payload["error"].(map[string]any); len(errorPayload) > 0 {
+		state.completed = true
+		events := []Event{{Event: "error", Data: cloneMap(payload)}}
+		shadowRecord(events, frame, state.provider)
+		return events, true, nil
+	}
 	var events []Event
 	if usage := normalizeChatUsage(payload); len(usage) > 0 {
 		state.usage = usage

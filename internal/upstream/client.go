@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/contextoverflow"
 	"openai-compat-proxy/internal/debugarchive"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
@@ -98,31 +99,28 @@ func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverf
 
 func contextOverflowFromEvent(evt Event) *PreOutputContextOverflow {
 	errObj := eventErrorObject(evt.Data)
-	code := strings.TrimSpace(stringValue(errObj["code"]))
-	if code == "" {
-		code = strings.TrimSpace(stringValue(evt.Data["code"]))
+	codes := []string{
+		strings.TrimSpace(stringValue(errObj["code"])),
+		strings.TrimSpace(stringValue(errObj["type"])),
+		strings.TrimSpace(stringValue(evt.Data["code"])),
+		strings.TrimSpace(stringValue(evt.Data["type"])),
 	}
 	message := strings.TrimSpace(stringValue(errObj["message"]))
 	if message == "" {
 		message = strings.TrimSpace(stringValue(evt.Data["message"]))
 	}
-	if !isContextOverflowSignal(code, message) {
+	normalizedCode, normalizedMessage, ok := contextoverflow.NormalizeCandidates(codes, message)
+	if !ok {
 		return nil
-	}
-	if message == "" {
-		message = "prompt is too long: context_length_exceeded"
-	}
-	if !strings.Contains(strings.ToLower(message), "prompt is too long") || !strings.Contains(strings.ToLower(message), "context_length_exceeded") {
-		message = "prompt is too long: context_length_exceeded: " + message
 	}
 	errObj = cloneMap(errObj)
 	errObj["type"] = "invalid_request_error"
-	errObj["code"] = "context_length_exceeded"
-	errObj["message"] = message
+	errObj["code"] = normalizedCode
+	errObj["message"] = normalizedMessage
 	if _, ok := errObj["param"]; !ok {
 		errObj["param"] = "input"
 	}
-	return &PreOutputContextOverflow{Message: message, Error: errObj}
+	return &PreOutputContextOverflow{Message: normalizedMessage, Error: errObj}
 }
 
 func eventErrorObject(data map[string]any) map[string]any {
@@ -134,20 +132,6 @@ func eventErrorObject(data map[string]any) map[string]any {
 		return errObj
 	}
 	return map[string]any{}
-}
-
-func isContextOverflowSignal(code, message string) bool {
-	switch strings.ToLower(strings.TrimSpace(code)) {
-	case "context_length_exceeded", "context_too_large", "model_context_window_exceeded":
-		return true
-	}
-	message = strings.ToLower(strings.TrimSpace(message))
-	return strings.Contains(message, "context_length_exceeded") ||
-		strings.Contains(message, "prompt is too long") ||
-		strings.Contains(message, "context window") ||
-		strings.Contains(message, "context length") ||
-		strings.Contains(message, "too many tokens") ||
-		strings.Contains(message, "token limit")
 }
 
 func (s *EventStream) FirstPendingResponseID() string {

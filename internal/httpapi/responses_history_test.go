@@ -247,16 +247,14 @@ func TestResponsesHistoryLoadToolCallByCallIDReturnsClone(t *testing.T) {
 }
 
 func TestRecoverResponseItemReferencesForMessagesUsesScopedToolCallIndex(t *testing.T) {
-	previous := globalResponsesHistory
-	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2}
-	t.Cleanup(func() { globalResponsesHistory = previous })
+	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2}
 
-	globalResponsesHistory.Save("codex-my", "resp-1", []model.CanonicalMessage{{
+	store.Save("codex-my", "resp-1", []model.CanonicalMessage{{
 		Role:      "assistant",
 		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", ResponseItemID: "fc_1", Type: "function", Name: "bash", Arguments: `{}`}},
 	}}, "scope-a")
 
-	references := recoverResponseItemReferencesForMessages([]model.CanonicalMessage{{
+	references := recoverResponseItemReferencesForMessages(store, []model.CanonicalMessage{{
 		Role:       "tool",
 		ToolCallID: "call_1",
 		Parts:      []model.CanonicalContentPart{{Type: "text", Text: `{"ok":true}`}},

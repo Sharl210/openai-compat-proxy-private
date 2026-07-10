@@ -16,6 +16,7 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 	admin   *adminUI
+	history *responsesHistoryStore
 
 	CacheInfo      *cacheinfo.Manager
 	TokenEstimator *tokenestimator.Manager
@@ -30,6 +31,11 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager,
 		store:          store,
 		CacheInfo:      cacheMgr,
 		TokenEstimator: tokenEstimatorMgr,
+	}
+	if snapshot := store.Active(); snapshot != nil {
+		srv.history = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, responsesHistoryToolCallRecoveryIndexPath(snapshot.Config.ProvidersDir))
+	} else {
+		srv.history = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
 	}
 	if imageArtifactRootDirOverride != "" {
 		ensureImageArtifactsReadyForRoot(imageArtifactRootDirOverride)
@@ -129,6 +135,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			ctx = withTokenEstimatorManager(ctx, s.TokenEstimator)
 		}
 		ctx = withRuntimeStore(ctx, s.store)
+		ctx = withResponsesHistory(ctx, s.history)
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
 		if shouldUseRootLegacyProxyAuth(info, snapshot) {

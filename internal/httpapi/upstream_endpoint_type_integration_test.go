@@ -138,6 +138,54 @@ func TestResponsesRoutePreservesTopLevelFieldsAcrossAnthropicUpstream(t *testing
 	}
 }
 
+func TestResponsesRouteDoesNotRestoreHistoryFromAnotherServer(t *testing.T) {
+	// Given
+	audioUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_shared","object":"response","status":"completed","output":[{"id":"msg_audio","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"stored separately"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer audioUpstream.Close()
+	audioServer := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: audioUpstream.URL, UpstreamAPIKey: "test-key", SupportsResponses: true, SupportsChat: true}}})
+	audioRequest := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"YWJj","format":"wav"}}]}]}`))
+	audioRequest.Header.Set("Content-Type", "application/json")
+	audioRecorder := httptest.NewRecorder()
+	audioServer.ServeHTTP(audioRecorder, audioRequest)
+	if audioRecorder.Code != http.StatusOK {
+		t.Fatalf("expected audio source server to accept request, got %d body=%s", audioRecorder.Code, audioRecorder.Body.String())
+	}
+
+	var anthropicRequestBody string
+	anthropicUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read anthropic upstream request: %v", err)
+		}
+		anthropicRequestBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_next","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"isolated"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer anthropicUpstream.Close()
+	anthropicServer := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: anthropicUpstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	continuationRequest := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"resp_shared","input":"hello"}`))
+	continuationRequest.Header.Set("Content-Type", "application/json")
+	continuationRecorder := httptest.NewRecorder()
+
+	// When
+	anthropicServer.ServeHTTP(continuationRecorder, continuationRequest)
+
+	// Then
+	if continuationRecorder.Code != http.StatusOK {
+		t.Fatalf("expected separate server continuation to succeed, got %d body=%s", continuationRecorder.Code, continuationRecorder.Body.String())
+	}
+	if strings.Contains(anthropicRequestBody, `"input_audio"`) {
+		t.Fatalf("expected separate server not to restore audio history, got %s", anthropicRequestBody)
+	}
+}
+
 func TestResponsesRouteDoesNotEchoArbitraryUnknownRequestFieldsBackIntoOutput(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1726,8 +1774,8 @@ func TestMessagesNonStreamPreservesContextLengthExceededFromUpstreamFailure(t *t
 	if strings.Contains(body, `invalid_upstream_stream`) {
 		t.Fatalf("expected non-stream messages path not to degrade into invalid_upstream_stream, got %s", body)
 	}
-	if !strings.Contains(body, `"type":"proxy_error"`) {
-		t.Fatalf("expected proxy-stable error envelope in non-stream messages path, got %s", body)
+	if !strings.Contains(body, `"type":"error"`) || !strings.Contains(body, `"type":"invalid_request_error"`) {
+		t.Fatalf("expected Anthropic context overflow envelope in non-stream messages path, got %s", body)
 	}
 }
 
@@ -2190,10 +2238,6 @@ func TestResponsesRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T)
 }
 
 func TestResponsesRouteRecoversAnthropicToolUseByCallIDWithoutPreviousResponseID(t *testing.T) {
-	previousGlobalHistory := globalResponsesHistory
-	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize}
-	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
-
 	requestCount := 0
 	var secondBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2240,10 +2284,6 @@ func TestResponsesRouteRecoversAnthropicToolUseByCallIDWithoutPreviousResponseID
 }
 
 func TestResponsesRouteRecoversAnthropicThinkingByCallIDWithoutPreviousResponseID(t *testing.T) {
-	previousGlobalHistory := globalResponsesHistory
-	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize}
-	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
-
 	requestCount := 0
 	var secondBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2290,10 +2330,7 @@ func TestResponsesRouteRecoversAnthropicThinkingByCallIDWithoutPreviousResponseI
 }
 
 func TestResponsesRouteRecoversAnthropicToolUsesByCallIDAfterHistoryStoreRestart(t *testing.T) {
-	previousGlobalHistory := globalResponsesHistory
-	indexPath := t.TempDir() + "/tool_call_recovery_index.json"
-	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize, toolCallRecoveryIndexPath: indexPath}
-	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
+	providersDir := t.TempDir()
 
 	requestCount := 0
 	var secondBody string
@@ -2312,7 +2349,8 @@ func TestResponsesRouteRecoversAnthropicToolUsesByCallIDAfterHistoryStoreRestart
 	}))
 	defer upstream.Close()
 
-	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	serverConfig := config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, ProvidersDir: providersDir, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}}
+	server := NewServer(serverConfig)
 
 	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
 	firstReq.Header.Set("Content-Type", "application/json")
@@ -2322,7 +2360,7 @@ func TestResponsesRouteRecoversAnthropicToolUsesByCallIDAfterHistoryStoreRestart
 		t.Fatalf("expected first status 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
 	}
 
-	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize, toolCallRecoveryIndexPath: indexPath}
+	server = NewServer(serverConfig)
 
 	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"type":"function_call_output","call_id":"call_1","output":"file contents"},{"type":"function_call_output","call_id":"call_2","output":"glob output"},{"type":"function_call_output","call_id":"call_3","output":"grep output"}]}`))
 	secondReq.Header.Set("Content-Type", "application/json")

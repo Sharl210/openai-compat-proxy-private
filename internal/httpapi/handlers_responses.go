@@ -25,6 +25,7 @@ type preparedResponsesRequest struct {
 	clientReasoningParameters string
 	clientReasoningEffort     string
 	client                    *upstream.Client
+	history                   *responsesHistoryStore
 	usageRecorder             usageRecorderFunc
 }
 
@@ -51,6 +52,7 @@ func handleResponses() http.HandlerFunc {
 		client := prepared.client
 		authorization := prepared.authorization
 		usageRecorder := prepared.usageRecorder
+		history := prepared.history
 
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
@@ -83,7 +85,7 @@ func handleResponses() http.HandlerFunc {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				if writeUpstreamError(w, err) {
+				if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
 					return
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -122,7 +124,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
-				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
+				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
 			}
 			return
 		}
@@ -134,7 +136,7 @@ func handleResponses() http.HandlerFunc {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				if writeUpstreamError(w, err) {
+				if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
 					return
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -148,7 +150,7 @@ func handleResponses() http.HandlerFunc {
 			normalized := responsesadapter.BuildResponse(result)
 			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
-				globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
+				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -169,7 +171,7 @@ func handleResponses() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
-			if writeUpstreamError(w, err) {
+			if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -196,7 +198,7 @@ func handleResponses() http.HandlerFunc {
 		if err != nil {
 			var terminalFailure *aggregate.TerminalFailureError
 			if errors.As(err, &terminalFailure) {
-				writeTerminalFailureError(w, terminalFailure)
+				writeTerminalFailureError(w, terminalFailure, clientReasoningProtocolResponses)
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())
@@ -207,7 +209,7 @@ func handleResponses() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			globalResponsesHistory.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
+			history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -264,7 +266,7 @@ func handleResponsesCompact() http.HandlerFunc {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				if writeUpstreamError(w, err) {
+				if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
 					return
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -293,7 +295,7 @@ func handleResponsesCompact() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
-			if writeUpstreamError(w, err) {
+			if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -315,7 +317,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			globalResponsesHistory.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(prepared.providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, prepared.authorization))
+			prepared.history.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(prepared.providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, prepared.authorization))
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -370,7 +372,7 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		if hasNoPromptModelSuffix(canon.Model) {
 			w.Header().Set(headerClientToProxyNoPrompt, "false")
 		}
-		if writeUpstreamError(w, selectionErr) {
+		if writeUpstreamErrorForProtocol(w, selectionErr, clientReasoningProtocolResponses) {
 			return nil, false
 		}
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
@@ -413,6 +415,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	clientModel := initial.clientModel
 	resolvedModel := initial.resolvedModel
 	requestID := initial.requestID
+	history := responsesHistoryFromRequest(r)
 	canon.Model = resolvedModel
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 		setConfigVersionHeaders(w, snapshot, providerID)
@@ -439,11 +442,11 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
 			currentMessages := prepareCanonicalMessages(canon.Messages)
-			if history := globalResponsesHistory.Load(providerID, previousResponseID); len(history) > 0 {
-				canon.Messages = append(history, currentMessages...)
+			if previousHistory := history.Load(providerID, previousResponseID); len(previousHistory) > 0 {
+				canon.Messages = append(previousHistory, currentMessages...)
 				previousHistoryRestored = true
-			} else if history := globalResponsesHistory.LoadAny(previousResponseID); len(history) > 0 {
-				canon.Messages = append(history, currentMessages...)
+			} else if previousHistory := history.LoadAny(previousResponseID); len(previousHistory) > 0 {
+				canon.Messages = append(previousHistory, currentMessages...)
 				previousHistoryRestored = true
 			} else {
 				canon.Messages = currentMessages
@@ -457,11 +460,11 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
 	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
-		canon.Messages = recoverToolCallsForMessages(canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
+		canon.Messages = recoverToolCallsForMessages(history, canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
 	}
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeResponses && providerCfg.MasqueradeTarget == config.MasqueradeTargetOpenCode {
 		if previousResponseIDFromItems(canon.ResponseInputItems) != "" {
-			canon.ResponseItemReferencesByCallID = recoverResponseItemReferencesForMessages(canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
+			canon.ResponseItemReferencesByCallID = recoverResponseItemReferencesForMessages(history, canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
 		}
 	}
 	applyProviderMaxOutputTokens(&canon, provider)
@@ -502,6 +505,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		clientReasoningParameters: clientReasoningParameters,
 		clientReasoningEffort:     clientReasoningEffort,
 		client:                    client,
+		history:                   history,
 		usageRecorder:             usageRecorder,
 	}, true
 }

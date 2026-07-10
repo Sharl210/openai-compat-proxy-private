@@ -33,7 +33,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if hasNoPromptModelSuffix(canon.Model) {
 				w.Header().Set(headerClientToProxyNoPrompt, "false")
 			}
-			if writeUpstreamError(w, selectionErr) {
+			if writeUpstreamErrorForProtocol(w, selectionErr, clientReasoningProtocolMessages) {
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
@@ -121,7 +121,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				if writeUpstreamError(w, err) {
+				if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolMessages) {
 					return
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -164,7 +164,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 					return
 				}
-				if writeUpstreamError(w, err) {
+				if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolMessages) {
 					return
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -199,7 +199,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 				return
 			}
-			if writeUpstreamError(w, err) {
+			if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolMessages) {
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
@@ -213,7 +213,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		if err != nil {
 			var terminalFailure *aggregate.TerminalFailureError
 			if errors.As(err, &terminalFailure) {
-				writeTerminalFailureError(w, terminalFailure)
+				writeTerminalFailureError(w, terminalFailure, clientReasoningProtocolMessages)
 				return
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "invalid_upstream_stream", err.Error())

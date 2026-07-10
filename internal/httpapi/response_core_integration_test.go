@@ -645,10 +645,6 @@ func TestResponsesPreviousResponseIDRestoresHistoryAcrossProviderSwitchForChatUp
 	}))
 	defer mimoUpstream.Close()
 
-	previousGlobalHistory := globalResponsesHistory
-	globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, maxSize: defaultResponsesHistoryMaxSize}
-	t.Cleanup(func() { globalResponsesHistory = previousGlobalHistory })
-
 	server := NewServer(config.Config{
 		DefaultProvider:             "codex-my,mimo",
 		EnableLegacyV1Routes:        true,

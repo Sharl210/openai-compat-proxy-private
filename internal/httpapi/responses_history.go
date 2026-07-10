@@ -51,8 +51,6 @@ type responsesHistoryToolCallRecoveryIndexFile struct {
 	ToolCalls map[string]responsesHistoryToolCallEntry `json:"tool_calls"`
 }
 
-var globalResponsesHistory = &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: defaultResponsesHistoryMaxSize, maxBytes: defaultResponsesHistoryMaxBytes}
-
 func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *responsesHistoryStore {
 	if maxSize <= 0 {
 		maxSize = defaultResponsesHistoryMaxSize
@@ -65,10 +63,6 @@ func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *re
 		maxBytes:                  defaultResponsesHistoryMaxBytes,
 		toolCallRecoveryIndexPath: strings.TrimSpace(toolCallRecoveryIndexPath),
 	}
-}
-
-func ConfigureResponsesHistoryPersistence(providersDir string) {
-	globalResponsesHistory = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, responsesHistoryToolCallRecoveryIndexPath(providersDir))
 }
 
 func responsesHistoryToolCallRecoveryIndexPath(providersDir string) string {
@@ -449,8 +443,8 @@ func shouldRestorePreviousConversation(messages []model.CanonicalMessage) bool {
 	return true
 }
 
-func recoverToolCallsForMessages(messages []model.CanonicalMessage, providerID string, scopes ...string) []model.CanonicalMessage {
-	if len(messages) == 0 || providerID == "" || globalResponsesHistory == nil {
+func recoverToolCallsForMessages(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) []model.CanonicalMessage {
+	if len(messages) == 0 || providerID == "" || history == nil {
 		return messages
 	}
 	existingToolCallIDs := currentToolCallIDs(messages)
@@ -463,7 +457,7 @@ func recoverToolCallsForMessages(messages []model.CanonicalMessage, providerID s
 		if existingToolCallIDs[msg.ToolCallID] {
 			continue
 		}
-		call, reasoningBlocks, ok := globalResponsesHistory.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		call, reasoningBlocks, ok := history.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
 		if !ok {
 			continue
 		}
@@ -475,8 +469,8 @@ func recoverToolCallsForMessages(messages []model.CanonicalMessage, providerID s
 	return recovered
 }
 
-func recoverResponseItemReferencesForMessages(messages []model.CanonicalMessage, providerID string, scopes ...string) map[string]string {
-	if len(messages) == 0 || providerID == "" || globalResponsesHistory == nil {
+func recoverResponseItemReferencesForMessages(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) map[string]string {
+	if len(messages) == 0 || providerID == "" || history == nil {
 		return nil
 	}
 	references := map[string]string{}
@@ -484,7 +478,7 @@ func recoverResponseItemReferencesForMessages(messages []model.CanonicalMessage,
 		if msg.Role != "tool" || msg.ToolCallID == "" {
 			continue
 		}
-		call, _, ok := globalResponsesHistory.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		call, _, ok := history.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
 		if !ok || strings.TrimSpace(call.ResponseItemID) == "" {
 			continue
 		}
