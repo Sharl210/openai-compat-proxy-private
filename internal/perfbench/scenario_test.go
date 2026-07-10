@@ -1,9 +1,15 @@
 package perfbench
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 )
+
+const scenarioCatalogVersion = "v1"
 
 type downstreamProtocol string
 
@@ -91,9 +97,33 @@ func scenarioCatalog() []scenario {
 	return catalog
 }
 
+func scenarioCatalogCanonicalDigest(catalog []scenario) (string, string) {
+	var canonical strings.Builder
+	canonical.WriteString(scenarioCatalogVersion)
+	canonical.WriteByte('\n')
+	for _, item := range catalog {
+		canonical.WriteString(item.ID)
+		canonical.WriteByte('|')
+		canonical.WriteString(string(item.Downstream))
+		canonical.WriteByte('|')
+		canonical.WriteString(string(item.Upstream))
+		canonical.WriteByte('|')
+		canonical.WriteString(string(item.Delivery))
+		canonical.WriteByte('|')
+		canonical.WriteString(strconv.FormatInt(item.ImageBytes, 10))
+		canonical.WriteByte('|')
+		canonical.WriteString(string(item.Profile))
+		canonical.WriteByte('\n')
+	}
+	digest := sha256.Sum256([]byte(canonical.String()))
+	return scenarioCatalogVersion, hex.EncodeToString(digest[:])
+}
+
 func TestScenarioMatrix_is_complete_and_stable(t *testing.T) {
 	// Given
 	const expectedCount = 342
+	const expectedVersion = "v1"
+	const expectedDigest = "e39cf48dbe9bbaddf461dd57b3576ae5f85228e3ac4c4680b391cc7d1d07a229"
 
 	// When
 	first := scenarioCatalog()
@@ -132,5 +162,10 @@ func TestScenarioMatrix_is_complete_and_stable(t *testing.T) {
 	}
 	if historyCount != 18 {
 		t.Fatalf("history_restore count = %d, want 18", historyCount)
+	}
+	version, digest := scenarioCatalogCanonicalDigest(first)
+	if version != expectedVersion || digest != expectedDigest {
+		t.Fatalf("catalog identity = %s/%s, want %s/%s",
+			version, digest, expectedVersion, expectedDigest)
 	}
 }
