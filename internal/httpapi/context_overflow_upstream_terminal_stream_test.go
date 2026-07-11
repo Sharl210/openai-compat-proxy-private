@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,7 @@ import (
 const upstreamCompletedEvent = "event: response.completed\n" +
 	"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_completed\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"
 
-func TestStreamingContextOverflow_emitsOneTerminal_whenUpstreamSendsErrorThenResponseFailed(t *testing.T) {
+func TestStreamingContextOverflow_returnsHTTP400BeforeSSE_whenUpstreamSendsLifecycleOverflow(t *testing.T) {
 	for _, tc := range contextOverflowRouteCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			// Given
@@ -36,14 +37,30 @@ func TestStreamingContextOverflow_emitsOneTerminal_whenUpstreamSendsErrorThenRes
 			server.ServeHTTP(rec, req)
 
 			// Then
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected late context overflow to preserve SSE status, got %d body=%s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected lifecycle context overflow to return HTTP 400 before SSE, got %d body=%s", rec.Code, rec.Body.String())
 			}
 			body := rec.Body.String()
-			if count := strings.Count(body, tc.terminalMarker); count != 1 {
-				t.Fatalf("expected exactly one downstream terminal marker %q, got %d body=%s", tc.terminalMarker, count, body)
+			if !json.Valid([]byte(body)) {
+				t.Fatalf("expected JSON error body before SSE, got %s", body)
 			}
 			assertContextOverflowSignals(t, body)
+			for _, marker := range []string{
+				"event:",
+				"response.created",
+				"response.in_progress",
+				"response.failed",
+				"\"id\":\"rs_proxy\"",
+				"\"type\":\"message_start\"",
+				tc.terminalMarker,
+			} {
+				if strings.Contains(body, marker) {
+					t.Fatalf("expected no downstream SSE or lifecycle marker %q before HTTP error, got %s", marker, body)
+				}
+			}
+			if got := rec.Header().Get("X-Accel-Buffering"); got != "" {
+				t.Fatalf("expected SSE headers to remain unset before HTTP error, got X-Accel-Buffering=%q", got)
+			}
 		})
 	}
 }

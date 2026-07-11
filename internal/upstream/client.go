@@ -77,8 +77,10 @@ func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverf
 			if overflow := contextOverflowFromEvent(evt); overflow != nil {
 				return overflow, nil
 			}
-			s.pendingEvents = append(s.pendingEvents, buffered...)
-			return nil, nil
+			if evt.Event != "response.created" && evt.Event != "response.in_progress" {
+				s.pendingEvents = append(s.pendingEvents, buffered...)
+				return nil, nil
+			}
 		}
 		if s.scanner == nil || s.readNext == nil {
 			s.pendingEvents = append(s.pendingEvents, buffered...)

@@ -2242,6 +2242,8 @@ func TestEventStreamProbeContextOverflowBeforeOutput_replaysFirstVisibleBatchOnc
 			return []Event{
 				{Event: "usage.update", ArchiveOnly: true},
 				{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_1"}}},
+				{Event: "response.in_progress", Data: map[string]any{"response": map[string]any{"id": "resp_1"}}},
+				{Event: "response.output_text.delta", Data: map[string]any{"delta": "hello"}},
 			}, nil
 		},
 	}
@@ -2256,7 +2258,7 @@ func TestEventStreamProbeContextOverflowBeforeOutput_replaysFirstVisibleBatchOnc
 	if overflow != nil {
 		t.Fatalf("expected first visible batch to remain replayable, got overflow %#v", overflow)
 	}
-	if len(stream.pendingEvents) != 2 {
+	if len(stream.pendingEvents) != 4 {
 		t.Fatalf("expected probe to retain one complete batch, got %#v", stream.pendingEvents)
 	}
 	var seen []string
@@ -2266,8 +2268,72 @@ func TestEventStreamProbeContextOverflowBeforeOutput_replaysFirstVisibleBatchOnc
 	}); err != nil {
 		t.Fatalf("consume replayed stream: %v", err)
 	}
-	if !reflect.DeepEqual(seen, []string{"response.created"}) {
-		t.Fatalf("expected first visible event exactly once after probe, got %#v", seen)
+	if !reflect.DeepEqual(seen, []string{"response.created", "response.in_progress", "response.output_text.delta"}) {
+		t.Fatalf("expected lifecycle and first output events exactly once after probe, got %#v", seen)
+	}
+	if readCount != 2 {
+		t.Fatalf("expected probe to stop reading at first output event, got %d reads", readCount)
+	}
+}
+
+func TestEventStreamProbeContextOverflowBeforeOutput_detectsLifecycleContextOverflow(t *testing.T) {
+	// Given
+	readCount := 0
+	stream := &EventStream{
+		resp:    &http.Response{Body: io.NopCloser(strings.NewReader(""))},
+		scanner: bufio.NewScanner(strings.NewReader("")),
+		readNext: func(*bufio.Scanner) ([]Event, error) {
+			readCount++
+			switch readCount {
+			case 1:
+				return []Event{
+					{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_1"}}},
+					{Event: "response.in_progress", Data: map[string]any{"response": map[string]any{"id": "resp_1"}}},
+				}, nil
+			case 2:
+				return []Event{
+					{Event: "error", Data: map[string]any{
+						"type": "error",
+						"error": map[string]any{
+							"code":    "context_length_exceeded",
+							"message": "prompt is too long",
+						},
+					}},
+					{Event: "response.failed", Data: map[string]any{
+						"type": "response.failed",
+						"response": map[string]any{
+							"status": "failed",
+							"error": map[string]any{
+								"code":    "context_length_exceeded",
+								"message": "prompt is too long",
+							},
+						},
+					}},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+
+	// When
+	overflow, err := stream.ProbeContextOverflowBeforeOutput()
+
+	// Then
+	if err != nil {
+		t.Fatalf("probe lifecycle context overflow: %v", err)
+	}
+	if overflow == nil {
+		t.Fatal("expected lifecycle context overflow to be detected before output")
+	}
+	if overflow.Error["code"] != "context_length_exceeded" {
+		t.Fatalf("expected normalized context overflow code, got %#v", overflow.Error)
+	}
+	if !strings.Contains(overflow.Message, "prompt is too long") || !strings.Contains(overflow.Message, "context_length_exceeded") {
+		t.Fatalf("expected normalized lifecycle overflow message to contain client-recognized context markers, got %q", overflow.Message)
+	}
+	if readCount != 2 {
+		t.Fatalf("expected probe to read through response.failed, got %d reads", readCount)
 	}
 }
 
