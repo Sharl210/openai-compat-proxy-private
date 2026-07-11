@@ -36,6 +36,10 @@ func writeUpstreamErrorForProtocol(w http.ResponseWriter, err error, protocol st
 			writeContextOverflowError(w, protocol, code, message)
 			return true
 		}
+		if code, message, ok := normalizeRetryExhaustedGeneric502ContextOverflow(w, httpErr); ok {
+			writeContextOverflowError(w, protocol, code, message)
+			return true
+		}
 	}
 	return writeUpstreamError(w, err)
 }

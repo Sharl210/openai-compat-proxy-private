@@ -179,19 +179,6 @@ var responsesWebSearchFunctionToolSchema = map[string]any{
 	"required": []string{"query"},
 }
 
-type HTTPStatusError struct {
-	StatusCode       int
-	ContentType      string
-	BodyBytes        []byte
-	Body             string
-	RetriesPerformed int
-	RetryDelay       time.Duration
-}
-
-func (e *HTTPStatusError) Error() string {
-	return fmt.Sprintf("upstream status %d: %s", e.StatusCode, e.Body)
-}
-
 func NewClient(baseURL string, cfgs ...config.Config) *Client {
 	var cfg config.Config
 	if len(cfgs) > 0 {
@@ -643,12 +630,14 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
+	retryEvidence := newRetryStatusErrorEvidence()
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
 		stream, err := c.openEventStream(ctx, endpointType, body, authorization, anthropicBeta, originalToolIDs, requestID, primeFirstEvent, allowEOFCompletion)
 		if err == nil {
 			return stream, nil
 		}
 		lastErr = err
+		retryEvidence.observe(lastErr)
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
 			logging.Event("upstreamRequestFailed", mergeLogAttrs(map[string]any{
 				"request_id":         requestID,
@@ -680,19 +669,21 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 			}
 		}
 	}
-	return nil, lastErr
+	return nil, retryEvidence.attach(lastErr)
 }
 
 func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, compact bool) (map[string]any, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
+	retryEvidence := newRetryStatusErrorEvidence()
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
 		payload, err := c.responseOnce(ctx, endpointType, body, authorization, anthropicBeta, compact)
 		if err == nil {
 			return payload, nil
 		}
 		lastErr = err
+		retryEvidence.observe(lastErr)
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
 			logging.Event("upstreamRequestFailed", mergeLogAttrs(map[string]any{
 				"request_id":         requestID,
@@ -724,7 +715,7 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 			}
 		}
 	}
-	return nil, lastErr
+	return nil, retryEvidence.attach(lastErr)
 }
 
 func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, compact bool) (map[string]any, error) {
@@ -1040,55 +1031,6 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func readHTTPStatusError(resp *http.Response) *HTTPStatusError {
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	msg := strings.TrimSpace(string(bodyBytes))
-	if msg == "" {
-		msg = http.StatusText(resp.StatusCode)
-		bodyBytes = []byte(msg)
-	}
-	return &HTTPStatusError{
-		StatusCode:  resp.StatusCode,
-		ContentType: resp.Header.Get("Content-Type"),
-		BodyBytes:   bodyBytes,
-		Body:        msg,
-	}
-}
-
-func shouldRetryRequestFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	if httpErr, ok := err.(*HTTPStatusError); ok {
-		return httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500
-	}
-	var httpErr *HTTPStatusError
-	if errors.As(err, &httpErr) {
-		return httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500
-	}
-	return true
-}
-
-func annotateRetryExhaustion(err error, retryCount int, retryDelay time.Duration) error {
-	if err == nil || retryCount <= 0 {
-		return err
-	}
-	if !shouldRetryRequestFailure(err) {
-		return err
-	}
-	var httpErr *HTTPStatusError
-	if errors.As(err, &httpErr) {
-		cloned := *httpErr
-		cloned.RetriesPerformed = retryCount
-		cloned.RetryDelay = retryDelay
-		return &cloned
-	}
-	return fmt.Errorf("%s%w", buildRetryNotice(retryCount, retryDelay), err)
 }
 
 func mergeLogAttrs(base map[string]any, extra map[string]any) map[string]any {

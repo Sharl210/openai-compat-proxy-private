@@ -318,6 +318,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Proxy-To-Upstream-Claude-Metadata-Session-Id` | Anthropic 上游、Claude 伪装且本次会实际向上游请求体注入 `metadata.user_id` 时，代理动态生成的 `session_id`；未实际注入时为空字符串 | `11111111-1111-4111-8111-111111111111` |
 | `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
 | `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前最终上游模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
+| `X-Proxy-Estimated-Input-Tokens` | 代理对最终 canonical 输入内容的预估 token 数；正常已认证文本生成请求常驻返回。该值是估算而非上游精确 usage，`MODEL_LIMIT_CONTEXT_TOKENS=-1` 时仍返回但不会据此拦截请求；命中正数代理限制时可能附带 estimator 置信度 | `1234` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
 | `X-Provider-Today-Cache-Rate` | 本次请求命中 provider 今日缓存率 | `25.00 %` |
 | `X-Provider-History-Cache-Rate` | 本次请求命中 provider 历史缓存率 | `25.00 %` |
@@ -387,6 +388,7 @@ UPSTREAM_ENDPOINT_TYPE=responses
 - 已开始 SSE 后出错会尽量保持下游流协议终态，而不是中途退化成 JSON 错误体
 - 上游流式返回 `error` / `response.failed` 时，代理会把上游错误码和错误消息映射到下游终态错误里，避免被泛化成单纯的 `unexpected EOF`
 - 如果上游在代理尚未写出任何下游事件前就报告 `context_length_exceeded` / `prompt is too long`，三套入口会直接返回各自协议的 HTTP `400` 错误外壳，避免 OpenCode / OMO 先进入 assistant 状态；一旦已有下游事件写出，仍按各自 SSE 终态错误结束流
+- 对于极端超大请求，如果上游在首输出前重试耗尽，且每次都返回严格相同的 HTTP `502` `upstream_error: Upstream service temporarily unavailable`，代理会结合本次预估输入 token 数保守归一化为 `context_length_exceeded`；例如估算达到 `1000000` token 以上时会返回 `prompt is too long`。这属于上游失败后的兼容归因，不会把 `MODEL_LIMIT_CONTEXT_TOKENS=-1` 变成请求前限制；小请求、`503/504`、quota / rate-limit、鉴权、校验或其它错误正文仍原样返回
 - chat 上游的 reasoning 标签、reasoning_content、tool_calls 会在代理层统一归一后再下发
 
 ### 3. responses 上游工具兼容模式
