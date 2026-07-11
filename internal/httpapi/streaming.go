@@ -675,6 +675,10 @@ func (h *responseEventWriterHelper) beginCompactionLifecycle() {
 
 func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (processResponseEventResult, error) {
 	result := processResponseEventResult{}
+	if h.terminalSeen {
+		result.skipWrite = true
+		return result, nil
+	}
 	compatCompleteToolArgs := h.shouldBufferCompatToolArgs()
 	if h.toolIDAliases == nil {
 		h.toolIDAliases = map[string]string{}
@@ -869,10 +873,6 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		h.closeRealReasoningLifecycle()
 		h.closeSyntheticReasoning()
 	case "response.done":
-		if h.terminalFailure != nil {
-			result.skipWrite = true
-			return result, nil
-		}
 		h.terminalSeen = true
 		// Mirror top-level usage into response object for compatibility
 		response, _ := evt.Data["response"].(map[string]any)
@@ -1248,7 +1248,7 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realReasoningSeen },
 		nil,
-		func() error { return writeSSEComment(w, flusher, "keep-alive") },
+		func() error { return writeSSEHeartbeat(w, flusher, state.terminalSeen) },
 		func(evt upstream.Event) error {
 			collector.Accept(evt)
 			if evt.Event == "response.output_text.delta" && shouldInjectSyntheticResponsesReasoningBeforeText(upstreamEndpointType, state, evt) {
@@ -1609,12 +1609,12 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 			}
 			return startAnthropicUnreasonedPlaceholder(w, flusher, state)
 		},
-		func() error { return writeSSEComment(w, flusher, "keep-alive") },
+		func() error { return writeSSEHeartbeat(w, flusher, state.terminalSeen) },
 		func(evt upstream.Event) error {
 			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
-	if err != nil {
+	if err != nil && !state.terminalSeen {
 		return err
 	}
 	if !state.terminalSeen {
@@ -2299,12 +2299,12 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 			}
 			return nil
 		},
-		func() error { return writeSSEComment(w, flusher, "keep-alive") },
+		func() error { return writeSSEHeartbeat(w, flusher, state.terminalSeen) },
 		func(evt upstream.Event) error {
 			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
-	if err != nil {
+	if err != nil && !state.terminalSeen {
 		return err
 	}
 	if !state.terminalSeen {
@@ -2862,6 +2862,13 @@ func writeSSEComment(w http.ResponseWriter, flusher http.Flusher, text string) e
 		flusher.Flush()
 	}
 	return nil
+}
+
+func writeSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher, terminalSeen bool) error {
+	if terminalSeen {
+		return nil
+	}
+	return writeSSEComment(w, flusher, "keep-alive")
 }
 
 func chatToolDelta(index int, callID, name, arguments string, includeMetadata bool) map[string]any {

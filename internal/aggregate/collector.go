@@ -65,6 +65,9 @@ func NewCollector() *Collector {
 }
 
 func (c *Collector) Accept(evt upstream.Event) {
+	if c.completed {
+		return
+	}
 	switch evt.Event {
 	case "response.created":
 		if response, _ := evt.Data["response"].(map[string]any); response != nil {
