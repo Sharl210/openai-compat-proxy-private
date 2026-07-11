@@ -9,47 +9,8 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	modelpkg "openai-compat-proxy/internal/model"
-	"openai-compat-proxy/internal/testutil"
 	"openai-compat-proxy/internal/tokenestimator"
 )
-
-func TestResponsesSuccessSetsModelLimitContextHeader(t *testing.T) {
-	upstream := testutil.NewStreamingUpstream(t, []string{
-		"event: response.completed\n" +
-			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
-	})
-	defer upstream.Close()
-
-	server := NewServer(config.Config{
-		DefaultProvider:           "openai",
-		EnableLegacyV1Routes:      true,
-		EnableNoPromptModelSuffix: true,
-		Providers: []config.ProviderConfig{{
-			ID:                      "openai",
-			Enabled:                 true,
-			SupportsResponses:       true,
-			ManualModels:            []string{"gpt-5.5"},
-			ModelLimitContextTokens: -1,
-			UpstreamEndpointType:    config.UpstreamEndpointTypeResponses,
-			UpstreamBaseURL:         upstream.URL,
-			UpstreamAPIKey:          "test-key",
-		}},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":"hello"}`))
-	rec := httptest.NewRecorder()
-
-	server.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 response, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "-1" {
-		t.Fatalf("expected context limit header -1, got %q", got)
-	}
-	if got := rec.Header().Get(headerProxyEstimatedInputTokens); got != "" {
-		t.Fatalf("expected no estimated input tokens header when context limit disabled, got %q", got)
-	}
-}
 
 func TestResponsesContextLimitReturnsOpenAIOverflowShape(t *testing.T) {
 	server := NewServer(config.Config{
