@@ -357,56 +357,6 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 	return nil
 }
 
-func (s *responsesHistoryStore) saveToolCallRecoveryIndexLocked() error {
-	if s == nil || s.toolCallRecoveryIndexPath == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(s.toolCallRecoveryIndexPath), 0o755); err != nil {
-		return err
-	}
-	toolCalls := make(map[string]responsesHistoryToolCallEntry, len(s.toolCalls))
-	for key, entry := range s.toolCalls {
-		if key == "" || entry.Call.ID == "" || entry.Call.Name == "" {
-			continue
-		}
-		toolCalls[key] = responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks)}
-	}
-	if len(toolCalls) == 0 {
-		if err := os.Remove(s.toolCallRecoveryIndexPath); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		return nil
-	}
-	data, err := json.MarshalIndent(responsesHistoryToolCallRecoveryIndexFile{Version: responsesHistoryToolCallRecoveryIndexVersion, Order: append([]string(nil), s.order...), ToolCalls: toolCalls}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicWriteResponsesHistoryFile(s.toolCallRecoveryIndexPath, data)
-}
-
-func atomicWriteResponsesHistoryFile(path string, data []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 func (s *responsesHistoryStore) deleteToolCallsForKeyLocked(snapshotKey string) {
 	if snapshotKey == "" || len(s.toolCalls) == 0 {
 		return

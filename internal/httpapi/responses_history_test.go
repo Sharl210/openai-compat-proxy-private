@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,6 +133,76 @@ func TestNewResponsesHistoryStoreUses256MiBByteBudget(t *testing.T) {
 	// Then
 	if configuredBudget != 256<<20 {
 		t.Fatalf("expected 256 MiB default history budget, got %d", configuredBudget)
+	}
+}
+
+func TestResponsesHistorySaveWritesCompactToolRecoveryIndex(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	messages := []model.CanonicalMessage{{
+		Role: "assistant",
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-1",
+			Type:      "function",
+			Name:      "inspect_image",
+			Arguments: `{"path":"/tmp/image.png"}`,
+		}},
+	}}
+
+	// When
+	store.Save("openai", "resp-1", messages)
+
+	// Then
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read compact recovery index: %v", err)
+	}
+	if strings.Contains(string(data), "\n") {
+		t.Fatalf("expected compact recovery index, got %q", data)
+	}
+
+	reloaded := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	call, _, ok := reloaded.LoadToolCall("openai", "call-1")
+	if !ok || call.Name != "inspect_image" {
+		t.Fatalf("expected compact recovery index to reload, got ok=%t call=%#v", ok, call)
+	}
+}
+
+func TestAtomicWriteResponsesHistoryFilePreservesExistingIndexWhenWriterFails(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	store.Save("openai", "resp-1", []model.CanonicalMessage{{
+		Role: "assistant",
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-1",
+			Type:      "function",
+			Name:      "inspect_image",
+			Arguments: `{}`,
+		}},
+	}})
+	failure := errors.New("injected write failure")
+
+	// When
+	err := atomicWriteResponsesHistoryFile(indexPath, func(writer io.Writer) error {
+		if _, writeErr := io.WriteString(writer, `{"version":`); writeErr != nil {
+			return writeErr
+		}
+		return failure
+	})
+
+	// Then
+	if !errors.Is(err, failure) {
+		t.Fatalf("expected injected write failure, got %v", err)
+	}
+	if _, err := os.Stat(indexPath + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("expected temporary index cleanup, got err=%v", err)
+	}
+	reloaded := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	call, _, ok := reloaded.LoadToolCall("openai", "call-1")
+	if !ok || call.Name != "inspect_image" {
+		t.Fatalf("expected prior index to remain loadable, got ok=%t call=%#v", ok, call)
 	}
 }
 
