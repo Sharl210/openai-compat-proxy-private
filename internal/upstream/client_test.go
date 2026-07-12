@@ -60,7 +60,13 @@ func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.
 	writer := debugarchive.NewArchiveWriter(root, "req-archive-stream")
 	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
 	client := NewClient(server.URL)
-	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: "req-archive-stream", Model: "gpt-5"}, "", func(Event) error { return nil })
+	var createdRaw json.RawMessage
+	err := client.StreamEvents(ctx, model.CanonicalRequest{RequestID: "req-archive-stream", Model: "gpt-5"}, "", func(evt Event) error {
+		if evt.Event == "response.created" {
+			createdRaw = append(createdRaw[:0], evt.Raw...)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("StreamEvents error: %v", err)
 	}
@@ -72,6 +78,105 @@ func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.
 	}
 	if _, err := os.Stat(filepath.Join(root, "req-archive-stream", "canonical.ndjson")); err != nil {
 		t.Fatalf("expected canonical.ndjson: %v", err)
+	}
+	if !bytes.Contains(createdRaw, []byte(`"provider":"responses"`)) {
+		t.Fatalf("archive callback raw = %s, want Responses envelope", createdRaw)
+	}
+	archivedRaw, err := os.ReadFile(filepath.Join(root, "req-archive-stream", "raw.ndjson"))
+	if err != nil {
+		t.Fatalf("read raw archive: %v", err)
+	}
+	if !bytes.Contains(archivedRaw, []byte(`"provider":"responses"`)) {
+		t.Fatalf("raw archive = %s, want Responses envelope", archivedRaw)
+	}
+}
+
+func TestClientStreamEvents_PreservesResponsesRawWhenArchiveDisabled(t *testing.T) {
+	const outputItemRaw = `{"item":{"id":"item_1","type":"message","content":[{"type":"output_text","text":"hello"}]}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.output_item.done\n"))
+		_, _ = w.Write([]byte("data: " + outputItemRaw + "\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_1\"}}\n\n"))
+	}))
+	defer server.Close()
+
+	var raw json.RawMessage
+	client := NewClient(server.URL)
+	err := client.StreamEvents(context.Background(), model.CanonicalRequest{RequestID: "req-no-archive-raw", Model: "gpt-5"}, "", func(evt Event) error {
+		if evt.Event == "response.output_item.done" {
+			raw = append(raw[:0], evt.Raw...)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamEvents error: %v", err)
+	}
+	if got := string(raw); got != outputItemRaw {
+		t.Fatalf("raw event = %s, want %s", got, outputItemRaw)
+	}
+}
+
+func TestUpstreamRequestLogBody_OmitsInlineBinaryData(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "Responses data URL",
+			body: `{"input":[{"content":[{"image_url":"data:image/png;base64,QUJD","type":"input_image"}],"role":"user"}]}`,
+		},
+		{
+			name: "Anthropic base64 source",
+			body: `{"messages":[{"content":[{"source":{"data":"QUJD","media_type":"image/png","type":"base64"},"type":"image"}],"role":"user"}]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := upstreamRequestLogBody([]byte(test.body))
+			if strings.Contains(got, "QUJD") {
+				t.Fatalf("log body leaks inline binary data: %q", got)
+			}
+			if !strings.Contains(got, "image") {
+				t.Fatalf("log body = %q, want redacted image metadata", got)
+			}
+		})
+	}
+
+	attrs := upstreamBodyLogAttrs([]byte(tests[0].body))
+	if attrs["inline_binary_data"] != true {
+		t.Fatalf("inline_binary_data = %v, want true", attrs["inline_binary_data"])
+	}
+	if _, ok := attrs["input_item_hashes"]; ok {
+		t.Fatalf("input_item_hashes must be omitted for inline binary data")
+	}
+}
+
+func TestUpstreamRequestLogBody_RedactsNonStandardImagePayloads(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		sensitive string
+	}{
+		{
+			name:      "URL-safe Base64",
+			body:      `{"input":[{"content":[{"image_url":"data:image/png;base64,QUJD-_8=","type":"input_image"}],"role":"user"}]}`,
+			sensitive: "-_8=",
+		},
+		{
+			name:      "escaped JSON string",
+			body:      `{"input":[{"content":[{"image_url":"data:image/png;base64,QUJD\nRVk=","type":"input_image"}],"role":"user"}]}`,
+			sensitive: `\nRVk=`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := upstreamRequestLogBody([]byte(test.body))
+			if strings.Contains(got, test.sensitive) {
+				t.Fatalf("log body leaks image payload %q: %q", test.sensitive, got)
+			}
+		})
 	}
 }
 

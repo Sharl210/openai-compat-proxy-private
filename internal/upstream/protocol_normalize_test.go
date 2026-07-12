@@ -1195,7 +1195,7 @@ func TestNormalizeChatFrame_ShadowRecording_AllEventTypes(t *testing.T) {
 	}
 }
 
-func TestReadNextResponsesEventBatch_ShadowRecording_RawPreserved(t *testing.T) {
+func TestReadNextResponsesEventBatch_PreservesRawFrame(t *testing.T) {
 	rawSSE := "event: response.output_text.delta\n" +
 		"data: {\"delta\":\"hello\"}\n\n"
 
@@ -1214,19 +1214,9 @@ func TestReadNextResponsesEventBatch_ShadowRecording_RawPreserved(t *testing.T) 
 		t.Fatal("shadow recording FAILED: responses event Raw is empty")
 	}
 
-	var envelope map[string]any
-	if err := json.Unmarshal(events[0].Raw, &envelope); err != nil {
-		t.Fatalf("unmarshal Raw envelope: %v", err)
-	}
-	if provider, _ := envelope["provider"].(string); provider != "responses" {
-		t.Fatalf("provider = %q, want %q", provider, "responses")
-	}
-	if originalEvent, _ := envelope["originalEvent"].(string); originalEvent != "response.output_text.delta" {
-		t.Fatalf("originalEvent = %q, want %q", originalEvent, "response.output_text.delta")
-	}
-	rawFrame, ok := envelope["_raw"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected _raw payload in envelope, got %#v", envelope["_raw"])
+	var rawFrame map[string]any
+	if err := json.Unmarshal(events[0].Raw, &rawFrame); err != nil {
+		t.Fatalf("unmarshal Raw frame: %v", err)
 	}
 	if delta, _ := rawFrame["delta"].(string); delta != "hello" {
 		t.Fatalf("delta = %q, want %q", delta, "hello")

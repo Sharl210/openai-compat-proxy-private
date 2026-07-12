@@ -50,12 +50,13 @@ type RequestObservabilityPreview struct {
 }
 
 type EventStream struct {
-	resp          *http.Response
-	scanner       *bufio.Scanner
-	pendingEvents []Event
-	readNext      func(*bufio.Scanner) ([]Event, error)
-	archive       *debugarchive.ArchiveWriter
-	seq           int64
+	resp                *http.Response
+	scanner             *bufio.Scanner
+	pendingEvents       []Event
+	readNext            func(*bufio.Scanner) ([]Event, error)
+	archive             *debugarchive.ArchiveWriter
+	archiveResponsesRaw bool
+	seq                 int64
 }
 
 type PreOutputContextOverflow struct {
@@ -382,7 +383,7 @@ func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, aut
 		"endpoint_type": endpointType,
 		"stream":        true,
 		"body_size":     len(body),
-		"body_preview":  previewBodyForLog([]byte(logging.RedactImageDataForLog(body))),
+		"body_preview":  previewBodyForLog(upstreamRequestLogBody(body)),
 		"tool_count":    len(req.Tools),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
@@ -484,7 +485,7 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 		return nil, err
 	}
 	originalToolIDs := extractOriginalToolIDs(req)
-	loggedBody := logging.RedactImageDataForLog(body)
+	loggedBody := upstreamRequestLogBody(body)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
 		"auth_mode":     req.AuthMode,
@@ -492,7 +493,7 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 		"stream":        true,
 		"body":          loggedBody,
 		"body_probe":    "enabled",
-		"body_preview":  previewBodyForLog([]byte(loggedBody)),
+		"body_preview":  previewBodyForLog(loggedBody),
 		"body_hash":     hashBytes(body),
 		"body_size":     len(body),
 		"message_count": len(req.Messages),
@@ -536,7 +537,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 		"endpoint_type": endpointType,
 		"stream":        true,
 		"body_size":     len(body),
-		"body_preview":  previewBodyForLog([]byte(logging.RedactImageDataForLog(body))),
+		"body_preview":  previewBodyForLog(upstreamRequestLogBody(body)),
 		"tool_count":    len(req.Tools),
 	}
 	for k, v := range upstreamBodyLogAttrs(body) {
@@ -797,10 +798,21 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 			_ = resp.Body.Close()
 			return nil, err
 		}
-		return &EventStream{resp: resp, pendingEvents: events, archive: debugarchive.ArchiveWriterFromContext(ctx)}, nil
+		return &EventStream{
+			resp:                resp,
+			pendingEvents:       events,
+			archive:             debugarchive.ArchiveWriterFromContext(ctx),
+			archiveResponsesRaw: normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses,
+		}, nil
 	}
 
-	stream := &EventStream{resp: resp, scanner: newSSEScanner(resp.Body), readNext: eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, c.upstreamXMLToolCallStyle, originalToolIDs, requestID, allowEOFCompletion), archive: debugarchive.ArchiveWriterFromContext(ctx)}
+	stream := &EventStream{
+		resp:                resp,
+		scanner:             newSSEScanner(resp.Body),
+		readNext:            eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, c.upstreamXMLToolCallStyle, originalToolIDs, requestID, allowEOFCompletion),
+		archive:             debugarchive.ArchiveWriterFromContext(ctx),
+		archiveResponsesRaw: normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses,
+	}
 	if primeFirstEvent {
 		if err := stream.prime(); err != nil {
 			_ = stream.Close()
@@ -909,7 +921,7 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 	for len(s.pendingEvents) > 0 {
 		evt := s.pendingEvents[0]
 		s.pendingEvents = s.pendingEvents[1:]
-		s.recordEvent(evt, evt)
+		evt = s.recordEvent(evt, evt)
 		if evt.ArchiveOnly {
 			continue
 		}
@@ -921,7 +933,7 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 		return nil
 	}
 	return consumeSSEScannerWithReader(s.scanner, s.readNext, func(evt Event) error {
-		s.recordEvent(evt, evt)
+		evt = s.recordEvent(evt, evt)
 		if evt.ArchiveOnly {
 			return nil
 		}
@@ -955,9 +967,12 @@ func (s *EventStream) prime() error {
 	return nil
 }
 
-func (s *EventStream) recordEvent(rawEvt Event, canonicalEvt Event) {
+func (s *EventStream) recordEvent(rawEvt Event, canonicalEvt Event) Event {
 	if s == nil || s.archive == nil {
-		return
+		return rawEvt
+	}
+	if s.archiveResponsesRaw {
+		rawEvt.Raw = responsesArchiveRaw(rawEvt.Raw, rawEvt.Event)
 	}
 	rawEventName := rawEvt.Event
 	if rawEvt.RawEventName != "" {
@@ -973,6 +988,7 @@ func (s *EventStream) recordEvent(rawEvt Event, canonicalEvt Event) {
 	}
 	populateCanonicalArchiveEvent(&canonical, canonicalEvt)
 	_ = s.archive.WriteCanonicalEvent(canonical)
+	return rawEvt
 }
 
 func populateCanonicalArchiveEvent(canonical *model.CanonicalEvent, evt Event) {
@@ -2121,6 +2137,9 @@ func cachedTokensFromUsageMap(usage map[string]any) any {
 }
 
 func upstreamBodyLogAttrs(body []byte) map[string]any {
+	if containsInlineBinaryData(body) {
+		return map[string]any{"inline_binary_data": true}
+	}
 	attrs := map[string]any{}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -2170,12 +2189,77 @@ func upstreamBodyLogAttrs(body []byte) map[string]any {
 	return attrs
 }
 
-func previewBodyForLog(body []byte) string {
+func upstreamRequestLogBody(body []byte) string {
+	if containsInlineBinaryData(body) {
+		return redactInlineBinaryDataPreview(body)
+	}
+	return logging.RedactImageDataForLog(body)
+}
+
+func containsInlineBinaryData(body []byte) bool {
+	return bytes.Contains(body, []byte(`"data:image/`)) || bytes.Contains(body, []byte(`"source":{"data":`))
+}
+
+func redactInlineBinaryDataPreview(body []byte) string {
+	const max = 512
+	if len(body) > max {
+		body = body[:max]
+	}
+
+	const dataURLPrefix = "data:image/"
+	const sourceDataPrefix = `"source":{"data":"`
+	var preview strings.Builder
+	preview.Grow(len(body))
+	for offset := 0; offset < len(body); {
+		dataURLAt := bytes.Index(body[offset:], []byte(dataURLPrefix))
+		sourceDataAt := bytes.Index(body[offset:], []byte(sourceDataPrefix))
+		if dataURLAt < 0 && sourceDataAt < 0 {
+			preview.Write(body[offset:])
+			break
+		}
+		if sourceDataAt < 0 || (dataURLAt >= 0 && dataURLAt < sourceDataAt) {
+			start := offset + dataURLAt
+			preview.Write(body[offset:start])
+			preview.WriteString("image")
+			end := endOfJSONString(body, start+len(dataURLPrefix))
+			if end == len(body) {
+				return preview.String()
+			}
+			offset = end
+			continue
+		}
+
+		start := offset + sourceDataAt
+		valueStart := start + len(sourceDataPrefix)
+		preview.Write(body[offset:valueStart])
+		preview.WriteString("image")
+		end := endOfJSONString(body, valueStart)
+		if end == len(body) {
+			return preview.String()
+		}
+		offset = end
+	}
+	return preview.String()
+}
+
+func endOfJSONString(body []byte, start int) int {
+	for index := start; index < len(body); index++ {
+		switch body[index] {
+		case '\\':
+			index++
+		case '"':
+			return index
+		}
+	}
+	return len(body)
+}
+
+func previewBodyForLog(body string) string {
 	const max = 512
 	if len(body) <= max {
-		return string(body)
+		return body
 	}
-	return string(body[:max])
+	return body[:max]
 }
 
 func hashAny(v any) string {

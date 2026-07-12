@@ -150,18 +150,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f7138ae19156bff9",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398403",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -275,18 +271,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f7138ae19156bff9",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398403",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -526,18 +518,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f9eb5f9dbc3633aa",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185111",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -651,18 +639,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f9eb5f9dbc3633aa",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185111",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -902,18 +886,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "1866b9ae08a6e39b",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739543",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -1027,18 +1007,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "1866b9ae08a6e39b",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739543",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -1277,15 +1253,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398403",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -1407,15 +1379,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398403",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -1663,15 +1631,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185111",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -1793,15 +1757,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185111",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -2049,15 +2009,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739543",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -2179,15 +2135,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739543",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -2435,15 +2387,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398404",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -2565,15 +2513,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398404",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -2821,15 +2765,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185112",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -2951,15 +2891,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185112",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -3207,15 +3143,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739544",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -3337,15 +3269,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739544",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -3594,14 +3522,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "04da956abb5bdc6b",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398369",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -3715,14 +3643,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "04da956abb5bdc6b",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398369",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -4046,14 +3974,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "759ffb4d69ce2aa6",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185077",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -4167,14 +4095,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "759ffb4d69ce2aa6",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185077",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -4498,14 +4426,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "a52bdc45ed45126f",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739509",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -4619,14 +4547,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "a52bdc45ed45126f",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739509",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -4949,11 +4877,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398369",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -5075,11 +5003,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398369",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -5411,11 +5339,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185077",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -5537,11 +5465,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185077",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -5873,11 +5801,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739509",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -5999,11 +5927,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739509",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -6335,11 +6263,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398370",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -6461,11 +6389,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398370",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -6797,11 +6725,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185078",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -6923,11 +6851,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185078",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -7259,11 +7187,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739510",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -7385,11 +7313,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false,\"stream_options\":{\"include_usage\":true}}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739510",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -7722,11 +7650,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "637347d710997bdf",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "1398362",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -7842,11 +7771,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "637347d710997bdf",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "1398362",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -8172,11 +8102,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "e4f69de653918b5d",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "11185070",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -8292,11 +8223,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "e4f69de653918b5d",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "11185070",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -8622,11 +8554,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "4e0b5a0e25e0e41f",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "44739502",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -8742,11 +8675,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "4e0b5a0e25e0e41f",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "44739502",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -9071,9 +9005,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398362",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -9196,9 +9131,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398362",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -9531,9 +9467,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185070",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -9656,9 +9593,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185070",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -9991,9 +9929,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739502",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -10116,9 +10055,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739502",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -10451,9 +10391,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398363",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -10576,9 +10517,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398363",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -10911,9 +10853,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185071",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -11036,9 +10979,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185071",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -11371,9 +11315,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739503",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -11496,9 +11441,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739503",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -11832,18 +11778,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f7138ae19156bff9",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398403",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -11957,18 +11899,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f7138ae19156bff9",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398403",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -12208,18 +12146,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f9eb5f9dbc3633aa",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185111",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -12333,18 +12267,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f9eb5f9dbc3633aa",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185111",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -12584,18 +12514,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "1866b9ae08a6e39b",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739543",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -12709,18 +12635,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "1866b9ae08a6e39b",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739543",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -12957,15 +12879,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398403",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -13086,15 +13004,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398403",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -13339,15 +13253,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185111",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -13468,15 +13378,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185111",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -13721,15 +13627,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739543",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -13850,15 +13752,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739543",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -14103,15 +14001,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398404",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -14232,15 +14126,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398404",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -14485,15 +14375,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185112",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -14614,15 +14500,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185112",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -14867,15 +14749,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739544",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -14996,15 +14874,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739544",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -15252,14 +15126,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "9d279a2970e2785c",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398329",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -15373,14 +15247,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "9d279a2970e2785c",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398329",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -15620,14 +15494,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "7a75a4a8abd371f5",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185037",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -15741,14 +15615,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "7a75a4a8abd371f5",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185037",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -15988,14 +15862,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "bf1324ea42089bf6",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739469",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -16109,14 +15983,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "bf1324ea42089bf6",
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739469",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -16353,11 +16227,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398329",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -16478,11 +16352,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398329",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -16727,11 +16601,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185037",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -16852,11 +16726,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185037",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -17101,11 +16975,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739469",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -17226,11 +17100,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739469",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -17475,11 +17349,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398330",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -17600,11 +17474,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398330",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -17849,11 +17723,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185038",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -17974,11 +17848,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185038",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -18223,11 +18097,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739470",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -18348,11 +18222,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739470",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -18600,11 +18474,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "637347d710997bdf",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "1398362",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -18720,11 +18595,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "637347d710997bdf",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "1398362",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -18966,11 +18842,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "e4f69de653918b5d",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "11185070",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -19086,11 +18963,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "e4f69de653918b5d",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "11185070",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -19332,11 +19210,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "4e0b5a0e25e0e41f",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "44739502",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -19452,11 +19331,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "server_default_key",
-            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "4e0b5a0e25e0e41f",
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "44739502",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -19695,9 +19575,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398362",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -19819,9 +19700,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398362",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -20067,9 +19949,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185070",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -20191,9 +20074,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185070",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -20439,9 +20323,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739502",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -20563,9 +20448,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739502",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -20811,9 +20697,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398363",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -20935,9 +20822,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398363",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -21183,9 +21071,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185071",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -21307,9 +21196,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185071",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -21555,9 +21445,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739503",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -21679,9 +21570,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":1024,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739503",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -21928,18 +21820,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "fa794b6e81324170",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398426",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -22052,18 +21940,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "fa794b6e81324170",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398426",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -22300,18 +22184,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "632d1f284d1dd7a0",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185134",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -22424,18 +22304,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "632d1f284d1dd7a0",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185134",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -22672,18 +22548,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f0cd9ab4b4ce0477",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739566",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -22796,18 +22668,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_hash": "f0cd9ab4b4ce0477",
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739566",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -23041,15 +22909,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398426",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -23169,15 +23033,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398426",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -23419,15 +23279,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185134",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -23547,15 +23403,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185134",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -23797,15 +23649,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739566",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -23925,15 +23773,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739566",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -24175,15 +24019,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398427",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -24303,15 +24143,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_01fa05afb7e19adea043bbf2a7edbd7f9448200ea523795d\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "1398427",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"e5ea7f56e789d1ce\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"cbe65b244c30e668\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -24553,15 +24389,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185135",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -24681,15 +24513,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_f42636df70ee0e5900c76578e72175ee2a4e741c95f3a6bc\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "11185135",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"5778ec1f7e550c64\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"64ef5668f4fa305d\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -24931,15 +24759,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739567",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -25059,15 +24883,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"max_output_tokens\":64,\"model\":\"perf-model\",\"prompt_cache_key\":\"ocp_v1_61248a2c2b70c0d4b4823812ae0e42131105dad662af2d70\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image",
             "body_size": "44739567",
             "endpoint_type": "responses",
-            "input_item_count": "1",
-            "input_item_hashes": "[\"ffe19fbb099fca49\"]",
-            "input_item_kinds": "[\"role:user\"]",
-            "input_prefix_hashes": "[\"fb2ddcde0c577693\"]",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -25312,14 +25132,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "9e10fd1532403066",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398345",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -25432,14 +25252,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "9e10fd1532403066",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "1398345",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -25676,14 +25496,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "92e29664357d7ffe",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185053",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -25796,14 +25616,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "92e29664357d7ffe",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "11185053",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -26040,14 +25860,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "3105e628c840c683",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739485",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -26160,14 +25980,14 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_hash": "3105e628c840c683",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_probe": "enabled",
             "body_size": "44739485",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -26401,11 +26221,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398345",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -26525,11 +26345,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398345",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -26771,11 +26591,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185053",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -26895,11 +26715,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185053",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -27141,11 +26961,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739485",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -27265,11 +27085,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739485",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -27511,11 +27331,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398346",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -27635,11 +27455,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "1398346",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -27881,11 +27701,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185054",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -28005,11 +27825,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "11185054",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -28251,11 +28071,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739486",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -28375,11 +28195,11 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"reasoning\":{\"summary\":\"detailed\"},\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image",
             "body_size": "44739486",
             "endpoint_type": "chat",
+            "inline_binary_data": "true",
             "model": "perf-model",
-            "reasoning_keys": "[\"summary\"]",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
             "tool_count": "0"
@@ -28624,11 +28444,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "04ae427a69e2e468",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "1398360",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -28743,11 +28564,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "04ae427a69e2e468",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "1398360",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -28986,11 +28808,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "07f2c7ae55500cbc",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "11185068",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -29105,11 +28928,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "07f2c7ae55500cbc",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "11185068",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -29348,11 +29172,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "ceb9e62a01f27bb2",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "44739500",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -29467,11 +29292,12 @@
           "name": "proxyToUpstreamRequest",
           "attrs": {
             "auth_mode": "",
-            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_hash": "ceb9e62a01f27bb2",
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_probe": "enabled",
             "body_size": "44739500",
+            "inline_binary_data": "true",
             "message_count": "1",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
@@ -29707,9 +29533,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398360",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -29830,9 +29657,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398360",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -30075,9 +29903,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185068",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -30198,9 +30027,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185068",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -30443,9 +30273,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739500",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -30566,9 +30397,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739500",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -30811,9 +30643,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398361",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -30934,9 +30767,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "1398361",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -31179,9 +31013,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185069",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -31302,9 +31137,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "11185069",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -31547,9 +31383,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739501",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",
@@ -31670,9 +31507,10 @@
         {
           "name": "proxyToUpstreamRequest",
           "attrs": {
-            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
+            "body_preview": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"cache_control\":{\"type\":\"ephemeral\"},\"source\":{\"data\":\"image",
             "body_size": "44739501",
             "endpoint_type": "anthropic",
+            "inline_binary_data": "true",
             "model": "perf-model",
             "request_id": "req-\u003cid\u003e",
             "stream": "true",

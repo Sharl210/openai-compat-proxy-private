@@ -379,26 +379,26 @@ func readNextResponsesEventBatch(scanner *bufio.Scanner) ([]Event, error) {
 	if evt == nil {
 		return nil, nil
 	}
-	events := []Event{*evt}
-	shadowRecordResponses(events, evt.Event)
-	return events, nil
+	return []Event{*evt}, nil
 }
 
-func shadowRecordResponses(events []Event, originalEvent string) {
-	if len(events) == 0 || originalEvent == "[DONE]" {
-		return
+func responsesArchiveRaw(rawData json.RawMessage, originalEvent string) json.RawMessage {
+	if originalEvent == "[DONE]" {
+		return rawData
 	}
-	rawData := events[0].Raw
 	if !json.Valid(rawData) {
-		return
+		return rawData
 	}
 	envelope := map[string]any{
 		"provider":      "responses",
 		"originalEvent": originalEvent,
 		"_raw":          json.RawMessage(rawData),
 	}
-	envelopeBytes, _ := json.Marshal(envelope)
-	events[0].Raw = envelopeBytes
+	envelopeBytes, err := json.Marshal(envelope)
+	if err != nil {
+		return rawData
+	}
+	return envelopeBytes
 }
 
 func consumeSSEScannerWithReader(scanner *bufio.Scanner, readNext func(*bufio.Scanner) ([]Event, error), onEvent func(Event) error) error {
