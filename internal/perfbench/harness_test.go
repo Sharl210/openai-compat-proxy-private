@@ -1,9 +1,7 @@
 package perfbench
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,62 +16,37 @@ type workerRun struct {
 	Exited   bool
 	Ready    bool
 	Sentinel string
+	BaseURL  string
 	Result   workerResult
 }
 
+type workerResultKind string
+
+const workerResultKindProxy workerResultKind = "proxy_server"
+
 type workerResult struct {
-	ScenarioID string        `json:"scenario_id"`
-	Metrics    workerMetrics `json:"metrics"`
-	Error      string        `json:"error,omitempty"`
+	Kind       workerResultKind `json:"kind,omitempty"`
+	ScenarioID string           `json:"scenario_id"`
+	Metrics    workerMetrics    `json:"metrics"`
+	Error      string           `json:"error,omitempty"`
 }
 
 func runPerfWorker(ctx context.Context, request workerRequest, started chan<- int) (run workerRun, err error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return workerRun{}, fmt.Errorf("locate test binary: %w", err)
-	}
-	sentinel, err := newHelperSentinel()
+	process, err := startPerfWorkerProcess(ctx, request, started)
 	if err != nil {
 		return workerRun{}, err
 	}
-	command := exec.CommandContext(ctx, executable,
-		"-test.run=^TestPerfWorkerHelperProcess$",
-		"-perfbench-helper-sentinel="+sentinel,
-	)
-	command.Env = workerEnvironment(os.Environ(), sentinel)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return workerRun{}, fmt.Errorf("open worker stdout: %w", err)
-	}
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		return workerRun{}, fmt.Errorf("open worker stdin: %w", err)
-	}
-	stdinOpen := true
+	run = process.run
+	command := process.command
+	stdin := process.stdin
+	stdout := process.stdout
+	stderr := process.stderr
+	stdinOpen := process.stdinOpen
 	defer func() {
 		if stdinOpen {
 			err = errors.Join(err, stdin.Close())
 		}
 	}()
-	if err := command.Start(); err != nil {
-		return workerRun{}, fmt.Errorf("start worker: %w", err)
-	}
-	run = workerRun{PID: command.Process.Pid, Sentinel: sentinel}
-	if err := json.NewEncoder(stdin).Encode(request); err != nil {
-		return reapFailedWorker(command, run, fmt.Errorf("send worker request: %w", err))
-	}
-	if err := readReadySignal(stdout); err != nil {
-		return reapFailedWorker(command, run, err)
-	}
-	run.Ready = true
-	if started != nil {
-		select {
-		case started <- run.PID:
-		case <-ctx.Done():
-		}
-	}
 	var processSampler processPeakSampler
 	var processPeak sampledProcessPeak
 	stopProcessSampler := func() error {
@@ -161,7 +134,6 @@ func runPerfWorker(ctx context.Context, request workerRequest, started chan<- in
 	}
 	return run, nil
 }
-
 func finalizeWorkerResult(request workerRequest, result *workerResult, processPeak sampledProcessPeak) error {
 	if result.Error != "" {
 		return fmt.Errorf("worker failed: %s", result.Error)

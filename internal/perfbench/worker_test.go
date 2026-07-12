@@ -8,6 +8,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"openai-compat-proxy/internal/config"
 )
 
 type workerAction string
@@ -16,13 +18,16 @@ const (
 	workerActionRoundTrip workerAction = "round_trip"
 	workerActionFail      workerAction = "fail"
 	workerActionBlock     workerAction = "block"
+	workerActionProxy     workerAction = "proxy_server"
 )
 
 type workerRequest struct {
-	Action   workerAction    `json:"action"`
-	Mode     measurementMode `json:"mode,omitempty"`
-	Scenario scenario        `json:"scenario"`
-	Timeout  time.Duration   `json:"-"`
+	Action      workerAction    `json:"action"`
+	Mode        measurementMode `json:"mode,omitempty"`
+	Scenario    scenario        `json:"scenario"`
+	ProxyConfig *config.Config  `json:"proxy_config,omitempty"`
+	UpstreamURL string          `json:"upstream_url,omitempty"`
+	Timeout     time.Duration   `json:"-"`
 }
 
 func executeWorker(request workerRequest) (workerResult, error) {
@@ -36,7 +41,7 @@ func executeWorker(request workerRequest) (workerResult, error) {
 		}
 		return workerResult{}, errors.New("parent input closed before cancellation")
 	case workerActionRoundTrip:
-		metrics, err := executeMeasuredRoundTrip(request.Scenario, request.Mode)
+		metrics, err := executeMeasuredProxyRuntimeRoundTrip(request.Scenario, request.Mode)
 		if err != nil {
 			return workerResult{}, err
 		}

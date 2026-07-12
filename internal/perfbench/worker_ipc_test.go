@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,9 +18,18 @@ import (
 const (
 	helperTokenEnvironment = "PERFBENCH_HELPER_TOKEN"
 	resultFrameMarker      = "PERFBENCH_RESULT_V2 "
+	readyFrameMarker       = "PERFBENCH_PROXY_READY_V2 "
 	maxResultFrameBytes    = 1 << 20
 	maxResultHeaderBytes   = 64
+	maxReadyFrameBytes     = 4 << 10
+	maxReadyHeaderBytes    = 64
 )
+
+type workerReady struct {
+	BaseURL string `json:"base_url"`
+	PID     int    `json:"pid"`
+	Error   string `json:"error,omitempty"`
+}
 
 func helperActivated(argvSentinel, environmentToken string) bool {
 	return argvSentinel != "" && argvSentinel == environmentToken
@@ -50,7 +60,7 @@ func workerEnvironment(inherited []string, token string) []string {
 }
 
 func encodeWorkerResultFrame(result workerResult) ([]byte, error) {
-	if result.Error == "" {
+	if result.Error == "" && result.Kind != workerResultKindProxy {
 		if err := result.Metrics.validateModeContract(); err != nil {
 			return nil, err
 		}
@@ -64,6 +74,89 @@ func encodeWorkerResultFrame(result workerResult) ([]byte, error) {
 	}
 	header := resultFrameMarker + strconv.Itoa(len(payload)) + "\n"
 	return append([]byte(header), payload...), nil
+}
+
+func encodeWorkerReadyFrame(ready workerReady) ([]byte, error) {
+	if ready.Error == "" {
+		if ready.PID <= 0 {
+			return nil, errors.New("proxy worker ready PID must be positive")
+		}
+		parsedURL, err := url.Parse(ready.BaseURL)
+		if err != nil || parsedURL.Scheme != "http" || parsedURL.Host == "" {
+			return nil, fmt.Errorf("invalid proxy worker ready URL %q", ready.BaseURL)
+		}
+	}
+	payload, err := json.Marshal(ready)
+	if err != nil {
+		return nil, fmt.Errorf("marshal proxy worker ready frame: %w", err)
+	}
+	if len(payload) > maxReadyFrameBytes {
+		return nil, fmt.Errorf("proxy worker ready frame is %d bytes, limit %d", len(payload), maxReadyFrameBytes)
+	}
+	header := readyFrameMarker + strconv.Itoa(len(payload)) + "\n"
+	return append([]byte(header), payload...), nil
+}
+
+func decodeWorkerReadyFrame(reader io.Reader) (workerReady, error) {
+	payload, err := readFramedPayload(reader, readyFrameMarker, maxReadyHeaderBytes, maxReadyFrameBytes)
+	if err != nil {
+		return workerReady{}, err
+	}
+	var ready workerReady
+	if err := json.Unmarshal(payload, &ready); err != nil {
+		return workerReady{}, fmt.Errorf("decode proxy worker ready payload: %w", err)
+	}
+	canonical, err := json.Marshal(ready)
+	if err != nil {
+		return workerReady{}, fmt.Errorf("re-encode proxy worker ready payload: %w", err)
+	}
+	if !bytes.Equal(payload, canonical) {
+		return workerReady{}, errors.New("proxy worker ready payload is not canonical")
+	}
+	if ready.Error != "" {
+		return workerReady{}, fmt.Errorf("proxy worker failed before ready: %s", ready.Error)
+	}
+	if ready.PID <= 0 {
+		return workerReady{}, errors.New("proxy worker ready PID must be positive")
+	}
+	parsedURL, err := url.Parse(ready.BaseURL)
+	if err != nil || parsedURL.Scheme != "http" || parsedURL.Host == "" {
+		return workerReady{}, fmt.Errorf("invalid proxy worker ready URL %q", ready.BaseURL)
+	}
+	return ready, nil
+}
+
+func readFramedPayload(reader io.Reader, marker string, maxHeaderBytes, maxPayloadBytes int) ([]byte, error) {
+	header := make([]byte, 0, maxHeaderBytes)
+	for {
+		var current [1]byte
+		if _, err := io.ReadFull(reader, current[:]); err != nil {
+			return nil, fmt.Errorf("read framed payload header: %w", err)
+		}
+		header = append(header, current[0])
+		if len(header) > maxHeaderBytes {
+			return nil, errors.New("framed payload header exceeds limit")
+		}
+		if current[0] == '\n' {
+			break
+		}
+	}
+	if !bytes.HasPrefix(header, []byte(marker)) {
+		return nil, errors.New("framed payload marker missing")
+	}
+	lengthText := string(header[len(marker) : len(header)-1])
+	payloadLength, err := strconv.Atoi(lengthText)
+	if err != nil || payloadLength < 0 || payloadLength > maxPayloadBytes {
+		return nil, fmt.Errorf("invalid framed payload length %q", lengthText)
+	}
+	if lengthText != strconv.Itoa(payloadLength) {
+		return nil, fmt.Errorf("non-canonical framed payload length %q", lengthText)
+	}
+	payload := make([]byte, payloadLength)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return nil, fmt.Errorf("read framed payload: %w", err)
+	}
+	return payload, nil
 }
 
 func decodeWorkerResultFrame(reader io.Reader) (workerResult, error) {
@@ -97,7 +190,7 @@ func decodeWorkerResultFrame(reader io.Reader) (workerResult, error) {
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return workerResult{}, fmt.Errorf("decode worker result payload: %w", err)
 	}
-	if result.Error == "" {
+	if result.Error == "" && result.Kind != workerResultKindProxy {
 		if err := result.Metrics.validateModeContract(); err != nil {
 			return workerResult{}, err
 		}
