@@ -2148,12 +2148,9 @@ func upstreamBodyLogAttrs(body []byte) map[string]any {
 	}
 	if input, _ := payload["input"].([]any); len(input) > 0 {
 		attrs["input_item_count"] = len(input)
-		itemHashes := make([]string, 0, len(input))
-		prefixHashes := make([]string, 0, len(input))
+		itemHashes, prefixHashes := hashInputItems(input)
 		itemKinds := make([]string, 0, len(input))
 		for i := range input {
-			itemHashes = append(itemHashes, hashAny(input[i]))
-			prefixHashes = append(prefixHashes, hashAny(input[:i+1]))
 			if item, _ := input[i].(map[string]any); item != nil {
 				if role, _ := item["role"].(string); role != "" {
 					itemKinds = append(itemKinds, "role:"+role)
