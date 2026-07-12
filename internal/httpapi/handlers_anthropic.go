@@ -190,7 +190,11 @@ func handleAnthropicMessages() http.HandlerFunc {
 			}
 			return
 		}
-		events, err := client.Stream(ctx, canon, authorization)
+		collector := aggregate.NewCollector()
+		err = client.StreamInto(ctx, canon, authorization, func(evt upstream.Event) error {
+			collector.Accept(evt)
+			return nil
+		})
 		if err != nil {
 			if writeRequestValidationError(w, err) {
 				return
@@ -204,10 +208,6 @@ func handleAnthropicMessages() http.HandlerFunc {
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
-		}
-		collector := aggregate.NewCollector()
-		for _, evt := range events {
-			collector.Accept(evt)
 		}
 		result, err := collector.Result()
 		if err != nil {

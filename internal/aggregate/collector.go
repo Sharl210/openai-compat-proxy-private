@@ -114,9 +114,10 @@ func (c *Collector) Accept(evt upstream.Event) {
 		if item == nil {
 			return
 		}
-		c.outputItems = append(c.outputItems, cloneOutputItem(item))
+		outputItem := cloneMessageOutputItemForAggregation(item, c.text.String(), c.hasTextDelta)
+		c.outputItems = append(c.outputItems, outputItem)
 		if itemType, _ := item["type"].(string); itemType == "message" {
-			if content, ok := item["content"].([]any); ok {
+			if content, ok := outputItem["content"].([]any); ok {
 				c.responseMessageContent = nil
 				for _, rawPart := range content {
 					part, _ := rawPart.(map[string]any)

@@ -354,14 +354,26 @@ func PrepareClaudeMetadataForRequest(req *model.CanonicalRequest, cfg config.Con
 }
 
 func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authorization string) ([]Event, error) {
-	endpointType := c.endpointType()
-	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
+	var events []Event
+	err := c.StreamInto(ctx, req, authorization, func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return events, nil
+}
+
+func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {
+	endpointType := c.endpointType()
+	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
+	if err != nil {
+		return err
+	}
 	anthropicBeta, err := anthropicBetaHeaderForRequest(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
@@ -380,22 +392,25 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	allowEOFCompletion := normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeChat && !req.Stream
 	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, originalToolIDs, true, allowEOFCompletion)
 	if err != nil {
-		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
+		return annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
 	defer stream.Close()
-	var events []Event
+	var eventCount int
+	var cachedTokens any
 	if err := stream.Consume(func(evt Event) error {
-		events = append(events, evt)
-		return nil
+		eventCount++
+		if tokens := cachedTokensFromEvent(evt); tokens != nil {
+			cachedTokens = tokens
+		}
+		return onEvent(evt)
 	}); err != nil {
 		logging.Event("upstreamStreamBroken", mergeLogAttrs(map[string]any{
 			"request_id":  req.RequestID,
 			"streaming":   true,
-			"event_count": len(events),
+			"event_count": eventCount,
 		}, failureLogAttrs(err, "upstreamStreamBroken")))
-		return nil, err
+		return err
 	}
-	cachedTokens := cachedTokensFromEvents(events)
 	logging.Event("upstreamStreamUsageObserved", map[string]any{
 		"request_id":     req.RequestID,
 		"upstream_event": "response.completed",
@@ -405,10 +420,10 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	logging.Event("upstreamToProxyResponse", map[string]any{
 		"request_id":    req.RequestID,
 		"attempt":       1,
-		"event_count":   len(events),
+		"event_count":   eventCount,
 		"cached_tokens": cachedTokens,
 	})
-	return events, nil
+	return nil
 }
 
 func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {

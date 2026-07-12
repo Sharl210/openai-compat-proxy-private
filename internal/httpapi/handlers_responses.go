@@ -165,22 +165,9 @@ func handleResponses() http.HandlerFunc {
 			return
 		}
 
-		events, err := client.Stream(ctx, canon, authorization)
-		if err != nil {
-			if isUpstreamTimeout(err, ctx) {
-				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
-				return
-			}
-			if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
-				return
-			}
-			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
-			return
-		}
-
 		collector := aggregate.NewCollector()
 		responsesState := newResponsesStreamState(canon.RequestID, providerCfg.UpstreamEndpointType)
-		for _, evt := range events {
+		err := client.StreamInto(ctx, canon, authorization, func(evt upstream.Event) error {
 			if evt.Event == "response.output_text.delta" && shouldInjectSyntheticResponsesReasoningBeforeText(providerCfg.UpstreamEndpointType, responsesState, evt) {
 				collector.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": syntheticReasoningPrelude(), aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}})
 				responsesState.syntheticInjected = true
@@ -192,6 +179,18 @@ func handleResponses() http.HandlerFunc {
 			if evt.Event == "response.reasoning.delta" || evt.Event == "response.reasoning_summary_text.delta" {
 				responsesState.realReasoningSeen = true
 			}
+			return nil
+		})
+		if err != nil {
+			if isUpstreamTimeout(err, ctx) {
+				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+				return
+			}
+			if writeUpstreamErrorForProtocol(w, err, clientReasoningProtocolResponses) {
+				return
+			}
+			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+			return
 		}
 
 		result, err := collector.Result()

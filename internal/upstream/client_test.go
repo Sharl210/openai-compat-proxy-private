@@ -75,6 +75,251 @@ func TestClientStreamEvents_WritesRawAndCanonicalWhenArchiveAttached(t *testing.
 	}
 }
 
+func TestClientStreamIntoNormalizesEventsForEveryUpstreamProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		endpointType string
+		path         string
+		body         string
+	}{
+		{
+			name:         "responses",
+			endpointType: config.UpstreamEndpointTypeResponses,
+			path:         "/responses",
+			body: "event: response.created\n" +
+				"data: {\"response\":{\"id\":\"resp_1\"}}\n\n" +
+				"event: response.output_text.delta\n" +
+				"data: {\"delta\":\"hello\"}\n\n" +
+				"event: response.completed\n" +
+				"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+		},
+		{
+			name:         "chat",
+			endpointType: config.UpstreamEndpointTypeChat,
+			path:         "/chat/completions",
+			body: "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+				"data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n",
+		},
+		{
+			name:         "anthropic",
+			endpointType: config.UpstreamEndpointTypeAnthropic,
+			path:         "/messages",
+			body: "event: message_start\n" +
+				"data: {\"message\":{\"id\":\"msg_1\"}}\n\n" +
+				"event: content_block_start\n" +
+				"data: {\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+				"event: content_block_delta\n" +
+				"data: {\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n" +
+				"event: message_delta\n" +
+				"data: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\n" +
+				"event: message_stop\n" +
+				"data: {}\n\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != test.path {
+					t.Fatalf("expected path %q, got %q", test.path, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			client := NewClient(server.URL, config.Config{UpstreamEndpointType: test.endpointType})
+			var events []Event
+			err := client.StreamInto(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "Bearer test-key", func(event Event) error {
+				events = append(events, event)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("StreamInto error: %v", err)
+			}
+			if len(events) < 3 || events[0].Event != "response.created" || events[1].Event != "response.output_text.delta" || events[len(events)-1].Event != "response.completed" {
+				t.Fatalf("expected normalized created, text and completed events, got %#v", events)
+			}
+		})
+	}
+}
+
+func TestClientStreamIntoPropagatesCallbackErrorAndStopsConsumption(t *testing.T) {
+	sentinel := errors.New("stop after first event")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"response\":{}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	var delivered []string
+	err := client.StreamInto(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "", func(event Event) error {
+		delivered = append(delivered, event.Event)
+		if len(delivered) == 1 {
+			return sentinel
+		}
+		return nil
+	})
+	if err != sentinel {
+		t.Fatalf("expected exact callback error, got %v", err)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected callback error to be identifiable, got %v", err)
+	}
+	if len(delivered) != 1 || delivered[0] != "response.output_text.delta" {
+		t.Fatalf("expected only the first event to be delivered, got %#v", delivered)
+	}
+}
+
+func TestClientStreamIntoAllowsChatEOFCompletionForBufferedNonStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+			"data: {\"id\":\"chatcmpl_123\",\"choices\":[{\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat})
+	var events []Event
+	err := client.StreamInto(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "Bearer test-key", func(event Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamInto error: %v", err)
+	}
+	completed := events[len(events)-1]
+	if completed.Event != "response.completed" {
+		t.Fatalf("expected EOF completion for buffered non-stream path, got %#v", events)
+	}
+}
+
+func TestClientStreamIntoRetriesBeforeFirstEvent(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) <= 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("temporary upstream failure"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 2, UpstreamRetryDelay: time.Millisecond})
+	var events []Event
+	err := client.StreamInto(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "", func(event Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamInto error: %v", err)
+	}
+	if attempts.Load() != 3 || len(events) != 1 || events[0].Event != "response.completed" {
+		t.Fatalf("expected three attempts and response.completed, attempts=%d events=%#v", attempts.Load(), events)
+	}
+}
+
+func TestClientStreamIntoDoesNotRetryAfterFirstEvent(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte("event: response.output_text.delta\n" +
+			"data: {\"delta\":\"hello\"}\n\n" +
+			"event: response.output_text.delta\n" +
+			"data: {broken json}\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 2, UpstreamRetryDelay: time.Millisecond})
+	err := client.StreamInto(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err == nil {
+		t.Fatal("expected malformed stream error")
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("expected no retry after first event, got %d attempts", attempts.Load())
+	}
+}
+
+func TestClientStreamIntoArchivesUsageWithoutForwardingArchiveOnlyEvent(t *testing.T) {
+	const requestID = "req-stream-into-archive-usage"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n" +
+			"data: {\"message\":{\"id\":\"msg_1\"}}\n\n" +
+			"event: message_delta\n" +
+			"data: {\"usage\":{\"input_tokens\":12,\"output_tokens\":7,\"cache_read_input_tokens\":5,\"cache_creation_input_tokens\":3},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
+			"event: message_stop\n" +
+			"data: {}\n\n"))
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	writer := debugarchive.NewArchiveWriter(root, requestID)
+	ctx := debugarchive.WithArchiveWriter(context.Background(), writer)
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic})
+	var events []Event
+	err := client.StreamInto(ctx, model.CanonicalRequest{RequestID: requestID, Model: "claude-test"}, "", func(event Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamInto error: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive writer: %v", err)
+	}
+	for _, event := range events {
+		if event.Event == "usage.update" || event.Event == "message_delta" {
+			t.Fatalf("archive-only usage event reached callback: %#v", events)
+		}
+	}
+	canonical, err := os.ReadFile(filepath.Join(root, requestID, "canonical.ndjson"))
+	if err != nil {
+		t.Fatalf("read canonical archive: %v", err)
+	}
+	if !bytes.Contains(canonical, []byte(`"Type":"usage.update"`)) {
+		t.Fatalf("expected canonical archive usage update, got %s", canonical)
+	}
+}
+
+func TestClientStreamIntoLogsBufferedUsageAndEventCount(t *testing.T) {
+	logPath, cleanup := initUpstreamTestLogger(t)
+	defer cleanup()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":3}}}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	err := client.StreamInto(context.Background(), model.CanonicalRequest{RequestID: "req-stream-into-logs", Model: "gpt-5"}, "", func(Event) error { return nil })
+	if err != nil {
+		t.Fatalf("StreamInto error: %v", err)
+	}
+
+	records := readUpstreamTestLogRecords(t, logPath)
+	assertHasLogRecord(t, records, "upstreamStreamUsageObserved", func(record map[string]any) bool {
+		return record["request_id"] == "req-stream-into-logs" && record["cached_tokens"] == float64(3) && record["streaming"] == false
+	})
+	assertHasLogRecord(t, records, "upstreamToProxyResponse", func(record map[string]any) bool {
+		_, hasStreaming := record["streaming"]
+		return record["request_id"] == "req-stream-into-logs" && record["event_count"] == float64(1) && record["cached_tokens"] == float64(3) && !hasStreaming
+	})
+}
+
 func TestClientStreamEvents_WritesResponsesFunctionCallFieldsToCanonicalArchive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
