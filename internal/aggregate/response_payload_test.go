@@ -28,6 +28,34 @@ func TestResultFromResponsePayloadPreservesReasoningSummaryOutputItems(t *testin
 	}
 }
 
+func TestResultFromResponsePayloadSeparatesReasoningBoldTitleFromFollowingContent(t *testing.T) {
+	payload := map[string]any{
+		"reasoning": map[string]any{
+			"summary": "**标题**正文",
+		},
+		"output": []any{
+			map[string]any{
+				"id":   "rs_1",
+				"type": "reasoning",
+				"summary": []any{
+					map[string]any{"type": "summary_text", "text": "**标题****后续**"},
+				},
+			},
+		},
+	}
+
+	result, err := ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload returned error: %v", err)
+	}
+	if got := stringValue(result.Reasoning["summary"]); got != "**标题**\n正文" {
+		t.Fatalf("expected reasoning summary title break, got %q", got)
+	}
+	if got := stringValue(result.ResponseOutputItems[0]["summary"].([]any)[0].(map[string]any)["text"]); got != "**标题**\n**后续**" {
+		t.Fatalf("expected reasoning output item title break, got %q", got)
+	}
+}
+
 func TestResultFromResponsePayloadCopiesUsageIntoReasoning(t *testing.T) {
 	payload := map[string]any{
 		"reasoning": map[string]any{

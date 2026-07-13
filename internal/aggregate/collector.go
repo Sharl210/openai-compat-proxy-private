@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	reasoningtext "openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -115,6 +116,9 @@ func (c *Collector) Accept(evt upstream.Event) {
 			return
 		}
 		outputItem := cloneMessageOutputItemForAggregation(item, c.text.String(), c.hasTextDelta)
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			outputItem = reasoningtext.FormatBlock(outputItem)
+		}
 		c.outputItems = append(c.outputItems, outputItem)
 		if itemType, _ := item["type"].(string); itemType == "message" {
 			if content, ok := outputItem["content"].([]any); ok {
@@ -289,7 +293,9 @@ func (c *Collector) Accept(evt upstream.Event) {
 				continue
 			}
 			if text, ok := v.(string); ok && shouldAppendReasoningKey(k) {
-				c.reasoning[k] = stringValue(c.reasoning[k]) + text
+				combined := stringValue(c.reasoning[k]) + text
+				combined = reasoningtext.FormatText(combined)
+				c.reasoning[k] = combined
 				continue
 			}
 			c.reasoning[k] = v
@@ -349,7 +355,7 @@ func cloneOutputItem(input map[string]any) map[string]any {
 
 func shouldAppendReasoningKey(key string) bool {
 	switch key {
-	case "summary", "reasoning_content", "content", "delta":
+	case "summary", "thinking", "reasoning_content", "reasoning", "content", "delta", "text":
 		return true
 	default:
 		return false
@@ -376,7 +382,7 @@ func reasoningSummaryFromItem(item map[string]any) string {
 			builder.WriteString(text)
 		}
 	}
-	return builder.String()
+	return reasoningtext.FormatText(builder.String())
 }
 
 func reasoningBlocksFromMap(reasoning map[string]any) []map[string]any {
@@ -393,7 +399,7 @@ func reasoningBlocksFromMap(reasoning map[string]any) []map[string]any {
 		if len(block) == 0 {
 			continue
 		}
-		blocks = append(blocks, cloneOutputItem(block))
+		blocks = append(blocks, reasoningtext.FormatBlock(block))
 	}
 	if len(blocks) == 0 {
 		return nil
@@ -410,7 +416,7 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 		if len(block) == 0 {
 			continue
 		}
-		cloned = append(cloned, cloneOutputItem(block))
+		cloned = append(cloned, reasoningtext.FormatBlock(block))
 	}
 	if len(cloned) == 0 {
 		return nil

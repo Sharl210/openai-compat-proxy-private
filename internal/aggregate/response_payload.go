@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	reasoningtext "openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -29,7 +30,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 		result.Usage = cloneMap(usage)
 	}
 	if reasoning, _ := payload["reasoning"].(map[string]any); len(reasoning) > 0 {
-		result.Reasoning = cloneMap(reasoning)
+		result.Reasoning = reasoningtext.FormatBlock(reasoning)
 		result.Reasoning[InternalReasoningSourceKey] = ReasoningSourceUpstream
 		result.ReasoningBlocks = cloneReasoningBlocks(reasoningBlocksFromMap(reasoning))
 	}
@@ -52,6 +53,9 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 					item["arguments"] = repaired
 				}
 			}
+		}
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			item = reasoningtext.FormatBlock(item)
 		}
 		result.ResponseOutputItems = append(result.ResponseOutputItems, cloneMap(item))
 		switch itemType, _ := item["type"].(string); itemType {
@@ -117,7 +121,7 @@ func ResultFromResponsePayload(payload map[string]any) (Result, error) {
 				}
 				switch partType, _ := part["type"].(string); partType {
 				case "thinking", "redacted_thinking":
-					result.ReasoningBlocks = append(result.ReasoningBlocks, cloneMap(part))
+					result.ReasoningBlocks = append(result.ReasoningBlocks, reasoningtext.FormatBlock(part))
 				case "tool_use":
 					call := ToolCall{}
 					if id, _ := part["id"].(string); id != "" {
