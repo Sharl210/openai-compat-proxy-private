@@ -29,8 +29,9 @@ type responsesHistoryStore struct {
 }
 
 type responsesConversationSnapshot struct {
-	Messages []model.CanonicalMessage
-	Bytes    int64
+	Messages         []model.CanonicalMessage
+	CompressedFields []responsesHistoryCompressedField
+	Bytes            int64
 }
 
 type responsesHistoryToolCallEntry struct {
@@ -177,9 +178,9 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 		s.retainedBytes += recoveryBytes
 		s.indexToolCallsLocked(providerID, key, messages, firstString(scopes...))
 	} else {
-		storedMessages := cloneCanonicalMessages(messages)
 		storedBytes := snapshotBytes + recoveryBytes
-		s.entries[key] = responsesConversationSnapshot{Messages: storedMessages, Bytes: storedBytes}
+		snapshot, storedMessages := newResponsesConversationSnapshot(messages, storedBytes)
+		s.entries[key] = snapshot
 		s.retainedBytes += storedBytes
 		s.byResponseID[responseID] = key
 		s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...))
@@ -206,7 +207,7 @@ func (s *responsesHistoryStore) Load(providerID, responseID string) []model.Cano
 	if !ok || len(stored.Messages) == 0 {
 		return nil
 	}
-	return cloneCanonicalMessages(stored.Messages)
+	return loadResponsesConversationSnapshot(stored)
 }
 
 func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes ...string) (model.CanonicalToolCall, []map[string]any, bool) {
@@ -236,7 +237,7 @@ func (s *responsesHistoryStore) LoadAny(responseID string) []model.CanonicalMess
 	if !ok || len(stored.Messages) == 0 {
 		return nil
 	}
-	return cloneCanonicalMessages(stored.Messages)
+	return loadResponsesConversationSnapshot(stored)
 }
 
 func (s *responsesHistoryStore) removeKeyLocked(target string) {
