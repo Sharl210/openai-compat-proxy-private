@@ -52,6 +52,14 @@ type tool struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+type UnsupportedToolChoiceError struct {
+	Reason string
+}
+
+func (err *UnsupportedToolChoiceError) Error() string {
+	return "unsupported anthropic tool_choice: " + err.Reason
+}
+
 func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	body, err := io.ReadAll(r)
 	if err != nil {
@@ -73,6 +81,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		Instructions:            instructions,
 		InstructionParts:        instructionParts,
 		MaxOutputTokens:         req.MaxTokens,
+		ReasoningModeOrigin:     model.ReasoningModeOriginNone,
 	}
 	if reasoning := decodeAnthropicThinking(req.ThinkingRaw); reasoning != nil {
 		canon.Reasoning = reasoning
@@ -123,7 +132,12 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			canon.Messages = append(canon.Messages, model.CanonicalMessage{Role: msg.Role, ToolCalls: toolCalls})
 		}
 	}
-	canon.ToolChoice = decodeAnthropicToolChoice(req.ToolChoiceRaw)
+	toolChoice, parallelToolCalls, err := decodeAnthropicToolChoice(req.ToolChoiceRaw)
+	if err != nil {
+		return model.CanonicalRequest{}, err
+	}
+	canon.ToolChoice = toolChoice
+	canon.ParallelToolCalls = parallelToolCalls
 	return canon, nil
 }
 
@@ -453,24 +467,69 @@ func decodeAnthropicOptionalBool(raw json.RawMessage) bool {
 	return false
 }
 
-func decodeAnthropicToolChoice(raw json.RawMessage) model.CanonicalToolChoice {
-	if len(raw) == 0 {
-		return model.CanonicalToolChoice{}
+func decodeAnthropicToolChoice(raw json.RawMessage) (model.CanonicalToolChoice, *bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return model.CanonicalToolChoice{}, nil, nil
 	}
-	var mode string
-	if err := json.Unmarshal(raw, &mode); err == nil {
-		if isUndefinedString(mode) {
-			return model.CanonicalToolChoice{}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return model.CanonicalToolChoice{}, nil, err
+	}
+	switch choice := value.(type) {
+	case string:
+		if isUndefinedString(choice) {
+			return model.CanonicalToolChoice{}, nil, nil
 		}
-		return model.CanonicalToolChoice{Mode: mode, Raw: map[string]any{"value": mode}}
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		if mode, _ := obj["type"].(string); mode != "" && !isUndefinedString(mode) {
-			return model.CanonicalToolChoice{Mode: mode, Raw: obj}
+		decoded, err := decodeAnthropicToolChoiceMode(choice, map[string]any{"value": choice})
+		return decoded, nil, err
+	case map[string]any:
+		mode, ok := choice["type"].(string)
+		if !ok || mode == "" {
+			return model.CanonicalToolChoice{}, nil, &UnsupportedToolChoiceError{Reason: "object requires a non-empty string type"}
 		}
+		decoded, err := decodeAnthropicToolChoiceMode(mode, choice)
+		if err != nil {
+			return model.CanonicalToolChoice{}, nil, err
+		}
+		parallelToolCalls, err := decodeAnthropicParallelToolCalls(choice)
+		if err != nil {
+			return model.CanonicalToolChoice{}, nil, err
+		}
+		return decoded, parallelToolCalls, nil
+	default:
+		return model.CanonicalToolChoice{}, nil, &UnsupportedToolChoiceError{Reason: "must be a string or object"}
 	}
-	return model.CanonicalToolChoice{}
+}
+
+func decodeAnthropicToolChoiceMode(mode string, raw map[string]any) (model.CanonicalToolChoice, error) {
+	choice := model.CanonicalToolChoice{Mode: mode, Raw: raw}
+	switch mode {
+	case "auto":
+		choice.Requirement = model.ToolChoiceOptional
+	case "any":
+		choice.Requirement = model.ToolChoiceRequiredAny
+	case "tool":
+		choice.Requirement = model.ToolChoiceRequiredNamed
+		choice.Name, _ = raw["name"].(string)
+	case "none":
+		choice.Requirement = model.ToolChoiceNone
+	default:
+		return model.CanonicalToolChoice{}, &UnsupportedToolChoiceError{Reason: "unknown type " + mode}
+	}
+	return choice, nil
+}
+
+func decodeAnthropicParallelToolCalls(choice map[string]any) (*bool, error) {
+	disabled, exists := choice["disable_parallel_tool_use"]
+	if !exists || disabled == nil {
+		return nil, nil
+	}
+	disabledValue, ok := disabled.(bool)
+	if !ok {
+		return nil, &UnsupportedToolChoiceError{Reason: "disable_parallel_tool_use must be a boolean"}
+	}
+	allowed := !disabledValue
+	return &allowed, nil
 }
 
 func decodeAnthropicCacheControl(raw json.RawMessage) map[string]any {

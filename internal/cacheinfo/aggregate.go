@@ -63,6 +63,8 @@ func addTokenTotals(dst, src TokenTotals) TokenTotals {
 	dst.InputTokens += src.InputTokens
 	dst.CachedTokens += src.CachedTokens
 	dst.CacheCreationTokens += src.CacheCreationTokens
+	dst.CacheWriteTokens += src.CacheWriteTokens
+	dst.CacheWriteReportedInputTokens += src.CacheWriteReportedInputTokens
 	dst.OutputTokens += src.OutputTokens
 	dst.TotalTokens += src.TotalTokens
 	dst.RequestCount += src.RequestCount

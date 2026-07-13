@@ -12,10 +12,12 @@ func RenderProviderStats(stats ProviderStats) string {
 		fmt.Fprintf(&b, "[%s]\n", title)
 		fmt.Fprintf(&b, "输入Tokens：%s\n", formatTokenCount(totals.InputTokens))
 		fmt.Fprintf(&b, "缓存Tokens：%s\n", formatTokenCount(totals.CachedTokens))
+		fmt.Fprintf(&b, "缓存写入Tokens：%s\n", formatTokenCount(totals.CacheWriteTokens))
 		fmt.Fprintf(&b, "输出Tokens：%s\n", formatTokenCount(totals.OutputTokens))
 		fmt.Fprintf(&b, "总计Tokens：%s\n", formatTokenCount(totals.TotalTokens))
 		fmt.Fprintf(&b, "总调用次数：%s\n", formatTokenCount(totals.RequestCount))
 		fmt.Fprintf(&b, "缓存率：%.2f %%\n", cacheRate(totals))
+		fmt.Fprintf(&b, "缓存写入覆盖率：%.2f %%\n", cacheWriteCoverage(totals))
 	}
 
 	days := renderDays(stats)
@@ -56,6 +58,14 @@ func DailyCacheRate(stats ProviderStats) float64 {
 	return cacheRate(stats.Today)
 }
 
+func ProviderCacheWriteCoverage(stats ProviderStats) float64 {
+	return cacheWriteCoverage(stats.HistoryTotal)
+}
+
+func DailyCacheWriteCoverage(stats ProviderStats) float64 {
+	return cacheWriteCoverage(stats.Today)
+}
+
 func renderDays(stats ProviderStats) []DailyStats {
 	if len(stats.RecentDays) > 0 {
 		return stats.RecentDays
@@ -80,16 +90,27 @@ func cacheRate(t TokenTotals) float64 {
 	return float64(t.CachedTokens*10000/t.InputTokens) / 100
 }
 
+func cacheWriteCoverage(t TokenTotals) float64 {
+	if t.CacheWriteReportedInputTokens == 0 {
+		return 0
+	}
+	return float64(t.CacheWriteTokens*10000/t.CacheWriteReportedInputTokens) / 100
+}
+
 func formatComparison(yesterday, today TokenTotals) string {
 	rateYesterday := cacheRate(yesterday)
 	rateToday := cacheRate(today)
+	writeCoverageYesterday := cacheWriteCoverage(yesterday)
+	writeCoverageToday := cacheWriteCoverage(today)
 
 	parts := []string{
 		formatChange("输入", yesterday.InputTokens, today.InputTokens),
 		formatChange("缓存", yesterday.CachedTokens, today.CachedTokens),
+		formatChange("缓存写入", yesterday.CacheWriteTokens, today.CacheWriteTokens),
 		formatChange("输出", yesterday.OutputTokens, today.OutputTokens),
 		formatChange("总计", yesterday.TotalTokens, today.TotalTokens),
-		formatRateChange(rateYesterday, rateToday),
+		formatRateChange("缓存率", rateYesterday, rateToday),
+		formatRateChange("缓存写入覆盖率", writeCoverageYesterday, writeCoverageToday),
 	}
 	return strings.Join(parts, " | ")
 }
@@ -110,23 +131,23 @@ func formatChange(label string, old, new int64) string {
 	return fmt.Sprintf("%s%s%.2f%%", label, sign, pct)
 }
 
-func formatRateChange(old, new float64) string {
+func formatRateChange(label string, old, new float64) string {
 	if old == 0 {
 		if new == 0 {
-			return "缓存率： ="
+			return label + "： ="
 		}
-		return fmt.Sprintf("缓存率：+ %.2f%%", new)
+		return fmt.Sprintf("%s：+ %.2f%%", label, new)
 	}
 	diff := new - old
 	if diff == 0 {
-		return "缓存率： ="
+		return label + "： ="
 	}
 	sign := "+ "
 	if diff < 0 {
 		sign = "- "
 		diff = -diff
 	}
-	return fmt.Sprintf("缓存率：%s%.2f%%", sign, diff)
+	return fmt.Sprintf("%s：%s%.2f%%", label, sign, diff)
 }
 
 func formatTokenCount(n int64) string {

@@ -115,11 +115,13 @@ func cacheInfoUsageFromMap(usage map[string]any, upstreamEndpointType string) (*
 }
 
 type usageMetrics struct {
-	InputTokens         int64
-	OutputTokens        int64
-	TotalTokens         int64
-	CachedTokens        int64
-	CacheCreationTokens int64
+	InputTokens                   int64
+	OutputTokens                  int64
+	TotalTokens                   int64
+	CachedTokens                  int64
+	CacheCreationTokens           int64
+	CacheWriteTokens              int64
+	CacheWriteReportedInputTokens int64
 }
 
 func parseUsageMetrics(usage map[string]any, upstreamEndpointType string) (usageMetrics, bool) {
@@ -156,8 +158,10 @@ func parseUsageMetrics(usage map[string]any, upstreamEndpointType string) (usage
 		parsed.CachedTokens = n
 		hasValues = true
 	}
-	if n, ok := cacheCreationTokensFromUsage(usage); ok {
-		parsed.CacheCreationTokens = n
+	cacheWriteTokens, cacheWriteReported := cacheWriteTokensFromUsage(usage)
+	if cacheWriteReported {
+		parsed.CacheCreationTokens = cacheWriteTokens
+		parsed.CacheWriteTokens = cacheWriteTokens
 		hasValues = true
 	}
 	if !hasValues {
@@ -174,16 +178,21 @@ func parseUsageMetrics(usage map[string]any, upstreamEndpointType string) (usage
 	} else if upstreamEndpointType == config.UpstreamEndpointTypeAnthropic && anthropicUsageNeedsTotalNormalization(usage) {
 		parsed.TotalTokens = parsed.InputTokens + parsed.OutputTokens
 	}
+	if cacheWriteReported {
+		parsed.CacheWriteReportedInputTokens = parsed.InputTokens
+	}
 	return parsed, true
 }
 
 func (m usageMetrics) cacheInfoUsage() *cacheinfo.Usage {
 	return &cacheinfo.Usage{
-		InputTokens:         m.InputTokens,
-		OutputTokens:        m.OutputTokens,
-		TotalTokens:         m.TotalTokens,
-		CachedTokens:        m.CachedTokens,
-		CacheCreationTokens: m.CacheCreationTokens,
+		InputTokens:                   m.InputTokens,
+		OutputTokens:                  m.OutputTokens,
+		TotalTokens:                   m.TotalTokens,
+		CachedTokens:                  m.CachedTokens,
+		CacheCreationTokens:           m.CacheCreationTokens,
+		CacheWriteTokens:              m.CacheWriteTokens,
+		CacheWriteReportedInputTokens: m.CacheWriteReportedInputTokens,
 	}
 }
 
@@ -207,7 +216,7 @@ func anthropicUsageNeedsTotalNormalization(usage map[string]any) bool {
 		return false
 	}
 	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-		if details["cached_tokens"] != nil || details["cache_creation_tokens"] != nil {
+		if details["cached_tokens"] != nil || details["cache_creation_tokens"] != nil || details["cache_write_tokens"] != nil {
 			return false
 		}
 	}
@@ -234,18 +243,27 @@ func cachedTokensFromUsage(usage map[string]any) (int64, bool) {
 	return 0, false
 }
 
-func cacheCreationTokensFromUsage(usage map[string]any) (int64, bool) {
+func cacheWriteTokensFromUsage(usage map[string]any) (int64, bool) {
 	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
+		if n, ok := usageNumberAsInt64(details["cache_write_tokens"]); ok {
+			return n, true
+		}
 		if n, ok := usageNumberAsInt64(details["cache_creation_tokens"]); ok {
 			return n, true
 		}
 	}
 	if details, _ := usage["prompt_tokens_details"].(map[string]any); len(details) > 0 {
+		if n, ok := usageNumberAsInt64(details["cache_write_tokens"]); ok {
+			return n, true
+		}
 		if n, ok := usageNumberAsInt64(details["cache_creation_tokens"]); ok {
 			return n, true
 		}
 	}
 	if n, ok := usageNumberAsInt64(usage["cache_creation_input_tokens"]); ok {
+		return n, true
+	}
+	if n, ok := usageNumberAsInt64(usage["cache_write_tokens"]); ok {
 		return n, true
 	}
 	if n, ok := usageNumberAsInt64(usage["cache_creation_tokens"]); ok {

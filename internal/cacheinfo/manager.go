@@ -14,11 +14,13 @@ import (
 var ErrProviderHistoryNotFound = errors.New("cacheinfo provider history not found")
 
 type Usage struct {
-	InputTokens         int64
-	CachedTokens        int64
-	CacheCreationTokens int64
-	OutputTokens        int64
-	TotalTokens         int64
+	InputTokens                   int64
+	CachedTokens                  int64
+	CacheCreationTokens           int64
+	CacheWriteTokens              int64
+	CacheWriteReportedInputTokens int64
+	OutputTokens                  int64
+	TotalTokens                   int64
 }
 
 type Clock interface {
@@ -159,12 +161,16 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	day.InputTokens += usage.InputTokens
 	day.CachedTokens += usage.CachedTokens
 	day.CacheCreationTokens += usage.CacheCreationTokens
+	day.CacheWriteTokens += usage.CacheWriteTokens
+	day.CacheWriteReportedInputTokens += usage.CacheWriteReportedInputTokens
 	day.OutputTokens += usage.OutputTokens
 	day.TotalTokens += usage.TotalTokens
 	day.RequestCount++
 	stats.HistoryTotal.InputTokens += usage.InputTokens
 	stats.HistoryTotal.CachedTokens += usage.CachedTokens
 	stats.HistoryTotal.CacheCreationTokens += usage.CacheCreationTokens
+	stats.HistoryTotal.CacheWriteTokens += usage.CacheWriteTokens
+	stats.HistoryTotal.CacheWriteReportedInputTokens += usage.CacheWriteReportedInputTokens
 	stats.HistoryTotal.OutputTokens += usage.OutputTokens
 	stats.HistoryTotal.TotalTokens += usage.TotalTokens
 	stats.HistoryTotal.RequestCount++

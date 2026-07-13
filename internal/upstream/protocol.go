@@ -294,12 +294,9 @@ func filteredPreservedTopLevelFieldsForEndpoint(fields map[string]any, endpointT
 	}
 	normalizedEndpointType := normalizeEndpointType(endpointType)
 	if normalizedEndpointType == config.UpstreamEndpointTypeResponses {
-		if !isAnthropicOnlyTopLevelField("context_management", normalizedEndpointType) {
-			return fields
-		}
 		filtered := map[string]any{}
 		for key, value := range fields {
-			if isAnthropicOnlyTopLevelField(key, normalizedEndpointType) {
+			if key == "parallel_tool_calls" || isAnthropicOnlyTopLevelField(key, normalizedEndpointType) {
 				continue
 			}
 			filtered[key] = value
@@ -333,7 +330,7 @@ func isAnthropicOnlyTopLevelField(key string, endpointType string) bool {
 
 func isResponsesOnlyTopLevelField(key string, endpointType string) bool {
 	switch key {
-	case "output_config", "previous_response_id", "prompt_cache_key", "store", "include", "truncation", "text":
+	case "output_config", "previous_response_id", "prompt_cache_key", "prompt_cache_options", "store", "include", "truncation", "text":
 		return true
 	case "parallel_tool_calls":
 		return endpointType == config.UpstreamEndpointTypeAnthropic
@@ -1473,16 +1470,36 @@ func buildChatRequestBody(req model.CanonicalRequest, xmlToolCallStyle ...string
 		}
 		payload["tools"] = tools
 	}
-	if req.ToolChoice.Raw != nil {
-		if value, ok := req.ToolChoice.Raw["value"]; ok {
-			payload["tool_choice"] = value
-		} else {
-			payload["tool_choice"] = cloneMap(req.ToolChoice.Raw)
-		}
-	} else if req.ToolChoice.Mode != "" {
-		payload["tool_choice"] = req.ToolChoice.Mode
+	if choice := normalizeChatCanonicalToolChoice(req.ToolChoice); choice != nil {
+		payload["tool_choice"] = choice
+	}
+	if req.ParallelToolCalls != nil {
+		payload["parallel_tool_calls"] = *req.ParallelToolCalls
 	}
 	return json.Marshal(payload)
+}
+
+func normalizeChatCanonicalToolChoice(choice model.CanonicalToolChoice) any {
+	switch choice.Requirement {
+	case model.ToolChoiceOptional:
+		return "auto"
+	case model.ToolChoiceRequiredAny:
+		return "required"
+	case model.ToolChoiceRequiredNamed:
+		return map[string]any{"type": "function", "function": map[string]any{"name": choice.Name}}
+	case model.ToolChoiceNone:
+		return "none"
+	}
+	if choice.Raw != nil {
+		if value, ok := choice.Raw["value"]; ok {
+			return value
+		}
+		return cloneMap(choice.Raw)
+	}
+	if choice.Mode != "" {
+		return choice.Mode
+	}
+	return nil
 }
 
 func buildChatMessages(req model.CanonicalRequest, xmlToolCallStyle ...string) []any {
@@ -1689,7 +1706,17 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		payload["tools"] = tools
 	}
 	if choice := normalizeAnthropicToolChoice(req.ToolChoice); choice != nil {
-		payload["tool_choice"] = choice
+		choiceMap, _ := choice.(map[string]any)
+		if req.ParallelToolCalls != nil {
+			choiceMap = cloneMap(choiceMap)
+			choiceMap["disable_parallel_tool_use"] = !*req.ParallelToolCalls
+		}
+		payload["tool_choice"] = choiceMap
+	} else if req.ParallelToolCalls != nil {
+		payload["tool_choice"] = map[string]any{
+			"type":                      "auto",
+			"disable_parallel_tool_use": !*req.ParallelToolCalls,
+		}
 	}
 	payload["messages"] = buildAnthropicMessages(req)
 	applyAnthropicCacheControlMode(payload, upstreamCacheControl)
@@ -2277,19 +2304,44 @@ func parseJSONArguments(arguments string) any {
 }
 
 func normalizeAnthropicToolChoice(choice model.CanonicalToolChoice) any {
+	var raw map[string]any
 	if choice.Raw != nil {
 		if value, ok := choice.Raw["value"].(string); ok && value != "" {
-			return map[string]any{"type": value}
+			raw = map[string]any{"type": value}
+		} else if value, ok := choice.Raw["value"].(map[string]any); ok {
+			raw = value
+		} else {
+			raw = choice.Raw
 		}
-		if value, ok := choice.Raw["value"].(map[string]any); ok {
-			choice.Raw = value
+	}
+	if raw == nil && choice.Mode != "" {
+		raw = map[string]any{"type": choice.Mode}
+	}
+	if raw == nil && choice.Requirement == "" {
+		return nil
+	}
+	normalized := normalizeAnthropicToolChoiceMap(raw)
+	switch choice.Requirement {
+	case model.ToolChoiceOptional:
+		normalized["type"] = "auto"
+	case model.ToolChoiceRequiredAny:
+		normalized["type"] = "any"
+	case model.ToolChoiceRequiredNamed:
+		normalized["type"] = "tool"
+		name := choice.Name
+		if name == "" {
+			if function, _ := normalized["function"].(map[string]any); function != nil {
+				name, _ = function["name"].(string)
+			}
 		}
-		return normalizeAnthropicToolChoiceMap(choice.Raw)
+		if name != "" {
+			normalized["name"] = name
+		}
+		delete(normalized, "function")
+	case model.ToolChoiceNone:
+		normalized["type"] = "none"
 	}
-	if choice.Mode != "" {
-		return map[string]any{"type": choice.Mode}
-	}
-	return nil
+	return normalized
 }
 
 func normalizeAnthropicToolChoiceMap(raw map[string]any) map[string]any {

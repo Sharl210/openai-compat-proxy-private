@@ -42,6 +42,222 @@ func newModelVisibilityAliasUpstream(t *testing.T) (*httptest.Server, *atomic.In
 	}
 }
 
+func TestExplicitProviderReasoningModeModelsAdmitDisplayedVariants(t *testing.T) {
+	tests := []struct {
+		name         string
+		capability   config.ReasoningModeProCapability
+		manualModels []string
+		model        string
+		wantStatus   int
+		wantHits     int32
+		wantModel    string
+		wantEffort   string
+	}{
+		{
+			name:       "supported dynamically displayed base pro admitted",
+			capability: config.ReasoningModeProCapabilitySupported,
+			model:      "model-pro",
+			wantStatus: http.StatusOK,
+			wantHits:   1,
+			wantModel:  "model",
+		},
+		{
+			name:       "supported dynamically displayed low pro admitted",
+			capability: config.ReasoningModeProCapabilitySupported,
+			model:      "model-low-pro",
+			wantStatus: http.StatusOK,
+			wantHits:   1,
+			wantModel:  "model",
+			wantEffort: "low",
+		},
+		{
+			name:       "probe dynamically displayed base pro admitted",
+			capability: config.ReasoningModeProCapabilityProbe,
+			model:      "model-pro",
+			wantStatus: http.StatusOK,
+			wantHits:   1,
+			wantModel:  "model",
+		},
+		{
+			name:       "probe dynamically displayed low pro admitted",
+			capability: config.ReasoningModeProCapabilityProbe,
+			model:      "model-low-pro",
+			wantStatus: http.StatusOK,
+			wantHits:   1,
+			wantModel:  "model",
+			wantEffort: "low",
+		},
+		{
+			name:         "supported base pro",
+			capability:   config.ReasoningModeProCapabilitySupported,
+			manualModels: []string{"model"},
+			model:        "model-pro",
+			wantStatus:   http.StatusOK,
+			wantHits:     1,
+			wantModel:    "model",
+		},
+		{
+			name:         "supported low pro",
+			capability:   config.ReasoningModeProCapabilitySupported,
+			manualModels: []string{"model"},
+			model:        "model-low-pro",
+			wantStatus:   http.StatusOK,
+			wantHits:     1,
+			wantModel:    "model-low",
+		},
+		{
+			name:         "probe base pro",
+			capability:   config.ReasoningModeProCapabilityProbe,
+			manualModels: []string{"model"},
+			model:        "model-pro",
+			wantStatus:   http.StatusOK,
+			wantHits:     1,
+			wantModel:    "model",
+		},
+		{
+			name:         "probe low pro",
+			capability:   config.ReasoningModeProCapabilityProbe,
+			manualModels: []string{"model"},
+			model:        "model-low-pro",
+			wantStatus:   http.StatusOK,
+			wantHits:     1,
+			wantModel:    "model-low",
+		},
+		{
+			name:       "unsupported remains unlisted and rejected",
+			capability: config.ReasoningModeProCapabilityUnsupported,
+			model:      "model-pro",
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			var responseHits atomic.Int32
+			var mu sync.Mutex
+			seenModel := ""
+			seenMode := ""
+			seenEffort := ""
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/models":
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"model","object":"model"},{"id":"model","object":"model"}]}`))
+				case "/responses":
+					responseHits.Add(1)
+					var payload struct {
+						Model     string `json:"model"`
+						Reasoning struct {
+							Mode   string `json:"mode"`
+							Effort string `json:"effort"`
+						} `json:"reasoning"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+						t.Fatalf("decode upstream request: %v", err)
+					}
+					mu.Lock()
+					seenModel = payload.Model
+					seenMode = payload.Reasoning.Mode
+					seenEffort = payload.Reasoning.Effort
+					mu.Unlock()
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed","output":[]}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer upstream.Close()
+			server := NewServer(config.Config{
+				EnableReasoningModeSuffix:    true,
+				EnableReasoningModeSuffixSet: true,
+				DefaultProReasoningModeSet:   true,
+				DefaultProReasoningMode:      false,
+				DownstreamNonStreamStrategy:  config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{{
+					ID:                              "openai",
+					Enabled:                         true,
+					UpstreamBaseURL:                 upstream.URL,
+					UpstreamAPIKey:                  "test-key",
+					UpstreamEndpointType:            config.UpstreamEndpointTypeResponses,
+					SupportsModels:                  true,
+					SupportsResponses:               true,
+					ManualModels:                    test.manualModels,
+					EnableReasoningEffortSuffix:     true,
+					ExposeReasoningSuffixModels:     true,
+					EnableReasoningModeSuffix:       true,
+					EnableReasoningModeSuffixSet:    true,
+					ExposeReasoningModeSuffixModels: true,
+					ReasoningModeProCapability:      test.capability,
+				}},
+			})
+
+			// When
+			modelsReq := httptest.NewRequest(http.MethodGet, "/openai/v1/models", nil)
+			modelsReq.Header.Set("Authorization", "Bearer test-key")
+			modelsRec := httptest.NewRecorder()
+			server.ServeHTTP(modelsRec, modelsReq)
+			request := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"`+test.model+`","input":"hello"}`))
+			request.Header.Set("Authorization", "Bearer test-key")
+			request.Header.Set("Content-Type", "application/json")
+			responseRec := httptest.NewRecorder()
+			server.ServeHTTP(responseRec, request)
+
+			// Then
+			if modelsRec.Code != http.StatusOK {
+				t.Fatalf("expected provider /models status 200, got %d body=%s", modelsRec.Code, modelsRec.Body.String())
+			}
+			listedIDs := modelIDsFromRewrittenBody(t, modelsRec.Body.Bytes())
+			if test.capability == config.ReasoningModeProCapabilityUnsupported {
+				for _, unexpected := range []string{"model-pro", "model-low-pro"} {
+					if contains(listedIDs, unexpected) {
+						t.Fatalf("expected unsupported variant %q to stay hidden, got %#v", unexpected, listedIDs)
+					}
+				}
+			} else {
+				positions := map[string]int{}
+				for _, expected := range []string{"model", "model-pro", "model-low", "model-low-pro"} {
+					matches := 0
+					for index, listedID := range listedIDs {
+						if listedID == expected {
+							matches++
+							positions[expected] = index
+						}
+					}
+					if matches != 1 {
+						t.Fatalf("expected displayed model %q exactly once, got %#v", expected, listedIDs)
+					}
+				}
+				if positions["model"] >= positions["model-pro"] || positions["model-low"] >= positions["model-low-pro"] {
+					t.Fatalf("expected canonical model order to stay stable, got %#v", listedIDs)
+				}
+			}
+			for _, unexpected := range []string{"model-noprompt", "model-pro-noprompt", "model-ultra", "model-pro-ultra"} {
+				if contains(listedIDs, unexpected) {
+					t.Fatalf("expected no generated private variant %q, got %#v", unexpected, listedIDs)
+				}
+			}
+			if responseRec.Code != test.wantStatus {
+				t.Fatalf("expected response status %d, got %d body=%s", test.wantStatus, responseRec.Code, responseRec.Body.String())
+			}
+			if test.wantStatus == http.StatusBadRequest && !strings.Contains(responseRec.Body.String(), "invalid_model") {
+				t.Fatalf("expected invalid_model for unlisted variant, got %s", responseRec.Body.String())
+			}
+			if got := responseHits.Load(); got != test.wantHits {
+				t.Fatalf("expected %d upstream responses calls, got %d", test.wantHits, got)
+			}
+			if test.wantModel != "" {
+				mu.Lock()
+				gotModel, gotMode, gotEffort := seenModel, seenMode, seenEffort
+				mu.Unlock()
+				if gotModel != test.wantModel || gotMode != "pro" || gotEffort != test.wantEffort {
+					t.Fatalf("expected upstream model %q with pro reasoning effort %q, got model=%q mode=%q effort=%q", test.wantModel, test.wantEffort, gotModel, gotMode, gotEffort)
+				}
+			}
+		})
+	}
+}
+
 func TestSecurity_DefaultGroupAllowsRegexModelMapHitOutsideVisibleModels(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
@@ -279,13 +495,13 @@ func TestSecurity_DefaultGroupRejectsNoPromptModelMapAliasWithoutReasoningButAll
 		EnableNoPromptModelSuffix:   true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
-			ID:                       "openai",
-			Enabled:                  true,
-			UpstreamBaseURL:          upstream.URL,
-			UpstreamAPIKey:           "test-key",
-			UpstreamEndpointType:     config.UpstreamEndpointTypeResponses,
-			SupportsResponses:        true,
-			SupportsModels:           true,
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsModels:              true,
 			EnableReasoningEffortSuffix: true,
 			ModelMap: []config.ModelMapEntry{
 				config.NewModelMapEntry("client-gpt-high", "upstream-priority"),

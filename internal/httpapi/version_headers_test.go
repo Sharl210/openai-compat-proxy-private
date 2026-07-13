@@ -399,7 +399,7 @@ func TestUnauthorizedRequestDoesNotExposeVersionHeaders(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthorized request, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	for _, header := range []string{"X-Provider-Name", headerProviderTodayCacheRate, headerProviderHistoryCacheRate, "X-Root-Env-Version", headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerThisUsageTokens, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
+	for _, header := range []string{"X-Provider-Name", headerProviderTodayCacheRate, headerProviderHistoryCacheRate, headerProviderTodayCacheWriteCoverage, headerProviderHistoryCacheWriteCoverage, "X-Root-Env-Version", headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, headerRootProviderTodayCacheWriteCoverage, headerRootProviderHistoryCacheWriteCoverage, "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerThisUsageTokens, headerThisUsageCacheWriteTokens, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
 		if got := rec.Header().Get(header); got != "" {
 			t.Fatalf("expected %s to be omitted on unauthorized response, got %q", header, got)
 		}
@@ -480,7 +480,7 @@ func TestEarlyLocalErrorsDoNotExposeTransparencyHeaders(t *testing.T) {
 			if !strings.Contains(rec.Body.String(), tc.code) {
 				t.Fatalf("expected body to contain %q, got %s", tc.code, rec.Body.String())
 			}
-			for _, header := range []string{"X-Provider-Name", headerProviderTodayCacheRate, headerProviderHistoryCacheRate, "X-Root-Env-Version", headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerThisUsageTokens, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
+			for _, header := range []string{"X-Provider-Name", headerProviderTodayCacheRate, headerProviderHistoryCacheRate, headerProviderTodayCacheWriteCoverage, headerProviderHistoryCacheWriteCoverage, "X-Root-Env-Version", headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, headerRootProviderTodayCacheWriteCoverage, headerRootProviderHistoryCacheWriteCoverage, "X-Provider-Version", "X-SYSTEM-PROMPT-ATTACH", headerCacheInfoTimezone, headerThisUsageTokens, headerThisUsageCacheWriteTokens, headerClientToProxyModel, headerClientToProxyServiceTier, headerClientToProxyReasoningParameters, headerClientToProxyReasoningEffort, headerProxyToUpstreamModel, headerProxyToUpstreamServiceTier, headerProxyToUpstreamReasoningParameters} {
 				if got := rec.Header().Get(header); got != "" {
 					t.Fatalf("expected %s to be omitted on early local error, got %q", header, got)
 				}

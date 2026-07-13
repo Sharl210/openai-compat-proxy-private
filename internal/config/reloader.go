@@ -65,6 +65,12 @@ func normalizeRuntimeConfigDefaults(cfg *Config) {
 		cfg.UpstreamCacheControl = Default().UpstreamCacheControl
 	}
 	for i := range cfg.Providers {
+		if !cfg.Providers[i].UltraMaxConcurrentSubagentsSet {
+			cfg.Providers[i].UltraMaxConcurrentSubagents = cfg.UltraMaxConcurrentSubagents
+		}
+		if !cfg.Providers[i].EnableReasoningModeSuffixSet {
+			cfg.Providers[i].EnableReasoningModeSuffix = cfg.EffectiveEnableReasoningModeSuffix()
+		}
 		if !cfg.Providers[i].ModelLimitContextTokensSet && cfg.Providers[i].ModelLimitContextTokens == 0 && len(cfg.Providers[i].ModelLimitContextTokenRules) == 0 {
 			cfg.Providers[i].ModelLimitContextTokens = cfg.ModelLimitContextTokens
 			cfg.Providers[i].ModelLimitContextTokenRules = append([]ScopedIntRule(nil), cfg.ModelLimitContextTokenRules...)

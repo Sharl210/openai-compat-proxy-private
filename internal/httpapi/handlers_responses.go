@@ -24,20 +24,23 @@ type preparedResponsesRequest struct {
 	requestID                 string
 	clientReasoningParameters string
 	clientReasoningEffort     string
+	clientReasoningMode       string
 	client                    *upstream.Client
+	reasoningModeFallback     *reasoningModeFallbackCoordinator
 	history                   *responsesHistoryStore
 	usageRecorder             usageRecorderFunc
 }
 
 type initialResponsesRequest struct {
-	canon          model.CanonicalRequest
-	provider       config.ProviderConfig
-	providerCfg    config.Config
-	providerID     string
-	rawClientModel string
-	clientModel    string
-	resolvedModel  string
-	requestID      string
+	canon               model.CanonicalRequest
+	provider            config.ProviderConfig
+	providerCfg         config.Config
+	providerID          string
+	rawClientModel      string
+	clientModel         string
+	resolvedModel       string
+	clientReasoningMode string
+	requestID           string
 }
 
 func handleResponses() http.HandlerFunc {
@@ -50,6 +53,7 @@ func handleResponses() http.HandlerFunc {
 		providerCfg := prepared.providerCfg
 		providerID := prepared.providerID
 		client := prepared.client
+		reasoningModeFallback := prepared.reasoningModeFallback
 		authorization := prepared.authorization
 		usageRecorder := prepared.usageRecorder
 		history := prepared.history
@@ -79,7 +83,10 @@ func handleResponses() http.HandlerFunc {
 
 		if canon.Stream {
 			w.Header().Del(headerThisUsageTokens)
-			stream, err := client.OpenEventStreamLazy(ctx, canon, authorization)
+			canon, stream, err := executeWithReasoningModeFallback(canon, reasoningModeFallback, func(request model.CanonicalRequest) (*upstream.EventStream, error) {
+				return client.OpenEventStreamLazy(ctx, request, authorization)
+			})
+			setReasoningModeObservabilityHeaders(w, canon, reasoningModeFallback)
 			if err != nil {
 				if isUpstreamTimeout(err, ctx) {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
@@ -90,6 +97,12 @@ func handleResponses() http.HandlerFunc {
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 				return
+			}
+			if reasoningModeFallback != nil && reasoningModeFallback.retried {
+				if err := refreshFallbackUpstreamReasoningObservabilityHeaders(w, canon, providerCfg); err != nil {
+					errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+					return
+				}
 			}
 			defer stream.Close()
 			overflow, err := stream.ProbeContextOverflowBeforeOutput()
@@ -130,7 +143,10 @@ func handleResponses() http.HandlerFunc {
 		}
 
 		if providerCfg.DownstreamNonStreamStrategy == config.DownstreamNonStreamStrategyUpstreamNonStream {
-			payload, err := client.Response(ctx, canon, authorization)
+			canon, payload, err := executeWithReasoningModeFallback(canon, reasoningModeFallback, func(request model.CanonicalRequest) (map[string]any, error) {
+				return client.Response(ctx, request, authorization)
+			})
+			setReasoningModeObservabilityHeaders(w, canon, reasoningModeFallback)
 			if err != nil {
 				if isUpstreamTimeout(err, ctx) {
 					errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
@@ -141,6 +157,12 @@ func handleResponses() http.HandlerFunc {
 				}
 				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 				return
+			}
+			if reasoningModeFallback != nil && reasoningModeFallback.retried {
+				if err := refreshFallbackUpstreamReasoningObservabilityHeaders(w, canon, providerCfg); err != nil {
+					errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+					return
+				}
 			}
 			result, err := aggregate.ResultFromResponsePayload(payload)
 			if err != nil {
@@ -154,6 +176,7 @@ func handleResponses() http.HandlerFunc {
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
+			w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
 			w.Header().Set("Content-Type", "application/json")
 			if err := writeJSON(w, normalized); err != nil {
 				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
@@ -165,7 +188,10 @@ func handleResponses() http.HandlerFunc {
 			return
 		}
 
-		events, err := client.Stream(ctx, canon, authorization)
+		canon, events, err := executeWithReasoningModeFallback(canon, reasoningModeFallback, func(request model.CanonicalRequest) ([]upstream.Event, error) {
+			return client.Stream(ctx, request, authorization)
+		})
+		setReasoningModeObservabilityHeaders(w, canon, reasoningModeFallback)
 		if err != nil {
 			if isUpstreamTimeout(err, ctx) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
@@ -176,6 +202,12 @@ func handleResponses() http.HandlerFunc {
 			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
+		}
+		if reasoningModeFallback != nil && reasoningModeFallback.retried {
+			if err := refreshFallbackUpstreamReasoningObservabilityHeaders(w, canon, providerCfg); err != nil {
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
 		}
 
 		collector := aggregate.NewCollector()
@@ -213,6 +245,7 @@ func handleResponses() http.HandlerFunc {
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
+		w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
 		if err := writeJSON(w, normalized); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return
@@ -321,6 +354,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
+		w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
 		w.Header().Set("Content-Type", "application/json")
 		if err := writeJSON(w, normalized); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
@@ -363,6 +397,7 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
+	canon.ResponsesOpenAIBeta = r.Header.Get("OpenAI-Beta")
 	selectionEffort := clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false)
 	if selectionEffort != "" {
 		*r = *r.Clone(context.WithValue(r.Context(), routeProviderSelectionEffortKey, selectionEffort))
@@ -383,8 +418,10 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		return nil, false
 	}
 	rawClientModel := canon.Model
-	clientModel := prepareProviderClientModel(&canon, resolvedModel, provider, providerCfg)
+	clientReasoningMode := clientReasoningModeForRequest(rawClientModel, canon, provider, providerCfg)
+	clientModel := prepareProviderClientModelForRequest(providerClientModelRequest{req: &canon, httpRequest: r, resolvedModel: sourceModelBeforeProviderMapping(r, rawClientModel, resolvedModel, provider), provider: provider, config: providerCfg})
 	resolvedModel = clientModel
+	applyProxyModelIntentReasoningMode(r, &canon)
 	if hasNoPromptModelSuffix(clientModel) {
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
@@ -392,14 +429,15 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, clientModel))
 	}
 	return &initialResponsesRequest{
-		canon:          canon,
-		provider:       provider,
-		providerCfg:    providerCfg,
-		providerID:     providerID,
-		rawClientModel: rawClientModel,
-		clientModel:    clientModel,
-		resolvedModel:  resolvedModel,
-		requestID:      requestID,
+		canon:               canon,
+		provider:            provider,
+		providerCfg:         providerCfg,
+		providerID:          providerID,
+		rawClientModel:      rawClientModel,
+		clientModel:         clientModel,
+		resolvedModel:       resolvedModel,
+		clientReasoningMode: clientReasoningMode,
+		requestID:           requestID,
 	}, true
 }
 
@@ -414,6 +452,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	rawClientModel := initial.rawClientModel
 	clientModel := initial.clientModel
 	resolvedModel := initial.resolvedModel
+	clientReasoningMode := initial.clientReasoningMode
 	requestID := initial.requestID
 	history := responsesHistoryFromRequest(r)
 	canon.Model = resolvedModel
@@ -457,7 +496,8 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 	}
 	applyProviderSystemPrompt(&canon, provider)
-	normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+	intent, _ := proxyModelIntentFromRequest(r)
+	normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
 	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
 		canon.Messages = recoverToolCallsForMessages(history, canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
@@ -469,6 +509,28 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	}
 	applyProviderMaxOutputTokens(&canon, provider)
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
+	applyProxyModelIntentReasoningMode(r, &canon)
+	enforceSuffixReasoningModePrecedence(&canon)
+	applyDefaultProReasoningMode(&canon, providerCfg)
+	canon, reasoningModeFallback, err := prepareReasoningModeFallback(canon, provider, providerCfg, reasoningModeFallbackKeyForRequest(r, providerID, providerCfg, canon.Model, authorization))
+	if err != nil {
+		var unsupportedMode unsupportedReasoningModeError
+		if errors.As(err, &unsupportedMode) {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_reasoning_mode", err.Error())
+			return nil, false
+		}
+		errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return nil, false
+	}
+	if err := applyUltraMultiAgent(&canon, intent, provider, providerCfg); err != nil {
+		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+		return nil, false
+	}
+	applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
+	if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
+		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
+		return nil, false
+	}
 	applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 	observationCtx := withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 		ProviderID:         providerID,
@@ -478,7 +540,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		Canon:              canon,
 	})
 	*r = *r.Clone(observationCtx)
-	if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+	if err := setDirectionalObservabilityHeadersWithClientReasoningMode(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort, clientReasoningMode, reasoningModeFallback); err != nil {
 		if writeRequestValidationError(w, err) {
 			return nil, false
 		}
@@ -505,6 +567,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		clientReasoningParameters: clientReasoningParameters,
 		clientReasoningEffort:     clientReasoningEffort,
 		client:                    client,
+		reasoningModeFallback:     reasoningModeFallback,
 		history:                   history,
 		usageRecorder:             usageRecorder,
 	}, true

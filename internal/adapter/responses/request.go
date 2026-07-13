@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"openai-compat-proxy/internal/model"
 )
@@ -29,9 +30,15 @@ type request struct {
 	TopP               json.RawMessage `json:"top_p"`
 	MaxOutputTokensRaw json.RawMessage `json:"max_output_tokens"`
 	Stop               []string        `json:"stop"`
+	PromptCacheKey     json.RawMessage `json:"prompt_cache_key"`
+	PromptCacheOptions json.RawMessage `json:"prompt_cache_options"`
+	MultiAgent         json.RawMessage `json:"multi_agent"`
 }
 
-type requestInput []json.RawMessage
+type requestInput struct {
+	items             []json.RawMessage
+	originalItemGraph bool
+}
 
 type message struct {
 	Role       string          `json:"role"`
@@ -103,16 +110,22 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	}
 
 	canon := model.CanonicalRequest{
-		Model:                   req.Model,
-		Stream:                  req.Stream,
-		PreservedTopLevelFields: collectPassthroughTopLevelFields(raw, req),
-		ResponseStore:           req.Store,
-		ResponseInclude:         append([]string(nil), req.Include...),
-		Instructions:            decodeOptionalString(req.Instructions),
-		Temperature:             decodeOptionalFloat(req.Temperature),
-		TopP:                    decodeOptionalFloat(req.TopP),
-		MaxOutputTokens:         decodeOptionalInt(req.MaxOutputTokensRaw),
-		Stop:                    req.Stop,
+		Model:                         req.Model,
+		Stream:                        req.Stream,
+		PreservedTopLevelFields:       collectPassthroughTopLevelFields(raw, req),
+		ResponseStore:                 req.Store,
+		ResponseInclude:               append([]string(nil), req.Include...),
+		ResponsePromptCacheKey:        cloneRawMessage(req.PromptCacheKey),
+		ResponsePromptCacheOptions:    cloneRawMessage(req.PromptCacheOptions),
+		ResponseMultiAgent:            cloneRawMessage(req.MultiAgent),
+		Instructions:                  decodeOptionalString(req.Instructions),
+		Temperature:                   decodeOptionalFloat(req.Temperature),
+		TopP:                          decodeOptionalFloat(req.TopP),
+		MaxOutputTokens:               decodeOptionalInt(req.MaxOutputTokensRaw),
+		Stop:                          req.Stop,
+		ParallelToolCalls:             req.ParallelToolCalls,
+		ReasoningModeOrigin:           model.ReasoningModeOriginNone,
+		ResponseInputItemsAreOriginal: req.Input.originalItemGraph,
 	}
 	for _, inc := range req.Include {
 		if inc == "usage" {
@@ -144,7 +157,11 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		canon.Reasoning = &model.CanonicalReasoning{
 			Effort:  stringMapValue(reasoningRaw, "effort"),
 			Summary: stringMapValue(reasoningRaw, "summary"),
+			Mode:    model.ReasoningMode(stringMapValue(reasoningRaw, "mode")),
 			Raw:     reasoningRaw,
+		}
+		if canon.Reasoning.Mode != "" {
+			canon.ReasoningModeOrigin = model.ReasoningModeOriginBody
 		}
 	}
 
@@ -167,13 +184,20 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		})
 	}
 	if req.ToolChoice != nil {
-		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
+		canon.ToolChoice = model.DecodeOpenAIToolChoice(req.ToolChoice)
 	}
 
 	var inputInstructions []string
-	for _, rawItem := range req.Input {
+	functionCallIDs := make(map[string]struct{})
+	for _, rawItem := range req.Input.items {
 		if len(rawItem) == 0 {
 			continue
+		}
+		if err := validateResponsesInputItemGraphItem(rawItem, functionCallIDs); err != nil {
+			return model.CanonicalRequest{}, err
+		}
+		if isResponsesLegacyToolCallMessage(rawItem) {
+			canon.ResponseInputItemsAreOriginal = false
 		}
 		preserved, msg, ok, syntheticReasoningReplay, err := decodeInputItem(rawItem)
 		if err != nil {
@@ -202,6 +226,23 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	canon.Messages = mergeAdjacentResponsesReasoningToolMessages(canon.Messages)
 
 	return canon, nil
+}
+
+func isResponsesLegacyToolCallMessage(raw json.RawMessage) bool {
+	var item map[string]any
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return false
+	}
+	role, _ := item["role"].(string)
+	switch role {
+	case "assistant":
+		_, ok := item["tool_calls"]
+		return ok
+	case "tool":
+		return stringMapValue(item, "tool_call_id") != ""
+	default:
+		return false
+	}
 }
 
 func mergeAdjacentResponsesReasoningToolMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
@@ -305,6 +346,39 @@ func isResponsesToolResultForCallIDs(msg model.CanonicalMessage, callIDs map[str
 	return ok
 }
 
+func validateResponsesInputItemGraphItem(raw json.RawMessage, functionCallIDs map[string]struct{}) error {
+	var rawMap map[string]any
+	if err := json.Unmarshal(raw, &rawMap); err != nil {
+		return err
+	}
+
+	switch itemType, _ := rawMap["type"].(string); itemType {
+	case "item_reference":
+		if id, _ := rawMap["id"].(string); id == "" {
+			return fmt.Errorf("item_reference id is required")
+		}
+	case "function_call":
+		callID, _ := rawMap["call_id"].(string)
+		if callID == "" {
+			return nil
+		}
+		if _, exists := functionCallIDs[callID]; exists {
+			return fmt.Errorf("duplicate function_call call_id: %s", callID)
+		}
+		functionCallIDs[callID] = struct{}{}
+	case "function_call_output":
+		callID, _ := rawMap["call_id"].(string)
+		if callID == "" || utf8.RuneCountInString(callID) > 64 {
+			return fmt.Errorf("function_call_output call_id must contain 1 to 64 characters")
+		}
+		if _, exists := rawMap["output"]; !exists {
+			return fmt.Errorf("function_call_output output is required")
+		}
+	}
+
+	return nil
+}
+
 func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, bool, error) {
 	var rawMap map[string]any
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
@@ -312,18 +386,16 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 	}
 	itemType, _ := rawMap["type"].(string)
 	if itemType == "reasoning" {
-		if isSyntheticResponsesReasoningInputItem(rawMap) {
+		if model.IsSyntheticResponsesReasoningPlaceholder(rawMap) {
 			return nil, model.CanonicalMessage{}, false, true, nil
 		}
 		reasoningContent := normalizeResponsesReasoningText(reasoningSummaryText(rawMap))
 		preserved := cloneMapAny(rawMap)
-		if summary := normalizeResponsesReasoningSummary(preserved["summary"]); len(summary) > 0 {
-			preserved["summary"] = summary
+		canonicalReasoningBlock := cloneMapAny(rawMap)
+		if summary := normalizeResponsesReasoningSummary(canonicalReasoningBlock["summary"]); len(summary) > 0 {
+			canonicalReasoningBlock["summary"] = summary
 		}
-		message := model.CanonicalMessage{Role: "assistant", ReasoningContent: reasoningContent, ReasoningBlocks: []map[string]any{cloneMapAny(preserved)}}
-		if stringMapValue(rawMap, "id") == "rs_proxy" {
-			return nil, message, true, true, nil
-		}
+		message := model.CanonicalMessage{Role: "assistant", ReasoningContent: reasoningContent, ReasoningBlocks: []map[string]any{canonicalReasoningBlock}}
 		return preserved, message, true, false, nil
 	}
 	if itemType == "function_call_output" {
@@ -410,7 +482,7 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			case "reasoning":
 				if idx < len(rawContent) {
 					block := cloneMapAny(rawContent[idx])
-					if isSyntheticResponsesReasoningInputItem(block) {
+					if model.IsSyntheticResponsesReasoningPlaceholder(block) {
 						continue
 					}
 					if len(block) > 0 {
@@ -433,20 +505,33 @@ func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessag
 			})
 		}
 
-		preserved := map[string]any{"role": role}
-		if len(normalizedContent) > 0 {
-			preserved["content"] = normalizedContent
-		}
-		if msg.ToolCallID != "" {
-			preserved["tool_call_id"] = msg.ToolCallID
-		}
-		if len(msg.ToolCalls) > 0 {
-			preserved["tool_calls"] = rawMap["tool_calls"]
-		}
+		preserved := preserveResponsesInputItem(rawMap)
 
 		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID, ReasoningBlocks: reasoningBlocks}, true, false, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, false, nil
+}
+
+func preserveResponsesInputItem(rawMap map[string]any) map[string]any {
+	preserved := cloneMapAny(rawMap)
+	content, ok := rawMap["content"].([]any)
+	if !ok {
+		return preserved
+	}
+	filtered := make([]any, 0, len(content))
+	removedSyntheticReasoning := false
+	for _, part := range content {
+		block, _ := part.(map[string]any)
+		if model.IsSyntheticResponsesReasoningPlaceholder(block) {
+			removedSyntheticReasoning = true
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	if removedSyntheticReasoning {
+		preserved["content"] = filtered
+	}
+	return preserved
 }
 
 func extractInstructionTextFromInputItem(item map[string]any) string {
@@ -455,43 +540,6 @@ func extractInstructionTextFromInputItem(item map[string]any) string {
 		return ""
 	}
 	return strings.TrimSpace(extractTextFromResponsesContent(item["content"]))
-}
-
-func isSyntheticResponsesReasoningInputItem(item map[string]any) bool {
-	if stringMapValue(item, "id") != "rs_proxy" {
-		return false
-	}
-	summary := responsesReasoningSummaryItems(item["summary"])
-	if len(summary) == 0 {
-		return true
-	}
-	for _, raw := range summary {
-		entry, _ := raw.(map[string]any)
-		if !isSyntheticResponsesReasoningSummaryText(stringMapValue(entry, "text")) {
-			return false
-		}
-	}
-	return true
-}
-
-func isSyntheticResponsesReasoningSummaryText(text string) bool {
-	text = normalizeResponsesReasoningText(text)
-	return text == "" || strings.Contains(strings.TrimSpace(text), "代理层占位")
-}
-
-func responsesReasoningSummaryItems(raw any) []any {
-	switch typed := raw.(type) {
-	case []any:
-		return typed
-	case []map[string]any:
-		items := make([]any, 0, len(typed))
-		for _, item := range typed {
-			items = append(items, item)
-		}
-		return items
-	default:
-		return nil
-	}
 }
 
 func normalizeResponsesReasoningText(text string) string {
@@ -719,13 +767,14 @@ func decodeResponsesInputImage(raw json.RawMessage) (model.CanonicalContentPart,
 func (ri *requestInput) UnmarshalJSON(data []byte) error {
 	trimmed := json.RawMessage(data)
 	if len(trimmed) == 0 || string(trimmed) == "null" {
-		*ri = nil
+		*ri = requestInput{}
 		return nil
 	}
 
 	var multi []json.RawMessage
 	if err := json.Unmarshal(data, &multi); err == nil {
-		*ri = multi
+		ri.items = multi
+		ri.originalItemGraph = true
 		return nil
 	}
 
@@ -738,7 +787,8 @@ func (ri *requestInput) UnmarshalJSON(data []byte) error {
 		if err != nil {
 			return err
 		}
-		*ri = []json.RawMessage{wrapped}
+		ri.items = []json.RawMessage{wrapped}
+		ri.originalItemGraph = false
 		return nil
 	}
 
@@ -746,7 +796,8 @@ func (ri *requestInput) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &rawItem); err != nil {
 		return err
 	}
-	*ri = []json.RawMessage{rawItem}
+	ri.items = []json.RawMessage{rawItem}
+	ri.originalItemGraph = true
 	return nil
 }
 
@@ -855,6 +906,7 @@ func collectPassthroughTopLevelFields(raw map[string]any, req request) map[strin
 		"model": {}, "stream": {}, "store": {}, "include": {}, "previous_response_id": {}, "metadata": {},
 		"parallel_tool_calls": {}, "truncation": {}, "text": {}, "instructions": {}, "input": {}, "tools": {},
 		"tool_choice": {}, "reasoning": {}, "temperature": {}, "top_p": {}, "max_output_tokens": {}, "stop": {},
+		"prompt_cache_key": {}, "prompt_cache_options": {}, "multi_agent": {},
 	}
 	for key, value := range raw {
 		if _, ok := known[key]; ok {
@@ -902,4 +954,8 @@ func decodeOptionalAny(raw json.RawMessage) any {
 		return nil
 	}
 	return value
+}
+
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	return append(json.RawMessage(nil), raw...)
 }

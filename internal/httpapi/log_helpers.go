@@ -63,6 +63,10 @@ func canonicalLogAttrs(req model.CanonicalRequest) map[string]any {
 	for _, tool := range req.Tools {
 		toolNames = append(toolNames, tool.Name)
 	}
+	reasoningMode := ""
+	if req.Reasoning != nil {
+		reasoningMode = string(req.Reasoning.Mode)
+	}
 	return map[string]any{
 		"message_roles":            roles,
 		"message_hashes":           messageHashes,
@@ -72,6 +76,8 @@ func canonicalLogAttrs(req model.CanonicalRequest) map[string]any {
 		"has_reasoning_content":    hasReasoningContent,
 		"total_text_bytes":         totalTextBytes,
 		"tool_names":               toolNames,
+		"reasoning_mode":           reasoningMode,
+		"reasoning_mode_origin":    string(req.ReasoningModeOrigin),
 	}
 }
 

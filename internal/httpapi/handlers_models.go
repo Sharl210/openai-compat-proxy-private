@@ -259,6 +259,7 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
 		expanded = reasoning.ExpandModelIDs(baseIDs, nil, true)
 	}
+	expanded = expandReasoningModeModelIDs(expanded, provider)
 	filteredExpanded := make([]string, 0, len(expanded))
 	for _, id := range expanded {
 		if provider.HidesModel(id) {
@@ -294,21 +295,56 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 	return encoded
 }
 
+func expandReasoningModeModelIDs(modelIDs []string, provider config.ProviderConfig) []string {
+	if !provider.EnableReasoningModeSuffix || !provider.ExposeReasoningModeSuffixModels {
+		return modelIDs
+	}
+	seen := make(map[string]struct{}, len(modelIDs)*2)
+	expanded := make([]string, 0, len(modelIDs)*2)
+	for _, modelID := range modelIDs {
+		if _, exists := seen[modelID]; !exists {
+			seen[modelID] = struct{}{}
+			expanded = append(expanded, modelID)
+		}
+		if strings.Contains(modelID, "-noprompt") || strings.HasSuffix(modelID, "-pro") {
+			continue
+		}
+		finalUpstreamModel, _ := provider.ResolveModelAndEffort(modelID, provider.EnableReasoningEffortSuffix)
+		if provider.ResolveReasoningModeProCapability(finalUpstreamModel) == config.ReasoningModeProCapabilityUnsupported {
+			continue
+		}
+		variant := modelID + "-pro"
+		if _, exists := seen[variant]; exists {
+			continue
+		}
+		seen[variant] = struct{}{}
+		expanded = append(expanded, variant)
+	}
+	return expanded
+}
+
 func configuredModelsFallbackBody(provider config.ProviderConfig) ([]byte, bool) {
 	return configuredModelsFallbackBodyForRoute(provider, true)
 }
 
 func configuredModelsFallbackBodyForRoute(provider config.ProviderConfig, rootRoute bool) ([]byte, bool) {
 	ids := provider.VisibleModelIDs()
+	ids = expandReasoningModeModelIDs(ids, provider)
 	if len(ids) == 0 {
 		return nil, false
 	}
 	entries := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
+		if provider.HidesModel(id) {
+			continue
+		}
 		entries = append(entries, map[string]any{
 			"id":     provider.ExternalModelID(id, rootRoute),
 			"object": "model",
 		})
+	}
+	if len(entries) == 0 {
+		return nil, false
 	}
 	payload := map[string]any{
 		"object": "list",

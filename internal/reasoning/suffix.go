@@ -1,12 +1,6 @@
 package reasoning
 
-import (
-	"strings"
-
-	"openai-compat-proxy/internal/model"
-)
-
-var supportedSuffixes = []string{"-minimal", "-xhigh", "-medium", "-high", "-low", "-none", "-max"}
+import "openai-compat-proxy/internal/model"
 
 func ApplyModelSuffix(req model.CanonicalRequest, enabled bool) model.CanonicalRequest {
 	if !enabled {
@@ -40,12 +34,7 @@ func ApplyModelSuffix(req model.CanonicalRequest, enabled bool) model.CanonicalR
 }
 
 func SplitSuffix(modelName string) (string, string, bool) {
-	for _, suffix := range supportedSuffixes {
-		if strings.HasSuffix(modelName, suffix) && len(modelName) > len(suffix) {
-			return strings.TrimSuffix(modelName, suffix), strings.TrimPrefix(suffix, "-"), true
-		}
-	}
-	return modelName, "", false
+	return model.SplitReasoningEffortSuffix(modelName)
 }
 
 func ExpandModelIDs(baseIDs []string, modelMapKeys []string, enabled bool) []string {
@@ -61,8 +50,8 @@ func ExpandModelIDs(baseIDs []string, modelMapKeys []string, enabled bool) []str
 			if _, _, ok := SplitSuffix(id); ok {
 				continue
 			}
-			for _, suffix := range supportedSuffixes {
-				expanded := id + suffix
+			for _, effort := range model.ReasoningEfforts() {
+				expanded := id + "-" + effort
 				if !seen[expanded] {
 					seen[expanded] = true
 					out = append(out, expanded)

@@ -3288,7 +3288,7 @@ func liveCacheRawMetricsFromUsage(usage map[string]any) (liveCacheRawMetrics, bo
 		metrics.CachedTokens = n
 		hasValues = true
 	}
-	if n, ok := cacheCreationTokensFromUsage(usage); ok {
+	if n, ok := cacheWriteTokensFromUsage(usage); ok {
 		metrics.CreatedTokens = n
 		hasValues = true
 	}

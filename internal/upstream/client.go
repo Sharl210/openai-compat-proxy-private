@@ -378,7 +378,7 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
 	allowEOFCompletion := normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeChat && !req.Stream
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, originalToolIDs, true, allowEOFCompletion)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, responsesBetaHeaderForRequest(req), originalToolIDs, true, allowEOFCompletion)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -487,7 +487,7 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, originalToolIDs, primeFirstEvent, false)
+	stream, err := c.openEventStreamWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, responsesBetaHeaderForRequest(req), originalToolIDs, primeFirstEvent, false)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -528,7 +528,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 		attrs[k] = v
 	}
 	logging.Event("proxyToUpstreamRequest", attrs)
-	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, compact)
+	payload, err := c.responseWithRetry(ctx, req.RequestID, endpointType, body, authorization, anthropicBeta, responsesBetaHeaderForRequest(req), compact)
 	if err != nil {
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
@@ -619,8 +619,63 @@ func (c *Client) Models(ctx context.Context, authorization string) (int, []byte,
 	return resp.StatusCode, body, resp.Header.Get("Content-Type"), nil
 }
 
+const responsesMultiAgentBeta = "responses_multi_agent=v1"
+
+func responsesBetaHeaderForRequest(req model.CanonicalRequest) string {
+	enabled := responseMultiAgentEnabled(req.ResponseMultiAgent)
+	if !enabled {
+		multiAgent, _ := req.PreservedTopLevelFields["multi_agent"].(map[string]any)
+		enabled, _ = multiAgent["enabled"].(bool)
+	}
+	if !enabled {
+		return ""
+	}
+	return mergeOpenAIBetaHeaders(req.ResponsesOpenAIBeta, responsesMultiAgentBeta)
+}
+
+func responseMultiAgentEnabled(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var multiAgent struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &multiAgent); err != nil {
+		return false
+	}
+	return multiAgent.Enabled
+}
+
+func applyOpenAIBetaHeader(httpReq *http.Request, endpointType string, beta string) {
+	if httpReq == nil || normalizeEndpointType(endpointType) != config.UpstreamEndpointTypeResponses || beta == "" {
+		return
+	}
+	if merged := mergeOpenAIBetaHeaders(append(httpReq.Header.Values("OpenAI-Beta"), beta)...); merged != "" {
+		httpReq.Header.Set("OpenAI-Beta", merged)
+	}
+}
+
+func mergeOpenAIBetaHeaders(values ...string) string {
+	seen := map[string]struct{}{}
+	merged := make([]string, 0)
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if _, exists := seen[part]; exists {
+				continue
+			}
+			seen[part] = struct{}{}
+			merged = append(merged, part)
+		}
+	}
+	return strings.Join(merged, ",")
+}
+
 func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []byte, authorization string, onEvent func(Event) error) error {
-	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, "", nil, true, false)
+	stream, err := c.openEventStreamWithRetry(ctx, requestID, c.endpointType(), body, authorization, "", "", nil, true, false)
 	if err != nil {
 		return err
 	}
@@ -628,13 +683,13 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 	return stream.Consume(onEvent)
 }
 
-func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, originalToolIDs map[int]string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
+func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, originalToolIDs map[int]string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	retryEvidence := newRetryStatusErrorEvidence()
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		stream, err := c.openEventStream(ctx, endpointType, body, authorization, anthropicBeta, originalToolIDs, requestID, primeFirstEvent, allowEOFCompletion)
+		stream, err := c.openEventStream(ctx, endpointType, body, authorization, anthropicBeta, openAIBeta, originalToolIDs, requestID, primeFirstEvent, allowEOFCompletion)
 		if err == nil {
 			return stream, nil
 		}
@@ -674,13 +729,13 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 	return nil, retryEvidence.attach(lastErr)
 }
 
-func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, compact bool) (map[string]any, error) {
+func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, compact bool) (map[string]any, error) {
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
 	retryEvidence := newRetryStatusErrorEvidence()
 	for attempt := 1; attempt <= retryCount+1; attempt++ {
-		payload, err := c.responseOnce(ctx, endpointType, body, authorization, anthropicBeta, compact)
+		payload, err := c.responseOnce(ctx, endpointType, body, authorization, anthropicBeta, openAIBeta, compact)
 		if err == nil {
 			return payload, nil
 		}
@@ -720,12 +775,13 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 	return nil, retryEvidence.attach(lastErr)
 }
 
-func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, compact bool) (map[string]any, error) {
+func (c *Client) responseOnce(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, compact bool) (map[string]any, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+responseEndpointPathForType(endpointType, compact), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget, c.masqueradeClientVersion)
+	applyOpenAIBetaHeader(httpReq, endpointType, openAIBeta)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -755,12 +811,13 @@ func responseEndpointPathForType(endpointType string, compact bool) string {
 	return path
 }
 
-func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
+func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	applyUpstreamHeaders(httpReq, endpointType, authorization, c.anthropicVersion, anthropicBeta, c.upstreamUserAgent, c.masqueradeTarget, c.masqueradeClientVersion)
+	applyOpenAIBetaHeader(httpReq, endpointType, openAIBeta)
 
 	httpClient := c.httpClient
 	if !primeFirstEvent && c.streamOpenHTTPClient != nil {
@@ -1161,7 +1218,7 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
-	if len(responseInputItems) > 0 && len(req.Messages) == 0 {
+	if len(responseInputItems) > 0 && (req.ResponseInputItemsAreOriginal || len(req.Messages) == 0) {
 		input := make([]map[string]any, 0, len(responseInputItems))
 		for _, item := range responseInputItems {
 			if isResponsesInstructionInputItem(item) {
@@ -1170,6 +1227,9 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 			input = append(input, cloneMap(item))
 		}
 		if len(input) > 0 {
+			if masqueradeTarget == config.MasqueradeTargetOpenCode {
+				input = injectResponsesItemReferences(input, req.ResponseItemReferencesByCallID)
+			}
 			payload["input"] = input
 		}
 	} else if len(req.Messages) > 0 {
@@ -1230,37 +1290,28 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 	if len(req.Tools) > 0 {
 		payload["tools"] = buildResponsesUpstreamToolPayloads(req.Tools, compatMode)
 	}
-	if req.ToolChoice.Raw != nil {
-		if value, ok := req.ToolChoice.Raw["value"]; ok {
-			payload["tool_choice"] = value
-		} else {
-			payload["tool_choice"] = normalizeResponsesToolChoice(req.ToolChoice.Raw)
-		}
-	} else if req.ToolChoice.Mode != "" {
-		payload["tool_choice"] = req.ToolChoice.Mode
+	if choice := normalizeResponsesCanonicalToolChoice(req.ToolChoice); choice != nil {
+		payload["tool_choice"] = choice
+	}
+	if req.ParallelToolCalls != nil {
+		payload["parallel_tool_calls"] = *req.ParallelToolCalls
 	}
 	if req.Reasoning != nil {
-		if len(req.Reasoning.Raw) > 0 {
-			if reasoning := normalizeOpenAIReasoningPayload(req.Reasoning); len(reasoning) > 0 {
-				payload["reasoning"] = reasoning
-			}
-		} else if req.Reasoning.Effort != "" || req.Reasoning.Summary != "" {
-			reasoning := map[string]any{}
-			if req.Reasoning.Effort != "" {
-				reasoning["effort"] = req.Reasoning.Effort
-			}
-			if req.Reasoning.Summary != "" {
-				reasoning["summary"] = req.Reasoning.Summary
-			} else {
-				reasoning["summary"] = "auto"
-			}
-			if len(reasoning) > 0 {
-				payload["reasoning"] = reasoning
-			}
+		if reasoning := normalizeOpenAIReasoningPayload(req.Reasoning); len(reasoning) > 0 {
+			payload["reasoning"] = reasoning
 		}
 	}
 	if masqueradeTarget == config.MasqueradeTargetCodex {
 		ensureCodexReasoningInclude(payload)
+	}
+	if len(req.ResponsePromptCacheKey) > 0 {
+		payload["prompt_cache_key"] = append(json.RawMessage(nil), req.ResponsePromptCacheKey...)
+	}
+	if len(req.ResponsePromptCacheOptions) > 0 {
+		payload["prompt_cache_options"] = append(json.RawMessage(nil), req.ResponsePromptCacheOptions...)
+	}
+	if len(req.ResponseMultiAgent) > 0 {
+		payload["multi_agent"] = append(json.RawMessage(nil), req.ResponseMultiAgent...)
 	}
 	ensureResponsesPromptCacheKey(payload)
 	return json.Marshal(payload)
@@ -1270,11 +1321,24 @@ func injectResponsesItemReferences(input []map[string]any, referencesByCallID ma
 	if len(input) == 0 || len(referencesByCallID) == 0 {
 		return input
 	}
+	existingReferences := make(map[string]struct{})
+	for _, item := range input {
+		if itemType, _ := item["type"].(string); itemType != "item_reference" {
+			continue
+		}
+		if itemID, _ := item["id"].(string); itemID != "" {
+			existingReferences[itemID] = struct{}{}
+		}
+	}
 	withReferences := make([]map[string]any, 0, len(input)+len(referencesByCallID))
 	for _, item := range input {
 		if itemType, _ := item["type"].(string); itemType == "function_call_output" {
 			callID, _ := item["call_id"].(string)
 			if strings.TrimSpace(referencesByCallID[callID]) != "" {
+				if _, exists := existingReferences[callID]; exists {
+					withReferences = append(withReferences, item)
+					continue
+				}
 				withReferences = append(withReferences, map[string]any{"type": "item_reference", "id": callID})
 			}
 		}
@@ -1334,10 +1398,19 @@ func promptCacheInputPrefix(input any) any {
 		return input
 	}
 	const maxItems = 32
-	if len(items) <= maxItems {
-		return items
+	if len(items) > maxItems {
+		items = items[:maxItems]
 	}
-	return items[:maxItems]
+	normalized := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		// Item identity is request-ephemeral; retain the original graph in payload but not its cache seed.
+		seedItem := cloneMap(item)
+		for _, key := range []string{"id", "call_id", "item_id", "response_item_id"} {
+			delete(seedItem, key)
+		}
+		normalized = append(normalized, seedItem)
+	}
+	return normalized
 }
 
 func promptCacheInstructions(raw any) any {
@@ -1424,6 +1497,29 @@ func normalizeResponsesToolChoice(raw map[string]any) map[string]any {
 		choice["type"] = "function"
 	}
 	return choice
+}
+
+func normalizeResponsesCanonicalToolChoice(choice model.CanonicalToolChoice) any {
+	switch choice.Requirement {
+	case model.ToolChoiceOptional:
+		return "auto"
+	case model.ToolChoiceRequiredAny:
+		return "required"
+	case model.ToolChoiceRequiredNamed:
+		return map[string]any{"type": "function", "name": choice.Name}
+	case model.ToolChoiceNone:
+		return "none"
+	}
+	if choice.Raw != nil {
+		if value, ok := choice.Raw["value"]; ok {
+			return value
+		}
+		return normalizeResponsesToolChoice(choice.Raw)
+	}
+	if choice.Mode != "" {
+		return choice.Mode
+	}
+	return nil
 }
 
 func responsesStreamSafeInclude(value any) []string {
@@ -1524,7 +1620,8 @@ func buildResponsesUpstreamToolPayloads(tools []model.CanonicalTool, compatMode 
 }
 
 func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode string) map[string]any {
-	if normalizeResponsesToolCompatMode(compatMode) != config.ResponsesToolCompatModeFunctionOnly || strings.TrimSpace(tool.Type) == "function" {
+	trimmedType := strings.TrimSpace(tool.Type)
+	if normalizeResponsesToolCompatMode(compatMode) != config.ResponsesToolCompatModeFunctionOnly || (trimmedType != "custom" && trimmedType != "web_search") {
 		return buildPreservedResponsesToolPayload(tool)
 	}
 
@@ -1533,7 +1630,6 @@ func buildResponsesUpstreamToolPayload(tool model.CanonicalTool, compatMode stri
 		"name":        tool.Name,
 		"description": tool.Description,
 	}
-	trimmedType := strings.TrimSpace(tool.Type)
 	switch trimmedType {
 	case "custom":
 		entry["parameters"] = normalizeResponsesCustomToolParameters(tool.Parameters)
@@ -1636,26 +1732,44 @@ func normalizeOpenAIReasoningPayload(reasoning *model.CanonicalReasoning) map[st
 	if reasoning == nil {
 		return nil
 	}
-	if len(reasoning.Raw) == 0 {
-		return nil
-	}
 	raw := cloneMap(reasoning.Raw)
+	if len(raw) == 0 {
+		if reasoning.Mode == "" && reasoning.Effort == "" && reasoning.Summary == "" {
+			return nil
+		}
+		if reasoning.Effort != "" {
+			raw["effort"] = reasoning.Effort
+		}
+		if reasoning.Summary != "" {
+			raw["summary"] = reasoning.Summary
+		}
+	}
+	if reasoning.Mode != "" {
+		raw["mode"] = string(reasoning.Mode)
+	}
 	if anthropicThinkingDisabled(raw) {
-		return map[string]any{
+		return withTypedReasoningMode(map[string]any{
 			"effort":  "none",
 			"summary": reasoningSummaryOrAuto(raw, reasoning.Summary),
-		}
+		}, reasoning.Mode)
 	}
 	if inferred := inferReasoningEffortFromAnthropicRaw(raw); inferred != "" {
-		return map[string]any{
+		return withTypedReasoningMode(map[string]any{
 			"effort":  inferred,
 			"summary": reasoningSummaryOrAuto(raw, reasoning.Summary),
-		}
+		}, reasoning.Mode)
 	}
 	if _, ok := raw["summary"]; !ok {
 		raw["summary"] = reasoningSummaryOrAuto(raw, reasoning.Summary)
 	}
 	return raw
+}
+
+func withTypedReasoningMode(payload map[string]any, mode model.ReasoningMode) map[string]any {
+	if mode != "" {
+		payload["mode"] = string(mode)
+	}
+	return payload
 }
 
 func anthropicThinkingDisabled(raw map[string]any) bool {
@@ -1696,7 +1810,8 @@ func inferReasoningEffortFromAnthropicRaw(raw map[string]any) string {
 	if raw == nil {
 		return ""
 	}
-	if effort := anthropicOutputEffortToReasoningEffort(raw); effort != "" {
+	outputConfig, _ := raw["output_config"].(map[string]any)
+	if effort := anthropicOutputEffortToReasoningEffort(outputConfig); effort != "" {
 		return effort
 	}
 	thinking, _ := raw["thinking"].(map[string]any)
@@ -1788,8 +1903,10 @@ func buildReasoningInputItems(msg model.CanonicalMessage) []map[string]any {
 	if reasoningContent == "" {
 		return nil
 	}
-	if isSyntheticResponsesReasoningPlaceholder(msg.ReasoningBlocks, reasoningContent) {
-		return nil
+	for _, block := range msg.ReasoningBlocks {
+		if model.IsSyntheticResponsesReasoningPlaceholder(block) {
+			return nil
+		}
 	}
 	return []map[string]any{{
 		"type": "reasoning",
@@ -1804,22 +1921,10 @@ func isReplayableResponsesReasoningBlock(block map[string]any) bool {
 	if stringValue(block["type"]) != "reasoning" {
 		return false
 	}
-	if stringValue(block["id"]) == "rs_proxy" && strings.Contains(strings.TrimSpace(reasoningTextFromResponsesBlock(block)), "代理层占位") {
+	if model.IsSyntheticResponsesReasoningPlaceholder(block) {
 		return false
 	}
 	return stringValue(block["encrypted_content"]) != "" || normalizeResponsesReasoningInputText(reasoningTextFromResponsesBlock(block)) != ""
-}
-
-func isSyntheticResponsesReasoningPlaceholder(blocks []map[string]any, reasoningContent string) bool {
-	if !strings.Contains(strings.TrimSpace(reasoningContent), "代理层占位") {
-		return false
-	}
-	for _, block := range blocks {
-		if stringValue(block["type"]) == "reasoning" && stringValue(block["id"]) == "rs_proxy" {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizeResponsesReasoningInputText(text string) string {

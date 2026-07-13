@@ -3,6 +3,7 @@ package cacheinfo
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -892,5 +893,42 @@ func TestManager_ClearProviderHistoryResetsProviderAndRebuildsAggregates(t *test
 	}
 	if got := m.stats["openai"].Today.TotalTokens; got != 7 {
 		t.Fatalf("openai Today.TotalTokens = %d, want 7 after reusing request id post-clear", got)
+	}
+}
+
+func TestManagerRecordsCacheWriteOnlyForReportedUsage(t *testing.T) {
+	tmp := t.TempDir()
+	m := NewManager(tmp, time.UTC, []string{"openai"}, nil)
+
+	usages := []Usage{
+		{InputTokens: 100, TotalTokens: 100},
+		{InputTokens: 100, CacheWriteTokens: 0, CacheWriteReportedInputTokens: 100, TotalTokens: 100},
+		{InputTokens: 100, CacheWriteTokens: 10, CacheWriteReportedInputTokens: 100, TotalTokens: 100},
+	}
+	for index := range usages {
+		requestID := fmt.Sprintf("req-cache-write-%d", index)
+		if err := m.RecordFinalUsage(requestID, "openai", &usages[index]); err != nil {
+			t.Fatalf("RecordFinalUsage(%s): %v", requestID, err)
+		}
+	}
+
+	stats := m.stats["openai"]
+	if stats.Today.CacheWriteTokens != 10 {
+		t.Fatalf("Today.CacheWriteTokens = %d, want 10", stats.Today.CacheWriteTokens)
+	}
+	if stats.Today.CacheWriteReportedInputTokens != 200 {
+		t.Fatalf("Today.CacheWriteReportedInputTokens = %d, want 200", stats.Today.CacheWriteReportedInputTokens)
+	}
+	if stats.HistoryTotal.CacheWriteTokens != 10 || stats.HistoryTotal.CacheWriteReportedInputTokens != 200 {
+		t.Fatalf("HistoryTotal cache-write totals = %#v, want tokens=10 reported_input=200", stats.HistoryTotal)
+	}
+
+	m.flushAll()
+	persisted, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatalf("LoadProviderStats: %v", err)
+	}
+	if persisted == nil || persisted.Today.CacheWriteTokens != 10 || persisted.Today.CacheWriteReportedInputTokens != 200 {
+		t.Fatalf("persisted cache-write totals = %#v, want tokens=10 reported_input=200", persisted)
 	}
 }

@@ -45,19 +45,23 @@ func TestRenderProviderStats(t *testing.T) {
 				"[前一天]",
 				"输入Tokens：12,345",
 				"缓存Tokens：6,789",
+				"缓存写入Tokens：0",
 				"输出Tokens：2,345",
 				"总计Tokens：14,690",
 				"总调用次数：0",
 				"缓存率：54.99 %",
-				"* 相较于前一天：输入+ 12,345 | 缓存+ 6,789 | 输出+ 2,345 | 总计+ 14,690 | 缓存率：+ 54.99%",
+				"缓存写入覆盖率：0.00 %",
+				"* 相较于前一天：输入+ 12,345 | 缓存+ 6,789 | 缓存写入 = | 输出+ 2,345 | 总计+ 14,690 | 缓存率：+ 54.99% | 缓存写入覆盖率： =",
 				"[今天]",
 				"输入Tokens：45,678",
 				"缓存Tokens：21,000",
+				"缓存写入Tokens：0",
 				"输出Tokens：9,876",
 				"总计Tokens：55,554",
 				"总调用次数：0",
 				"缓存率：45.97 %",
-				"* 相较于前一天：输入+ 270.01% | 缓存+ 209.32% | 输出+ 321.15% | 总计+ 278.18% | 缓存率：- 9.02%",
+				"缓存写入覆盖率：0.00 %",
+				"* 相较于前一天：输入+ 270.01% | 缓存+ 209.32% | 缓存写入 = | 输出+ 321.15% | 总计+ 278.18% | 缓存率：- 9.02% | 缓存写入覆盖率： =",
 				"[提供商历史以来总计]",
 				"输入Tokens：99,999",
 				"缓存Tokens：50,000",
@@ -92,19 +96,23 @@ func TestRenderProviderStats(t *testing.T) {
 				"[前一天]",
 				"输入Tokens：0",
 				"缓存Tokens：0",
+				"缓存写入Tokens：0",
 				"输出Tokens：0",
 				"总计Tokens：0",
 				"总调用次数：0",
 				"缓存率：0.00 %",
-				"* 相较于前一天：输入 = | 缓存 = | 输出 = | 总计 = | 缓存率： =",
+				"缓存写入覆盖率：0.00 %",
+				"* 相较于前一天：输入 = | 缓存 = | 缓存写入 = | 输出 = | 总计 = | 缓存率： = | 缓存写入覆盖率： =",
 				"[今天]",
 				"输入Tokens：1,000",
 				"缓存Tokens：500",
+				"缓存写入Tokens：0",
 				"输出Tokens：200",
 				"总计Tokens：1,200",
 				"总调用次数：0",
 				"缓存率：50.00 %",
-				"* 相较于前一天：输入+ 1,000 | 缓存+ 500 | 输出+ 200 | 总计+ 1,200 | 缓存率：+ 50.00%",
+				"缓存写入覆盖率：0.00 %",
+				"* 相较于前一天：输入+ 1,000 | 缓存+ 500 | 缓存写入 = | 输出+ 200 | 总计+ 1,200 | 缓存率：+ 50.00% | 缓存写入覆盖率： =",
 			},
 		},
 		{
@@ -122,19 +130,23 @@ func TestRenderProviderStats(t *testing.T) {
 				"[前一天]",
 				"输入Tokens：0",
 				"缓存Tokens：0",
+				"缓存写入Tokens：0",
 				"输出Tokens：0",
 				"总计Tokens：0",
 				"总调用次数：0",
 				"缓存率：0.00 %",
-				"* 相较于前一天：输入 = | 缓存 = | 输出 = | 总计 = | 缓存率： =",
+				"缓存写入覆盖率：0.00 %",
+				"* 相较于前一天：输入 = | 缓存 = | 缓存写入 = | 输出 = | 总计 = | 缓存率： = | 缓存写入覆盖率： =",
 				"[今天]",
 				"输入Tokens：0",
 				"缓存Tokens：0",
+				"缓存写入Tokens：0",
 				"输出Tokens：0",
 				"总计Tokens：0",
 				"总调用次数：0",
 				"缓存率：0.00 %",
-				"* 相较于前一天：输入 = | 缓存 = | 输出 = | 总计 = | 缓存率： =",
+				"缓存写入覆盖率：0.00 %",
+				"* 相较于前一天：输入 = | 缓存 = | 缓存写入 = | 输出 = | 总计 = | 缓存率： = | 缓存写入覆盖率： =",
 			},
 		},
 		{
@@ -187,15 +199,20 @@ func TestRenderProviderStats(t *testing.T) {
 	}
 }
 
-func TestRenderProviderStatsOmitsCacheCreationLabel(t *testing.T) {
+func TestRenderProviderStatsIncludesCacheWriteCoverage(t *testing.T) {
 	got := RenderProviderStats(ProviderStats{
 		RecentDays: []DailyStats{{
 			Date:   "2026-03-27",
-			Totals: TokenTotals{InputTokens: 100, CachedTokens: 25, CacheCreationTokens: 10, OutputTokens: 40, TotalTokens: 140, RequestCount: 3},
+			Totals: TokenTotals{InputTokens: 100, CachedTokens: 25, CacheWriteTokens: 10, CacheWriteReportedInputTokens: 50, OutputTokens: 40, TotalTokens: 140, RequestCount: 3},
 		}},
-		HistoryTotal: TokenTotals{InputTokens: 100, CachedTokens: 25, CacheCreationTokens: 10, OutputTokens: 40, TotalTokens: 140, RequestCount: 3},
+		HistoryTotal: TokenTotals{InputTokens: 100, CachedTokens: 25, CacheWriteTokens: 10, CacheWriteReportedInputTokens: 50, OutputTokens: 40, TotalTokens: 140, RequestCount: 3},
 	})
-	if strings.Contains(got, "缓存创建Tokens") || strings.Contains(got, "缓存创建") {
-		t.Fatalf("expected txt rendering to omit cache creation wording, got:\n%s", got)
+	for _, want := range []string{"缓存写入Tokens：10", "缓存写入覆盖率：20.00 %"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected txt rendering to contain %q, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "缓存创建") {
+		t.Fatalf("expected txt rendering not to use cache creation wording, got:\n%s", got)
 	}
 }

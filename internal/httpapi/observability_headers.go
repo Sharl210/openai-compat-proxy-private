@@ -18,10 +18,12 @@ const (
 	headerClientToProxyServiceTier                 = "X-Client-To-Proxy-Service-Tier"
 	headerClientToProxyReasoningParameters         = "X-Client-To-Proxy-Reasoning-Parameters"
 	headerClientToProxyReasoningEffort             = "X-Client-To-Proxy-Reasoning-Effort"
+	headerClientToProxyReasoningMode               = "X-Client-To-Proxy-Reasoning-Mode"
 	headerClientToProxyNoPrompt                    = "X-Client-To-Proxy-NoPrompt"
 	headerSystemPromptAttach                       = "X-SYSTEM-PROMPT-ATTACH"
 	headerCacheInfoTimezone                        = "X-Cache-Info-Timezone"
 	headerThisUsageTokens                          = "X-This-Usage-Tokens"
+	headerThisUsageCacheWriteTokens                = "X-This-Usage-Cache-Write-Tokens"
 	headerProxyToUpstreamModel                     = "X-Proxy-To-Upstream-Model"
 	headerProxyEstimatedInputTokens                = "X-Proxy-Estimated-Input-Tokens"
 	headerProxyModelLimitContextTokens             = "X-Proxy-Model-Limit-Context-Tokens"
@@ -33,13 +35,18 @@ const (
 	headerProxyToUpstreamClaudeMetadataSessionID   = "X-Proxy-To-Upstream-Claude-Metadata-Session-Id"
 	headerProxyToUpstreamReasoningEffort           = "X-Proxy-To-Upstream-Reasoning-Effort"
 	headerProxyToUpstreamReasoningParameters       = "X-Proxy-To-Upstream-Reasoning-Parameters"
+	headerProxyToUpstreamReasoningMode             = "X-Proxy-To-Upstream-Reasoning-Mode"
 	headerProxyUpstreamRetryCount                  = "X-Proxy-Upstream-Retry-Count"
 	headerProxyUpstreamRetryDelay                  = "X-Proxy-Upstream-Retry-Delay"
 	headerProxyUpstreamAnthropicCacheControl       = "X-Proxy-Upstream-Anthropic-Cache-Control"
 	headerProviderTodayCacheRate                   = "X-Provider-Today-Cache-Rate"
 	headerProviderHistoryCacheRate                 = "X-Provider-History-Cache-Rate"
+	headerProviderTodayCacheWriteCoverage          = "X-Provider-Today-Cache-Write-Coverage"
+	headerProviderHistoryCacheWriteCoverage        = "X-Provider-History-Cache-Write-Coverage"
 	headerRootProviderTodayCacheRate               = "X-Root-Provider-Today-Cache-Rate"
 	headerRootProviderHistoryCacheRate             = "X-Root-Provider-History-Cache-Rate"
+	headerRootProviderTodayCacheWriteCoverage      = "X-Root-Provider-Today-Cache-Write-Coverage"
+	headerRootProviderHistoryCacheWriteCoverage    = "X-Root-Provider-History-Cache-Write-Coverage"
 )
 
 const (
@@ -141,6 +148,7 @@ func cloneCanonicalReasoning(reasoning *modelpkg.CanonicalReasoning) *modelpkg.C
 	cloned := &modelpkg.CanonicalReasoning{
 		Effort:  reasoning.Effort,
 		Summary: reasoning.Summary,
+		Mode:    reasoning.Mode,
 	}
 	if len(reasoning.Raw) > 0 {
 		cloned.Raw = cloneMap(reasoning.Raw)
@@ -149,15 +157,26 @@ func cloneCanonicalReasoning(reasoning *modelpkg.CanonicalReasoning) *modelpkg.C
 }
 
 func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalRequest, sourceModel string, requestEffort string, provider config.ProviderConfig, providerCfg config.Config) {
+	normalizeCanonicalModelAndReasoningForProxyModelIntent(canon, sourceModel, requestEffort, provider, providerCfg, modelpkg.ProxyModelIntent{})
+}
+
+func normalizeCanonicalModelAndReasoningForProxyModelIntent(canon *modelpkg.CanonicalRequest, sourceModel string, requestEffort string, provider config.ProviderConfig, providerCfg config.Config, intent modelpkg.ProxyModelIntent) {
 	if canon == nil {
 		return
 	}
-	if strings.TrimSpace(sourceModel) == "" {
+	if strings.TrimSpace(intent.BaseModel) != "" {
+		canon.Model = intent.BaseModel
+		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, intent.ReasoningEffort)
+	} else if strings.TrimSpace(sourceModel) == "" {
 		sourceModel = canon.Model
+		mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(sourceModel, requestEffort, provider.EnableReasoningEffortSuffix)
+		canon.Model = mappedModel
+		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
+	} else {
+		mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(sourceModel, requestEffort, provider.EnableReasoningEffortSuffix)
+		canon.Model = mappedModel
+		canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 	}
-	mappedModel, effort := provider.ResolveModelAndEffortWithRequestEffort(sourceModel, requestEffort, provider.EnableReasoningEffortSuffix)
-	canon.Model = mappedModel
-	canon.Reasoning = applyResolvedReasoningEffort(canon.Reasoning, effort)
 	if canon.Reasoning == nil {
 		summary := strings.TrimSpace(provider.ReasoningSummaryDetail)
 		if summary == "" {
@@ -189,6 +208,14 @@ func normalizeCanonicalModelAndReasoningForProvider(canon *modelpkg.CanonicalReq
 		}
 	}
 	canon.PassThroughRawReasoning = providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !provider.MapReasoningSuffixToAnthropicThinking
+}
+
+func normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(canon *modelpkg.CanonicalRequest, sourceModel string, requestEffort string, provider config.ProviderConfig, providerCfg config.Config, intent modelpkg.ProxyModelIntent) {
+	if intent.HasModelMapAlias || intent.ReasoningEffort != "" || intent.ReasoningMode != "" || intent.HasNoPrompt || intent.HasUltra {
+		normalizeCanonicalModelAndReasoningForProxyModelIntent(canon, sourceModel, requestEffort, provider, providerCfg, intent)
+		return
+	}
+	normalizeCanonicalModelAndReasoningForProvider(canon, sourceModel, requestEffort, provider, providerCfg)
 }
 
 func finalizeAnthropicReasoningForUpstream(canon *modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) {
@@ -316,7 +343,11 @@ func applyProviderOpenAIServiceTierOverride(canon *modelpkg.CanonicalRequest, pr
 	canon.PreservedTopLevelFields["service_tier"] = provider.OpenAIServiceTier
 }
 
-func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, providerID string, canon *modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string) error {
+func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, providerID string, canon *modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string, reasoningModeFallback *reasoningModeFallbackCoordinator) error {
+	return setDirectionalObservabilityHeadersWithClientReasoningMode(w, r, provider, providerCfg, providerID, canon, clientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort, "", reasoningModeFallback)
+}
+
+func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWriter, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, providerID string, canon *modelpkg.CanonicalRequest, clientModel string, clientServiceTier string, clientReasoningParameters string, clientReasoningEffort string, clientReasoningMode string, reasoningModeFallback *reasoningModeFallbackCoordinator) error {
 	if canon == nil {
 		return nil
 	}
@@ -330,6 +361,8 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set(headerClientToProxyServiceTier, strings.TrimSpace(clientServiceTier))
 	w.Header().Set(headerClientToProxyReasoningParameters, strings.TrimSpace(clientReasoningParameters))
 	w.Header().Set(headerClientToProxyReasoningEffort, strings.TrimSpace(clientReasoningEffort))
+	w.Header().Set(headerClientToProxyReasoningMode, strings.TrimSpace(clientReasoningMode))
+	w.Header().Set(headerProxyToUpstreamReasoningMode, proxyToUpstreamReasoningMode(*canon, reasoningModeFallback))
 	if canon.SkipProviderSystemPrompt {
 		w.Header().Set(headerClientToProxyNoPrompt, "true")
 	} else {
@@ -347,6 +380,15 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(*canon, preview)))
 	w.Header().Set(headerProxyToUpstreamReasoningParameters, strings.TrimSpace(preview.ReasoningParameters))
 	w.Header().Set(headerThisUsageTokens, "")
+	w.Header().Set(headerThisUsageCacheWriteTokens, "")
+	for _, header := range []string{
+		headerProviderTodayCacheWriteCoverage,
+		headerProviderHistoryCacheWriteCoverage,
+		headerRootProviderTodayCacheWriteCoverage,
+		headerRootProviderHistoryCacheWriteCoverage,
+	} {
+		w.Header().Set(header, formatCacheRatePercentage(0))
+	}
 	w.Header().Set(headerProxyUpstreamRetryCount, strconv.Itoa(providerCfg.UpstreamRetryCount))
 	w.Header().Set(headerProxyUpstreamRetryDelay, providerCfg.UpstreamRetryDelay.String())
 	w.Header().Set(headerProxyUpstreamAnthropicCacheControl, strings.TrimSpace(providerCfg.UpstreamCacheControl))
@@ -354,6 +396,57 @@ func setDirectionalObservabilityHeaders(w http.ResponseWriter, r *http.Request, 
 	setClaudeMetadataObservabilityHeaders(w, providerCfg, *canon)
 	setCacheRateHeaders(w, r, providerID)
 	return nil
+}
+
+func clientReasoningModeForRequest(rawClientModel string, canon modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) string {
+	intent, parsed := provider.ParseProxyModelIntentWithReasoningMode(rawClientModel, providerCfg.EnableNoPromptModelSuffix, providerCfg.EffectiveEnableReasoningModeSuffix())
+	if parsed && intent.ReasoningMode != "" {
+		return intent.ReasoningMode
+	}
+	return clientToProxyReasoningMode(canon)
+}
+
+func setReasoningModeObservabilityHeaders(w http.ResponseWriter, canon modelpkg.CanonicalRequest, fallback *reasoningModeFallbackCoordinator) {
+	if _, exists := w.Header()[http.CanonicalHeaderKey(headerClientToProxyReasoningMode)]; !exists {
+		w.Header().Set(headerClientToProxyReasoningMode, clientToProxyReasoningMode(canon))
+	}
+	setProxyToUpstreamReasoningModeHeader(w, canon, fallback)
+}
+
+func refreshFallbackUpstreamReasoningObservabilityHeaders(w http.ResponseWriter, canon modelpkg.CanonicalRequest, providerCfg config.Config) error {
+	preview, err := upstream.PreviewRequestObservability(canon, providerCfg.UpstreamEndpointType, providerCfg.MasqueradeTarget, providerCfg.InjectClaudeCodeMetadataUserID, providerCfg.InjectClaudeCodeSystemPrompt)
+	if err != nil {
+		return err
+	}
+	w.Header().Set(headerProxyToUpstreamReasoningEffort, strings.TrimSpace(proxyToUpstreamReasoningEffort(canon, preview)))
+	w.Header().Set(headerProxyToUpstreamReasoningParameters, strings.TrimSpace(preview.ReasoningParameters))
+	return nil
+}
+
+func setProxyToUpstreamReasoningModeHeader(w http.ResponseWriter, canon modelpkg.CanonicalRequest, fallback *reasoningModeFallbackCoordinator) {
+	w.Header().Set(headerProxyToUpstreamReasoningMode, proxyToUpstreamReasoningMode(canon, fallback))
+}
+
+func clientToProxyReasoningMode(canon modelpkg.CanonicalRequest) string {
+	switch canon.ReasoningModeOrigin {
+	case modelpkg.ReasoningModeOriginSuffix:
+		return string(modelpkg.ReasoningModePro)
+	case modelpkg.ReasoningModeOriginBody:
+		if canon.Reasoning != nil {
+			return strings.TrimSpace(string(canon.Reasoning.Mode))
+		}
+	}
+	return ""
+}
+
+func proxyToUpstreamReasoningMode(canon modelpkg.CanonicalRequest, fallback *reasoningModeFallbackCoordinator) string {
+	if fallback != nil && (fallback.modeUnsupported || fallback.retried) {
+		return "pro_failed:model_unsupported"
+	}
+	if canon.Reasoning == nil {
+		return ""
+	}
+	return strings.TrimSpace(string(canon.Reasoning.Mode))
 }
 
 func setClaudeMetadataObservabilityHeaders(w http.ResponseWriter, providerCfg config.Config, canon modelpkg.CanonicalRequest) {
@@ -386,26 +479,41 @@ func formatThisUsageTokens(usage map[string]any) string {
 		return ""
 	}
 	inputTokens, ok := usageNumberAsInt64(usage["input_tokens"])
+	if !ok || inputTokens == 0 {
+		if promptTokens, promptOK := usageNumberAsInt64(usage["prompt_tokens"]); promptOK {
+			inputTokens = promptTokens
+			ok = true
+		}
+	}
 	if !ok || inputTokens <= 0 {
 		return ""
 	}
 	outputTokens, ok := usageNumberAsInt64(usage["output_tokens"])
+	if !ok || outputTokens == 0 {
+		if completionTokens, completionOK := usageNumberAsInt64(usage["completion_tokens"]); completionOK {
+			outputTokens = completionTokens
+			ok = true
+		}
+	}
 	if !ok || outputTokens < 0 {
 		return ""
 	}
 	cachedTokens := int64(0)
-	if details, _ := usage["input_tokens_details"].(map[string]any); len(details) > 0 {
-		if n, ok := usageNumberAsInt64(details["cached_tokens"]); ok && n > 0 {
-			cachedTokens = n
-		}
-	} else if details, _ := usage["prompt_tokens_details"].(map[string]any); len(details) > 0 {
-		if n, ok := usageNumberAsInt64(details["cached_tokens"]); ok && n > 0 {
-			cachedTokens = n
-		}
-	} else if n, ok := usageNumberAsInt64(usage["cached_tokens"]); ok && n > 0 {
+	if n, ok := cachedTokensFromUsage(usage); ok && n > 0 {
 		cachedTokens = n
 	}
+	if cacheWriteTokens, reported := cacheWriteTokensFromUsage(usage); reported {
+		return "↑ " + formatUsageTokensNumber(inputTokens) + "(" + formatUsageTokensNumber(cachedTokens) + " cached, " + formatUsageTokensNumber(cacheWriteTokens) + " cache-write) | ↓ " + formatUsageTokensNumber(outputTokens)
+	}
 	return formatThisUsageTokensValue(inputTokens, cachedTokens, outputTokens)
+}
+
+func formatThisUsageCacheWriteTokens(usage map[string]any) string {
+	cacheWriteTokens, reported := cacheWriteTokensFromUsage(usage)
+	if !reported {
+		return ""
+	}
+	return strconv.FormatInt(cacheWriteTokens, 10)
 }
 
 func formatThisUsageTokensValue(inputTokens int64, cachedTokens int64, outputTokens int64) string {
@@ -459,10 +567,12 @@ func setCacheRateHeaders(w http.ResponseWriter, r *http.Request, providerID stri
 	}
 	if providerStats, ok := manager.ProviderStatsSnapshot(providerID); ok {
 		setCacheRateHeaderPair(w, headerProviderTodayCacheRate, headerProviderHistoryCacheRate, providerStats)
+		setCacheWriteCoverageHeaderPair(w, headerProviderTodayCacheWriteCoverage, headerProviderHistoryCacheWriteCoverage, providerStats)
 	}
 	if info.Legacy {
 		if rootStats := rootProviderStatsSnapshot(r, manager); rootStats != nil {
 			setCacheRateHeaderPair(w, headerRootProviderTodayCacheRate, headerRootProviderHistoryCacheRate, rootStats)
+			setCacheWriteCoverageHeaderPair(w, headerRootProviderTodayCacheWriteCoverage, headerRootProviderHistoryCacheWriteCoverage, rootStats)
 		}
 	}
 }
@@ -495,6 +605,14 @@ func setCacheRateHeaderPair(w http.ResponseWriter, todayHeader string, historyHe
 	}
 	w.Header().Set(todayHeader, formatCacheRatePercentage(cacheinfo.DailyCacheRate(*stats)))
 	w.Header().Set(historyHeader, formatCacheRatePercentage(cacheinfo.ProviderCacheRate(*stats)))
+}
+
+func setCacheWriteCoverageHeaderPair(w http.ResponseWriter, todayHeader string, historyHeader string, stats *cacheinfo.ProviderStats) {
+	if stats == nil {
+		return
+	}
+	w.Header().Set(todayHeader, formatCacheRatePercentage(cacheinfo.DailyCacheWriteCoverage(*stats)))
+	w.Header().Set(historyHeader, formatCacheRatePercentage(cacheinfo.ProviderCacheWriteCoverage(*stats)))
 }
 
 func formatCacheRatePercentage(rate float64) string {
@@ -533,17 +651,23 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		"X-Provider-Name",
 		headerProviderTodayCacheRate,
 		headerProviderHistoryCacheRate,
+		headerProviderTodayCacheWriteCoverage,
+		headerProviderHistoryCacheWriteCoverage,
 		"X-Root-Env-Version",
 		headerRootProviderTodayCacheRate,
 		headerRootProviderHistoryCacheRate,
+		headerRootProviderTodayCacheWriteCoverage,
+		headerRootProviderHistoryCacheWriteCoverage,
 		headerCacheInfoTimezone,
 		headerThisUsageTokens,
+		headerThisUsageCacheWriteTokens,
 		"X-Provider-Version",
 		headerSystemPromptAttach,
 		headerClientToProxyModel,
 		headerClientToProxyServiceTier,
 		headerClientToProxyReasoningParameters,
 		headerClientToProxyReasoningEffort,
+		headerClientToProxyReasoningMode,
 		headerClientToProxyNoPrompt,
 		headerProxyToUpstreamModel,
 		headerProxyEstimatedInputTokens,
@@ -552,6 +676,7 @@ func clearTransparencyHeaders(w http.ResponseWriter) {
 		headerProxyToUpstreamMaxOutputTokens,
 		headerProxyToUpstreamReasoningEffort,
 		headerProxyToUpstreamReasoningParameters,
+		headerProxyToUpstreamReasoningMode,
 		headerProxyUpstreamRetryCount,
 		headerProxyUpstreamRetryDelay,
 		headerProxyUpstreamAnthropicCacheControl,
