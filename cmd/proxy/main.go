@@ -9,6 +9,7 @@ import (
 
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/diagnostics"
 	"openai-compat-proxy/internal/httpapi"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/tokenestimator"
@@ -25,6 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer closeFn()
+	defer diagnostics.StartHeapCaptureSignalHandler(log.Printf)()
 	if err := store.StartWatching(context.Background(), 300*time.Millisecond, 5*time.Second); err != nil {
 		log.Fatal(err)
 	}
