@@ -32,6 +32,37 @@ func TestBuildEstimatorSnapshotCountsResponsesReasoningAndToolShape(t *testing.T
 	}
 }
 
+func TestWithTokenEstimatorObservationDropsCanonicalRequest(t *testing.T) {
+	canon := modelpkg.CanonicalRequest{
+		Model: "gpt-5.4",
+		ResponseInputItems: []map[string]any{
+			{"type": "reasoning", "summary": []map[string]any{{"text": "trace"}}},
+		},
+		Messages: []modelpkg.CanonicalMessage{{
+			Role: "assistant",
+			ToolCalls: []modelpkg.CanonicalToolCall{{
+				ID: "call_1", Type: "function", Name: "search_web",
+			}},
+		}},
+	}
+
+	ctx := withTokenEstimatorObservation(context.Background(), tokenEstimatorObservationInput{
+		ProviderID:         "codex-2",
+		EndpointType:       "responses",
+		FinalUpstreamModel: "gpt-5.4",
+		BaseEstimate:       123,
+		Canon:              canon,
+	})
+
+	stored, ok := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
+	if !ok {
+		t.Fatal("expected token estimator observation in context")
+	}
+	if stored.Canon.Model != "" || len(stored.Canon.Messages) != 0 || len(stored.Canon.ResponseInputItems) != 0 {
+		t.Fatalf("expected context observation to drop canonical request, got %#v", stored.Canon)
+	}
+}
+
 func TestEstimateCanonicalInputTokensStillUsesBaseEstimatorOnly(t *testing.T) {
 	canon := modelpkg.CanonicalRequest{Model: "gpt-5.4", Messages: []modelpkg.CanonicalMessage{{Role: "user", Parts: []modelpkg.CanonicalContentPart{{Type: "text", Text: "hello world"}}}}}
 	if got := estimateCanonicalInputTokens(canon); got <= 0 {

@@ -21,6 +21,7 @@ type tokenEstimatorObservationInput struct {
 	FinalUpstreamModel string
 	BaseEstimate       int64
 	Canon              modelpkg.CanonicalRequest
+	Snapshot           estimatorSnapshot
 	Now                time.Time
 	Usage              usageTotals
 }
@@ -143,11 +144,16 @@ func isMultimodalPart(part modelpkg.CanonicalContentPart) bool {
 }
 
 func withTokenEstimatorObservation(ctx context.Context, input tokenEstimatorObservationInput) context.Context {
+	input.Snapshot = buildEstimatorSnapshot(input.Canon)
+	input.Canon = modelpkg.CanonicalRequest{}
 	return context.WithValue(ctx, tokenEstimatorObservationKey, input)
 }
 
 func buildTokenEstimatorObservation(input tokenEstimatorObservationInput) tokenestimator.Observation {
-	snap := buildEstimatorSnapshot(input.Canon)
+	snap := input.Snapshot
+	if snap == (estimatorSnapshot{}) && input.Canon.Model != "" {
+		snap = buildEstimatorSnapshot(input.Canon)
+	}
 	uncached := input.Usage.InputTokens - input.Usage.CachedTokens
 	if uncached < 0 {
 		uncached = 0
