@@ -73,6 +73,10 @@ func stableSemanticProxyHeaders(header http.Header) map[string]string {
 	excluded := map[string]bool{
 		"X-Provider-Today-Cache-Rate": true, "X-Provider-History-Cache-Rate": true,
 		"X-Root-Provider-Today-Cache-Rate": true, "X-Root-Provider-History-Cache-Rate": true,
+		"X-This-Usage-Cache-Write-Tokens": true,
+		"X-Provider-Today-Cache-Write-Coverage": true, "X-Provider-History-Cache-Write-Coverage": true,
+		"X-Root-Provider-Today-Cache-Write-Coverage": true, "X-Root-Provider-History-Cache-Write-Coverage": true,
+		"X-Client-To-Proxy-Reasoning-Mode": true, "X-Proxy-To-Upstream-Reasoning-Mode": true,
 		"X-Root-Env-Version": true, "X-Provider-Version": true,
 	}
 	result := make(map[string]string, len(header))
