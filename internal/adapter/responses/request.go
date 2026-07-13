@@ -1,7 +1,6 @@
 package responses
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,33 +11,32 @@ import (
 )
 
 type request struct {
-	Model              string          `json:"model"`
-	Stream             bool            `json:"stream"`
-	Store              *bool           `json:"store"`
-	Include            []string        `json:"include"`
-	PreviousResponseID string          `json:"previous_response_id"`
-	Metadata           json.RawMessage `json:"metadata"`
-	ParallelToolCalls  *bool           `json:"parallel_tool_calls"`
-	Truncation         json.RawMessage `json:"truncation"`
-	Text               json.RawMessage `json:"text"`
-	Instructions       json.RawMessage `json:"instructions"`
-	Input              requestInput    `json:"input"`
-	Tools              []tool          `json:"tools"`
-	ToolChoice         any             `json:"tool_choice"`
-	Reasoning          *reasoning      `json:"reasoning"`
-	Temperature        json.RawMessage `json:"temperature"`
-	TopP               json.RawMessage `json:"top_p"`
-	MaxOutputTokensRaw json.RawMessage `json:"max_output_tokens"`
-	Stop               []string        `json:"stop"`
-	PromptCacheKey     json.RawMessage `json:"prompt_cache_key"`
-	PromptCacheOptions json.RawMessage `json:"prompt_cache_options"`
-	MultiAgent         json.RawMessage `json:"multi_agent"`
+	Model                     string          `json:"model"`
+	Stream                    bool            `json:"stream"`
+	Store                     *bool           `json:"store"`
+	Include                   []string        `json:"include"`
+	PreviousResponseID        string          `json:"previous_response_id"`
+	Metadata                  json.RawMessage `json:"metadata"`
+	ParallelToolCalls         *bool           `json:"parallel_tool_calls"`
+	Truncation                json.RawMessage `json:"truncation"`
+	Text                      json.RawMessage `json:"text"`
+	Instructions              json.RawMessage `json:"instructions"`
+	Input                     requestInput    `json:"input"`
+	Tools                     []tool          `json:"tools"`
+	ToolChoice                any             `json:"tool_choice"`
+	Reasoning                 *reasoning      `json:"reasoning"`
+	Temperature               json.RawMessage `json:"temperature"`
+	TopP                      json.RawMessage `json:"top_p"`
+	MaxOutputTokensRaw        json.RawMessage `json:"max_output_tokens"`
+	Stop                      []string        `json:"stop"`
+	PromptCacheKey            json.RawMessage `json:"prompt_cache_key"`
+	PromptCacheOptions        json.RawMessage `json:"prompt_cache_options"`
+	MultiAgent                json.RawMessage `json:"multi_agent"`
+	inputWasString            bool            `json:"-"`
+	passthroughTopLevelFields map[string]any  `json:"-"`
 }
 
-type requestInput struct {
-	items             []json.RawMessage
-	originalItemGraph bool
-}
+type requestInput []json.RawMessage
 
 type message struct {
 	Role       string          `json:"role"`
@@ -93,26 +91,62 @@ type reasoning struct {
 	Raw     map[string]any `json:"-"`
 }
 
+func (r *request) UnmarshalJSON(data []byte) error {
+	type alias request
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawFields); err != nil {
+		return err
+	}
+	passthrough := make(map[string]any)
+	for key, raw := range rawFields {
+		if isKnownRequestField(key) {
+			continue
+		}
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		passthrough[key] = value
+	}
+
+	*r = request(decoded)
+	if inputRaw, ok := rawFields["input"]; ok {
+		var inputText string
+		r.inputWasString = json.Unmarshal(inputRaw, &inputText) == nil
+	}
+	r.passthroughTopLevelFields = passthrough
+	return nil
+}
+
+func isKnownRequestField(key string) bool {
+	switch key {
+	case "model", "stream", "store", "include", "previous_response_id", "metadata",
+		"parallel_tool_calls", "truncation", "text", "instructions", "input", "tools",
+		"tool_choice", "reasoning", "temperature", "top_p", "max_output_tokens", "stop",
+		"prompt_cache_key", "prompt_cache_options", "multi_agent":
+		return true
+	default:
+		return false
+	}
+}
+
 const preservedResponsesTopLevelFieldsKey = "__openai_compat_responses_top_level"
 
 func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return model.CanonicalRequest{}, err
-	}
 	var req request
-	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
-		return model.CanonicalRequest{}, err
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(body, &raw); err != nil {
+	if err := json.NewDecoder(r).Decode(&req); err != nil {
 		return model.CanonicalRequest{}, err
 	}
 
 	canon := model.CanonicalRequest{
 		Model:                         req.Model,
 		Stream:                        req.Stream,
-		PreservedTopLevelFields:       collectPassthroughTopLevelFields(raw, req),
+		PreservedTopLevelFields:       collectPassthroughTopLevelFields(req),
 		ResponseStore:                 req.Store,
 		ResponseInclude:               append([]string(nil), req.Include...),
 		ResponsePromptCacheKey:        cloneRawMessage(req.PromptCacheKey),
@@ -125,7 +159,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		Stop:                          req.Stop,
 		ParallelToolCalls:             req.ParallelToolCalls,
 		ReasoningModeOrigin:           model.ReasoningModeOriginNone,
-		ResponseInputItemsAreOriginal: req.Input.originalItemGraph,
+		ResponseInputItemsAreOriginal: !req.inputWasString,
 	}
 	for _, inc := range req.Include {
 		if inc == "usage" {
@@ -189,7 +223,8 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 
 	var inputInstructions []string
 	functionCallIDs := make(map[string]struct{})
-	for _, rawItem := range req.Input.items {
+	for idx, rawItem := range req.Input {
+		req.Input[idx] = nil
 		if len(rawItem) == 0 {
 			continue
 		}
@@ -773,8 +808,7 @@ func (ri *requestInput) UnmarshalJSON(data []byte) error {
 
 	var multi []json.RawMessage
 	if err := json.Unmarshal(data, &multi); err == nil {
-		ri.items = multi
-		ri.originalItemGraph = true
+		*ri = requestInput(multi)
 		return nil
 	}
 
@@ -787,8 +821,7 @@ func (ri *requestInput) UnmarshalJSON(data []byte) error {
 		if err != nil {
 			return err
 		}
-		ri.items = []json.RawMessage{wrapped}
-		ri.originalItemGraph = false
+		*ri = requestInput{wrapped}
 		return nil
 	}
 
@@ -796,8 +829,7 @@ func (ri *requestInput) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &rawItem); err != nil {
 		return err
 	}
-	ri.items = []json.RawMessage{rawItem}
-	ri.originalItemGraph = true
+	*ri = requestInput{rawItem}
 	return nil
 }
 
@@ -900,21 +932,12 @@ func isUndefinedString(value string) bool {
 	return value == "[undefined]" || value == "undefined" || value == ""
 }
 
-func collectPassthroughTopLevelFields(raw map[string]any, req request) map[string]any {
-	fields := map[string]any{}
-	known := map[string]struct{}{
-		"model": {}, "stream": {}, "store": {}, "include": {}, "previous_response_id": {}, "metadata": {},
-		"parallel_tool_calls": {}, "truncation": {}, "text": {}, "instructions": {}, "input": {}, "tools": {},
-		"tool_choice": {}, "reasoning": {}, "temperature": {}, "top_p": {}, "max_output_tokens": {}, "stop": {},
-		"prompt_cache_key": {}, "prompt_cache_options": {}, "multi_agent": {},
-	}
-	for key, value := range raw {
-		if _, ok := known[key]; ok {
-			continue
-		}
-		fields[key] = value
-	}
+func collectPassthroughTopLevelFields(req request) map[string]any {
+	fields := req.passthroughTopLevelFields
 	if preserved := collectResponseEchoTopLevelFields(req); len(preserved) > 0 {
+		if fields == nil {
+			fields = make(map[string]any, len(preserved))
+		}
 		for key, value := range preserved {
 			fields[key] = value
 		}

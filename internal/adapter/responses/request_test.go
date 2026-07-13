@@ -177,6 +177,22 @@ func TestDecodeRequestNormalizesRequiredToolChoice(t *testing.T) {
 	}
 }
 
+func TestRequestUnmarshalJSONPreservesUnknownTopLevelFieldsSeparately(t *testing.T) {
+	var req request
+	if err := json.Unmarshal([]byte(`{"model":"gpt-5","input":"hello","extension":{"nested":{"value":"kept"}}}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+
+	extension, ok := req.passthroughTopLevelFields["extension"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected unknown extension field, got %#v", req.passthroughTopLevelFields)
+	}
+	nested, ok := extension["nested"].(map[string]any)
+	if !ok || nested["value"] != "kept" {
+		t.Fatalf("expected nested extension value to survive, got %#v", extension)
+	}
+}
+
 func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	req := `{
 		"model":"gpt-5",
