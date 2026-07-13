@@ -1,9 +1,34 @@
 package chat
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDecodeRequestRecordsBodyReasoningMode(t *testing.T) {
+	// Given
+	requestBody := `{"model":"model","reasoning":{"mode":"pro","effort":"low","summary":"detailed","vendor_option":"keep"},"messages":[{"role":"user","content":"hello"}]}`
+
+	// When
+	canon, err := DecodeRequest(strings.NewReader(requestBody))
+
+	// Then
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.Reasoning == nil || canon.Reasoning.Raw["mode"] != "pro" || canon.Reasoning.Raw["vendor_option"] != "keep" {
+		t.Fatalf("expected body reasoning payload preserved, got %#v", canon.Reasoning)
+	}
+	mode := reflect.ValueOf(canon.Reasoning).Elem().FieldByName("Mode")
+	if !mode.IsValid() || mode.Type().Name() != "ReasoningMode" || mode.String() != "pro" {
+		t.Fatalf("expected typed mode pro, got %#v", canon.Reasoning)
+	}
+	origin := reflect.ValueOf(canon).FieldByName("ReasoningModeOrigin")
+	if !origin.IsValid() || origin.Type().Name() != "ReasoningModeOrigin" || origin.String() != "body" {
+		t.Fatalf("expected body mode origin, got %#v", canon)
+	}
+}
 
 func TestDecodeRequestAcceptsAssistantNullContentWithToolCalls(t *testing.T) {
 	req := `{
@@ -88,6 +113,42 @@ func TestDecodeRequestPreservesClientToolOrderForCanonicalization(t *testing.T) 
 	}
 	if canon.Tools[0].Name != "workspace_shell" || canon.Tools[1].Name != "search_web" {
 		t.Fatalf("expected client tool order preserved in canonical form, got %#v", canon.Tools)
+	}
+}
+
+func TestDecodeRequestPreservesParallelToolCallsTriState(t *testing.T) {
+	trueValue, falseValue := true, false
+	for _, tc := range []struct {
+		name string
+		body string
+		want *bool
+	}{
+		{name: "unspecified", body: `{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}]}`},
+		{name: "allowed", body: `{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}],"parallel_tool_calls":true}`, want: &trueValue},
+		{name: "disabled", body: `{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}],"parallel_tool_calls":false}`, want: &falseValue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			canon, err := DecodeRequest(strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("DecodeRequest error: %v", err)
+			}
+			if canon.ParallelToolCalls == nil || tc.want == nil || *canon.ParallelToolCalls != *tc.want {
+				if canon.ParallelToolCalls == nil && tc.want == nil {
+					return
+				}
+				t.Fatalf("expected ParallelToolCalls %#v, got %#v", tc.want, canon.ParallelToolCalls)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestNormalizesNamedToolChoice(t *testing.T) {
+	canon, err := DecodeRequest(strings.NewReader(`{"model":"gpt-5.6","messages":[{"role":"user","content":"hello"}],"tool_choice":{"type":"function","function":{"name":"lookup"}}}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if got := string(canon.ToolChoice.Requirement); got != "required_named" || canon.ToolChoice.Name != "lookup" {
+		t.Fatalf("expected required named lookup choice, got %#v", canon.ToolChoice)
 	}
 }
 

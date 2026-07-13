@@ -125,6 +125,36 @@ func TestLoadProviderStats_NormalRecovery(t *testing.T) {
 	}
 }
 
+func TestLoadProviderStats_LegacyCacheWriteWithoutDenominatorRemainsUnknown(t *testing.T) {
+	tmp := t.TempDir()
+	if err := EnsureCacheInfoDir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := `{"timezone":"UTC","today_date":"2026-03-27","today":{"input_tokens":100,"cache_write_tokens":12},"history_total":{"input_tokens":100,"cache_write_tokens":12}}`
+	path := expectedCacheInfoJSONPath(tmp, "openai")
+	if err := os.WriteFile(path, []byte(legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatalf("LoadProviderStats() error: %v", err)
+	}
+	if stats == nil {
+		t.Fatal("expected non-nil stats")
+	}
+	if stats.Today.CacheWriteTokens != 12 {
+		t.Fatalf("Today.CacheWriteTokens = %d, want 12", stats.Today.CacheWriteTokens)
+	}
+	if stats.Today.CacheWriteReportedInputTokens != 0 {
+		t.Fatalf("Today.CacheWriteReportedInputTokens = %d, want 0 for legacy JSON without denominator", stats.Today.CacheWriteReportedInputTokens)
+	}
+	if got := DailyCacheWriteCoverage(*stats); got != 0 {
+		t.Fatalf("DailyCacheWriteCoverage() = %.2f, want 0 for unknown denominator", got)
+	}
+}
+
 func TestLoadProviderStats_LegacyFallback(t *testing.T) {
 	tmp := t.TempDir()
 	if err := EnsureCacheInfoDir(tmp); err != nil {

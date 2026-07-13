@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -260,6 +261,137 @@ func TestRewriteModelsBodyDoesNotExposeReasoningSuffixModelsWhenDisabled(t *test
 			t.Fatalf("expected suffix model %q to stay hidden from /models when exposure is disabled, got %#v", hidden, ids)
 		}
 	}
+}
+
+func TestRewriteModelsBodyExposesCanonicalReasoningModeVariants(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		EnableReasoningEffortSuffix:     true,
+		ExposeReasoningSuffixModels:     true,
+		EnableReasoningModeSuffix:       true,
+		ExposeReasoningModeSuffixModels: true,
+		ReasoningModeProCapability:      config.ReasoningModeProCapabilitySupported,
+	}
+
+	ids := modelIDsFromRewrittenBody(t, rewriteModelsBody(body, provider))
+	for _, want := range []string{"gpt-5.5-pro", "gpt-5.5-low-pro", "gpt-5.5-xhigh-pro"} {
+		if !contains(ids, want) {
+			t.Fatalf("expected canonical reasoning mode variant %q, got %#v", want, ids)
+		}
+	}
+	for _, unwanted := range []string{"gpt-5.5-pro-low", "gpt-5.5-noprompt", "gpt-5.5-low-noprompt", "gpt-5.5-pro-noprompt"} {
+		if contains(ids, unwanted) {
+			t.Fatalf("expected no generated non-canonical variant %q, got %#v", unwanted, ids)
+		}
+	}
+}
+
+func TestRewriteModelsBodyExposesCanonicalProVariantForSupportedAndProbeOnly(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"},{"id":"gpt-5.5","object":"model"}]}`)
+	for capability, wantIDs := range map[config.ReasoningModeProCapability][]string{
+		config.ReasoningModeProCapabilitySupported:   {"gpt-5.5", "gpt-5.5-pro"},
+		config.ReasoningModeProCapabilityProbe:       {"gpt-5.5", "gpt-5.5-pro"},
+		config.ReasoningModeProCapabilityUnsupported: {"gpt-5.5"},
+	} {
+		provider := config.ProviderConfig{
+			EnableReasoningModeSuffix:       true,
+			ExposeReasoningModeSuffixModels: true,
+			ReasoningModeProCapability:      capability,
+		}
+		ids := modelIDsFromRewrittenBody(t, rewriteModelsBody(body, provider))
+		if !reflect.DeepEqual(ids, wantIDs) {
+			t.Fatalf("capability %q: expected ordered ids %#v, got %#v", capability, wantIDs, ids)
+		}
+	}
+}
+
+func TestRewriteModelsBodyDoesNotExposeUltraVariants(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.6","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		EnableReasoningEffortSuffix:     true,
+		ExposeReasoningSuffixModels:     true,
+		EnableReasoningModeSuffix:       true,
+		ExposeReasoningModeSuffixModels: true,
+		ReasoningModeProCapability:      config.ReasoningModeProCapabilitySupported,
+		SupportsResponsesMultiAgent:     true,
+	}
+
+	ids := modelIDsFromRewrittenBody(t, rewriteModelsBody(body, provider))
+	for _, unexpected := range []string{"gpt-5.6-ultra", "gpt-5.6-high-ultra", "gpt-5.6-pro-ultra"} {
+		if contains(ids, unexpected) {
+			t.Fatalf("ultra must not be exposed by /models: %#v", ids)
+		}
+	}
+}
+
+func TestRewriteModelsBodySuppressesUnsupportedReasoningModeVariants(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		EnableReasoningEffortSuffix:     true,
+		ExposeReasoningSuffixModels:     true,
+		EnableReasoningModeSuffix:       true,
+		ExposeReasoningModeSuffixModels: true,
+		ReasoningModeProCapability:      config.ReasoningModeProCapabilityUnsupported,
+	}
+
+	ids := modelIDsFromRewrittenBody(t, rewriteModelsBody(body, provider))
+	for _, unwanted := range []string{"gpt-5.5-pro", "gpt-5.5-low-pro"} {
+		if contains(ids, unwanted) {
+			t.Fatalf("expected unsupported reasoning mode variant %q to stay hidden, got %#v", unwanted, ids)
+		}
+	}
+}
+
+func TestRewriteModelsBodyHonorsHiddenReasoningModeVariants(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"gpt-5.5","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		EnableReasoningEffortSuffix:     true,
+		ExposeReasoningSuffixModels:     true,
+		EnableReasoningModeSuffix:       true,
+		ExposeReasoningModeSuffixModels: true,
+		ReasoningModeProCapability:      config.ReasoningModeProCapabilitySupported,
+		HiddenModels:                    []string{"gpt-5.5-pro"},
+	}
+
+	ids := modelIDsFromRewrittenBody(t, rewriteModelsBody(body, provider))
+	if contains(ids, "gpt-5.5-pro") {
+		t.Fatalf("expected hidden base pro variant to stay hidden, got %#v", ids)
+	}
+	if !contains(ids, "gpt-5.5-low-pro") {
+		t.Fatalf("expected unrelated canonical pro variant to remain visible, got %#v", ids)
+	}
+}
+
+func TestConfiguredModelsFallbackExposesReasoningModeVariants(t *testing.T) {
+	provider := config.ProviderConfig{
+		ManualModels:                    []string{"gpt-5.5"},
+		EnableReasoningModeSuffix:       true,
+		ExposeReasoningModeSuffixModels: true,
+		ReasoningModeProCapability:      config.ReasoningModeProCapabilitySupported,
+	}
+
+	body, ok := configuredModelsFallbackBody(provider)
+	if !ok {
+		t.Fatal("expected configured fallback body")
+	}
+	if !contains(modelIDsFromRewrittenBody(t, body), "gpt-5.5-pro") {
+		t.Fatalf("expected fallback model list to expose pro variant, got %s", body)
+	}
+}
+
+func modelIDsFromRewrittenBody(t *testing.T, rewritten []byte) []string {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	return ids
 }
 
 func TestRewriteModelsBodyExpandsManualReasonSuffixFamilyIndependentOfExposeFlag(t *testing.T) {

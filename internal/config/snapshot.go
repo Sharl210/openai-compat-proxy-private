@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/reasoning"
 )
 
@@ -155,6 +156,9 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 		}
 		if !cfg.Providers[i].ReasoningSummaryDetailSet {
 			cfg.Providers[i].ReasoningSummaryDetail = cfg.ReasoningSummaryDetail
+		}
+		if !cfg.Providers[i].EnableReasoningModeSuffixSet {
+			cfg.Providers[i].EnableReasoningModeSuffix = cfg.EffectiveEnableReasoningModeSuffix()
 		}
 		if !cfg.Providers[i].ForceUpstreamMaxOutputTokensSet {
 			cfg.Providers[i].ForceUpstreamMaxOutputTokens = cfg.ForceUpstreamMaxOutputTokens
@@ -519,6 +523,60 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelectionForRequestEffort(model 
 	return "", model, false
 }
 
+func (s *RuntimeSnapshot) ResolveDefaultProviderSelectionForProxyModel(modelName string) (string, string, model.ProxyModelIntent, bool) {
+	if s == nil || strings.TrimSpace(modelName) == "" {
+		return "", modelName, model.ProxyModelIntent{}, false
+	}
+	if s.Config.EnableDefaultProviderModelTags {
+		providerID, externalModel, tagged := parseTaggedModelID(modelName)
+		if !tagged {
+			return "", modelName, model.ProxyModelIntent{}, false
+		}
+		provider, err := s.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			return "", modelName, model.ProxyModelIntent{}, false
+		}
+		return s.resolveProviderProxyModelIntent(providerID, provider, externalModel)
+	}
+	for index := len(s.DefaultProviderIDs) - 1; index >= 0; index-- {
+		providerID := s.DefaultProviderIDs[index]
+		provider, err := s.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		if resolvedID, resolvedModel, intent, ok := s.resolveProviderProxyModelIntent(providerID, provider, modelName); ok {
+			return resolvedID, resolvedModel, intent, true
+		}
+	}
+	return "", modelName, model.ProxyModelIntent{}, false
+}
+
+func (s *RuntimeSnapshot) resolveProviderProxyModelIntent(providerID string, provider ProviderConfig, externalModel string) (string, string, model.ProxyModelIntent, bool) {
+	internalModel, ok := provider.InternalModelID(externalModel, true)
+	if !ok {
+		return "", externalModel, model.ProxyModelIntent{}, false
+	}
+	intent, ok := provider.ParseProxyModelIntentWithReasoningMode(internalModel, s.Config.EnableNoPromptModelSuffix, s.Config.EffectiveEnableReasoningModeSuffix())
+	if !ok {
+		if provider.AllowsLiteralModelMapTarget(internalModel) {
+			return providerID, internalModel, model.ProxyModelIntent{}, true
+		}
+		return "", externalModel, model.ProxyModelIntent{}, false
+	}
+	if provider.HidesModel(intent.CanonicalModel()) {
+		return "", externalModel, model.ProxyModelIntent{}, false
+	}
+	matchedAlias := provider.ProxyModelIntentAllowsAlias(intent)
+	if mappedIntent, mapped := provider.ResolveMappedProxyModelIntent(intent); mapped {
+		intent = mappedIntent
+	}
+	routingModel := ProxyModelIntentRoutingModel(intent)
+	if matchedAlias || providerAllowsInternalVisibleModel(provider, routingModel, s.Config.EnableNoPromptModelSuffix) {
+		return providerID, routingModel, intent, true
+	}
+	return "", externalModel, model.ProxyModelIntent{}, false
+}
+
 func stripNoPromptModelSuffix(model string) (string, bool) {
 	trimmed, _, hasNoPrompt := stripRootProxySuffixMarkers(model)
 	if !hasNoPrompt {
@@ -559,6 +617,20 @@ func validateHotReloadableRootEnvValues(values map[string]string) error {
 	}
 	if err := validateStrictBool(values, "ENABLE_NOPROMPT_MODEL_SUFFIX"); err != nil {
 		return err
+	}
+	if err := validateStrictBool(values, "ENABLE_REASONING_MODE_SUFFIX"); err != nil {
+		return err
+	}
+	if err := validateStrictBool(values, "DEFAULT_PRO_REASONING_MODE"); err != nil {
+		return err
+	}
+	if err := validateMinInt(values, "ULTRA_MAX_CONCURRENT_SUBAGENTS", 1); err != nil {
+		return err
+	}
+	if value := strings.TrimSpace(values["DEFAULT_PRO_REASONING_MODE_EXCLUDED_MODELS"]); value != "" {
+		if _, err := parseModelPatternRules(value, "DEFAULT_PRO_REASONING_MODE_EXCLUDED_MODELS", "root env DEFAULT_PRO_REASONING_MODE_EXCLUDED_MODELS"); err != nil {
+			return err
+		}
 	}
 	if err := validateMasqueradeTarget(values, "UPSTREAM_MASQUERADE_TARGET"); err != nil {
 		return err

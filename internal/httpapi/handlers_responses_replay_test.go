@@ -89,7 +89,7 @@ func assertReplayUpstreamInputHasAdjacentToolShape(t *testing.T, request map[str
 			sequence = append(sequence, typ)
 		}
 	}
-	want := []string{"function_call", "function_call", "function_call_output", "function_call_output"}
+	want := []string{"function_call", "function_call_output", "function_call", "function_call_output"}
 	if strings.Join(sequence, ",") != strings.Join(want, ",") {
 		t.Fatalf("unexpected adjacent tool sequence: got %#v want %#v", sequence, want)
 	}

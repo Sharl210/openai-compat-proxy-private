@@ -2066,6 +2066,40 @@ func TestLoadProviderFileRejectsUnknownResponsesToolCompatMode(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileParsesResponsesPromptCacheHintDropPermission(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "default is fail closed", want: false},
+		{name: "explicit allow", value: "true", want: true},
+		{name: "explicit deny", value: "false", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\n"
+			if tt.value != "" {
+				providerBody += "ALLOW_RESPONSES_PROMPT_CACHE_HINT_DROP=" + tt.value + "\n"
+			}
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			provider, err := loadProviderFile(providerEnvPath)
+			if err != nil {
+				t.Fatalf("loadProviderFile returned error: %v", err)
+			}
+			if provider.AllowResponsesPromptCacheHintDrop != tt.want {
+				t.Fatalf("expected prompt cache hint drop permission %t, got %t", tt.want, provider.AllowResponsesPromptCacheHintDrop)
+			}
+		})
+	}
+}
+
 func TestLoadProviderFileParsesUpstreamXMLToolCallStyle(t *testing.T) {
 	for _, tc := range []struct {
 		value string

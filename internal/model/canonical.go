@@ -1,5 +1,7 @@
 package model
 
+import "encoding/json"
+
 type CanonicalRequest struct {
 	Model                          string
 	Stream                         bool
@@ -7,9 +9,14 @@ type CanonicalRequest struct {
 	IncludeUsage                   bool
 	ResponseStore                  *bool
 	ResponseInclude                []string
+	ResponsePromptCacheKey         json.RawMessage
+	ResponsePromptCacheOptions     json.RawMessage
+	ResponseMultiAgent             json.RawMessage
+	ResponsesOpenAIBeta            string
 	Instructions                   string
 	InstructionParts               []CanonicalContentPart
 	ResponseInputItems             []map[string]any
+	ResponseInputItemsAreOriginal  bool
 	ResponseItemReferencesByCallID map[string]string
 	Messages                       []CanonicalMessage
 	Temperature                    *float64
@@ -19,7 +26,9 @@ type CanonicalRequest struct {
 	Stop                           []string
 	Tools                          []CanonicalTool
 	ToolChoice                     CanonicalToolChoice
+	ParallelToolCalls              *bool
 	Reasoning                      *CanonicalReasoning
+	ReasoningModeOrigin            ReasoningModeOrigin
 	PassThroughRawReasoning        bool
 	RequestID                      string
 	AuthMode                       string
@@ -79,13 +88,37 @@ type CanonicalTool struct {
 }
 
 type CanonicalToolChoice struct {
-	Mode string
-	Name string
-	Raw  map[string]any
+	Mode        string
+	Name        string
+	Requirement ToolChoiceRequirement
+	Raw         map[string]any
 }
+
+type ToolChoiceRequirement string
+
+const (
+	ToolChoiceOptional      ToolChoiceRequirement = "optional"
+	ToolChoiceRequiredAny   ToolChoiceRequirement = "required_any"
+	ToolChoiceRequiredNamed ToolChoiceRequirement = "required_named"
+	ToolChoiceNone          ToolChoiceRequirement = "none"
+)
 
 type CanonicalReasoning struct {
 	Effort  string
 	Summary string
+	Mode    ReasoningMode
 	Raw     map[string]any
 }
+
+type ReasoningMode string
+
+const ReasoningModePro ReasoningMode = "pro"
+
+type ReasoningModeOrigin string
+
+const (
+	ReasoningModeOriginNone         ReasoningModeOrigin = "none"
+	ReasoningModeOriginBody         ReasoningModeOrigin = "body"
+	ReasoningModeOriginProxyDefault ReasoningModeOrigin = "proxy_default"
+	ReasoningModeOriginSuffix       ReasoningModeOrigin = "suffix"
+)

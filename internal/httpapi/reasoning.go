@@ -1,8 +1,67 @@
 package httpapi
 
-import "strings"
+import (
+	"net/http"
+	"strings"
+)
 
+import "openai-compat-proxy/internal/config"
 import modelpkg "openai-compat-proxy/internal/model"
+
+func applyProxyModelIntentReasoningMode(req *http.Request, canon *modelpkg.CanonicalRequest) {
+	if canon == nil {
+		return
+	}
+	intent, ok := proxyModelIntentFromRequest(req)
+	if !ok {
+		return
+	}
+	mode := modelpkg.ReasoningMode(strings.TrimSpace(intent.ReasoningMode))
+	if mode == "" {
+		return
+	}
+	if canon.Reasoning == nil {
+		canon.Reasoning = &modelpkg.CanonicalReasoning{}
+	}
+	if canon.Reasoning.Raw == nil {
+		canon.Reasoning.Raw = map[string]any{}
+	}
+	canon.Reasoning.Mode = mode
+	canon.Reasoning.Raw["mode"] = string(mode)
+	canon.ReasoningModeOrigin = modelpkg.ReasoningModeOriginSuffix
+}
+
+func enforceSuffixReasoningModePrecedence(canon *modelpkg.CanonicalRequest) {
+	if canon == nil || canon.ReasoningModeOrigin != modelpkg.ReasoningModeOriginSuffix {
+		return
+	}
+	if canon.Reasoning == nil {
+		canon.Reasoning = &modelpkg.CanonicalReasoning{}
+	}
+	if canon.Reasoning.Raw == nil {
+		canon.Reasoning.Raw = map[string]any{}
+	}
+	canon.Reasoning.Mode = modelpkg.ReasoningModePro
+	canon.Reasoning.Raw["mode"] = string(modelpkg.ReasoningModePro)
+}
+
+func applyDefaultProReasoningMode(canon *modelpkg.CanonicalRequest, providerCfg config.Config) {
+	if canon == nil || canon.ReasoningModeOrigin == modelpkg.ReasoningModeOriginSuffix {
+		return
+	}
+	if !providerCfg.DefaultProReasoningModeEnabledForFinalUpstreamModel(canon.Model) {
+		return
+	}
+	if canon.Reasoning == nil {
+		canon.Reasoning = &modelpkg.CanonicalReasoning{}
+	}
+	if canon.Reasoning.Raw == nil {
+		canon.Reasoning.Raw = map[string]any{}
+	}
+	canon.Reasoning.Mode = modelpkg.ReasoningModePro
+	canon.Reasoning.Raw["mode"] = string(modelpkg.ReasoningModePro)
+	canon.ReasoningModeOrigin = modelpkg.ReasoningModeOriginProxyDefault
+}
 
 func applyResolvedReasoningEffort(reasoning *modelpkg.CanonicalReasoning, effort string) *modelpkg.CanonicalReasoning {
 	if effort == "" {

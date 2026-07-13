@@ -13,20 +13,21 @@ import (
 )
 
 type request struct {
-	Model           string          `json:"model"`
-	Stream          bool            `json:"stream"`
-	StreamOptions   *streamOptions  `json:"stream_options"`
-	Messages        []message       `json:"messages"`
-	Tools           []tool          `json:"tools"`
-	ToolChoice      any             `json:"tool_choice"`
-	ReasoningEffort string          `json:"reasoning_effort"`
-	Reasoning       map[string]any  `json:"reasoning"`
-	Temperature     *float64        `json:"temperature"`
-	TopP            *float64        `json:"top_p"`
-	MaxTokens       *int            `json:"max_tokens"`
-	StopRaw         json.RawMessage `json:"stop"`
-	N               *int            `json:"n"`
-	Raw             json.RawMessage `json:"-"`
+	Model             string          `json:"model"`
+	Stream            bool            `json:"stream"`
+	StreamOptions     *streamOptions  `json:"stream_options"`
+	Messages          []message       `json:"messages"`
+	Tools             []tool          `json:"tools"`
+	ToolChoice        any             `json:"tool_choice"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls"`
+	ReasoningEffort   string          `json:"reasoning_effort"`
+	Reasoning         map[string]any  `json:"reasoning"`
+	Temperature       *float64        `json:"temperature"`
+	TopP              *float64        `json:"top_p"`
+	MaxTokens         *int            `json:"max_tokens"`
+	StopRaw           json.RawMessage `json:"stop"`
+	N                 *int            `json:"n"`
+	Raw               json.RawMessage `json:"-"`
 }
 
 type streamOptions struct {
@@ -93,6 +94,8 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		Temperature:             req.Temperature,
 		TopP:                    req.TopP,
 		MaxOutputTokens:         req.MaxTokens,
+		ParallelToolCalls:       req.ParallelToolCalls,
+		ReasoningModeOrigin:     model.ReasoningModeOriginNone,
 	}
 	stop, err := decodeStop(req.StopRaw)
 	if err != nil {
@@ -108,7 +111,11 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		canon.Reasoning = &model.CanonicalReasoning{
 			Effort:  stringMapValue(reasoningRaw, "effort"),
 			Summary: stringMapValue(reasoningRaw, "summary"),
+			Mode:    model.ReasoningMode(stringMapValue(reasoningRaw, "mode")),
 			Raw:     reasoningRaw,
+		}
+		if canon.Reasoning.Mode != "" {
+			canon.ReasoningModeOrigin = model.ReasoningModeOriginBody
 		}
 	} else if req.ReasoningEffort != "" {
 		canon.Reasoning = &model.CanonicalReasoning{Effort: req.ReasoningEffort, Summary: "auto", Raw: map[string]any{"effort": req.ReasoningEffort, "summary": "auto"}}
@@ -123,7 +130,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		})
 	}
 	if req.ToolChoice != nil {
-		canon.ToolChoice = model.CanonicalToolChoice{Raw: map[string]any{"value": req.ToolChoice}}
+		canon.ToolChoice = model.DecodeOpenAIToolChoice(req.ToolChoice)
 	}
 
 	var instructions []string
@@ -222,7 +229,7 @@ func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {
 		return nil
 	}
 	known := map[string]struct{}{
-		"model": {}, "stream": {}, "stream_options": {}, "messages": {}, "tools": {}, "tool_choice": {},
+		"model": {}, "stream": {}, "stream_options": {}, "messages": {}, "tools": {}, "tool_choice": {}, "parallel_tool_calls": {},
 		"reasoning_effort": {}, "reasoning": {}, "temperature": {}, "top_p": {}, "max_tokens": {}, "stop": {}, "n": {},
 	}
 	fields := map[string]any{}

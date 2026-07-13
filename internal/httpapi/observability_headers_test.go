@@ -15,6 +15,21 @@ import (
 	"openai-compat-proxy/internal/testutil"
 )
 
+func TestClearTransparencyHeadersClearsReasoningModeHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set(headerClientToProxyReasoningMode, "pro")
+	rec.Header().Set(headerProxyToUpstreamReasoningMode, "pro")
+
+	clearTransparencyHeaders(rec)
+
+	if got := rec.Header().Get(headerClientToProxyReasoningMode); got != "" {
+		t.Fatalf("expected client reasoning mode header to be cleared, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningMode); got != "" {
+		t.Fatalf("expected upstream reasoning mode header to be cleared, got %q", got)
+	}
+}
+
 func TestResponsesRouteExposesDirectionalObservabilityHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -390,15 +405,15 @@ func TestRouteObservabilityHeadersExposeRetryCacheControlAndCacheRates(t *testin
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}`))
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920,"cache_write_tokens":86},"output_tokens":300,"total_tokens":2306}}`))
 	}))
 	defer upstream.Close()
 
 	cacheMgr := cacheinfo.NewManager(t.TempDir(), time.UTC, []string{"openai", "fallback"}, nil)
-	if err := cacheMgr.RecordFinalUsage("req-openai", "openai", &cacheinfo.Usage{InputTokens: 100, CachedTokens: 25, TotalTokens: 100}); err != nil {
+	if err := cacheMgr.RecordFinalUsage("req-openai", "openai", &cacheinfo.Usage{InputTokens: 100, CachedTokens: 25, CacheWriteTokens: 5, CacheWriteReportedInputTokens: 100, TotalTokens: 100}); err != nil {
 		t.Fatalf("RecordFinalUsage openai: %v", err)
 	}
-	if err := cacheMgr.RecordFinalUsage("req-fallback", "fallback", &cacheinfo.Usage{InputTokens: 100, CachedTokens: 50, TotalTokens: 100}); err != nil {
+	if err := cacheMgr.RecordFinalUsage("req-fallback", "fallback", &cacheinfo.Usage{InputTokens: 100, CachedTokens: 50, CacheWriteReportedInputTokens: 100, TotalTokens: 100}); err != nil {
 		t.Fatalf("RecordFinalUsage fallback: %v", err)
 	}
 
@@ -447,6 +462,9 @@ func TestRouteObservabilityHeadersExposeRetryCacheControlAndCacheRates(t *testin
 	if got := explicitRec.Header().Get(headerProviderTodayCacheRate); got != "25.00 %" {
 		t.Fatalf("expected explicit provider today cache rate 25.00 %%, got %q", got)
 	}
+	if got := explicitRec.Header().Get(headerProviderTodayCacheWriteCoverage); got != "5.00 %" {
+		t.Fatalf("expected explicit provider today cache-write coverage 5.00 %%, got %q", got)
+	}
 	if got := explicitRec.Header().Get(headerRootProviderTodayCacheRate); got != "" {
 		t.Fatalf("expected explicit provider route to omit root provider cache rate, got %q", got)
 	}
@@ -467,19 +485,98 @@ func TestRouteObservabilityHeadersExposeRetryCacheControlAndCacheRates(t *testin
 	if got := rootRec.Header().Get(headerProxyUpstreamAnthropicCacheControl); got != config.UpstreamCacheControl1H {
 		t.Fatalf("expected %s %q, got %q", headerProxyUpstreamAnthropicCacheControl, config.UpstreamCacheControl1H, got)
 	}
-	if got := rootRec.Header().Get(headerProviderTodayCacheRate); got != "25.00 %" {
-		t.Fatalf("expected provider today cache rate 25.00 %%, got %q", got)
+	if got := rootRec.Header().Get(headerProviderTodayCacheRate); got != "92.35 %" {
+		t.Fatalf("expected provider today cache rate 92.35 %%, got %q", got)
 	}
-	if got := rootRec.Header().Get(headerProviderHistoryCacheRate); got != "25.00 %" {
-		t.Fatalf("expected provider history cache rate 25.00 %%, got %q", got)
+	if got := rootRec.Header().Get(headerProviderHistoryCacheRate); got != "92.35 %" {
+		t.Fatalf("expected provider history cache rate 92.35 %%, got %q", got)
 	}
-	if got := rootRec.Header().Get(headerRootProviderTodayCacheRate); got != "37.50 %" {
-		t.Fatalf("expected root provider today cache rate 37.50 %%, got %q", got)
+	if got := rootRec.Header().Get(headerProviderHistoryCacheWriteCoverage); got != "4.32 %" {
+		t.Fatalf("expected provider history cache-write coverage 4.32 %%, got %q", got)
 	}
-	if got := rootRec.Header().Get(headerRootProviderHistoryCacheRate); got != "37.50 %" {
-		t.Fatalf("expected root provider history cache rate 37.50 %%, got %q", got)
+	if got := rootRec.Header().Get(headerRootProviderTodayCacheRate); got != "90.43 %" {
+		t.Fatalf("expected root provider today cache rate 90.43 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerRootProviderHistoryCacheRate); got != "90.43 %" {
+		t.Fatalf("expected root provider history cache rate 90.43 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerRootProviderTodayCacheWriteCoverage); got != "4.12 %" {
+		t.Fatalf("expected root provider today cache-write coverage 4.12 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerRootProviderHistoryCacheWriteCoverage); got != "4.12 %" {
+		t.Fatalf("expected root provider history cache-write coverage 4.12 %%, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerThisUsageTokens); got != "↑ 2,006(1,920 cached, 86 cache-write) | ↓ 300" {
+		t.Fatalf("expected cache-write usage summary, got %q", got)
+	}
+	if got := rootRec.Header().Get(headerThisUsageCacheWriteTokens); got != "86" {
+		t.Fatalf("expected cache-write usage header 86, got %q", got)
 	}
 
+}
+
+func TestNonStreamCacheWriteHeaderDistinguishesMissingAndExplicitZero(t *testing.T) {
+	tests := []struct {
+		name       string
+		usage      string
+		wantHeader string
+	}{
+		{
+			name:       "missing cache write stays empty",
+			usage:      `"input_tokens":100,"output_tokens":10,"total_tokens":110`,
+			wantHeader: "",
+		},
+		{
+			name:       "explicit zero is reported",
+			usage:      `"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_write_tokens":0},"output_tokens":10,"total_tokens":110`,
+			wantHeader: "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/responses" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"resp-cache-write","object":"response","output":[{"id":"msg-1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{` + tt.usage + `}}`))
+			}))
+			defer upstream.Close()
+
+			server := NewServer(config.Config{
+				DefaultProvider:             "openai",
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{{
+					ID:                   "openai",
+					Enabled:              true,
+					UpstreamBaseURL:      upstream.URL,
+					UpstreamAPIKey:       "test-key",
+					UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+					SupportsResponses:    true,
+					ManualModels:         []string{"gpt-5"},
+				}},
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			if _, exists := rec.Header()[headerThisUsageCacheWriteTokens]; !exists {
+				t.Fatalf("expected %s header to be present", headerThisUsageCacheWriteTokens)
+			}
+			if got := rec.Header().Get(headerThisUsageCacheWriteTokens); got != tt.wantHeader {
+				t.Fatalf("%s = %q, want %q", headerThisUsageCacheWriteTokens, got, tt.wantHeader)
+			}
+		})
+	}
 }
 
 func TestResponsesRouteClientReasoningEffortPrefersSuffixOverRequestBodyParameter(t *testing.T) {
@@ -579,7 +676,7 @@ func TestResponsesRouteDirectionalHeadersPreserveClientModelAndFinalUpstreamStat
 		proxyUpstreamModel:        "gpt-5.4-mini",
 		proxyUpstreamServiceTier:  "",
 		proxyReasoningEffort:      "low",
-		proxyReasoningPayload:     map[string]any{"reasoning": map[string]any{"effort": "low", "summary": "auto"}},
+		proxyReasoningPayload:     map[string]any{"reasoning": map[string]any{"effort": "low", "mode": "pro", "summary": "auto"}},
 	})
 }
 
@@ -667,6 +764,10 @@ func TestResponsesStreamKeepsUsageTokensHeaderEmpty(t *testing.T) {
 	}
 	if _, exists := rec.Header()[headerThisUsageTokens]; exists {
 		t.Fatalf("expected stream response not to include %s, got %#v", headerThisUsageTokens, rec.Header()[headerThisUsageTokens])
+	}
+	assertHeaderPresence(t, rec, headerThisUsageCacheWriteTokens)
+	if got := rec.Header().Get(headerThisUsageCacheWriteTokens); got != "" {
+		t.Fatalf("expected stream response to leave %s empty, got %q", headerThisUsageCacheWriteTokens, got)
 	}
 }
 
@@ -1069,8 +1170,10 @@ func assertDirectionalObservabilityHeaders(t *testing.T, rec *httptest.ResponseR
 	assertHeaderPresence(t, rec, headerProxyToUpstreamMaxOutputTokens)
 	assertHeaderPresence(t, rec, headerClientToProxyReasoningParameters)
 	assertHeaderPresence(t, rec, headerClientToProxyReasoningEffort)
+	assertHeaderPresence(t, rec, headerClientToProxyReasoningMode)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamReasoningEffort)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamReasoningParameters)
+	assertHeaderPresence(t, rec, headerProxyToUpstreamReasoningMode)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataDeviceID)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataAccountUUID)
 	assertHeaderPresence(t, rec, headerProxyToUpstreamClaudeMetadataSessionID)

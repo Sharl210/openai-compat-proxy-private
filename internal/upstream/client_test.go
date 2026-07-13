@@ -4432,12 +4432,12 @@ func TestBuildChatRequestBodyUsesConfiguredReasoningSummaryDetail(t *testing.T) 
 
 func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testing.T) {
 	body, err := buildChatRequestBody(model.CanonicalRequest{
-		Model: "gpt-5",
+		Model:             "gpt-5",
+		ParallelToolCalls: boolPointer(true),
 		PreservedTopLevelFields: map[string]any{
 			"output_config":        map[string]any{"format": map[string]any{"type": "json_schema"}},
 			"previous_response_id": "resp_123",
 			"prompt_cache_key":     "responses-cache-key",
-			"parallel_tool_calls":  true,
 			"truncation":           "auto",
 			"text":                 map[string]any{"format": map[string]any{"type": "text"}},
 			"response_format":      map[string]any{"type": "json_object"},
@@ -4467,6 +4467,179 @@ func TestBuildChatRequestBodyDropsResponsesOnlyPreservedTopLevelFields(t *testin
 	if got := payload["custom_passthrough"]; got != "keep-me" {
 		t.Fatalf("expected chat upstream payload to keep non-responses passthrough field, got %#v", payload)
 	}
+}
+
+func TestBuildOpenAIRequestBodiesPreserveCanonicalParallelToolCalls(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value *bool
+	}{
+		{name: "unspecified"},
+		{name: "allowed", value: boolPointer(true)},
+		{name: "disabled", value: boolPointer(false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, builder := range []struct {
+				name  string
+				build func(model.CanonicalRequest) ([]byte, error)
+			}{
+				{name: "responses", build: func(req model.CanonicalRequest) ([]byte, error) {
+					return buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+				}},
+				{name: "chat", build: func(req model.CanonicalRequest) ([]byte, error) { return buildChatRequestBody(req) }},
+			} {
+				t.Run(builder.name, func(t *testing.T) {
+					body, err := builder.build(model.CanonicalRequest{Model: "gpt-5.6", ParallelToolCalls: tc.value})
+					if err != nil {
+						t.Fatalf("build request body: %v", err)
+					}
+					var payload map[string]any
+					if err := json.Unmarshal(body, &payload); err != nil {
+						t.Fatalf("unmarshal payload: %v", err)
+					}
+					got, exists := payload["parallel_tool_calls"]
+					if tc.value == nil {
+						if exists {
+							t.Fatalf("expected omitted parallel_tool_calls, got %#v", payload)
+						}
+						return
+					}
+					if !exists || got != *tc.value {
+						t.Fatalf("expected parallel_tool_calls=%v, got %#v", *tc.value, payload)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestBuildAnthropicRequestBodyMapsCanonicalParallelToolCalls(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value *bool
+	}{
+		{name: "unspecified"},
+		{name: "allowed", value: boolPointer(true)},
+		{name: "disabled", value: boolPointer(false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+				Model:             "claude-sonnet-4-5",
+				ParallelToolCalls: tc.value,
+				ToolChoice:        model.DecodeOpenAIToolChoice("auto"),
+			}, config.MasqueradeTargetNone, false, false, "nochange")
+			if err != nil {
+				t.Fatalf("build anthropic request body: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			choice, _ := payload["tool_choice"].(map[string]any)
+			if got := choice["type"]; got != "auto" {
+				t.Fatalf("expected auto tool choice to survive, got %#v", choice)
+			}
+			got, exists := choice["disable_parallel_tool_use"]
+			if tc.value == nil {
+				if exists {
+					t.Fatalf("expected omitted disable_parallel_tool_use, got %#v", choice)
+				}
+				return
+			}
+			if !exists || got != !*tc.value {
+				t.Fatalf("expected disable_parallel_tool_use=%v, got %#v", !*tc.value, choice)
+			}
+		})
+	}
+}
+
+func TestBuildAnthropicRequestBodyPreservesRequiredNamedToolChoiceWhenParallelIsDisabled(t *testing.T) {
+	body, err := buildAnthropicRequestBody(model.CanonicalRequest{
+		Model:             "claude-sonnet-4-5",
+		ParallelToolCalls: boolPointer(false),
+		ToolChoice: model.DecodeOpenAIToolChoice(map[string]any{
+			"type":     "function",
+			"function": map[string]any{"name": "lookup"},
+		}),
+	}, config.MasqueradeTargetNone, false, false, "nochange")
+	if err != nil {
+		t.Fatalf("build anthropic request body: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	choice, _ := payload["tool_choice"].(map[string]any)
+	if got := choice["type"]; got != "tool" {
+		t.Fatalf("expected named Anthropic tool choice, got %#v", choice)
+	}
+	if got := choice["name"]; got != "lookup" {
+		t.Fatalf("expected named tool lookup, got %#v", choice)
+	}
+	if got := choice["disable_parallel_tool_use"]; got != true {
+		t.Fatalf("expected disabled parallel tool use, got %#v", choice)
+	}
+}
+
+func TestBuildOpenAIRequestBodiesMapCanonicalRequiredToolChoices(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		choice     model.CanonicalToolChoice
+		wantString string
+	}{
+		{name: "required any", choice: model.CanonicalToolChoice{Requirement: model.ToolChoiceRequiredAny, Raw: map[string]any{"type": "any"}}, wantString: "required"},
+		{name: "required named", choice: model.CanonicalToolChoice{Requirement: model.ToolChoiceRequiredNamed, Name: "lookup", Raw: map[string]any{"type": "tool", "name": "lookup"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, builder := range []struct {
+				name  string
+				build func(model.CanonicalRequest) ([]byte, error)
+			}{
+				{name: "responses", build: func(req model.CanonicalRequest) ([]byte, error) {
+					return buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+				}},
+				{name: "chat", build: func(req model.CanonicalRequest) ([]byte, error) { return buildChatRequestBody(req) }},
+			} {
+				t.Run(builder.name, func(t *testing.T) {
+					body, err := builder.build(model.CanonicalRequest{Model: "gpt-5.6", ParallelToolCalls: boolPointer(false), ToolChoice: tc.choice})
+					if err != nil {
+						t.Fatalf("build request body: %v", err)
+					}
+					var payload map[string]any
+					if err := json.Unmarshal(body, &payload); err != nil {
+						t.Fatalf("unmarshal payload: %v", err)
+					}
+					choice := payload["tool_choice"]
+					if tc.wantString != "" && choice != tc.wantString {
+						t.Fatalf("expected tool_choice %q, got %#v", tc.wantString, choice)
+					}
+					if tc.wantString == "" {
+						choiceMap, _ := choice.(map[string]any)
+						if got := choiceMap["type"]; got != "function" {
+							t.Fatalf("expected function tool choice, got %#v", choiceMap)
+						}
+						if builder.name == "responses" {
+							if got := choiceMap["name"]; got != "lookup" {
+								t.Fatalf("expected Responses named tool lookup, got %#v", choiceMap)
+							}
+						} else {
+							function, _ := choiceMap["function"].(map[string]any)
+							if got := function["name"]; got != "lookup" {
+								t.Fatalf("expected Chat named tool lookup, got %#v", choiceMap)
+							}
+						}
+					}
+					if got := payload["parallel_tool_calls"]; got != false {
+						t.Fatalf("expected disabled parallel tool calls, got %#v", payload)
+					}
+				})
+			}
+		})
+	}
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func TestBuildResponsesRequestBodyPreservesPreviousResponseIDForResponsesHTTPUpstream(t *testing.T) {
@@ -4581,6 +4754,33 @@ func TestPreviewRequestObservabilityForResponses(t *testing.T) {
 	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
 }
 
+func TestBuildRequestBody_serializesTypedReasoningModeWhenRawIsMissing(t *testing.T) {
+	// Given
+	request := model.CanonicalRequest{
+		Model: "gpt-5-mini",
+		Reasoning: &model.CanonicalReasoning{
+			Mode:   model.ReasoningModePro,
+			Effort: "high",
+		},
+	}
+
+	// When
+	body, err := buildRequestBody(request)
+
+	// Then
+	if err != nil {
+		t.Fatalf("build request body: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal request payload: %v", err)
+	}
+	reasoning, _ := payload["reasoning"].(map[string]any)
+	if got, _ := reasoning["mode"].(string); got != "pro" {
+		t.Fatalf("expected typed reasoning mode pro, got %#v", reasoning)
+	}
+}
+
 func TestPreviewRequestObservabilityForChat(t *testing.T) {
 	preview, err := PreviewRequestObservability(model.CanonicalRequest{
 		Model:     "gpt-5-mini",
@@ -4596,6 +4796,52 @@ func TestPreviewRequestObservabilityForChat(t *testing.T) {
 		t.Fatalf("expected empty upstream service tier, got %#v", preview)
 	}
 	assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{"reasoning": map[string]any{"effort": "high", "summary": "auto"}})
+}
+
+func TestPreviewRequestObservability_preservesProModeAndVendorReasoningFields(t *testing.T) {
+	endpointTypes := []struct {
+		name         string
+		endpointType string
+	}{
+		{name: "responses", endpointType: config.UpstreamEndpointTypeResponses},
+		{name: "chat", endpointType: config.UpstreamEndpointTypeChat},
+	}
+
+	for _, endpoint := range endpointTypes {
+		t.Run(endpoint.name, func(t *testing.T) {
+			// Given
+			request := model.CanonicalRequest{
+				Model: "gpt-5-mini",
+				Reasoning: &model.CanonicalReasoning{
+					Mode:    model.ReasoningModePro,
+					Effort:  "low",
+					Summary: "detailed",
+					Raw: map[string]any{
+						"mode":          "pro",
+						"effort":        "low",
+						"summary":       "detailed",
+						"vendor_option": "keep",
+					},
+				},
+			}
+
+			// When
+			preview, err := PreviewRequestObservability(request, endpoint.endpointType, "", false, false)
+
+			// Then
+			if err != nil {
+				t.Fatalf("PreviewRequestObservability error: %v", err)
+			}
+			assertPreviewReasoningJSON(t, preview.ReasoningParameters, map[string]any{
+				"reasoning": map[string]any{
+					"mode":          "pro",
+					"effort":        "low",
+					"summary":       "detailed",
+					"vendor_option": "keep",
+				},
+			})
+		})
+	}
 }
 
 func TestPreviewRequestObservabilityForAnthropic(t *testing.T) {
@@ -5473,4 +5719,130 @@ func assertHasLogRecord(t *testing.T, records []map[string]any, event string, ma
 		}
 	}
 	t.Fatalf("expected log event %q in %#v", event, records)
+}
+
+func TestBuildRequestBodyDropsResponsesPromptCacheControlsForCrossProtocolUpstreams(t *testing.T) {
+	for _, endpointType := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		t.Run(endpointType, func(t *testing.T) {
+			// Given
+			req := model.CanonicalRequest{
+				Model: "model",
+				PreservedTopLevelFields: map[string]any{
+					"prompt_cache_key":     "responses-only-key",
+					"prompt_cache_options": map[string]any{"mode": "explicit"},
+					"vendor_passthrough":   "keep",
+				},
+				Messages: []model.CanonicalMessage{{
+					Role:  "user",
+					Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+				}},
+			}
+
+			// When
+			body, err := buildRequestBodyForEndpoint(req, endpointType, config.MasqueradeTargetNone, false, false, config.UpstreamCacheControlNoChange)
+			if err != nil {
+				t.Fatalf("build request body: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal upstream body: %v", err)
+			}
+
+			// Then
+			for _, key := range []string{"prompt_cache_key", "prompt_cache_options"} {
+				if _, exists := payload[key]; exists {
+					t.Fatalf("expected %s to stay Responses-only, got %#v", key, payload)
+				}
+			}
+			if got, _ := payload["vendor_passthrough"].(string); got != "keep" {
+				t.Fatalf("expected non-Responses passthrough field preserved, got %#v", payload)
+			}
+		})
+	}
+}
+
+func TestClientResponseAddsMultiAgentBetaHeaderAndPreservesProgrammaticTool(t *testing.T) {
+	// Given
+	var receivedBeta string
+	var receivedBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		receivedBeta = r.Header.Get("OpenAI-Beta")
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1"}`))
+	}))
+	defer server.Close()
+
+	request := model.CanonicalRequest{
+		Model: "gpt-5.6",
+		PreservedTopLevelFields: map[string]any{
+			"multi_agent": map[string]any{"enabled": true},
+		},
+		Tools: []model.CanonicalTool{{
+			Type: "programmatic_tool_calling",
+			Raw: map[string]any{
+				"type": "programmatic_tool_calling",
+				"allowed_callers": []any{
+					map[string]any{"type": "agent", "name": "researcher"},
+				},
+			},
+		}},
+	}
+
+	// When
+	client := NewClient(server.URL)
+	if _, err := client.Response(context.Background(), request, ""); err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+
+	// Then
+	if receivedBeta != "responses_multi_agent=v1" {
+		t.Fatalf("expected multi-agent beta header, got %q", receivedBeta)
+	}
+	if multiAgent, _ := receivedBody["multi_agent"].(map[string]any); multiAgent["enabled"] != true {
+		t.Fatalf("expected multi_agent payload preserved, got %#v", receivedBody)
+	}
+	tools, _ := receivedBody["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("expected programmatic tool upstream, got %#v", receivedBody)
+	}
+	tool, _ := tools[0].(map[string]any)
+	if tool["type"] != "programmatic_tool_calling" {
+		t.Fatalf("expected programmatic tool type preserved, got %#v", tool)
+	}
+	if callers, _ := tool["allowed_callers"].([]any); len(callers) != 1 {
+		t.Fatalf("expected allowed_callers preserved, got %#v", tool)
+	}
+}
+
+func TestClientResponseMergesClientAndMultiAgentBetaHeaders(t *testing.T) {
+	// Given
+	var receivedBeta string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBeta = r.Header.Get("OpenAI-Beta")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1"}`))
+	}))
+	defer server.Close()
+	request := model.CanonicalRequest{
+		Model:               "gpt-5.6",
+		ResponsesOpenAIBeta: "other_feature=v1,responses_multi_agent=v1",
+		PreservedTopLevelFields: map[string]any{
+			"multi_agent": map[string]any{"enabled": true},
+		},
+	}
+
+	// When
+	client := NewClient(server.URL)
+	if _, err := client.Response(context.Background(), request, ""); err != nil {
+		t.Fatalf("Response error: %v", err)
+	}
+
+	// Then
+	if receivedBeta != "other_feature=v1,responses_multi_agent=v1" {
+		t.Fatalf("expected merged and deduplicated beta header, got %q", receivedBeta)
+	}
 }

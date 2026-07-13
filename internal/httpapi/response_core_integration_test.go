@@ -556,18 +556,14 @@ func TestChatUpstreamReasoningPreservedInResponsesNonStream(t *testing.T) {
 	}
 }
 
-func TestResponsesReasoningAndToolCallPreservedForChatUpstream(t *testing.T) {
-	var upstreamBody string
+func TestResponsesRejectsPersistedEncryptedReasoningForChatUpstream(t *testing.T) {
+	upstreamCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("read upstream body: %v", err)
-		}
-		upstreamBody = string(body)
+		upstreamCalls++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"chatcmpl_123","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"final answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
 	}))
@@ -602,14 +598,14 @@ func TestResponsesReasoningAndToolCallPreservedForChatUpstream(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(upstreamBody, `"reasoning_content":"thinking"`) {
-		t.Fatalf("expected reasoning_content to be forwarded to chat upstream, got %s", upstreamBody)
+	if upstreamCalls != 0 {
+		t.Fatalf("expected no chat upstream call, got %d", upstreamCalls)
 	}
-	if !strings.Contains(upstreamBody, `"tool_calls"`) {
-		t.Fatalf("expected tool_calls to be forwarded to chat upstream, got %s", upstreamBody)
+	if !strings.Contains(rec.Body.String(), "persisted responses item") {
+		t.Fatalf("expected persisted responses item error, got %s", rec.Body.String())
 	}
 }
 

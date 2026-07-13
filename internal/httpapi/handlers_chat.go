@@ -10,6 +10,7 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/logging"
+	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/upstream"
 )
 
@@ -40,8 +41,10 @@ func handleChat() http.HandlerFunc {
 			return
 		}
 		rawClientModel := canon.Model
-		clientModel := prepareProviderClientModel(&canon, resolvedModel, provider, providerCfg)
+		clientReasoningMode := clientReasoningModeForRequest(rawClientModel, canon, provider, providerCfg)
+		clientModel := prepareProviderClientModelForRequest(providerClientModelRequest{req: &canon, httpRequest: r, resolvedModel: sourceModelBeforeProviderMapping(r, rawClientModel, resolvedModel, provider), provider: provider, config: providerCfg})
 		resolvedModel = clientModel
+		applyProxyModelIntentReasoningMode(r, &canon)
 		if hasNoPromptModelSuffix(clientModel) {
 			w.Header().Set(headerClientToProxyNoPrompt, "false")
 		}
@@ -68,11 +71,35 @@ func handleChat() http.HandlerFunc {
 		*r = *r.Clone(context.WithValue(r.Context(), routeRequestEffortKey, clientReasoningEffort))
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
+		var reasoningModeFallback *reasoningModeFallbackCoordinator
 		if ok {
-			normalizeCanonicalModelAndReasoningForProvider(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg)
+			intent, _ := proxyModelIntentFromRequest(r)
+			normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
 			applyProviderMaxOutputTokens(&canon, provider)
 			finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
+			applyProxyModelIntentReasoningMode(r, &canon)
+			enforceSuffixReasoningModePrecedence(&canon)
+			applyDefaultProReasoningMode(&canon, providerCfg)
+			canon, reasoningModeFallback, err = prepareReasoningModeFallback(canon, provider, providerCfg, reasoningModeFallbackKeyForRequest(r, providerID, providerCfg, canon.Model, authorization))
+			if err != nil {
+				var unsupportedMode unsupportedReasoningModeError
+				if errors.As(err, &unsupportedMode) {
+					errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_reasoning_mode", err.Error())
+					return
+				}
+				errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
+				return
+			}
+			if err := applyUltraMultiAgent(&canon, intent, provider, providerCfg); err != nil {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+				return
+			}
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+			applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
+			if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
+				return
+			}
 		}
 		baseEstimate := int64(estimateCanonicalInputTokens(canon))
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
@@ -82,7 +109,7 @@ func handleChat() http.HandlerFunc {
 			BaseEstimate:       baseEstimate,
 			Canon:              canon,
 		}))
-		if err := setDirectionalObservabilityHeaders(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort); err != nil {
+		if err := setDirectionalObservabilityHeadersWithClientReasoningMode(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort, clientReasoningMode, reasoningModeFallback); err != nil {
 			if writeRequestValidationError(w, err) {
 				return
 			}
@@ -122,7 +149,10 @@ func handleChat() http.HandlerFunc {
 		}
 
 		if canon.Stream {
-			stream, err := client.OpenEventStreamLazy(ctx, canon, authorization)
+			canon, stream, err := executeWithReasoningModeFallback(canon, reasoningModeFallback, func(request model.CanonicalRequest) (*upstream.EventStream, error) {
+				return client.OpenEventStreamLazy(ctx, request, authorization)
+			})
+			setReasoningModeObservabilityHeaders(w, canon, reasoningModeFallback)
 			if err != nil {
 				if writeRequestValidationError(w, err) {
 					return
@@ -164,7 +194,10 @@ func handleChat() http.HandlerFunc {
 		}
 
 		if providerCfg.DownstreamNonStreamStrategy == config.DownstreamNonStreamStrategyUpstreamNonStream {
-			payload, err := client.Response(ctx, canon, authorization)
+			canon, payload, err := executeWithReasoningModeFallback(canon, reasoningModeFallback, func(request model.CanonicalRequest) (map[string]any, error) {
+				return client.Response(ctx, request, authorization)
+			})
+			setReasoningModeObservabilityHeaders(w, canon, reasoningModeFallback)
 			if err != nil {
 				if writeRequestValidationError(w, err) {
 					return
@@ -189,6 +222,7 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
+			w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
 			w.Header().Set("Content-Type", "application/json")
 			if err := writeJSON(w, chatadapter.BuildResponse(result)); err != nil {
 				errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
@@ -201,10 +235,23 @@ func handleChat() http.HandlerFunc {
 		}
 
 		collector := aggregate.NewCollector()
-		err = client.StreamInto(ctx, canon, authorization, func(evt upstream.Event) error {
-			collector.Accept(evt)
-			return nil
-		})
+		if reasoningModeFallback != nil {
+			var events []upstream.Event
+			canon, events, err = executeWithReasoningModeFallback(canon, reasoningModeFallback, func(request model.CanonicalRequest) ([]upstream.Event, error) {
+				return client.Stream(ctx, request, authorization)
+			})
+			setReasoningModeObservabilityHeaders(w, canon, reasoningModeFallback)
+			if err == nil {
+				for _, evt := range events {
+					collector.Accept(evt)
+				}
+			}
+		} else {
+			err = client.StreamInto(ctx, canon, authorization, func(evt upstream.Event) error {
+				collector.Accept(evt)
+				return nil
+			})
+		}
 		if err != nil {
 			if writeRequestValidationError(w, err) {
 				return
@@ -237,6 +284,7 @@ func handleChat() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
+		w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
 		if err := writeJSON(w, chatadapter.BuildResponse(result)); err != nil {
 			errorsx.WriteJSON(w, http.StatusInternalServerError, "encode_error", err.Error())
 			return

@@ -515,46 +515,9 @@ func filterSyntheticReasoningBlocks(blocks []map[string]any) []map[string]any {
 	return cloneReasoningBlocks(blocks)
 }
 
-func isSyntheticResponsesReasoningBlock(block map[string]any) bool {
-	if stringValue(block["id"]) != "rs_proxy" {
-		return false
-	}
-	if stringValue(block["type"]) != "reasoning" {
-		return false
-	}
-	if isSyntheticReasoningSummary(stringValue(block["thinking"])) || isSyntheticReasoningSummary(stringValue(block["text"])) {
-		return true
-	}
-	var summaries []any
-	switch typed := block["summary"].(type) {
-	case []any:
-		summaries = typed
-	case []map[string]any:
-		for _, item := range typed {
-			summaries = append(summaries, item)
-		}
-	}
-	if len(summaries) == 0 {
-		return true
-	}
-	for _, raw := range summaries {
-		item, _ := raw.(map[string]any)
-		if len(item) == 0 {
-			continue
-		}
-		if !isSyntheticReasoningSummary(stringValue(item["text"])) && !isSyntheticReasoningSummary(stringValue(item["summary_text"])) {
-			return false
-		}
-		if nested, _ := item["summary_text"].(map[string]any); len(nested) > 0 && !isSyntheticReasoningSummary(stringValue(nested["text"])) {
-			return false
-		}
-	}
-	return true
-}
-
 func isSyntheticReasoningBlock(block map[string]any) bool {
-	if isSyntheticResponsesReasoningBlock(block) {
-		return true
+	if stringValue(block["type"]) == "reasoning" && stringValue(block["id"]) == "rs_proxy" {
+		return model.IsSyntheticResponsesReasoningPlaceholder(block)
 	}
 	if isSyntheticReasoningSummary(stringValue(block["thinking"])) {
 		return true

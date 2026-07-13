@@ -35,6 +35,7 @@ type ProviderConfig struct {
 	ReasoningSummaryDetailSet              bool
 	UpstreamEndpointType                   string
 	ResponsesToolCompatMode                string
+	AllowResponsesPromptCacheHintDrop      bool
 	MasqueradeTarget                       string
 	UpstreamUserAgent                      string
 	MasqueradeClientVersion                string
@@ -60,6 +61,16 @@ type ProviderConfig struct {
 	MapReasoningSuffixToAnthropicThinking  bool
 	EnableNoPromptModelSuffix              bool
 	EnableNoPromptModelSuffixSet           bool
+	EnableReasoningModeSuffix              bool
+	EnableReasoningModeSuffixSet           bool
+	ExposeReasoningModeSuffixModels        bool
+	ReasoningModeProCapability             ReasoningModeProCapability
+	ReasoningModeProCapabilityRules        []ReasoningModeProCapabilityRule
+	SupportsProgrammaticToolCalling        bool
+	SupportsResponsesMultiAgent            bool
+	UltraMaxConcurrentSubagents            int
+	UltraMaxConcurrentSubagentsSet         bool
+	SupportsParallelToolCallsControl       bool
 	UpstreamFirstByteTimeout               time.Duration
 	UpstreamStreamOpenTimeout              time.Duration
 	UpstreamRetryCount                     int
@@ -189,6 +200,8 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 		ModelIDTemplate:                       defaultModelIDTemplate,
 		UpstreamXMLToolCallStyle:              UpstreamXMLToolCallStyleLegacy,
 		MapReasoningSuffixToAnthropicThinking: true,
+		ReasoningModeProCapability:            ReasoningModeProCapabilityProbe,
+		SupportsResponsesMultiAgent:           true,
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -283,6 +296,11 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid RESPONSES_TOOL_COMPAT_MODE in %s: %q (allowed: preserve, function_only)", path, value))
 			}
 			provider.ResponsesToolCompatMode = normalized
+		case "ALLOW_RESPONSES_PROMPT_CACHE_HINT_DROP":
+			provider.AllowResponsesPromptCacheHintDrop, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "SUPPORTS_CHAT":
 			provider.SupportsChat, err = parseProviderSupportsBool(value, key, path)
 			if err != nil {
@@ -354,6 +372,58 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.EnableNoPromptModelSuffixSet = true
 			provider.EnableNoPromptModelSuffix = parsed
+		case "ENABLE_REASONING_MODE_SUFFIX":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			parsed, parseErr := parseProviderStrictBool(value, key, path)
+			if parseErr != nil {
+				return ProviderConfig{}, parseErr
+			}
+			provider.EnableReasoningModeSuffixSet = true
+			provider.EnableReasoningModeSuffix = parsed
+		case "EXPOSE_REASONING_MODE_SUFFIX_MODELS":
+			provider.ExposeReasoningModeSuffixModels, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "REASONING_MODE_PRO_CAPABILITY":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			provider.ReasoningModeProCapability, err = parseReasoningModeProCapability(value)
+			if err != nil {
+				return ProviderConfig{}, ErrInvalidConfig(fmt.Sprintf("invalid REASONING_MODE_PRO_CAPABILITY in %s: %q (allowed: supported, unsupported, probe)", path, value))
+			}
+		case "REASONING_MODE_PRO_CAPABILITY_RULES":
+			provider.ReasoningModeProCapabilityRules, err = parseReasoningModeProCapabilityRules(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "SUPPORTS_PROGRAMMATIC_TOOL_CALLING":
+			provider.SupportsProgrammaticToolCalling, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "SUPPORTS_RESPONSES_MULTI_AGENT":
+			provider.SupportsResponsesMultiAgent, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "ULTRA_MAX_CONCURRENT_SUBAGENTS":
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			provider.UltraMaxConcurrentSubagents, err = parseProviderMinInt(value, key, path, 1)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+			provider.UltraMaxConcurrentSubagentsSet = true
+		case "SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL":
+			provider.SupportsParallelToolCallsControl, err = parseProviderSupportsBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
 		case "UPSTREAM_FIRST_BYTE_TIMEOUT":
 			parsed, err := parseProviderPositiveDuration(value, "UPSTREAM_FIRST_BYTE_TIMEOUT", path)
 			if err != nil {

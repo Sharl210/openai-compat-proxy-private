@@ -35,6 +35,19 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 	if requestedModel == "" {
 		return nil
 	}
+	if provider.AllowsLiteralModelMapTarget(requestedModel) {
+		return nil
+	}
+	if intent, ok := proxyModelIntentFromRequest(r); ok {
+		if intent.HasModelMapAlias || provider.ProxyModelIntentAllowsAlias(intent) || provider.AllowsInternalProxyModelIntent(intent, providerCfg.EnableNoPromptModelSuffix) {
+			return nil
+		}
+	}
+	if discovery, ok := defaultOverlayDiscoveryFromRequest(r); ok && discovery.ProviderID == provider.ID {
+		if _, allowed := discovery.VisibleModelIDs[requestedModel]; allowed {
+			return nil
+		}
+	}
 	if shouldBypassUsageRecorderForRequest(r) {
 		return nil
 	}
@@ -48,7 +61,7 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 	if !providerModelsListEnforcedForRequest(r, provider, info) {
 		return nil
 	}
-	allowed, enforced, err := explicitProviderVisibleModelSet(ctx, r, provider, providerCfg, authorization)
+	allowed, discoveredModelIDs, enforced, err := explicitProviderVisibleModelSet(ctx, r, provider, providerCfg, authorization)
 	if err != nil {
 		return err
 	}
@@ -56,6 +69,9 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		return nil
 	}
 	if _, ok := allowed[requestedModel]; ok {
+		if intent, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(requestedModel, providerCfg.EnableNoPromptModelSuffix, providerCfg.EffectiveEnableReasoningModeSuffix(), discoveredModelIDs); parsed && (intent.ReasoningEffort != "" || intent.ReasoningMode != "" || intent.HasNoPrompt || intent.HasUltra) {
+			*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+		}
 		if provider.HidesModel(requestedModel) {
 			return &modelAllowanceError{status: http.StatusBadRequest, code: "invalid_model", message: "requested model is not in models list"}
 		}
@@ -187,24 +203,24 @@ func writeModelAllowanceError(w http.ResponseWriter, err error) {
 	errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 }
 
-func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, bool, error) {
+func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, []string, bool, error) {
 	if provider.SupportsModels {
 		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		if status == http.StatusNotFound {
 			if ids := provider.VisibleModelIDs(); len(ids) > 0 {
-				return rawModelIDSetFromIDs(ids), true, nil
+				return rawModelIDSetFromIDs(ids), nil, true, nil
 			}
-			return nil, false, nil
+			return nil, nil, false, nil
 		}
 		if status >= 200 && status < 300 {
-			set, err := rawModelIDSetFromModelsBody(body, provider)
-			return set, true, err
+			set, discoveredModelIDs, err := rawModelIDSetFromModelsBody(body, provider)
+			return set, discoveredModelIDs, true, err
 		}
-		return nil, false, &upstream.HTTPStatusError{
+		return nil, nil, false, &upstream.HTTPStatusError{
 			StatusCode:  status,
 			ContentType: contentType,
 			BodyBytes:   append([]byte(nil), body...),
@@ -213,13 +229,13 @@ func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provi
 	}
 	ids := provider.VisibleModelIDs()
 	if len(ids) == 0 {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	set := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		set[id] = struct{}{}
 	}
-	return set, true, nil
+	return set, nil, true, nil
 }
 
 func rawModelIDSetFromIDs(ids []string) map[string]struct{} {
@@ -234,10 +250,10 @@ func rawModelIDSetFromIDs(ids []string) map[string]struct{} {
 	return set
 }
 
-func rawModelIDSetFromModelsBody(body []byte, provider config.ProviderConfig) (map[string]struct{}, error) {
+func rawModelIDSetFromModelsBody(body []byte, provider config.ProviderConfig) (map[string]struct{}, []string, error) {
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	data, _ := payload["data"].([]any)
 	baseIDs := make([]string, 0, len(data)+len(provider.ManualModels))
@@ -280,6 +296,7 @@ func rawModelIDSetFromModelsBody(body []byte, provider config.ProviderConfig) (m
 	if provider.ExposeReasoningSuffixModels && provider.EnableReasoningEffortSuffix {
 		visible = reasoning.ExpandModelIDs(baseIDs, nil, true)
 	}
+	visible = expandReasoningModeModelIDs(visible, provider)
 	set := make(map[string]struct{}, len(visible))
 	for _, id := range visible {
 		id = strings.TrimSpace(id)
@@ -288,5 +305,5 @@ func rawModelIDSetFromModelsBody(body []byte, provider config.ProviderConfig) (m
 		}
 		set[id] = struct{}{}
 	}
-	return set, nil
+	return set, upstreamBaseIDs, nil
 }

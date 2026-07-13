@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"net/http"
 	"strings"
 
 	"openai-compat-proxy/internal/config"
@@ -91,4 +92,43 @@ func prepareProviderClientModel(req *model.CanonicalRequest, resolvedModel strin
 		applyNoPromptModelSuffix(req, cfg)
 	}
 	return req.Model
+}
+
+type providerClientModelRequest struct {
+	req           *model.CanonicalRequest
+	httpRequest   *http.Request
+	resolvedModel string
+	provider      config.ProviderConfig
+	config        config.Config
+}
+
+func sourceModelBeforeProviderMapping(r *http.Request, rawClientModel string, selectedModel string, provider config.ProviderConfig) string {
+	sourceModel := rawClientModel
+	if info, ok := routeInfoFromRequest(r); ok && info.Legacy {
+		if strings.HasPrefix(strings.TrimSpace(rawClientModel), "[") && strings.TrimSpace(selectedModel) != "" {
+			sourceModel = selectedModel
+		} else if routedModel, routed := legacyRoutingModelFromRequest(r); routed {
+			sourceModel = routedModel
+		}
+	}
+	if internalModel, ok := provider.InternalModelID(sourceModel, true); ok {
+		return internalModel
+	}
+	return sourceModel
+}
+
+func prepareProviderClientModelForRequest(input providerClientModelRequest) string {
+	if input.req == nil {
+		return strings.TrimSpace(input.resolvedModel)
+	}
+	if intent, ok := proxyModelIntentFromRequest(input.httpRequest); ok && intent.HasNoPrompt && input.provider.EffectiveNoPromptModelSuffix(input.config.EnableNoPromptModelSuffix) && !input.provider.HidesModel(intent.CanonicalModel()) {
+		input.req.SkipProviderSystemPrompt = true
+	}
+	if discovery, ok := defaultOverlayDiscoveryFromRequest(input.httpRequest); ok && discovery.ProviderID == input.provider.ID && discovery.RawModelID == input.req.Model {
+		if _, exact := discovery.VisibleModelIDs[discovery.RawModelID]; exact {
+			input.req.Model = input.resolvedModel
+			return input.req.Model
+		}
+	}
+	return prepareProviderClientModel(input.req, input.resolvedModel, input.provider, input.config)
 }

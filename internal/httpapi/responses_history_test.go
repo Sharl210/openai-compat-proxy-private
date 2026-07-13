@@ -800,6 +800,67 @@ func TestBuildResponsesHistorySnapshotKeepsRealProxyReasoningBlock(t *testing.T)
 	}
 }
 
+func TestResponsesHistoryReplaysProxyReasoningStateWithoutSummaryOrEncryption(t *testing.T) {
+	// Given
+	base := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":             "reasoning",
+			"id":               "rs_proxy",
+			"context":          "ctx_opaque",
+			"phase":            "analysis",
+			"vendor_reasoning": map[string]any{"opaque": "keep"},
+		}},
+	}}
+	store := newResponsesHistoryStore(2, "")
+
+	// When
+	store.Save("provider", "resp_1", buildResponsesHistorySnapshot(base, assistant))
+	replayed := store.Load("provider", "resp_1")
+
+	// Then
+	if len(replayed) != 2 || len(replayed[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real rs_proxy reasoning replayed, got %#v", replayed)
+	}
+	reasoning := replayed[1].ReasoningBlocks[0]
+	if reasoning["context"] != "ctx_opaque" || reasoning["phase"] != "analysis" {
+		t.Fatalf("expected real reasoning state replayed, got %#v", reasoning)
+	}
+	vendor, _ := reasoning["vendor_reasoning"].(map[string]any)
+	if vendor["opaque"] != "keep" {
+		t.Fatalf("expected opaque vendor state replayed, got %#v", reasoning)
+	}
+}
+
+func TestBuildResponsesHistorySnapshotKeepsProxyReasoningStateWithPlaceholderSummary(t *testing.T) {
+	// Given
+	base := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":    "reasoning",
+			"id":      "rs_proxy",
+			"context": "ctx_opaque",
+			"summary": []map[string]any{{"type": "summary_text", "text": "代理层占位"}},
+		}},
+	}}
+
+	// When
+	snapshot := buildResponsesHistorySnapshot(base, assistant)
+
+	// Then
+	if len(snapshot) != 2 || len(snapshot[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real rs_proxy state preserved despite placeholder summary, got %#v", snapshot)
+	}
+}
+
 func TestBuildResponsesHistorySnapshotDropsSyntheticNativeThinkingBlocks(t *testing.T) {
 	base := []model.CanonicalMessage{{
 		Role:  "user",

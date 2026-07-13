@@ -39,6 +39,8 @@ func TestResponsesRouteUsesChatUpstreamEndpointType(t *testing.T) {
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
@@ -66,6 +68,338 @@ func TestResponsesRouteUsesChatUpstreamEndpointType(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"object":"response"`) || !strings.Contains(rec.Body.String(), `"hello from chat upstream"`) {
 		t.Fatalf("expected responses output normalized from chat upstream, got %s", rec.Body.String())
+	}
+}
+
+func TestResponsesRouteRejectsProgrammaticToolWhenProviderDoesNotSupportIt(t *testing.T) {
+	// Given
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_unexpected"}`))
+	}))
+	defer upstream.Close()
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{
+		ID:                   "openai",
+		Enabled:              true,
+		UpstreamBaseURL:      upstream.URL,
+		UpstreamAPIKey:       "test-key",
+		UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		SupportsResponses:    true,
+	}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5.6",
+		"tools":[{"type":"programmatic_tool_calling"}],
+		"input":"hello"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected preflight 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unsupported_upstream_feature") {
+		t.Fatalf("expected stable unsupported feature error, got %s", rec.Body.String())
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("expected no upstream request, got %d", upstreamHits)
+	}
+}
+
+func TestResponsesRouteRejectsMultiAgentWhenProviderDoesNotSupportIt(t *testing.T) {
+	// Given
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_unexpected"}`))
+	}))
+	defer upstream.Close()
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{
+		ID:                   "openai",
+		Enabled:              true,
+		UpstreamBaseURL:      upstream.URL,
+		UpstreamAPIKey:       "test-key",
+		UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		SupportsResponses:    true,
+	}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5.6",
+		"multi_agent":{"enabled":true},
+		"input":"hello"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected preflight 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "unsupported_upstream_feature") {
+		t.Fatalf("expected stable unsupported feature error, got %s", rec.Body.String())
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("expected no upstream request, got %d", upstreamHits)
+	}
+}
+
+func TestResponsesRouteUltraSuffixSendsRealMultiAgentBeta(t *testing.T) {
+	var receivedBeta string
+	var receivedBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBeta = r.Header.Get("OpenAI-Beta")
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		writeFeatureCompatibilityMatrixResponse(w, config.UpstreamEndpointTypeResponses)
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                          "openai",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+			SupportsResponses:           true,
+			SupportsResponsesMultiAgent: true,
+			UltraMaxConcurrentSubagents: 5,
+			EnableReasoningEffortSuffix: true,
+			ManualModels:                []string{"gpt-5.6"},
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-high-ultra","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(receivedBeta, "responses_multi_agent=v1") {
+		t.Fatalf("expected multi-agent beta header, got %q", receivedBeta)
+	}
+	multiAgent, _ := receivedBody["multi_agent"].(map[string]any)
+	if multiAgent["enabled"] != true || multiAgent["max_concurrent_subagents"] != float64(5) {
+		t.Fatalf("unexpected multi_agent payload: %#v", multiAgent)
+	}
+	reasoning, _ := receivedBody["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
+		t.Fatalf("expected high effort alongside ultra, got %#v", reasoning)
+	}
+}
+
+func TestResponsesRouteRejectsSemanticFeaturesBeforeNonResponsesUpstream(t *testing.T) {
+	features := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "programmatic tool calling",
+			body: `{"model":"gpt-5.6","tools":[{"type":"programmatic_tool_calling"}],"input":"hello"}`,
+		},
+		{
+			name: "multi agent",
+			body: `{"model":"gpt-5.6","multi_agent":{"enabled":true},"input":"hello"}`,
+		},
+		{
+			name: "persisted reasoning item",
+			body: `{"model":"gpt-5.6","input":[{"type":"reasoning","encrypted_content":"opaque","phase":"analysis","summary":[]}]}`,
+		},
+		{
+			name: "reasoning context",
+			body: `{"model":"gpt-5.6","reasoning":{"context":"opaque"},"input":"hello"}`,
+		},
+		{
+			name: "prompt cache controls",
+			body: `{"model":"gpt-5.6","prompt_cache_key":"stable-key","input":"hello"}`,
+		},
+		{
+			name: "original image detail",
+			body: `{"model":"gpt-5.6","input":[{"role":"user","content":[{"type":"input_image","image_url":{"url":"https://example.com/image.png","detail":"original"}}]}]}`,
+		},
+	}
+
+	for _, endpointType := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		for _, feature := range features {
+			t.Run(endpointType+"/"+feature.name, func(t *testing.T) {
+				upstreamHits := 0
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					upstreamHits++
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"unexpected"}`))
+				}))
+				defer upstream.Close()
+
+				server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{
+					ID:                   "openai",
+					Enabled:              true,
+					UpstreamBaseURL:      upstream.URL,
+					UpstreamAPIKey:       "test-key",
+					UpstreamEndpointType: endpointType,
+					SupportsResponses:    true,
+				}}})
+				req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(feature.body))
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+
+				server.ServeHTTP(rec, req)
+
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("expected preflight 400, got %d body=%s", rec.Code, rec.Body.String())
+				}
+				if !strings.Contains(rec.Body.String(), "unsupported_upstream_feature") {
+					t.Fatalf("expected stable unsupported feature error, got %s", rec.Body.String())
+				}
+				if upstreamHits != 0 {
+					t.Fatalf("expected no upstream request, got %d", upstreamHits)
+				}
+			})
+		}
+	}
+}
+
+func TestChatRouteRejectsResponsesOnlyFeaturesBeforeAnthropicUpstream(t *testing.T) {
+	features := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "reasoning mode",
+			body: `{"model":"gpt-5.6","reasoning":{"mode":"pro"},"messages":[{"role":"user","content":"hello"}]}`,
+		},
+		{
+			name: "original image detail",
+			body: `{"model":"gpt-5.6","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"original"}}]}]}`,
+		},
+	}
+
+	for _, feature := range features {
+		t.Run(feature.name, func(t *testing.T) {
+			upstreamHits := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamHits++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"unexpected"}`))
+			}))
+			defer upstream.Close()
+
+			server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DefaultProReasoningModeSet: true, DefaultProReasoningMode: false, Providers: []config.ProviderConfig{{
+				ID:                        "openai",
+				Enabled:                   true,
+				UpstreamBaseURL:           upstream.URL,
+				UpstreamAPIKey:            "test-key",
+				UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+				SupportsChat:              true,
+				SupportsAnthropicMessages: true,
+			}}})
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(feature.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected preflight 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			expectedCode := "unsupported_upstream_feature"
+			if feature.name == "reasoning mode" {
+				expectedCode = "unsupported_reasoning_mode"
+			}
+			if !strings.Contains(rec.Body.String(), expectedCode) {
+				t.Fatalf("expected stable %s error, got %s", expectedCode, rec.Body.String())
+			}
+			if upstreamHits != 0 {
+				t.Fatalf("expected no upstream request, got %d", upstreamHits)
+			}
+		})
+	}
+}
+
+func TestResponsesRoutePreservesUnknownNativeResponsesEvent(t *testing.T) {
+	// Given
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.created\n" +
+			"data: {\"response\":{\"id\":\"resp_1\",\"object\":\"response\"}}\n\n" +
+			"event: response.program_output.delta\n" +
+			"data: {\"type\":\"response.program_output.delta\",\"item_id\":\"prog_1\",\"delta\":\"console.log(1)\"}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\"}}\n\n"))
+	}))
+	defer upstream.Close()
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{
+		ID:                   "openai",
+		Enabled:              true,
+		UpstreamBaseURL:      upstream.URL,
+		UpstreamAPIKey:       "test-key",
+		UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		SupportsResponses:    true,
+	}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6","stream":true,"input":"hello"}`))
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected successful Responses stream, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "event: response.program_output.delta") {
+		t.Fatalf("expected unknown native event passthrough, got %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "unexpected EOF") {
+		t.Fatalf("expected terminal stream completion, got %s", rec.Body.String())
+	}
+}
+
+func TestResponsesRouteMergesClientAndRequiredMultiAgentBetaHeaders(t *testing.T) {
+	// Given
+	var receivedBeta string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBeta = r.Header.Get("OpenAI-Beta")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed","output":[]}`))
+	}))
+	defer upstream.Close()
+	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, Providers: []config.ProviderConfig{{
+		ID:                          "openai",
+		Enabled:                     true,
+		UpstreamBaseURL:             upstream.URL,
+		UpstreamAPIKey:              "test-key",
+		UpstreamEndpointType:        config.UpstreamEndpointTypeResponses,
+		SupportsResponses:           true,
+		SupportsResponsesMultiAgent: true,
+	}}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6","multi_agent":{"enabled":true},"input":"hello"}`))
+	req.Header.Set("OpenAI-Beta", "other_feature=v1,responses_multi_agent=v1")
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if receivedBeta != "other_feature=v1,responses_multi_agent=v1" {
+		t.Fatalf("expected client and required beta headers merged once, got %q", receivedBeta)
 	}
 }
 
@@ -124,7 +458,7 @@ func TestResponsesRoutePreservesTopLevelFieldsAcrossAnthropicUpstream(t *testing
 	}))
 	defer upstream.Close()
 
-	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsParallelToolCallsControl: true, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"resp_123","metadata":{"trace_id":"trace_123"},"parallel_tool_calls":false,"truncation":"auto","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -212,11 +546,10 @@ func TestResponsesRouteDoesNotEchoArbitraryUnknownRequestFieldsBackIntoOutput(t 
 	}
 }
 
-func TestResponsesRouteDoesNotForwardStoreIncludeToChatUpstream(t *testing.T) {
-	var gotBody string
+func TestResponsesRouteRejectsPersistedReasoningIncludeForChatUpstream(t *testing.T) {
+	upstreamCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bodyBytes, _ := io.ReadAll(r.Body)
-		gotBody = string(bodyBytes)
+		upstreamCalls++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello from chat upstream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
 	}))
@@ -229,29 +562,21 @@ func TestResponsesRouteDoesNotForwardStoreIncludeToChatUpstream(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
-		t.Fatalf("unmarshal chat upstream payload: %v body=%s", err, gotBody)
+	if upstreamCalls != 0 {
+		t.Fatalf("expected no chat upstream call, got %d", upstreamCalls)
 	}
-	if _, exists := payload["store"]; exists {
-		t.Fatalf("expected store to stay out of chat upstream payload, got %#v", payload)
-	}
-	if _, exists := payload["include"]; exists {
-		t.Fatalf("expected include to stay out of chat upstream payload, got %#v", payload)
-	}
-	if got, _ := payload["model"].(string); got != "gpt-5" {
-		t.Fatalf("expected regular responses fields to keep working, got %#v", payload)
+	if !strings.Contains(rec.Body.String(), "persisted reasoning include") {
+		t.Fatalf("expected persisted reasoning include error, got %s", rec.Body.String())
 	}
 }
 
-func TestResponsesRouteDoesNotForwardStoreIncludeToAnthropicUpstream(t *testing.T) {
-	var gotBody string
+func TestResponsesRouteRejectsPersistedReasoningIncludeForAnthropicUpstream(t *testing.T) {
+	upstreamCalls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bodyBytes, _ := io.ReadAll(r.Body)
-		gotBody = string(bodyBytes)
+		upstreamCalls++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic upstream"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
 	}))
@@ -264,21 +589,14 @@ func TestResponsesRouteDoesNotForwardStoreIncludeToAnthropicUpstream(t *testing.
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(gotBody), &payload); err != nil {
-		t.Fatalf("unmarshal anthropic upstream payload: %v body=%s", err, gotBody)
+	if upstreamCalls != 0 {
+		t.Fatalf("expected no Anthropic upstream call, got %d", upstreamCalls)
 	}
-	if _, exists := payload["store"]; exists {
-		t.Fatalf("expected store to stay out of anthropic upstream payload, got %#v", payload)
-	}
-	if _, exists := payload["include"]; exists {
-		t.Fatalf("expected include to stay out of anthropic upstream payload, got %#v", payload)
-	}
-	if got, _ := payload["model"].(string); got == "" {
-		t.Fatalf("expected regular responses fields to keep working, got %#v", payload)
+	if !strings.Contains(rec.Body.String(), "persisted reasoning include") {
+		t.Fatalf("expected persisted reasoning include error, got %s", rec.Body.String())
 	}
 }
 
@@ -900,6 +1218,8 @@ func TestResponsesRouteNoPromptSuffixSkipsProviderPromptAndKeepsReasoningSuffix(
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		EnableNoPromptModelSuffix:   true,
@@ -959,6 +1279,8 @@ func TestResponsesRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		EnableNoPromptModelSuffix:   true,
@@ -1017,6 +1339,8 @@ func TestResponsesRouteNoPromptSuffixWorksBeforeReasoningSuffix(t *testing.T) {
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		EnableNoPromptModelSuffix:   true,
@@ -1079,6 +1403,8 @@ func TestChatRouteNoPromptSuffixWorksWithoutReasoningSuffix(t *testing.T) {
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		EnableNoPromptModelSuffix:   true,
@@ -1245,6 +1571,8 @@ func TestResponsesRouteNoneReasoningSuffixDisablesReasoning(t *testing.T) {
 
 	server := NewServer(config.Config{
 		DefaultProvider:             "openai",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
 		EnableLegacyV1Routes:        true,
 		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
 		Providers: []config.ProviderConfig{{
@@ -1833,7 +2161,7 @@ func TestAnthropicRouteMapsThinkingConfigToResponsesReasoningWhenUpstreamIsRespo
 	}))
 	defer upstream.Close()
 
-	server := NewServer(config.Config{DefaultProvider: "openai", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	server := NewServer(config.Config{DefaultProvider: "openai", DefaultProReasoningModeSet: true, DefaultProReasoningMode: false, EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":2048},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -2804,7 +3132,7 @@ func TestResponsesRouteUsesItemReferenceForOpenCodeMasqueradeFunctionCallFollowU
 	}))
 	defer upstream.Close()
 
-	server := NewServer(config.Config{DefaultProvider: "resp", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "resp", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, MasqueradeTarget: config.MasqueradeTargetOpenCode, SupportsResponses: true, SupportsChat: true}}})
+	server := NewServer(config.Config{DefaultProvider: "resp", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "resp", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, MasqueradeTarget: config.MasqueradeTargetOpenCode, SupportsResponses: true, SupportsChat: true, SystemPromptText: "provider prompt", SystemPromptPosition: config.SystemPromptPositionAppend}}})
 
 	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello","tools":[{"type":"function","name":"search_web","description":"Search","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}]}`))
 	firstReq.Header.Set("Content-Type", "application/json")
@@ -2819,7 +3147,7 @@ func TestResponsesRouteUsesItemReferenceForOpenCodeMasqueradeFunctionCallFollowU
 	}
 	responseID, _ := firstResp["id"].(string)
 
-	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","previous_response_id":"`+responseID+`","instructions":"follow-up instructions","input":[{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`))
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondRec := httptest.NewRecorder()
 	server.ServeHTTP(secondRec, secondReq)
@@ -2834,6 +3162,9 @@ func TestResponsesRouteUsesItemReferenceForOpenCodeMasqueradeFunctionCallFollowU
 	}
 	if !strings.Contains(secondBody, `"type":"function_call_output"`) || !strings.Contains(secondBody, `"call_id":"call_1"`) {
 		t.Fatalf("expected opencode masquerade follow-up to preserve function_call_output, got %s", secondBody)
+	}
+	if !strings.Contains(secondBody, `"instructions":"follow-up instructions\n\nprovider prompt"`) {
+		t.Fatalf("expected provider prompt to preserve follow-up item-reference ordering, got %s", secondBody)
 	}
 }
 

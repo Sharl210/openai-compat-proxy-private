@@ -2,9 +2,30 @@ package anthropic
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDecodeRequestRecordsNoReasoningModeWhenMessagesHasNoBodyMode(t *testing.T) {
+	// Given
+	requestBody := `{"model":"model","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`
+
+	// When
+	canon, err := DecodeRequest(strings.NewReader(requestBody))
+
+	// Then
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.Reasoning != nil {
+		t.Fatalf("expected no reasoning body for messages request, got %#v", canon.Reasoning)
+	}
+	origin := reflect.ValueOf(canon).FieldByName("ReasoningModeOrigin")
+	if !origin.IsValid() || origin.Type().Name() != "ReasoningModeOrigin" || origin.String() != "none" {
+		t.Fatalf("expected none mode origin, got %#v", canon)
+	}
+}
 
 func TestDecodeRequestPreservesThinkingBlocksInFollowUpMessages(t *testing.T) {
 	req := `{
@@ -87,6 +108,59 @@ func TestDecodeRequestPreservesOrderedAnthropicContentBlocks(t *testing.T) {
 	}
 	if blocks[3].Type != "content" || blocks[3].Part.Text != "调用后" {
 		t.Fatalf("expected fourth block text after tool_use, got %#v", blocks[3])
+	}
+}
+
+func TestDecodeRequestMapsDisableParallelToolUseTriState(t *testing.T) {
+	trueValue, falseValue := true, false
+	for _, tc := range []struct {
+		name string
+		body string
+		want *bool
+	}{
+		{name: "unspecified", body: `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"hello"}],"tool_choice":{"type":"auto"}}`},
+		{name: "allowed", body: `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"hello"}],"tool_choice":{"type":"auto","disable_parallel_tool_use":false}}`, want: &trueValue},
+		{name: "disabled", body: `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"hello"}],"tool_choice":{"type":"auto","disable_parallel_tool_use":true}}`, want: &falseValue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			canon, err := DecodeRequest(strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("DecodeRequest error: %v", err)
+			}
+			if canon.ParallelToolCalls == nil || tc.want == nil || *canon.ParallelToolCalls != *tc.want {
+				if canon.ParallelToolCalls == nil && tc.want == nil {
+					return
+				}
+				t.Fatalf("expected ParallelToolCalls %#v, got %#v", tc.want, canon.ParallelToolCalls)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestNormalizesAnthropicToolChoiceRequirements(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		choice string
+		want   string
+	}{
+		{name: "optional", choice: `{"type":"auto"}`, want: "optional"},
+		{name: "required any", choice: `{"type":"any"}`, want: "required_any"},
+		{name: "required named", choice: `{"type":"tool","name":"lookup"}`, want: "required_named"},
+		{name: "none", choice: `{"type":"none"}`, want: "none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"hello"}],"tool_choice":` + tc.choice + `}`
+			canon, err := DecodeRequest(strings.NewReader(body))
+			if err != nil {
+				t.Fatalf("DecodeRequest error: %v", err)
+			}
+			if got := string(canon.ToolChoice.Requirement); got != tc.want {
+				t.Fatalf("expected %q, got %#v", tc.want, canon.ToolChoice)
+			}
+			if tc.want == "required_named" && canon.ToolChoice.Name != "lookup" {
+				t.Fatalf("expected named choice lookup, got %#v", canon.ToolChoice)
+			}
+		})
 	}
 }
 
