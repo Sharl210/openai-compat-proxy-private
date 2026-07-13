@@ -91,3 +91,15 @@ func TestBuildResponsePromotesCachedTokenUsageFields(t *testing.T) {
 		t.Fatalf("expected prompt_tokens_details.cache_creation_tokens 2, got %#v", got)
 	}
 }
+
+func TestBuildResponseFormatsReasoningContentTitle(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Reasoning: map[string]any{"reasoning_content": "**重点**正文"},
+	})
+
+	choices, _ := resp["choices"].([]map[string]any)
+	message, _ := choices[0]["message"].(map[string]any)
+	if got, _ := message["reasoning_content"].(string); got != "**重点**\n正文" {
+		t.Fatalf("expected reasoning_content title to be separated, got %#v", message)
+	}
+}

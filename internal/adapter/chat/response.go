@@ -1,6 +1,9 @@
 package chat
 
-import "openai-compat-proxy/internal/aggregate"
+import (
+	"openai-compat-proxy/internal/aggregate"
+	reasoningtext "openai-compat-proxy/internal/reasoning"
+)
 
 func BuildResponse(result aggregate.Result) map[string]any {
 	content := any(result.Text)
@@ -75,7 +78,7 @@ func reasoningContentValue(reasoning map[string]any) string {
 	}
 	for _, key := range []string{"reasoning_content", "summary", "content", "delta"} {
 		if text, _ := reasoning[key].(string); text != "" {
-			return text
+			return reasoningtext.FormatText(text)
 		}
 	}
 	return ""
