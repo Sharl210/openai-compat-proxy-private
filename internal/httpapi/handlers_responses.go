@@ -423,7 +423,7 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		return nil, false
 	}
 	rawClientModel := canon.Model
-	clientReasoningMode := clientReasoningModeForRequest(rawClientModel, canon, provider, providerCfg)
+	clientReasoningMode := clientReasoningModeForRequest(r, rawClientModel, canon, provider, providerCfg)
 	clientModel := prepareProviderClientModelForRequest(providerClientModelRequest{req: &canon, httpRequest: r, resolvedModel: sourceModelBeforeProviderMapping(r, rawClientModel, resolvedModel, provider), provider: provider, config: providerCfg})
 	resolvedModel = clientModel
 	applyProxyModelIntentReasoningMode(r, &canon)

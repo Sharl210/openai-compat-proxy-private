@@ -552,29 +552,16 @@ func (s *RuntimeSnapshot) ResolveDefaultProviderSelectionForProxyModel(modelName
 }
 
 func (s *RuntimeSnapshot) resolveProviderProxyModelIntent(providerID string, provider ProviderConfig, externalModel string) (string, string, model.ProxyModelIntent, bool) {
-	internalModel, ok := provider.InternalModelID(externalModel, true)
+	resolution, ok := provider.ResolveExternalProxyModelIntentWithCandidates(
+		externalModel,
+		s.Config.EnableNoPromptModelSuffix,
+		s.Config.EffectiveEnableReasoningModeSuffix(),
+		nil,
+	)
 	if !ok {
 		return "", externalModel, model.ProxyModelIntent{}, false
 	}
-	intent, ok := provider.ParseProxyModelIntentWithReasoningMode(internalModel, s.Config.EnableNoPromptModelSuffix, s.Config.EffectiveEnableReasoningModeSuffix())
-	if !ok {
-		if provider.AllowsLiteralModelMapTarget(internalModel) {
-			return providerID, internalModel, model.ProxyModelIntent{}, true
-		}
-		return "", externalModel, model.ProxyModelIntent{}, false
-	}
-	if provider.HidesModel(intent.CanonicalModel()) {
-		return "", externalModel, model.ProxyModelIntent{}, false
-	}
-	matchedAlias := provider.ProxyModelIntentAllowsAlias(intent)
-	if mappedIntent, mapped := provider.ResolveMappedProxyModelIntent(intent); mapped {
-		intent = mappedIntent
-	}
-	routingModel := ProxyModelIntentRoutingModel(intent)
-	if matchedAlias || providerAllowsInternalVisibleModel(provider, routingModel, s.Config.EnableNoPromptModelSuffix) {
-		return providerID, routingModel, intent, true
-	}
-	return "", externalModel, model.ProxyModelIntent{}, false
+	return providerID, ProxyModelIntentRoutingModel(resolution.ResolvedIntent), resolution.ResolvedIntent, true
 }
 
 func stripNoPromptModelSuffix(model string) (string, bool) {

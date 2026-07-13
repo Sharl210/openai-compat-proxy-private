@@ -129,12 +129,16 @@ func (p ProviderConfig) ParseProxyModelIntentWithReasoningMode(modelName string,
 func (p ProviderConfig) ParseProxyModelIntentWithReasoningModeCandidates(modelName string, rootNoPrompt bool, rootReasoningMode bool, additionalCandidates []string) (model.ProxyModelIntent, bool) {
 	modelName = strings.TrimSpace(modelName)
 	candidates := append(p.proxyModelIntentCandidates(), additionalCandidates...)
-	return model.ParseProxyModelIntent(modelName, candidates, model.ProxyModelIntentAxes{
+	return model.ParseProxyModelIntent(modelName, candidates, p.proxyModelIntentAxes(modelName, rootNoPrompt, rootReasoningMode))
+}
+
+func (p ProviderConfig) proxyModelIntentAxes(modelName string, rootNoPrompt bool, rootReasoningMode bool) model.ProxyModelIntentAxes {
+	return model.ProxyModelIntentAxes{
 		EnableReasoningEffort: p.EnableReasoningEffortSuffix || p.HasManualReasonSuffixForModel(modelName),
 		EnablePro:             p.EffectiveEnableReasoningModeSuffix(rootReasoningMode),
 		EnableNoPrompt:        p.EffectiveNoPromptModelSuffix(rootNoPrompt),
 		EnableUltra:           true,
-	})
+	}
 }
 
 func (p ProviderConfig) ProxyModelIntentAllowsAlias(intent model.ProxyModelIntent) bool {

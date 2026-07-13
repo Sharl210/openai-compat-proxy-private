@@ -44,6 +44,9 @@ func ensureProviderModelAllowed(ctx context.Context, r *http.Request, provider c
 		}
 	}
 	if discovery, ok := defaultOverlayDiscoveryFromRequest(r); ok && discovery.ProviderID == provider.ID {
+		if discovery.RequestedModelID == requestedModel || discovery.RawModelID == requestedModel {
+			return nil
+		}
 		if _, allowed := discovery.VisibleModelIDs[requestedModel]; allowed {
 			return nil
 		}

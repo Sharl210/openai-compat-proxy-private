@@ -124,9 +124,13 @@ func prepareProviderClientModelForRequest(input providerClientModelRequest) stri
 	if intent, ok := proxyModelIntentFromRequest(input.httpRequest); ok && intent.HasNoPrompt && input.provider.EffectiveNoPromptModelSuffix(input.config.EnableNoPromptModelSuffix) && !input.provider.HidesModel(intent.CanonicalModel()) {
 		input.req.SkipProviderSystemPrompt = true
 	}
-	if discovery, ok := defaultOverlayDiscoveryFromRequest(input.httpRequest); ok && discovery.ProviderID == input.provider.ID && discovery.RawModelID == input.req.Model {
-		if _, exact := discovery.VisibleModelIDs[discovery.RawModelID]; exact {
-			input.req.Model = input.resolvedModel
+	if discovery, ok := defaultOverlayDiscoveryFromRequest(input.httpRequest); ok && discovery.ProviderID == input.provider.ID {
+		if discovery.ExactLiteral {
+			input.req.Model = discovery.RawModelID
+			return input.req.Model
+		}
+		if discovery.HasProxyModelIntent {
+			input.req.Model = discovery.RawModelID
 			return input.req.Model
 		}
 	}

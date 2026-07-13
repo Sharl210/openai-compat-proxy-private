@@ -10,9 +10,7 @@ import (
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
-	"openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/tokenestimator"
-	"openai-compat-proxy/internal/upstream"
 )
 
 var defaultOverlayRefreshInterval = 24 * time.Hour
@@ -24,9 +22,14 @@ type routeInfo struct {
 }
 
 type defaultOverlayDiscovery struct {
-	ProviderID      string
-	RawModelID      string
-	VisibleModelIDs map[string]struct{}
+	ProviderID             string
+	RequestedModelID       string
+	RawModelID             string
+	VisibleModelIDs        map[string]struct{}
+	SourceProxyModelIntent model.ProxyModelIntent
+	ProxyModelIntent       model.ProxyModelIntent
+	HasProxyModelIntent    bool
+	ExactLiteral           bool
 }
 
 type routeContextKey string
@@ -349,18 +352,42 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		resolvedModel := canonicalModel
 		resolvedModelIsInternal := false
 		rootModelMapped := false
+		applyDiscovery := func(discovery defaultOverlayDiscovery) {
+			providerID = discovery.ProviderID
+			resolvedModel = discovery.RawModelID
+			resolvedModelIsInternal = true
+			if discovery.HasProxyModelIntent {
+				intent := discovery.ProxyModelIntent
+				if rootModelMapped {
+					intent.HasModelMapAlias = true
+				}
+				discovery.ProxyModelIntent = intent
+				*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+			}
+			*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), discovery))
+		}
 		if info.Legacy && canonicalModel != "" {
 			if rootIntent, mapped := resolveV1ProxyModelIntentForLegacyRequest(r, canonicalModel); mapped {
 				canonicalModel = rootIntent.CanonicalModel()
 				rootModelMapped = true
-			} else {
+			} else if requestEffort := requestEffortFromRouteContext(r); requestEffort != "" {
 				snapshot, _ = runtimeSnapshotFromRequest(r)
-				canonicalModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, requestEffortFromRouteContext(r))
+				canonicalModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, requestEffort)
 			}
 			resolvedModel = canonicalModel
 			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, canonicalModel))
 			snapshot, _ = runtimeSnapshotFromRequest(r)
-			if resolvedID, modelForProvider, intent, ok := snapshot.ResolveDefaultProviderSelectionForProxyModel(canonicalModel); ok {
+			var realtimeDiscovery defaultOverlayDiscovery
+			var realtimeErr error
+			realtimeChecked := false
+			realtimeResolved := false
+			if defaultOverlayModelMayContainProxyIntent(snapshot, canonicalModel) {
+				realtimeChecked = true
+				realtimeDiscovery, realtimeErr, realtimeResolved = resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel)
+			}
+			if realtimeResolved && realtimeDiscovery.ExactLiteral {
+				applyDiscovery(realtimeDiscovery)
+			} else if resolvedID, modelForProvider, intent, ok := snapshot.ResolveDefaultProviderSelectionForProxyModel(canonicalModel); ok {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
 				resolvedModelIsInternal = true
@@ -372,44 +399,44 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				providerID = resolvedID
 				resolvedModel = modelForProvider
 				resolvedModelIsInternal = true
-			} else if legacyModelsListEnforced(snapshot) && hasProxyModelTail(canonicalModel) {
-				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-			} else if discovery, realtimeErr, ok := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel); ok {
-				providerID = discovery.ProviderID
-				resolvedModel = discovery.RawModelID
-				resolvedModelIsInternal = true
-				*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), discovery))
-			} else if realtimeErr != nil {
-				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
-			} else if legacyModelsListEnforced(snapshot) && snapshot.Config.EnableDefaultProviderModelTags {
-				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-			} else if snapshot.Config.EnableNoPromptModelSuffix {
-				strippedModel, stripped := stripNoPromptModelSuffix(canonicalModel)
-				if !stripped {
-					if shouldBypassUsageRecorderForRequest(r) {
-						if len(snapshot.DefaultProviderIDs) > 0 {
-							providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
+			} else {
+				if !realtimeChecked {
+					realtimeDiscovery, realtimeErr, realtimeResolved = resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel)
+				}
+				if realtimeResolved {
+					applyDiscovery(realtimeDiscovery)
+				} else if realtimeErr != nil {
+					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
+				} else if legacyModelsListEnforced(snapshot) && snapshot.Config.EnableDefaultProviderModelTags {
+					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+				} else if snapshot.Config.EnableNoPromptModelSuffix {
+					strippedModel, stripped := stripNoPromptModelSuffix(canonicalModel)
+					if !stripped {
+						if shouldBypassUsageRecorderForRequest(r) {
+							if len(snapshot.DefaultProviderIDs) > 0 {
+								providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
+							}
+						} else if legacyModelsListEnforced(snapshot) {
+							return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+						}
+					} else if resolvedID, modelForProvider, strippedOK := snapshot.ResolveDefaultProviderSelection(strippedModel); strippedOK {
+						if provider, err := snapshot.Config.ProviderByID(resolvedID); err == nil && provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(canonicalModel) {
+							providerID = resolvedID
+							resolvedModel = modelForProvider
+							resolvedModelIsInternal = true
+						} else if legacyModelsListEnforced(snapshot) {
+							return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 						}
 					} else if legacyModelsListEnforced(snapshot) {
 						return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 					}
-				} else if resolvedID, modelForProvider, strippedOK := snapshot.ResolveDefaultProviderSelection(strippedModel); strippedOK {
-					if provider, err := snapshot.Config.ProviderByID(resolvedID); err == nil && provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(canonicalModel) {
-						providerID = resolvedID
-						resolvedModel = modelForProvider
-						resolvedModelIsInternal = true
-					} else if legacyModelsListEnforced(snapshot) {
-						return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+				} else if shouldBypassUsageRecorderForRequest(r) {
+					if len(snapshot.DefaultProviderIDs) > 0 {
+						providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
 					}
 				} else if legacyModelsListEnforced(snapshot) {
 					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 				}
-			} else if shouldBypassUsageRecorderForRequest(r) {
-				if len(snapshot.DefaultProviderIDs) > 0 {
-					providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
-				}
-			} else if legacyModelsListEnforced(snapshot) {
-				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 			}
 		}
 		if provider, err := snapshot.Config.ProviderByID(providerID); err == nil {
@@ -417,6 +444,17 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				discovery, exactRawModel := defaultOverlayDiscoveryFromRequest(r)
 				if (!exactRawModel || discovery.ProviderID != providerID || discovery.RawModelID != originalModel) && (!provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) || provider.HidesModel(originalModel)) {
 					return config.ProviderConfig{}, config.Config{}, "", originalModel, false, nil
+				}
+			}
+			var explicitDiscovery defaultOverlayDiscovery
+			var explicitRealtimeErr error
+			explicitRealtimeChecked := false
+			explicitRealtimeResolved := false
+			if canonicalModel != "" && !resolvedModelIsInternal && !info.Legacy && explicitProviderModelMayContainProxyIntent(provider, canonicalModel, false) {
+				explicitRealtimeChecked = true
+				explicitDiscovery, explicitRealtimeErr, explicitRealtimeResolved = resolveExplicitProviderSelectionFromRealtimeModels(r, snapshot, providerID, provider, canonicalModel)
+				if explicitRealtimeResolved && explicitDiscovery.ExactLiteral {
+					applyDiscovery(explicitDiscovery)
 				}
 			}
 			if canonicalModel != "" && !resolvedModelIsInternal {
@@ -434,6 +472,17 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 						}
 					} else if provider.HasProxyModelIntentCandidatePrefix(internalModel) {
 						return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
+					} else if !info.Legacy {
+						if !explicitRealtimeChecked {
+							explicitDiscovery, explicitRealtimeErr, explicitRealtimeResolved = resolveExplicitProviderSelectionFromRealtimeModels(r, snapshot, providerID, provider, canonicalModel)
+						}
+						if explicitRealtimeResolved {
+							applyDiscovery(explicitDiscovery)
+						} else if explicitRealtimeErr != nil {
+							return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, explicitRealtimeErr
+						} else {
+							resolvedModel = internalModel
+						}
 					} else {
 						resolvedModel = internalModel
 					}
@@ -612,58 +661,6 @@ func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {
 	return provider, ok
 }
 
-func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot *config.RuntimeSnapshot, modelName string) (defaultOverlayDiscovery, error, bool) {
-	if snapshot == nil || snapshot.Config.EnableDefaultProviderModelTags || strings.TrimSpace(modelName) == "" {
-		return defaultOverlayDiscovery{}, nil, false
-	}
-	discovery := defaultOverlayDiscovery{}
-	exactRawFound := false
-	var upstreamErr error
-	for _, providerID := range snapshot.DefaultProviderIDs {
-		provider, err := snapshot.Config.ProviderByID(providerID)
-		if err != nil || !provider.Enabled || !provider.SupportsModels {
-			continue
-		}
-		providerCfg := providerConfigForID(snapshot, providerID)
-		authorization, err := authHeaderForOverlayProviderUpstream(r, providerCfg, providerID)
-		if err != nil {
-			continue
-		}
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-		body, ok, err := fetchProviderModelsBody(r.Context(), client, authorization, provider)
-		if err != nil {
-			upstreamErr = err
-		}
-		if !ok {
-			continue
-		}
-		entries := decodeModelEntries(body)
-		if modelEntriesContain(entries, modelName) {
-			discovery = defaultOverlayDiscovery{
-				ProviderID:      providerID,
-				RawModelID:      modelName,
-				VisibleModelIDs: rawModelIDSet(entries),
-			}
-			exactRawFound = true
-			continue
-		}
-		if exactRawFound || hasProxyModelTail(modelName) {
-			continue
-		}
-		if modelEntriesAllowModel(entries, modelName, provider, providerCfg.EnableNoPromptModelSuffix) {
-			discovery = defaultOverlayDiscovery{
-				ProviderID:      providerID,
-				RawModelID:      modelName,
-				VisibleModelIDs: rawModelIDSet(entries),
-			}
-		}
-	}
-	if discovery.ProviderID == "" {
-		return defaultOverlayDiscovery{}, upstreamErr, false
-	}
-	return discovery, nil, true
-}
-
 func rawModelIDSet(entries []map[string]any) map[string]struct{} {
 	modelIDs := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
@@ -674,27 +671,6 @@ func rawModelIDSet(entries []map[string]any) map[string]struct{} {
 		}
 	}
 	return modelIDs
-}
-
-func hasProxyModelTail(modelName string) bool {
-	original := strings.TrimSpace(modelName)
-	current := original
-	for current != "" {
-		if baseModel, _, ok := model.SplitReasoningEffortSuffix(current); ok {
-			current = baseModel
-			continue
-		}
-		if strings.HasSuffix(current, "-pro") {
-			current = strings.TrimSuffix(current, "-pro")
-			continue
-		}
-		if strings.HasSuffix(current, "-noprompt") {
-			current = strings.TrimSuffix(current, "-noprompt")
-			continue
-		}
-		return current != original
-	}
-	return false
 }
 
 func modelEntriesContain(entries []map[string]any, model string) bool {
@@ -709,20 +685,6 @@ func modelEntriesContain(entries []map[string]any, model string) bool {
 		}
 	}
 	return false
-}
-
-func modelEntriesAllowModel(entries []map[string]any, model string, provider config.ProviderConfig, enableNoPrompt bool) bool {
-	if modelEntriesContain(entries, model) {
-		return true
-	}
-	if strippedModel, stripped := stripNoPromptModelSuffix(model); stripped {
-		return enableNoPrompt && !provider.HidesModel(model) && modelEntriesAllowModel(entries, strippedModel, provider, enableNoPrompt)
-	}
-	baseModel, _, ok := reasoning.SplitSuffix(model)
-	if !ok || (!provider.EnableReasoningEffortSuffix && !provider.HasManualReasonSuffixForModel(model)) || provider.HidesModel(model) {
-		return false
-	}
-	return modelEntriesContain(entries, baseModel)
 }
 
 func taggedModelID(providerID string, modelID string) string {

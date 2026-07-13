@@ -94,26 +94,36 @@ func TestProxyModelIntentRouting_rejectsInvalidAndDisallowedModelsBeforeGenerati
 	}
 }
 
-func TestDefaultOverlayRealtimeDiscovery_skipsProxyTailsAndTaggedRequests(t *testing.T) {
+func TestDefaultOverlayRealtimeDiscovery_validatesUnsupportedTailsAndRoutesTaggedModels(t *testing.T) {
 	tests := []struct {
-		name   string
-		model  string
-		tagged bool
+		name               string
+		model              string
+		tagged             bool
+		wantStatus         int
+		wantGenerationHits int32
 	}{
-		{name: "proxy tail", model: "unknown-low"},
-		{name: "tagged request", model: "[packy]unknown", tagged: true},
+		{name: "disabled effort tail", model: "unknown-low", wantStatus: http.StatusBadRequest},
+		{name: "tagged exact model", model: "[packy]unknown", tagged: true, wantStatus: http.StatusOK, wantGenerationHits: 1},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Given
 			var modelsHits atomic.Int32
+			var generationHits atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/models" {
+				switch r.URL.Path {
+				case "/models":
 					modelsHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"unknown","object":"model"}]}`))
+				case "/responses":
+					generationHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"resp_proxy","object":"response","status":"completed","output":[]}`))
+				default:
+					http.NotFound(w, r)
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"unknown","object":"model"}]}`))
 			}))
 			defer upstream.Close()
 			server := NewServer(config.Config{
@@ -140,11 +150,17 @@ func TestDefaultOverlayRealtimeDiscovery_skipsProxyTailsAndTaggedRequests(t *tes
 			server.ServeHTTP(rec, req)
 
 			// Then
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_model") {
-				t.Fatalf("expected invalid_model, got %d body=%s", rec.Code, rec.Body.String())
+			if rec.Code != test.wantStatus {
+				t.Fatalf("expected status %d, got %d body=%s", test.wantStatus, rec.Code, rec.Body.String())
 			}
-			if got := modelsHits.Load(); got != 0 {
-				t.Fatalf("expected no realtime models lookup, got %d", got)
+			if test.wantStatus == http.StatusBadRequest && !strings.Contains(rec.Body.String(), "invalid_model") {
+				t.Fatalf("expected invalid_model, got body=%s", rec.Body.String())
+			}
+			if got := modelsHits.Load(); got != 1 {
+				t.Fatalf("expected one realtime models lookup, got %d", got)
+			}
+			if got := generationHits.Load(); got != test.wantGenerationHits {
+				t.Fatalf("expected %d generation hits, got %d", test.wantGenerationHits, got)
 			}
 		})
 	}

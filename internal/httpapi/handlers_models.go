@@ -158,25 +158,8 @@ func authHeaderForOverlayProviderUpstream(r *http.Request, cfg config.Config, pr
 }
 
 func fetchProviderModelsBody(ctx context.Context, client *upstream.Client, authorization string, provider config.ProviderConfig) ([]byte, bool, error) {
-	status, body, contentType, err := client.Models(ctx, authorization)
-	if err == nil {
-		if status >= 200 && status < 300 {
-			return rewriteModelsBody(body, provider), true, nil
-		}
-		if status == http.StatusNotFound {
-			if fallbackBody, ok := configuredModelsFallbackBody(provider); ok {
-				return fallbackBody, true, nil
-			}
-			return nil, false, nil
-		}
-		return nil, false, &upstream.HTTPStatusError{
-			StatusCode:  status,
-			ContentType: contentType,
-			BodyBytes:   append([]byte(nil), body...),
-			Body:        strings.TrimSpace(string(body)),
-		}
-	}
-	return nil, false, err
+	bodies, ok, err := fetchProviderModelsBodies(ctx, client, authorization, provider)
+	return bodies.visible, ok, err
 }
 
 func decodeModelEntries(body []byte) []map[string]any {

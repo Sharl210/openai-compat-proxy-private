@@ -1,0 +1,224 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"openai-compat-proxy/internal/config"
+)
+
+func TestDefaultOverlaySuffixRouting_resolvesRealtimeBaseBeforeProxyAxes(t *testing.T) {
+	// Given
+	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
+	defer beta.Close()
+	server := NewServer(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"realtime-base-high-pro-ultra-noprompt","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected realtime base suffix request to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "alpha" {
+		discovery, _ := defaultOverlayDiscoveryFromRequest(req)
+		intent, _ := proxyModelIntentFromRequest(req)
+		t.Fatalf("expected alpha owner, got %q discovery=%#v intent=%#v", got, discovery, intent)
+	}
+	if got := rec.Header().Get(headerClientToProxyReasoningEffort); got != "high" {
+		t.Fatalf("expected high effort, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyReasoningMode); got != "pro" {
+		t.Fatalf("expected pro mode, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected noprompt intent, got %q", got)
+	}
+	captured := <-alpha.requests
+	if got := captured.body["model"]; got != "realtime-base" {
+		t.Fatalf("expected stripped upstream model, got %#v", got)
+	}
+	reasoning, _ := captured.body["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" || reasoning["mode"] != "pro" {
+		t.Fatalf("expected effort and pro reasoning, got %#v", reasoning)
+	}
+	multiAgent, _ := captured.body["multi_agent"].(map[string]any)
+	if multiAgent["enabled"] != true || multiAgent["max_concurrent_subagents"] != float64(5) {
+		t.Fatalf("expected ultra multi_agent payload, got %#v", multiAgent)
+	}
+	if !strings.Contains(captured.beta, "responses_multi_agent=v1") {
+		t.Fatalf("expected multi-agent beta header, got %q", captured.beta)
+	}
+}
+
+func TestDefaultOverlaySuffixRouting_preservesExactSuffixLikeLiteralOwner(t *testing.T) {
+	// Given
+	literalModel := "realtime-base-high-pro-ultra-noprompt"
+	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{literalModel})
+	defer beta.Close()
+	server := NewServer(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"`+literalModel+`","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected exact suffix-like literal to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		discovery, _ := defaultOverlayDiscoveryFromRequest(req)
+		intent, _ := proxyModelIntentFromRequest(req)
+		t.Fatalf("expected exact literal owner beta, got %q discovery=%#v intent=%#v", got, discovery, intent)
+	}
+	captured := <-beta.requests
+	if got := captured.body["model"]; got != literalModel {
+		t.Fatalf("expected literal upstream model unchanged, got %#v", got)
+	}
+	if alpha.responseHits.Load() != 0 {
+		t.Fatalf("expected derived alpha owner not to receive exact literal request, got %d hits", alpha.responseHits.Load())
+	}
+}
+
+func TestResolveDefaultProviderSelectionFromRealtimeModels_preservesExactAndDerivedIntent(t *testing.T) {
+	// Given
+	literalModel := "realtime-base-high-pro-ultra-noprompt"
+	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{literalModel})
+	defer beta.Close()
+	store := config.NewStaticRuntimeStore(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req = req.WithContext(withRuntimeSnapshot(req.Context(), store.Active()))
+
+	// When
+	exact, exactErr, exactOK := resolveDefaultProviderSelectionFromRealtimeModels(req, store.Active(), literalModel)
+	derived, derivedErr, derivedOK := resolveDefaultProviderSelectionFromRealtimeModels(req, store.Active(), "realtime-base-high-pro-ultra-noprompt-extra")
+
+	// Then
+	if exactErr != nil || !exactOK || exact.ProviderID != "beta" || !exact.ExactLiteral {
+		t.Fatalf("expected beta exact literal, got discovery=%#v ok=%t err=%v", exact, exactOK, exactErr)
+	}
+	if derivedErr != nil || derivedOK {
+		t.Fatalf("expected malformed derived tail to be rejected, got discovery=%#v ok=%t err=%v", derived, derivedOK, derivedErr)
+	}
+}
+
+func TestProviderSelectionForModelRequest_usesRealtimeExactBeforeDerivedOwner(t *testing.T) {
+	// Given
+	literalModel := "realtime-base-high-pro-ultra-noprompt"
+	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{literalModel})
+	defer beta.Close()
+	store := config.NewStaticRuntimeStore(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	exactRequest := overlayProviderSelectionRequest(store)
+	derivedRequest := overlayProviderSelectionRequest(store)
+
+	// When
+	_, _, exactProvider, exactModel, exactOK, exactErr := providerSelectionForModelRequest(exactRequest, literalModel)
+	_, _, derivedProvider, derivedModel, derivedOK, derivedErr := providerSelectionForModelRequest(derivedRequest, "realtime-base-high-pro-ultra-noprompt-extra")
+
+	// Then
+	if exactErr != nil || !exactOK || exactProvider != "beta" || exactModel != literalModel {
+		t.Fatalf("expected beta exact selection, got provider=%q model=%q ok=%t err=%v", exactProvider, exactModel, exactOK, exactErr)
+	}
+	if derivedErr != nil || derivedOK {
+		t.Fatalf("expected malformed derived selection rejection, got provider=%q model=%q ok=%t err=%v", derivedProvider, derivedModel, derivedOK, derivedErr)
+	}
+}
+
+func overlayProviderSelectionRequest(store *config.RuntimeStore) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx := withRouteInfo(req.Context(), routeInfo{ProviderID: "alpha", Legacy: true, CanonicalPath: canonicalV1ResponsesPath})
+	ctx = withRuntimeStore(ctx, store)
+	ctx = withRuntimeSnapshot(ctx, store.Active())
+	return req.WithContext(ctx)
+}
+
+type overlaySuffixCapture struct {
+	body map[string]any
+	beta string
+}
+
+type overlaySuffixUpstream struct {
+	*httptest.Server
+	requests     chan overlaySuffixCapture
+	responseHits atomic.Int32
+}
+
+func newOverlaySuffixUpstream(t *testing.T, modelIDs []string) *overlaySuffixUpstream {
+	t.Helper()
+	upstream := &overlaySuffixUpstream{requests: make(chan overlaySuffixCapture, 1)}
+	upstream.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			data := make([]map[string]any, 0, len(modelIDs))
+			for _, modelID := range modelIDs {
+				data = append(data, map[string]any{"id": modelID, "object": "model"})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+		case "/responses":
+			upstream.responseHits.Add(1)
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			upstream.requests <- overlaySuffixCapture{body: body, beta: r.Header.Get("OpenAI-Beta")}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_overlay","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return upstream
+}
+
+func defaultOverlaySuffixConfig(alphaURL string, betaURL string) config.Config {
+	cfg := config.Default()
+	cfg.DefaultProvider = "alpha,beta"
+	cfg.EnableLegacyV1Routes = true
+	cfg.DownstreamNonStreamStrategy = config.DownstreamNonStreamStrategyUpstreamNonStream
+	cfg.DefaultProReasoningModeSet = true
+	cfg.DefaultProReasoningMode = false
+	cfg.Providers = []config.ProviderConfig{
+		overlaySuffixProvider("alpha", alphaURL),
+		overlaySuffixProvider("beta", betaURL),
+	}
+	return cfg
+}
+
+func overlaySuffixProvider(id string, upstreamURL string) config.ProviderConfig {
+	return config.ProviderConfig{
+		ID:                             id,
+		Enabled:                        true,
+		UpstreamBaseURL:                upstreamURL,
+		UpstreamAPIKey:                 id + "-key",
+		UpstreamEndpointType:           config.UpstreamEndpointTypeResponses,
+		SupportsChat:                   true,
+		SupportsResponses:              true,
+		SupportsModels:                 true,
+		SupportsAnthropicMessages:      true,
+		ManualModels:                   []string{id + "-static"},
+		EnableReasoningEffortSuffix:    true,
+		ReasoningModeProCapability:     config.ReasoningModeProCapabilitySupported,
+		SupportsResponsesMultiAgent:    true,
+		UltraMaxConcurrentSubagents:    5,
+		UltraMaxConcurrentSubagentsSet: true,
+	}
+}

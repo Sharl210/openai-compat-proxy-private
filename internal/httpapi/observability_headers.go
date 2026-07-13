@@ -211,7 +211,7 @@ func normalizeCanonicalModelAndReasoningForProxyModelIntent(canon *modelpkg.Cano
 }
 
 func normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(canon *modelpkg.CanonicalRequest, sourceModel string, requestEffort string, provider config.ProviderConfig, providerCfg config.Config, intent modelpkg.ProxyModelIntent) {
-	if intent.HasModelMapAlias || intent.ReasoningEffort != "" || intent.ReasoningMode != "" || intent.HasNoPrompt || intent.HasUltra {
+	if intent.IsExactLiteral || intent.HasModelMapAlias || intent.ReasoningEffort != "" || intent.ReasoningMode != "" || intent.HasNoPrompt || intent.HasUltra {
 		normalizeCanonicalModelAndReasoningForProxyModelIntent(canon, sourceModel, requestEffort, provider, providerCfg, intent)
 		return
 	}
@@ -398,7 +398,13 @@ func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWr
 	return nil
 }
 
-func clientReasoningModeForRequest(rawClientModel string, canon modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) string {
+func clientReasoningModeForRequest(r *http.Request, rawClientModel string, canon modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) string {
+	if discovery, ok := defaultOverlayDiscoveryFromRequest(r); ok && discovery.HasProxyModelIntent {
+		if discovery.SourceProxyModelIntent.ReasoningMode != "" {
+			return discovery.SourceProxyModelIntent.ReasoningMode
+		}
+		return clientToProxyReasoningMode(canon)
+	}
 	intent, parsed := provider.ParseProxyModelIntentWithReasoningMode(rawClientModel, providerCfg.EnableNoPromptModelSuffix, providerCfg.EffectiveEnableReasoningModeSuffix())
 	if parsed && intent.ReasoningMode != "" {
 		return intent.ReasoningMode

@@ -26,6 +26,7 @@ type ProxyModelIntent struct {
 	HasNoPrompt      bool
 	HasUltra         bool
 	HasModelMapAlias bool
+	IsExactLiteral   bool
 }
 
 func (intent ProxyModelIntent) CanonicalModel() string {
@@ -76,6 +77,28 @@ func ParseProxyModelIntent(modelName string, candidates []string, axes ProxyMode
 		matched = true
 	}
 	return selected, matched
+}
+
+func HasProxyModelIntentTail(modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	axes := ProxyModelIntentAxes{
+		EnableReasoningEffort: true,
+		EnablePro:             true,
+		EnableNoPrompt:        true,
+		EnableUltra:           true,
+	}
+	for offset := 0; offset < len(modelName); {
+		next := strings.IndexByte(modelName[offset:], '-')
+		if next < 0 {
+			return false
+		}
+		offset += next
+		if _, ok := ParseProxyModelIntent(modelName, []string{modelName[:offset]}, axes); ok {
+			return true
+		}
+		offset++
+	}
+	return false
 }
 
 func SplitReasoningEffortSuffix(modelName string) (string, string, bool) {
