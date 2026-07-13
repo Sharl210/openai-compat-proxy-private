@@ -14,6 +14,7 @@ import (
 	"openai-compat-proxy/internal/contextoverflow"
 	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/model"
+	reasoningtext "openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -69,6 +70,7 @@ type anthropicStreamState struct {
 	stopReason        string
 	nextIndex         int
 	realThinkingSeen  bool
+	reasoningText     strings.Builder
 	planningSent      bool
 	toolStatusSent    bool
 	toolItemID        string
@@ -92,6 +94,7 @@ type responsesStreamState struct {
 	reasoningClosed      bool
 	realReasoningItemID  string
 	realReasoningSummary strings.Builder
+	formattedReasoning   map[string]*strings.Builder
 	syntheticInjected    bool
 	syntheticSummary     strings.Builder
 	toolItems            map[string]*responsesToolItemState
@@ -147,6 +150,7 @@ type responseProjectionState struct {
 	reasoningClosed            bool
 	realReasoningItemID        string
 	realReasoningSummary       *strings.Builder
+	formattedReasoning         map[string]*strings.Builder
 	syntheticInjected          bool
 	realReasoningSeen          bool
 	compactionLifecycleStarted bool
@@ -174,6 +178,7 @@ type responseEventWriterHelper struct {
 	reasoningClosed            bool
 	realReasoningItemID        string
 	realReasoningSummary       *strings.Builder
+	formattedReasoning         map[string]*strings.Builder
 	syntheticInjected          bool
 	realReasoningSeen          bool
 	compactionLifecycleStarted bool
@@ -182,6 +187,75 @@ type responseEventWriterHelper struct {
 	terminalSeen               bool
 	terminalFailure            *aggregate.TerminalFailureError
 	events                     []processEventCommand
+}
+
+func (h *responseEventWriterHelper) formatReasoningContentDelta(key, delta string) string {
+	if h.formattedReasoning == nil {
+		h.formattedReasoning = map[string]*strings.Builder{}
+	}
+	previous := h.formattedReasoning[key]
+	if previous == nil {
+		previous = &strings.Builder{}
+		h.formattedReasoning[key] = previous
+	}
+	formattedDelta, combined := reasoningtext.FormatDelta(previous.String(), delta)
+	previous.Reset()
+	previous.WriteString(combined)
+	return formattedDelta
+}
+
+func (h *responseEventWriterHelper) formatReasoningEvent(evt *upstream.Event) {
+	if evt == nil || evt.Data == nil {
+		return
+	}
+	if evt.Event == "response.reasoning.delta" {
+		for _, key := range []string{"summary", "thinking", "reasoning_content", "reasoning", "content", "delta", "text"} {
+			if text, ok := evt.Data[key].(string); ok && text != "" {
+				evt.Data[key] = h.formatReasoningContentDelta(key, text)
+			}
+		}
+	}
+	key := ""
+	switch evt.Event {
+	case "response.reasoning_summary_text.delta":
+		key = "delta"
+	case "response.reasoning_summary_text.done":
+		key = "text"
+	}
+	if key != "" {
+		if text, ok := evt.Data[key].(string); ok && text != "" {
+			evt.Data[key] = h.formatReasoningContentDelta(key, text)
+		}
+	}
+	if part, ok := evt.Data["part"].(map[string]any); ok {
+		evt.Data["part"] = reasoningtext.FormatBlock(part)
+	}
+	if blocks, ok := evt.Data["blocks"].([]any); ok {
+		formatted := make([]any, len(blocks))
+		for index, rawBlock := range blocks {
+			block, ok := rawBlock.(map[string]any)
+			if ok {
+				formatted[index] = reasoningtext.FormatBlock(block)
+			} else {
+				formatted[index] = rawBlock
+			}
+		}
+		evt.Data["blocks"] = formatted
+	}
+}
+
+func (h *responseEventWriterHelper) resetFormattedReasoning() {
+	h.formattedReasoning = nil
+}
+
+func formatStreamingReasoningDelta(previous *strings.Builder, delta string) string {
+	if previous == nil || delta == "" {
+		return delta
+	}
+	formattedDelta, combined := reasoningtext.FormatDelta(previous.String(), delta)
+	previous.Reset()
+	previous.WriteString(combined)
+	return formattedDelta
 }
 
 func (h *responseEventWriterHelper) ensureToolItemState(itemID string) *responsesToolItemState {
@@ -561,6 +635,7 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state.reasoningStarted = initialState.reasoningStarted
 	state.reasoningClosed = initialState.reasoningClosed
 	state.realReasoningItemID = initialState.realReasoningItemID
+	state.formattedReasoning = initialState.formattedReasoning
 	state.syntheticInjected = initialState.syntheticInjected
 	state.toolItems = initialState.toolItems
 	state.toolIDAliases = initialState.toolIDAliases
@@ -718,6 +793,8 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.output_item.added", "response.output_item.done":
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" {
+			item = reasoningtext.FormatBlock(item)
+			evt.Data["item"] = item
 			if h.downstreamType == "responses" {
 				evt.Data = h.outputItemEventData(item, evt.Data)
 			}
@@ -737,6 +814,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			evt.Data = h.outputItemEventData(item, evt.Data)
 		}
 		if isResponseToolCallItemType(itemType) {
+			h.resetFormattedReasoning()
 			if evt.Event == "response.output_item.added" {
 				if _, ok := item["arguments"]; !ok {
 					item["arguments"] = ""
@@ -785,6 +863,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			h.flushPendingFunctionCalls()
 		}
 		h.closeRealReasoningLifecycle()
+		h.resetFormattedReasoning()
 		h.closeSyntheticReasoning()
 		h.reasoningStarted = true
 		evt.Data = h.outputTextDeltaData(evt.Data)
@@ -798,8 +877,10 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			}
 		}
 		h.markRealReasoningSeen()
+		h.formatReasoningEvent(&evt)
 		if evt.Event == "response.reasoning.delta" {
-			if summary := reasoningContentValue(evt.Data); summary != "" {
+			summary := reasoningContentValue(evt.Data)
+			if summary != "" {
 				h.ensureRealReasoningLifecycleStarted()
 				if h.realReasoningSummary != nil && h.realReasoningItemID != "" {
 					h.realReasoningSummary.WriteString(summary)
@@ -1298,6 +1379,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		reasoningClosed:      state.reasoningClosed,
 		realReasoningItemID:  state.realReasoningItemID,
 		realReasoningSummary: &state.realReasoningSummary,
+		formattedReasoning:   state.formattedReasoning,
 		syntheticInjected:    state.syntheticInjected,
 		realReasoningSeen:    state.realReasoningSeen,
 		syntheticSummary:     &state.syntheticSummary,
@@ -1324,6 +1406,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.reasoningStarted = h.reasoningStarted
 	state.reasoningClosed = h.reasoningClosed
 	state.realReasoningItemID = h.realReasoningItemID
+	state.formattedReasoning = h.formattedReasoning
 	state.syntheticInjected = h.syntheticInjected
 	state.realReasoningSeen = h.realReasoningSeen
 	state.terminalSeen = h.terminalSeen
@@ -1460,6 +1543,7 @@ func newResponseEventWriterHelper(downstreamType string, state responseProjectio
 		reasoningClosed:      state.reasoningClosed,
 		realReasoningItemID:  state.realReasoningItemID,
 		realReasoningSummary: state.realReasoningSummary,
+		formattedReasoning:   state.formattedReasoning,
 		syntheticInjected:    state.syntheticInjected,
 		realReasoningSeen:    state.realReasoningSeen,
 		syntheticSummary:     state.syntheticSummary,
@@ -1761,6 +1845,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return err
 		}
 		state.thinkingStopped = true
+		state.reasoningText.Reset()
 		state.thinkingType = ""
 		state.thinkingSignature = ""
 		return nil
@@ -1921,7 +2006,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				state.thinkingSignature = signature
 			}
 		}
-		if delta := reasoningContentValue(evt.Data); delta != "" {
+		if delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentValue(evt.Data)); delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
 				return err
@@ -2254,6 +2339,7 @@ type chatStreamState struct {
 	roleSent            bool
 	textStarted         bool
 	realReasoningSeen   bool
+	reasoningText       strings.Builder
 	thinkingTagStyle    string
 	planningSent        bool
 	toolStatusSent      bool
@@ -2263,6 +2349,7 @@ type chatStreamState struct {
 	toolSent            map[string]bool
 	pendingToolArgs     map[string]string
 	nextToolIx          int
+	reasoningTextActive bool
 	terminalSeen        bool
 	terminalFailure     *aggregate.TerminalFailureError
 	pendingReasoningTag string
@@ -2527,6 +2614,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 		}
 		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
+			state.reasoningTextActive = false
 			rawItemID, _ := item["id"].(string)
 			itemID := rawItemID
 			if callID, _ := item["call_id"].(string); callID != "" {
@@ -2565,6 +2653,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 		}
 	case "response.output_text.delta":
+		state.reasoningTextActive = false
 		state.textStarted = true
 		if err := ensureRoleSent(); err != nil {
 			return err
@@ -2599,7 +2688,11 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 		}
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
-		if delta := reasoningContentValue(evt.Data); delta != "" {
+		if !state.reasoningTextActive {
+			state.reasoningText.Reset()
+			state.reasoningTextActive = true
+		}
+		if delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentValue(evt.Data)); delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
 				return err
@@ -2928,9 +3021,9 @@ func isResponseToolCallItemType(itemType string) bool {
 }
 
 func reasoningContentValue(data map[string]any) string {
-	for _, key := range []string{"reasoning_content", "summary", "content", "delta", "text"} {
+	for _, key := range []string{"thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text"} {
 		if text, _ := data[key].(string); text != "" {
-			return text
+			return reasoningtext.FormatText(text)
 		}
 	}
 	return ""
@@ -2951,7 +3044,7 @@ func reasoningSummaryFromItem(item map[string]any) string {
 			builder.WriteString(text)
 		}
 	}
-	return builder.String()
+	return reasoningtext.FormatText(builder.String())
 }
 
 func usageFromEventData(data map[string]any) map[string]any {

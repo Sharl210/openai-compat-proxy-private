@@ -751,7 +751,9 @@ func TestMessagesStreamResetsStopReasonAfterToolUseFollowedByText(t *testing.T) 
 func TestMessagesStreamForwardsReasoningSummaryTextDelta(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
-			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"alpha\"}\n\n",
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"正文\"}\n\n",
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
 	})
@@ -781,8 +783,26 @@ func TestMessagesStreamForwardsReasoningSummaryTextDelta(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"alpha"`) {
+	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"\n正文"`) {
 		t.Fatalf("expected reasoning summary text delta to be forwarded as thinking, got %s", body)
+	}
+}
+
+func TestReasoningContentValueFormatsThinkingText(t *testing.T) {
+	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**\n正文" {
+		t.Fatalf("expected thinking title to be separated, got %q", got)
+	}
+}
+
+func TestReasoningSummaryFromItemSeparatesBoldTitleFromFollowingContent(t *testing.T) {
+	item := map[string]any{
+		"type": "reasoning",
+		"summary": []any{
+			map[string]any{"type": "summary_text", "text": "**标题****后续**"},
+		},
+	}
+	if got := reasoningSummaryFromItem(item); got != "**标题**\n**后续**" {
+		t.Fatalf("expected reasoning summary title break, got %q", got)
 	}
 }
 

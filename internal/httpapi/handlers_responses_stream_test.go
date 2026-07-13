@@ -736,6 +736,31 @@ func TestResponsesStreamTextSnapshotStrippingPreservesToolAndReasoningItems(t *t
 	}
 }
 
+func TestResponsesStreamFormatsReasoningItemTitle(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{
+			"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题**正文"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	if !strings.Contains(body, `"text":"**标题**\n正文","type":"summary_text"`) {
+		t.Fatalf("expected reasoning item title to be separated, got %s", body)
+	}
+}
+
+func TestResponsesStreamFormatsReasoningTitleAcrossEvents(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**标题**"}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "正文"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	if !strings.Contains(body, `"delta":"**标题**"`) || !strings.Contains(body, `"delta":"\n正文"`) {
+		t.Fatalf("expected reasoning title formatting across events, got %s", body)
+	}
+}
+
 func TestResponsesStreamCompletedWithoutOutputUsesNativeMessageMetadataWithoutText(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_native", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},

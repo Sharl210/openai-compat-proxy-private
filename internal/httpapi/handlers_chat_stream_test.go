@@ -728,6 +728,28 @@ func TestChatEventWriterKeepsLaterToolArgumentDeltaAfterReasoningAndTextInCompat
 	}
 }
 
+func TestChatEventWriterFormatsReasoningTitleAcrossChunks(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, evt := range []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": "**标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": "正文"}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	} {
+		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
+			t.Fatalf("writer.WriteEvent error: %v", err)
+		}
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n正文"`) {
+		t.Fatalf("expected reasoning title formatting across chat chunks, got %s", body)
+	}
+}
+
 func TestChatEventWriterBuffersAttemptCompletionArgumentsUntilDone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
