@@ -6,6 +6,7 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	modelpkg "openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/upstream"
 )
 
 type realtimeOverlayProviderModels struct {
@@ -25,7 +26,7 @@ func resolveExplicitProviderSelectionFromRealtimeModels(r *http.Request, snapsho
 	if err != nil {
 		return defaultOverlayDiscovery{}, nil, false
 	}
-	client := upstreamClientForProvider(r, providerID, providerCfg)
+	client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 	bodies, ok, err := fetchProviderModelsBodies(r.Context(), client, authorization, provider)
 	if err != nil || !ok {
 		return defaultOverlayDiscovery{}, err, false
@@ -87,7 +88,7 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 		if err != nil {
 			continue
 		}
-		client := upstreamClientForProvider(r, providerID, providerCfg)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		bodies, ok, err := fetchProviderModelsBodies(r.Context(), client, authorization, provider)
 		if err != nil {
 			upstreamErr = err

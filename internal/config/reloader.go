@@ -12,11 +12,9 @@ import (
 )
 
 type RuntimeStore struct {
-	rootEnvPath        string
-	active             atomic.Pointer[RuntimeSnapshot]
-	mu                 sync.Mutex
-	refreshListenersMu sync.RWMutex
-	refreshListeners   []func(*RuntimeSnapshot)
+	rootEnvPath string
+	active      atomic.Pointer[RuntimeSnapshot]
+	mu          sync.Mutex
 }
 
 func NewRuntimeStore(rootEnvPath string) (*RuntimeStore, error) {
@@ -111,35 +109,23 @@ func (s *RuntimeStore) Active() *RuntimeSnapshot {
 	return s.active.Load()
 }
 
-func (s *RuntimeStore) AddRefreshListener(listener func(*RuntimeSnapshot)) {
-	if s == nil || listener == nil {
-		return
-	}
-	s.refreshListenersMu.Lock()
-	s.refreshListeners = append(s.refreshListeners, listener)
-	s.refreshListenersMu.Unlock()
-}
-
 func (s *RuntimeStore) Refresh() error {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	current := s.active.Load()
 	if current == nil {
 		snapshot, err := BuildRuntimeSnapshot(s.rootEnvPath)
 		if err != nil {
-			s.mu.Unlock()
 			return err
 		}
 		s.active.Store(snapshot)
-		s.mu.Unlock()
-		s.notifyRefreshListeners(snapshot)
 		return nil
 	}
 	snapshot, err := BuildRuntimeSnapshotForRefresh(s.rootEnvPath, current.Config)
 	if err != nil {
-		s.mu.Unlock()
 		return err
 	}
 	hotChanged := !snapshot.Config.hotReloadableRootEquals(current.Config)
@@ -148,18 +134,7 @@ func (s *RuntimeStore) Refresh() error {
 		snapshot.RootEnvVersion = current.RootEnvVersion
 	}
 	s.active.Store(snapshot)
-	s.mu.Unlock()
-	s.notifyRefreshListeners(snapshot)
 	return nil
-}
-
-func (s *RuntimeStore) notifyRefreshListeners(snapshot *RuntimeSnapshot) {
-	s.refreshListenersMu.RLock()
-	listeners := append([]func(*RuntimeSnapshot){}, s.refreshListeners...)
-	s.refreshListenersMu.RUnlock()
-	for _, listener := range listeners {
-		listener(snapshot)
-	}
 }
 
 func (s *RuntimeStore) UpdateDefaultOverlayIndex(defaultModelOwners map[string]string, defaultVisibleModels []string, defaultTaggedModelOwners map[string]string, defaultTaggedVisibleModels []string, defaultModelRawIDs map[string]string, defaultTaggedModelRawIDs map[string]string) {

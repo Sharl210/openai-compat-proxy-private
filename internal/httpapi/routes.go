@@ -11,7 +11,6 @@ import (
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/tokenestimator"
-	"openai-compat-proxy/internal/upstream"
 )
 
 var defaultOverlayRefreshInterval = 24 * time.Hour
@@ -46,7 +45,6 @@ const runtimeStoreKey routeContextKey = "runtime-store"
 const legacyRoutingModelKey routeContextKey = "legacy-routing-model"
 const proxyModelIntentKey routeContextKey = "proxy-model-intent"
 const defaultOverlayDiscoveryKey routeContextKey = "default-overlay-discovery"
-const upstreamTransportPoolKey routeContextKey = "upstream-transport-pool"
 
 const (
 	canonicalV1ModelsPath            = "/v1/models"
@@ -202,22 +200,6 @@ func withRuntimeStore(ctx context.Context, store *config.RuntimeStore) context.C
 		return ctx
 	}
 	return context.WithValue(ctx, runtimeStoreKey, store)
-}
-
-func withUpstreamTransportPool(ctx context.Context, pool *upstream.TransportPool) context.Context {
-	if pool == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, upstreamTransportPoolKey, pool)
-}
-
-func upstreamClientForProvider(r *http.Request, providerID string, providerCfg config.Config) *upstream.Client {
-	pool, _ := r.Context().Value(upstreamTransportPoolKey).(*upstream.TransportPool)
-	if pool == nil {
-		return upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
-	}
-	transports := pool.Get(providerID, providerCfg.UpstreamBaseURL, providerCfg)
-	return upstream.NewClientWithOptions(upstream.ClientOptions{BaseURL: providerCfg.UpstreamBaseURL, Config: providerCfg, Transports: transports})
 }
 
 func routeInfoFromRequest(r *http.Request) (routeInfo, bool) {

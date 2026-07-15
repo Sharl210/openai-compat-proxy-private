@@ -73,7 +73,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			writeModelAllowanceError(w, err)
 			return
 		}
-		client := upstreamClientForProvider(r, providerID, providerCfg)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)

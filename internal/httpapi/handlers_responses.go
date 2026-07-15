@@ -476,7 +476,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		writeModelAllowanceError(w, err)
 		return nil, false
 	}
-	client := upstreamClientForProvider(r, providerID, providerCfg)
+	client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 	clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {

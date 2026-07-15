@@ -27,7 +27,7 @@ func handleModels() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_provider_contract", "provider does not support models")
 			return
 		}
-		client := upstreamClientForProvider(r, provider.ID, providerCfg)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		authorization, err := authHeaderForUpstream(r, providerCfg)
 		if err != nil {
 			errorsx.WriteJSON(w, http.StatusUnauthorized, "missing_upstream_auth", err.Error())
@@ -123,7 +123,7 @@ func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.R
 		if err != nil {
 			continue
 		}
-		client := upstreamClientForProvider(r, providerID, providerCfg)
+		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
 		body, ok, _ := fetchProviderModelsBody(ctx, client, authorization, provider)
 		if !ok {
 			continue
