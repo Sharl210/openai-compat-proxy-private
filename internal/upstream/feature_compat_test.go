@@ -30,10 +30,6 @@ func TestCheckResponsesFeatureCompatibilityRejectsSemanticFeaturesOutsideRespons
 			}}},
 		},
 		{
-			name: "persisted reasoning include",
-			req:  model.CanonicalRequest{ResponseInclude: []string{"reasoning.encrypted_content"}},
-		},
-		{
 			name: "reasoning context",
 			req:  model.CanonicalRequest{Reasoning: &model.CanonicalReasoning{Raw: map[string]any{"context": "opaque"}}},
 		},
@@ -68,6 +64,15 @@ func TestCheckResponsesFeatureCompatibilityRejectsSemanticFeaturesOutsideRespons
 				})
 			}
 		})
+	}
+}
+
+func TestCheckResponsesFeatureCompatibilityDropsEncryptedReasoningIncludeOutsideResponses(t *testing.T) {
+	req := model.CanonicalRequest{ResponseInclude: []string{"reasoning.encrypted_content"}}
+	for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		if err := CheckResponsesFeatureCompatibility(req, endpoint); err != nil {
+			t.Fatalf("%s upstream should ignore unavailable encrypted reasoning output: %v", endpoint, err)
+		}
 	}
 }
 

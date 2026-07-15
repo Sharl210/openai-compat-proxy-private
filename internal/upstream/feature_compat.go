@@ -42,9 +42,6 @@ func ClassifyResponsesFeatureCompatibility(req model.CanonicalRequest, upstreamE
 	if hasUnsupportedPersistedResponsesItem(req.ResponseInputItems, upstreamEndpointType) {
 		return ResponsesFeatureCompatibility{Decision: ResponsesFeatureCompatibilityDecisionReject, Feature: "persisted responses item"}
 	}
-	if hasEncryptedReasoningInclude(req.ResponseInclude) {
-		return ResponsesFeatureCompatibility{Decision: ResponsesFeatureCompatibilityDecisionReject, Feature: "persisted reasoning include"}
-	}
 	if hasReasoningContext(req.Reasoning) {
 		return ResponsesFeatureCompatibility{Decision: ResponsesFeatureCompatibilityDecisionReject, Feature: "reasoning context"}
 	}

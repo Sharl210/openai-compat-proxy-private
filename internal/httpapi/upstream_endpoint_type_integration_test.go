@@ -546,10 +546,13 @@ func TestResponsesRouteDoesNotEchoArbitraryUnknownRequestFieldsBackIntoOutput(t 
 	}
 }
 
-func TestResponsesRouteRejectsPersistedReasoningIncludeForChatUpstream(t *testing.T) {
+func TestResponsesRouteDropsPersistedReasoningIncludeForChatUpstream(t *testing.T) {
 	upstreamCalls := 0
+	var upstreamBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalls++
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hello from chat upstream"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
 	}))
@@ -562,21 +565,24 @@ func TestResponsesRouteRejectsPersistedReasoningIncludeForChatUpstream(t *testin
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if upstreamCalls != 0 {
-		t.Fatalf("expected no chat upstream call, got %d", upstreamCalls)
+	if upstreamCalls != 1 {
+		t.Fatalf("expected one chat upstream call, got %d", upstreamCalls)
 	}
-	if !strings.Contains(rec.Body.String(), "persisted reasoning include") {
-		t.Fatalf("expected persisted reasoning include error, got %s", rec.Body.String())
+	if strings.Contains(upstreamBody, "reasoning.encrypted_content") {
+		t.Fatalf("expected Responses-only include omitted from chat request, got %s", upstreamBody)
 	}
 }
 
-func TestResponsesRouteRejectsPersistedReasoningIncludeForAnthropicUpstream(t *testing.T) {
+func TestResponsesRouteDropsPersistedReasoningIncludeForAnthropicUpstream(t *testing.T) {
 	upstreamCalls := 0
+	var upstreamBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamCalls++
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from anthropic upstream"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
 	}))
@@ -589,14 +595,14 @@ func TestResponsesRouteRejectsPersistedReasoningIncludeForAnthropicUpstream(t *t
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if upstreamCalls != 0 {
-		t.Fatalf("expected no Anthropic upstream call, got %d", upstreamCalls)
+	if upstreamCalls != 1 {
+		t.Fatalf("expected one Anthropic upstream call, got %d", upstreamCalls)
 	}
-	if !strings.Contains(rec.Body.String(), "persisted reasoning include") {
-		t.Fatalf("expected persisted reasoning include error, got %s", rec.Body.String())
+	if strings.Contains(upstreamBody, "reasoning.encrypted_content") {
+		t.Fatalf("expected Responses-only include omitted from Anthropic request, got %s", upstreamBody)
 	}
 }
 
