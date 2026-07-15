@@ -101,6 +101,41 @@ func compressResponsesHistoryString(value string) ([]byte, bool) {
 	return append([]byte(nil), compressed.Bytes()...), true
 }
 
+func compressResponsesHistoryToolCallEntry(entry responsesHistoryToolCallEntry) responsesHistoryToolCallEntry {
+	if entry.Call.Arguments == "" || len(entry.Call.Arguments) < responsesHistoryCompressionMinFieldBytes {
+		return entry
+	}
+	compressed, ok := compressResponsesHistoryString(entry.Call.Arguments)
+	if !ok {
+		return entry
+	}
+	entry.ArgumentsOriginalSize = len(entry.Call.Arguments)
+	entry.ArgumentsCompressed = compressed
+	entry.Call.Arguments = ""
+	return entry
+}
+
+func normalizeResponsesHistoryToolCallEntry(entry responsesHistoryToolCallEntry) (responsesHistoryToolCallEntry, bool) {
+	if len(entry.ArgumentsCompressed) > 0 || entry.ArgumentsOriginalSize != 0 {
+		if !validResponsesHistoryCompressedStream(entry.ArgumentsCompressed, entry.ArgumentsOriginalSize) {
+			return responsesHistoryToolCallEntry{}, false
+		}
+		entry.Call.Arguments = ""
+		return entry, true
+	}
+	return compressResponsesHistoryToolCallEntry(entry), true
+}
+
+func loadResponsesHistoryToolCallArguments(entry responsesHistoryToolCallEntry) (string, bool) {
+	if len(entry.ArgumentsCompressed) == 0 && entry.ArgumentsOriginalSize == 0 {
+		return entry.Call.Arguments, true
+	}
+	if entry.Call.Arguments != "" || !validResponsesHistoryCompressedData(entry.ArgumentsCompressed, entry.ArgumentsOriginalSize) {
+		return "", false
+	}
+	return decompressResponsesHistoryString(entry.ArgumentsCompressed, entry.ArgumentsOriginalSize)
+}
+
 func loadResponsesConversationSnapshot(snapshot responsesConversationSnapshot) []model.CanonicalMessage {
 	messages := cloneCanonicalMessages(snapshot.Messages)
 	for _, field := range snapshot.CompressedFields {
@@ -113,15 +148,35 @@ func loadResponsesConversationSnapshot(snapshot responsesConversationSnapshot) [
 }
 
 func decompressResponsesHistoryString(data []byte, originalSize int) (string, bool) {
+	if !validResponsesHistoryCompressedData(data, originalSize) {
+		return "", false
+	}
 	reader := flate.NewReader(bytes.NewReader(data))
 	var restored strings.Builder
 	restored.Grow(originalSize)
-	_, copyErr := io.Copy(&restored, reader)
+	_, copyErr := io.Copy(&restored, io.LimitReader(reader, int64(originalSize)+1))
 	closeErr := reader.Close()
 	if copyErr != nil || closeErr != nil || restored.Len() != originalSize {
 		return "", false
 	}
 	return restored.String(), true
+}
+
+func validResponsesHistoryCompressedData(data []byte, originalSize int) bool {
+	if len(data) == 0 || originalSize <= 0 || int64(originalSize) > defaultResponsesHistoryMaxBytes || int64(len(data)) > defaultResponsesHistoryMaxBytes {
+		return false
+	}
+	return int64(len(data))*4 < int64(originalSize)*3
+}
+
+func validResponsesHistoryCompressedStream(data []byte, originalSize int) bool {
+	if !validResponsesHistoryCompressedData(data, originalSize) {
+		return false
+	}
+	reader := flate.NewReader(bytes.NewReader(data))
+	restored, copyErr := io.Copy(io.Discard, io.LimitReader(reader, int64(originalSize)+1))
+	closeErr := reader.Close()
+	return copyErr == nil && closeErr == nil && restored == int64(originalSize)
 }
 
 func restoreResponsesHistoryField(messages []model.CanonicalMessage, field responsesHistoryCompressedField, value string) bool {

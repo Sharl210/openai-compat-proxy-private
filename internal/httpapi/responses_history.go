@@ -35,9 +35,11 @@ type responsesConversationSnapshot struct {
 }
 
 type responsesHistoryToolCallEntry struct {
-	SnapshotKey     string
-	Call            model.CanonicalToolCall
-	ReasoningBlocks []map[string]any
+	SnapshotKey           string
+	Call                  model.CanonicalToolCall
+	ReasoningBlocks       []map[string]any
+	ArgumentsCompressed   []byte `json:"arguments_compressed,omitempty"`
+	ArgumentsOriginalSize int    `json:"arguments_original_size,omitempty"`
 }
 
 const defaultResponsesHistoryMaxSize = 512
@@ -223,6 +225,11 @@ func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes .
 	if !ok || entry.Call.ID == "" || entry.Call.Name == "" {
 		return model.CanonicalToolCall{}, nil, false
 	}
+	arguments, ok := loadResponsesHistoryToolCallArguments(entry)
+	if !ok {
+		return model.CanonicalToolCall{}, nil, false
+	}
+	entry.Call.Arguments = arguments
 	return entry.Call, cloneReasoningBlocks(entry.ReasoningBlocks), true
 }
 
@@ -274,7 +281,8 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 	for _, msg := range messages {
 		if msg.RecoveredToolCall != nil && msg.RecoveredToolCall.ID != "" && msg.RecoveredToolCall.Name != "" {
 			call := *msg.RecoveredToolCall
-			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntry(stored)
 		}
 		if len(msg.ToolCalls) == 0 {
 			continue
@@ -283,7 +291,8 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
-			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntry(stored)
 		}
 	}
 }
@@ -319,7 +328,12 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 		if key == "" || entry.SnapshotKey == "" || entry.Call.ID == "" || entry.Call.Name == "" {
 			continue
 		}
-		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks)}
+		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks), ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize}
+		var valid bool
+		stored, valid = normalizeResponsesHistoryToolCallEntry(stored)
+		if !valid {
+			continue
+		}
 		s.toolCalls[key] = stored
 		retainedBytesBySnapshot[stored.SnapshotKey] += estimateResponsesHistoryToolCallEntryBytes(stored)
 	}

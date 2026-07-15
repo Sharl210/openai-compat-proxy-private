@@ -59,7 +59,11 @@ func estimateToolRecoveryBytes(messages []model.CanonicalMessage) int64 {
 }
 
 func estimateResponsesHistoryToolCallEntryBytes(entry responsesHistoryToolCallEntry) int64 {
-	return estimateCanonicalToolCallBytes(entry.Call) + estimateDynamicValueBytes(entry.ReasoningBlocks)
+	callBytes := estimateCanonicalToolCallBytes(entry.Call)
+	if entry.ArgumentsOriginalSize > len(entry.Call.Arguments) {
+		callBytes += int64(entry.ArgumentsOriginalSize - len(entry.Call.Arguments))
+	}
+	return callBytes + estimateDynamicValueBytes(entry.ReasoningBlocks)
 }
 
 func estimateDynamicValueBytes(value any) int64 {
