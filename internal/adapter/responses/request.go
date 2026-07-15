@@ -228,13 +228,17 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if len(rawItem) == 0 {
 			continue
 		}
-		if err := validateResponsesInputItemGraphItem(rawItem, functionCallIDs); err != nil {
+		var rawItemMap map[string]any
+		if err := json.Unmarshal(rawItem, &rawItemMap); err != nil {
 			return model.CanonicalRequest{}, err
 		}
-		if isResponsesLegacyToolCallMessage(rawItem) {
+		if err := validateResponsesInputItemGraphItem(rawItemMap, functionCallIDs); err != nil {
+			return model.CanonicalRequest{}, err
+		}
+		if isResponsesLegacyToolCallMessage(rawItemMap) {
 			canon.ResponseInputItemsAreOriginal = false
 		}
-		preserved, msg, ok, syntheticReasoningReplay, err := decodeInputItem(rawItem)
+		preserved, msg, ok, syntheticReasoningReplay, err := decodeInputItem(rawItem, rawItemMap)
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
@@ -263,18 +267,14 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 	return canon, nil
 }
 
-func isResponsesLegacyToolCallMessage(raw json.RawMessage) bool {
-	var item map[string]any
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return false
-	}
-	role, _ := item["role"].(string)
+func isResponsesLegacyToolCallMessage(rawMap map[string]any) bool {
+	role, _ := rawMap["role"].(string)
 	switch role {
 	case "assistant":
-		_, ok := item["tool_calls"]
+		_, ok := rawMap["tool_calls"]
 		return ok
 	case "tool":
-		return stringMapValue(item, "tool_call_id") != ""
+		return stringMapValue(rawMap, "tool_call_id") != ""
 	default:
 		return false
 	}
@@ -381,12 +381,7 @@ func isResponsesToolResultForCallIDs(msg model.CanonicalMessage, callIDs map[str
 	return ok
 }
 
-func validateResponsesInputItemGraphItem(raw json.RawMessage, functionCallIDs map[string]struct{}) error {
-	var rawMap map[string]any
-	if err := json.Unmarshal(raw, &rawMap); err != nil {
-		return err
-	}
-
+func validateResponsesInputItemGraphItem(rawMap map[string]any, functionCallIDs map[string]struct{}) error {
 	switch itemType, _ := rawMap["type"].(string); itemType {
 	case "item_reference":
 		if id, _ := rawMap["id"].(string); id == "" {
@@ -414,11 +409,7 @@ func validateResponsesInputItemGraphItem(raw json.RawMessage, functionCallIDs ma
 	return nil
 }
 
-func decodeInputItem(raw json.RawMessage) (map[string]any, model.CanonicalMessage, bool, bool, error) {
-	var rawMap map[string]any
-	if err := json.Unmarshal(raw, &rawMap); err != nil {
-		return nil, model.CanonicalMessage{}, false, false, err
-	}
+func decodeInputItem(raw json.RawMessage, rawMap map[string]any) (map[string]any, model.CanonicalMessage, bool, bool, error) {
 	itemType, _ := rawMap["type"].(string)
 	if itemType == "reasoning" {
 		if model.IsSyntheticResponsesReasoningPlaceholder(rawMap) {

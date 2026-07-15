@@ -1,0 +1,68 @@
+{
+  "model": "gpt-5.6",
+  "previous_response_id": "resp_previous",
+  "instructions": "keep this instruction",
+  "reasoning": {
+    "effort": "high",
+    "summary": "auto",
+    "vendor_reasoning": {"list": [1, null, {"keep": true}]}
+  },
+  "parallel_tool_calls": false,
+  "tools": [
+    {
+      "type": "function",
+      "name": "lookup",
+      "description": "lookup description",
+      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+      "vendor_tool": {"nested": {"keep": true}}
+    }
+  ],
+  "input": [
+    {
+      "type": "message",
+      "id": "msg_1",
+      "role": "user",
+      "content": [
+        {"type": "input_text", "text": "hello", "vendor_part": {"keep": true}},
+        {"type": "input_image", "image_url": {"url": "https://example.test/image.png", "detail": "high", "vendor_image": {"keep": true}}},
+        {"type": "input_file", "input_file": {"file_id": "file_1", "vendor_file": ["keep", null]}},
+        {"type": "input_audio", "input_audio": {"data": "YWJj", "format": "wav", "vendor_audio": {"keep": 7}}}
+      ],
+      "vendor_message": {"nested": [true, {"keep": "yes"}]}
+    },
+    {
+      "type": "reasoning",
+      "id": "rs_1",
+      "summary": [{"type": "summary_text", "text": "thinking"}],
+      "encrypted_content": "enc_real",
+      "vendor_reasoning": {"keep": true}
+    },
+    {
+      "type": "function_call",
+      "id": "fc_1",
+      "call_id": "call_1",
+      "name": "lookup",
+      "arguments": "{\"query\":\"x\"}",
+      "vendor_call": {"keep": true}
+    },
+    {
+      "type": "function_call_output",
+      "id": "fco_1",
+      "call_id": "call_1",
+      "output": {"ok": true, "value": "result"},
+      "vendor_output": {"keep": true}
+    },
+    {
+      "type": "compaction",
+      "id": "cmp_1",
+      "encrypted_content": "enc_compaction",
+      "vendor_compaction": {"keep": true}
+    },
+    {
+      "type": "vendor_future_item",
+      "id": "future_1",
+      "payload": {"list": [1, 2, null, {"keep": true}]}
+    }
+  ],
+  "vendor_top_level": {"nested": {"list": [1, null, {"keep": true}]}}
+}
