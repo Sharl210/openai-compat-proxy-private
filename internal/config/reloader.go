@@ -245,8 +245,12 @@ func (s *RuntimeStore) StartWatching(ctx context.Context, debounce time.Duration
 				debounceTimer = nil
 				debounceC = nil
 			case <-resyncTicker.C:
+				current := s.Active()
+				changed, err := runtimeSourceStateChanged(current)
+				if err != nil || changed {
+					_ = s.Refresh()
+				}
 				watchDirs, _, providersDir, promptPaths, _ = s.ensureWatchDirs(watcher, tracked)
-				_ = s.Refresh()
 			case _, ok := <-watcher.Errors:
 				if !ok {
 					return

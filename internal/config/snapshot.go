@@ -33,6 +33,7 @@ type RuntimeSnapshot struct {
 	ProviderPathByID           map[string]string
 	PromptPathsByID            map[string][]string
 	providerMTimeByID          map[string]time.Time
+	sourceState                runtimeSourceState
 }
 
 func FormatVersionTime(t time.Time) string {
@@ -72,7 +73,7 @@ func BuildRuntimeSnapshot(rootEnvPath string) (*RuntimeSnapshot, error) {
 	if err := ValidateRootEnvValues(values); err != nil {
 		return nil, err
 	}
-	return buildRuntimeSnapshotFromValues(rootEnvPath, rootInfo.ModTime(), values)
+	return buildRuntimeSnapshotFromValues(rootEnvPath, rootInfo, values)
 }
 
 func BuildRuntimeSnapshotForRefresh(rootEnvPath string, previous Config) (*RuntimeSnapshot, error) {
@@ -87,7 +88,7 @@ func BuildRuntimeSnapshotForRefresh(rootEnvPath string, previous Config) (*Runti
 	if err := validateHotReloadableRootEnvValues(values); err != nil {
 		return nil, err
 	}
-	snapshot, err := buildRuntimeSnapshotFromValues(rootEnvPath, rootInfo.ModTime(), values)
+	snapshot, err := buildRuntimeSnapshotFromValues(rootEnvPath, rootInfo, values)
 	if err != nil {
 		return nil, err
 	}
@@ -98,17 +99,19 @@ func BuildRuntimeSnapshotForRefresh(rootEnvPath string, previous Config) (*Runti
 	return snapshot, nil
 }
 
-func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, values map[string]string) (*RuntimeSnapshot, error) {
+func buildRuntimeSnapshotFromValues(rootEnvPath string, rootInfo os.FileInfo, values map[string]string) (*RuntimeSnapshot, error) {
 	cfg := LoadFromValues(values)
 	cfg.ProvidersDir = ResolveProvidersDir(rootEnvPath, cfg.ProvidersDir)
 	versionLocation, err := cfg.CacheInfoLocation()
 	if err != nil {
 		return nil, err
 	}
-	providers, providerVersions, providerPaths, promptPaths, providerMTimes, err := loadProvidersWithMetadata(cfg.ProvidersDir, versionLocation)
+	providers, providerVersions, providerPaths, promptPaths, providerMTimes, sourceState, err := loadProvidersWithMetadata(cfg.ProvidersDir, versionLocation)
 	if err != nil {
 		return nil, err
 	}
+	rootEnvMTime := rootInfo.ModTime()
+	sourceState.files[filepath.Clean(rootEnvPath)] = runtimeSourceStampFromInfo(rootInfo)
 	cfg.Providers = providers
 	normalizeRuntimeConfigDefaults(&cfg)
 	applyRootProviderTokenDefaults(&cfg)
@@ -135,6 +138,7 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootEnvMTime time.Time, 
 		ProviderPathByID:           providerPaths,
 		PromptPathsByID:            promptPaths,
 		providerMTimeByID:          providerMTimes,
+		sourceState:                sourceState,
 	}, nil
 }
 
@@ -696,10 +700,19 @@ func parseEnvFile(path string) (map[string]string, error) {
 	return values, nil
 }
 
-func loadProvidersWithMetadata(dir string, versionLocation *time.Location) ([]ProviderConfig, map[string]string, map[string]string, map[string][]string, map[string]time.Time, error) {
+func loadProvidersWithMetadata(dir string, versionLocation *time.Location) ([]ProviderConfig, map[string]string, map[string]string, map[string][]string, map[string]time.Time, runtimeSourceState, error) {
+	sourceState := runtimeSourceState{
+		files: map[string]runtimeSourceStamp{},
+		dirs:  map[string]runtimeSourceStamp{},
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		return nil, nil, nil, nil, nil, sourceState, err
+	}
+	recordRuntimeSourceStamp(sourceState.dirs, filepath.Clean(dir), runtimeSourceStampFromInfo(dirInfo))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, sourceState, err
 	}
 
 	providers := make([]ProviderConfig, 0, len(entries))
@@ -717,24 +730,25 @@ func loadProvidersWithMetadata(dir string, versionLocation *time.Location) ([]Pr
 			continue
 		}
 		fullPath := filepath.Join(dir, name)
-		provider, err := loadProviderFile(fullPath)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
 		info, err := os.Stat(fullPath)
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, sourceState, err
+		}
+		recordRuntimeSourceStamp(sourceState.files, filepath.Clean(fullPath), runtimeSourceStampFromInfo(info))
+		provider, err := loadProviderFile(fullPath)
+		if err != nil {
+			return nil, nil, nil, nil, nil, sourceState, err
 		}
 		providerVersionTime := info.ModTime()
-		provider.SystemPromptText, providerVersionTime, err = loadSystemPromptText(provider.SystemPromptFiles, providerVersionTime)
+		provider.SystemPromptText, providerVersionTime, err = loadSystemPromptText(provider.SystemPromptFiles, providerVersionTime, &sourceState)
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, sourceState, err
 		}
 		if provider.ID == "" {
-			return nil, nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("provider file %s is missing PROVIDER_ID", name))
+			return nil, nil, nil, nil, nil, sourceState, ErrInvalidConfig(fmt.Sprintf("provider file %s is missing PROVIDER_ID", name))
 		}
 		if _, exists := seen[provider.ID]; exists {
-			return nil, nil, nil, nil, nil, ErrInvalidConfig(fmt.Sprintf("duplicate provider id: %s", provider.ID))
+			return nil, nil, nil, nil, nil, sourceState, ErrInvalidConfig(fmt.Sprintf("duplicate provider id: %s", provider.ID))
 		}
 		seen[provider.ID] = struct{}{}
 		providers = append(providers, provider)
@@ -744,7 +758,7 @@ func loadProvidersWithMetadata(dir string, versionLocation *time.Location) ([]Pr
 		mtimes[provider.ID] = providerVersionTime
 	}
 	sortProviders(providers)
-	return providers, versions, paths, promptPaths, mtimes, nil
+	return providers, versions, paths, promptPaths, mtimes, sourceState, nil
 }
 
 func sortProviders(providers []ProviderConfig) {
@@ -757,23 +771,32 @@ func sortProviders(providers []ProviderConfig) {
 	}
 }
 
-func loadSystemPromptText(paths []string, latest time.Time) (string, time.Time, error) {
+func loadSystemPromptText(paths []string, latest time.Time, sourceState *runtimeSourceState) (string, time.Time, error) {
 	if len(paths) == 0 {
 		return "", latest, nil
 	}
 	sections := make([]string, 0, len(paths))
 	for _, path := range paths {
-		info, err := os.Stat(path)
+		dirPath := filepath.Clean(filepath.Dir(path))
+		dirStamp, err := captureRuntimeSourceStamp(dirPath)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
 			return "", latest, err
 		}
-		if info.ModTime().After(latest) {
-			latest = info.ModTime()
+		recordRuntimeSourceStamp(sourceState.dirs, dirPath, dirStamp)
+
+		cleanPath := filepath.Clean(path)
+		fileStamp, err := captureRuntimeSourceStamp(cleanPath)
+		if err != nil {
+			return "", latest, err
 		}
-		content, err := os.ReadFile(path)
+		recordRuntimeSourceStamp(sourceState.files, cleanPath, fileStamp)
+		if !fileStamp.exists {
+			continue
+		}
+		if fileStamp.modTime.After(latest) {
+			latest = fileStamp.modTime
+		}
+		content, err := os.ReadFile(cleanPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
