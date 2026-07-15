@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"crypto/sha256"
+	"encoding"
 	"encoding/json"
 	"fmt"
+	"hash"
 
 	"openai-compat-proxy/internal/model"
 )
@@ -34,7 +36,7 @@ func nestedCachedTokens(usage map[string]any) any {
 func canonicalLogAttrs(req model.CanonicalRequest) map[string]any {
 	roles := make([]string, 0, len(req.Messages))
 	messageHashes := make([]string, 0, len(req.Messages))
-	prefixHashes := make([]string, 0, len(req.Messages))
+	prefixHashes := hashCanonicalMessagePrefixes(req.Messages)
 	textBytes := make([]int, 0, len(req.Messages))
 	toolCallCounts := make([]int, 0, len(req.Messages))
 	hasReasoningContent := make([]bool, 0, len(req.Messages))
@@ -57,7 +59,6 @@ func canonicalLogAttrs(req model.CanonicalRequest) map[string]any {
 			"tool_call_id":      msg.ToolCallID,
 			"reasoning_content": msg.ReasoningContent,
 		}))
-		prefixHashes = append(prefixHashes, hashAny(req.Messages[:i+1]))
 	}
 	toolNames := make([]string, 0, len(req.Tools))
 	for _, tool := range req.Tools {
@@ -79,6 +80,58 @@ func canonicalLogAttrs(req model.CanonicalRequest) map[string]any {
 		"reasoning_mode":           reasoningMode,
 		"reasoning_mode_origin":    string(req.ReasoningModeOrigin),
 	}
+}
+
+type canonicalHashState interface {
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+}
+
+func hashCanonicalMessagePrefixes(messages []model.CanonicalMessage) []string {
+	return hashCanonicalMessagePrefixesWithHasher(messages, sha256.New())
+}
+
+func hashCanonicalMessagePrefixesWithHasher(messages []model.CanonicalMessage, prefixHasher hash.Hash) []string {
+	state, ok := prefixHasher.(canonicalHashState)
+	if !ok || !writeCanonicalHashBytes(prefixHasher, []byte{'['}) {
+		return legacyCanonicalMessagePrefixHashes(messages)
+	}
+	prefixHashes := make([]string, 0, len(messages))
+	for index := range messages {
+		encodedMessage, err := json.Marshal(messages[index])
+		if err != nil {
+			return legacyCanonicalMessagePrefixHashes(messages)
+		}
+		if index > 0 && !writeCanonicalHashBytes(prefixHasher, []byte{','}) {
+			return legacyCanonicalMessagePrefixHashes(messages)
+		}
+		if !writeCanonicalHashBytes(prefixHasher, encodedMessage) {
+			return legacyCanonicalMessagePrefixHashes(messages)
+		}
+		checkpoint, err := state.MarshalBinary()
+		if err != nil || !writeCanonicalHashBytes(prefixHasher, []byte{']'}) {
+			return legacyCanonicalMessagePrefixHashes(messages)
+		}
+		sum := prefixHasher.Sum(nil)
+		prefixHashes = append(prefixHashes, fmt.Sprintf("%x", sum[:8]))
+		if err := state.UnmarshalBinary(checkpoint); err != nil {
+			return legacyCanonicalMessagePrefixHashes(messages)
+		}
+	}
+	return prefixHashes
+}
+
+func writeCanonicalHashBytes(hasher hash.Hash, value []byte) bool {
+	_, err := hasher.Write(value)
+	return err == nil
+}
+
+func legacyCanonicalMessagePrefixHashes(messages []model.CanonicalMessage) []string {
+	prefixHashes := make([]string, 0, len(messages))
+	for index := range messages {
+		prefixHashes = append(prefixHashes, hashAny(messages[:index+1]))
+	}
+	return prefixHashes
 }
 
 func hashAny(v any) string {
