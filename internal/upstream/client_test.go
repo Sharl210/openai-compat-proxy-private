@@ -2534,6 +2534,27 @@ func TestParseSSEStreamingAcceptsLargeEventPayload(t *testing.T) {
 	}
 }
 
+func TestParseSSEStreamingInfersResponsesEventNameFromDataType(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n",
+		)),
+	}
+
+	var events []Event
+	err := parseSSEStreaming(resp, func(evt Event) error {
+		events = append(events, evt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected data-only Responses SSE to complete, got %v", err)
+	}
+	if len(events) != 2 || events[0].Event != "response.output_text.delta" || events[1].Event != "response.completed" {
+		t.Fatalf("expected event names inferred from payload types, got %#v", events)
+	}
+}
+
 func TestParseSSEStreamingReturnsUnexpectedEOFWhenStreamEndsWithoutTerminalEvent(t *testing.T) {
 	resp := &http.Response{
 		Body: io.NopCloser(strings.NewReader("event: response.output_text.delta\n" +

@@ -2436,7 +2436,7 @@ func readNextSSEEvent(scanner *bufio.Scanner) (*Event, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
-			if currentEvent != "" {
+			if currentEvent != "" || len(dataLines) > 0 {
 				evt, err := finalizeEvent(currentEvent, dataLines)
 				if err != nil {
 					return nil, err
@@ -2462,7 +2462,7 @@ func readNextSSEEvent(scanner *bufio.Scanner) (*Event, error) {
 		return nil, err
 	}
 
-	if currentEvent != "" {
+	if currentEvent != "" || len(dataLines) > 0 {
 		evt, err := finalizeEvent(currentEvent, dataLines)
 		if err != nil {
 			return nil, err
@@ -2475,10 +2475,20 @@ func readNextSSEEvent(scanner *bufio.Scanner) (*Event, error) {
 
 func finalizeEvent(name string, dataLines []string) (Event, error) {
 	raw := []byte(strings.Join(dataLines, "\n"))
+	if name == "" && bytes.Equal(bytes.TrimSpace(raw), []byte("[DONE]")) {
+		return Event{Event: "[DONE]", Raw: raw}, nil
+	}
 	var parsed map[string]any
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &parsed); err != nil {
 			return Event{}, fmt.Errorf("parse event %s: %w", name, err)
+		}
+	}
+	if name == "" {
+		if payloadType, _ := parsed["type"].(string); payloadType != "" {
+			name = payloadType
+		} else {
+			name = "message"
 		}
 	}
 	return Event{Event: name, Data: parsed, Raw: raw}, nil
