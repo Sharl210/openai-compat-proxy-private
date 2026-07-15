@@ -3,20 +3,24 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"sync"
 
 	"openai-compat-proxy/internal/auth"
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	"openai-compat-proxy/internal/tokenestimator"
+	"openai-compat-proxy/internal/upstream"
 )
 
 type Server struct {
-	store   *config.RuntimeStore
-	mux     *http.ServeMux
-	handler http.Handler
-	admin   *adminUI
-	history *responsesHistoryStore
+	store              *config.RuntimeStore
+	mux                *http.ServeMux
+	handler            http.Handler
+	admin              *adminUI
+	history            *responsesHistoryStore
+	upstreamTransports *upstream.TransportPool
+	transportReconcile sync.Mutex
 
 	CacheInfo      *cacheinfo.Manager
 	TokenEstimator *tokenestimator.Manager
@@ -28,9 +32,10 @@ func NewServer(cfg config.Config) *Server {
 
 func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager, tokenEstimatorMgr *tokenestimator.Manager) *Server {
 	srv := &Server{
-		store:          store,
-		CacheInfo:      cacheMgr,
-		TokenEstimator: tokenEstimatorMgr,
+		store:              store,
+		CacheInfo:          cacheMgr,
+		TokenEstimator:     tokenEstimatorMgr,
+		upstreamTransports: upstream.NewTransportPool(),
 	}
 	if snapshot := store.Active(); snapshot != nil {
 		srv.history = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, responsesHistoryToolCallRecoveryIndexPath(snapshot.Config.ProvidersDir))
@@ -42,6 +47,8 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager,
 	} else if snapshot := store.Active(); snapshot != nil {
 		ensureImageArtifactsReadyForRoot(imageArtifactRootDirFromSnapshot(snapshot))
 	}
+	store.AddRefreshListener(srv.reconcileUpstreamTransports)
+	srv.reconcileUpstreamTransports(store.Active())
 	srv.admin = newAdminUI(store, cacheMgr)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz(store))
@@ -136,6 +143,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx = withRuntimeStore(ctx, s.store)
 		ctx = withResponsesHistory(ctx, s.history)
+		ctx = withUpstreamTransportPool(ctx, s.upstreamTransports)
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
 		if shouldUseRootLegacyProxyAuth(info, snapshot) {
@@ -155,6 +163,24 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
+}
+
+func (s *Server) reconcileUpstreamTransports(snapshot *config.RuntimeSnapshot) {
+	if snapshot == nil {
+		return
+	}
+	s.transportReconcile.Lock()
+	defer s.transportReconcile.Unlock()
+	if s.store.Active() != snapshot {
+		return
+	}
+	activeProviderIDs := make([]string, 0, len(snapshot.Config.Providers))
+	for _, provider := range snapshot.Config.Providers {
+		if provider.Enabled {
+			activeProviderIDs = append(activeProviderIDs, provider.ID)
+		}
+	}
+	s.upstreamTransports.ReconcileProviderIDs(activeProviderIDs)
 }
 
 func shouldUseRootLegacyProxyAuth(info routeInfo, snapshot *config.RuntimeSnapshot) bool {

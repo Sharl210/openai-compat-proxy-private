@@ -64,7 +64,7 @@ func handleChat() http.HandlerFunc {
 			writeModelAllowanceError(w, err)
 			return
 		}
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+		client := upstreamClientForProvider(r, providerID, providerCfg)
 		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolChat, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)

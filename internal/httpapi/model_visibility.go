@@ -208,7 +208,7 @@ func writeModelAllowanceError(w http.ResponseWriter, err error) {
 
 func explicitProviderVisibleModelSet(ctx context.Context, r *http.Request, provider config.ProviderConfig, providerCfg config.Config, authorization string) (map[string]struct{}, []string, bool, error) {
 	if provider.SupportsModels {
-		client := upstream.NewClient(providerCfg.UpstreamBaseURL, providerCfg)
+		client := upstreamClientForProvider(r, provider.ID, providerCfg)
 		status, body, contentType, err := client.Models(ctx, authorization)
 		if err != nil {
 			return nil, nil, false, err
