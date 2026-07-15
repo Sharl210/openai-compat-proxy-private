@@ -15,12 +15,15 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
+const loggerCleanupInterval = time.Minute
+
 type Logger struct {
-	stdout      io.Writer
-	dir         string
-	maxRequests int
-	maxBodySize int
-	mu          sync.Mutex
+	stdout        io.Writer
+	dir           string
+	maxRequests   int
+	maxBodySize   int
+	lastCleanupAt time.Time
+	mu            sync.Mutex
 }
 
 var (
@@ -101,7 +104,7 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	file := l.getFile(requestID)
+	file, created := l.getFile(requestID)
 	if file == nil {
 		return
 	}
@@ -109,16 +112,36 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	_, _ = file.Write(append(line, '\n'))
 	_, _ = fmt.Fprintf(l.stdout, "%s %s\n", name, summarize(record))
 
-	l.cleanupOldFiles()
+	l.maybeCleanup(created)
 }
 
-func (l *Logger) getFile(requestID string) *os.File {
+func (l *Logger) getFile(requestID string) (*os.File, bool) {
 	filePath := filepath.Join(l.dir, requestID+".txt")
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err == nil {
+		return file, true
 	}
-	return file
+	if !os.IsExist(err) {
+		return nil, false
+	}
+	file, err = os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, false
+	}
+	return file, false
+}
+
+func (l *Logger) maybeCleanup(created bool) {
+	if l.maxRequests <= 0 {
+		return
+	}
+	now := time.Now()
+	if !created && !l.lastCleanupAt.IsZero() && now.Sub(l.lastCleanupAt) < loggerCleanupInterval {
+		return
+	}
+	if err := l.cleanupOldFiles(); err == nil {
+		l.lastCleanupAt = now
+	}
 }
 
 func (l *Logger) cleanupOldFiles() error {
