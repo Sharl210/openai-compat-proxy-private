@@ -66,7 +66,15 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 		if err := writer.WriteByte(':'); err != nil {
 			return err
 		}
-		encodedEntry, err := json.Marshal(s.toolCalls[key])
+		entry := s.toolCalls[key]
+		if len(entry.ArgumentsCompressed) > 0 && entry.Call.Arguments == "" {
+			arguments, ok := loadResponsesHistoryToolCallArguments(entry)
+			if !ok {
+				return errors.New("invalid compressed responses tool-call arguments")
+			}
+			entry.Call.Arguments = arguments
+		}
+		encodedEntry, err := json.Marshal(entry)
 		if err != nil {
 			return err
 		}
