@@ -98,29 +98,180 @@ func (r *request) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	var rawFields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &rawFields); err != nil {
+	passthrough, inputWasString, err := decodeRequestPreservedFields(data)
+	if err != nil {
 		return err
-	}
-	passthrough := make(map[string]any)
-	for key, raw := range rawFields {
-		if isKnownRequestField(key) {
-			continue
-		}
-		var value any
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return err
-		}
-		passthrough[key] = value
 	}
 
 	*r = request(decoded)
-	if inputRaw, ok := rawFields["input"]; ok {
-		var inputText string
-		r.inputWasString = json.Unmarshal(inputRaw, &inputText) == nil
-	}
+	r.inputWasString = inputWasString
 	r.passthroughTopLevelFields = passthrough
 	return nil
+}
+
+func decodeRequestPreservedFields(data []byte) (map[string]any, bool, error) {
+	pos := skipJSONWhitespace(data, 0)
+	if pos >= len(data) {
+		return nil, false, fmt.Errorf("responses request must be a JSON object")
+	}
+	if isJSONNullAt(data, pos) {
+		return nil, false, nil
+	}
+	if data[pos] != '{' {
+		return nil, false, fmt.Errorf("responses request must be a JSON object")
+	}
+	pos++
+	var passthrough map[string]any
+	inputWasString := false
+	for {
+		pos = skipJSONWhitespace(data, pos)
+		if pos >= len(data) {
+			return nil, false, fmt.Errorf("unexpected end of responses request")
+		}
+		if data[pos] == '}' {
+			return finishPreservedFields(data, pos+1, passthrough, inputWasString)
+		}
+
+		keyStart, keyEnd, next, err := scanJSONString(data, pos)
+		if err != nil {
+			return nil, false, err
+		}
+		var key string
+		if err := json.Unmarshal(data[keyStart:keyEnd], &key); err != nil {
+			return nil, false, err
+		}
+		pos = skipJSONWhitespace(data, next)
+		if pos >= len(data) || data[pos] != ':' {
+			return nil, false, fmt.Errorf("missing colon after responses request field %q", key)
+		}
+		pos = skipJSONWhitespace(data, pos+1)
+		valueStart, valueEnd, next, err := scanJSONValue(data, pos)
+		if err != nil {
+			return nil, false, err
+		}
+		if key == "input" {
+			inputWasString = isLegacyStringInputValue(data[valueStart:valueEnd])
+		} else if !isKnownRequestField(key) {
+			var value any
+			if err := json.Unmarshal(data[valueStart:valueEnd], &value); err != nil {
+				return nil, false, err
+			}
+			if passthrough == nil {
+				passthrough = make(map[string]any)
+			}
+			passthrough[key] = value
+		}
+		pos = skipJSONWhitespace(data, next)
+		if pos >= len(data) {
+			return nil, false, fmt.Errorf("unexpected end after responses request field %q", key)
+		}
+		if data[pos] == '}' {
+			return finishPreservedFields(data, pos+1, passthrough, inputWasString)
+		}
+		if data[pos] != ',' {
+			return nil, false, fmt.Errorf("missing comma after responses request field %q", key)
+		}
+		pos++
+	}
+}
+
+func finishPreservedFields(data []byte, pos int, passthrough map[string]any, inputWasString bool) (map[string]any, bool, error) {
+	if skipJSONWhitespace(data, pos) != len(data) {
+		return nil, false, fmt.Errorf("unexpected trailing data after responses request")
+	}
+	return passthrough, inputWasString, nil
+}
+
+func isJSONNullAt(data []byte, pos int) bool {
+	return pos+4 <= len(data) && data[pos] == 'n' && data[pos+1] == 'u' && data[pos+2] == 'l' && data[pos+3] == 'l' && skipJSONWhitespace(data, pos+4) == len(data)
+}
+
+func isLegacyStringInputValue(value []byte) bool {
+	if len(value) > 0 && value[0] == '"' {
+		return true
+	}
+	return isJSONNullAt(value, 0)
+}
+
+func skipJSONWhitespace(data []byte, pos int) int {
+	for pos < len(data) {
+		switch data[pos] {
+		case ' ', '\t', '\r', '\n':
+			pos++
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+func scanJSONString(data []byte, pos int) (int, int, int, error) {
+	if pos >= len(data) || data[pos] != '"' {
+		return 0, 0, 0, fmt.Errorf("responses request field name must be a JSON string")
+	}
+	start := pos
+	pos++
+	for ; pos < len(data); pos++ {
+		switch data[pos] {
+		case '\\':
+			pos++
+		case '"':
+			return start, pos + 1, pos + 1, nil
+		}
+	}
+	return 0, 0, 0, fmt.Errorf("unterminated responses request string")
+}
+
+func scanJSONValue(data []byte, pos int) (int, int, int, error) {
+	start := pos
+	if pos >= len(data) {
+		return 0, 0, 0, fmt.Errorf("missing JSON value in responses request")
+	}
+	if data[pos] == '"' {
+		return scanJSONString(data, pos)
+	}
+	if data[pos] == '{' || data[pos] == '[' {
+		open := data[pos]
+		close := byte('}')
+		if open == '[' {
+			close = ']'
+		}
+		depth := 0
+		inString := false
+		for ; pos < len(data); pos++ {
+			if inString {
+				switch data[pos] {
+				case '\\':
+					pos++
+				case '"':
+					inString = false
+				}
+				continue
+			}
+			switch data[pos] {
+			case '"':
+				inString = true
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					if data[pos] != close {
+						return 0, 0, 0, fmt.Errorf("mismatched JSON value delimiter")
+					}
+					return start, pos + 1, pos + 1, nil
+				}
+			}
+		}
+		return 0, 0, 0, fmt.Errorf("unterminated JSON value in responses request")
+	}
+	for pos < len(data) && data[pos] != ',' && data[pos] != '}' && data[pos] != ']' && data[pos] != ' ' && data[pos] != '\t' && data[pos] != '\r' && data[pos] != '\n' {
+		pos++
+	}
+	if start == pos {
+		return 0, 0, 0, fmt.Errorf("missing JSON value in responses request")
+	}
+	return start, pos, pos, nil
 }
 
 func isKnownRequestField(key string) bool {

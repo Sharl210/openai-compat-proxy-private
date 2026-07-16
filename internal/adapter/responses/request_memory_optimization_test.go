@@ -40,6 +40,124 @@ func TestDecodeRequestMemoryOptimizationFixturePreservesDynamicFields(t *testing
 	}
 }
 
+func TestDecodeRequestPreservedFieldsSkipsKnownValuesAndDetectsStringInput(t *testing.T) {
+	data := []byte(`{"model":"gpt-5.6","input":"hello","reasoning":{"effort":"high"},"vendor_top_level":{"keep":true},"vendor_array":[1,{"keep":true}]}`)
+
+	got, inputWasString, err := decodeRequestPreservedFields(data)
+	if err != nil {
+		t.Fatalf("decode preserved fields: %v", err)
+	}
+	if !inputWasString {
+		t.Fatal("expected string input to be detected")
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected only unknown top-level fields, got %#v", got)
+	}
+	if got["vendor_top_level"].(map[string]any)["keep"] != true {
+		t.Fatalf("expected unknown object to be preserved, got %#v", got["vendor_top_level"])
+	}
+	if len(got["vendor_array"].([]any)) != 2 {
+		t.Fatalf("expected unknown array to be preserved, got %#v", got["vendor_array"])
+	}
+}
+
+func TestDecodeRequestPreservedFieldsHandlesNestedAndEscapedValues(t *testing.T) {
+	data := []byte(`{"model":{"nested":[{"text":"known"}]},"input":[{"role":"user","content":"known"}],"vendor_key":"quote\\\"slash\\\\","vendor_nested":{"items":[1,{"text":"}"}]},"vendor_null":null}`)
+
+	got, inputWasString, err := decodeRequestPreservedFields(data)
+	if err != nil {
+		t.Fatalf("decode preserved fields: %v", err)
+	}
+	if inputWasString {
+		t.Fatal("expected array input not to be detected as string input")
+	}
+	if got["vendor_key"] != `quote\"slash\\` {
+		t.Fatalf("expected escaped unknown string to be preserved, got %#v", got["vendor_key"])
+	}
+	nested, ok := got["vendor_nested"].(map[string]any)
+	if !ok || len(nested["items"].([]any)) != 2 {
+		t.Fatalf("expected nested unknown value to be preserved, got %#v", got["vendor_nested"])
+	}
+	if value, exists := got["vendor_null"]; !exists || value != nil {
+		t.Fatalf("expected null unknown value to be preserved, got %#v", got["vendor_null"])
+	}
+}
+
+func TestDecodeRequestPreservedFieldsKeepsNullInputCompatibility(t *testing.T) {
+	got, inputWasString, err := decodeRequestPreservedFields([]byte(`{"model":"gpt-5.6","input":null}`))
+	if err != nil {
+		t.Fatalf("decode preserved fields: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected no preserved fields, got %#v", got)
+	}
+	if !inputWasString {
+		t.Fatal("expected null input to retain legacy string-input compatibility")
+	}
+}
+
+func TestDecodeRequestPreservedFieldsUsesLastDuplicateInputAndDecodesEscapedKey(t *testing.T) {
+	tests := []struct {
+		name           string
+		data           string
+		inputWasString bool
+	}{
+		{
+			name:           "string then number",
+			data:           `{"input":"first","input":42}`,
+			inputWasString: false,
+		},
+		{
+			name:           "number then string",
+			data:           `{"input":42,"input":"last"}`,
+			inputWasString: true,
+		},
+		{
+			name:           "escaped key then number",
+			data:           `{"\u0069nput":"first","input":false}`,
+			inputWasString: false,
+		},
+		{
+			name:           "number then escaped key",
+			data:           `{"input":false,"\u0069nput":null}`,
+			inputWasString: true,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, inputWasString, err := decodeRequestPreservedFields([]byte(testCase.data))
+			if err != nil {
+				t.Fatalf("decode preserved fields: %v", err)
+			}
+			if inputWasString != testCase.inputWasString {
+				t.Fatalf("inputWasString=%v, want %v", inputWasString, testCase.inputWasString)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestPreservedFieldsHandlesTopLevelNull(t *testing.T) {
+	got, inputWasString, err := decodeRequestPreservedFields([]byte(" null \n"))
+	if err != nil {
+		t.Fatalf("decode preserved fields: %v", err)
+	}
+	if got != nil || inputWasString {
+		t.Fatalf("expected null request to keep zero preserved state, got fields=%#v string=%v", got, inputWasString)
+	}
+}
+
+func TestDecodeRequestPreservedFieldsRejectsTrailingData(t *testing.T) {
+	for _, data := range []string{
+		`{"model":"gpt-5.6"} trailing`,
+		`null trailing`,
+	} {
+		if _, _, err := decodeRequestPreservedFields([]byte(data)); err == nil {
+			t.Fatalf("expected trailing data to fail for %q", data)
+		}
+	}
+}
+
 func TestDecodeRequestMemoryOptimizationFixturePreservesTypedMultimodalSemantics(t *testing.T) {
 	_, canon := decodeMemoryOptimizationFixture(t)
 
