@@ -43,6 +43,12 @@ type Client struct {
 	upstreamCacheControl           string
 }
 
+type ClientOptions struct {
+	BaseURL    string
+	Config     config.Config
+	Transports *TransportSet
+}
+
 type RequestObservabilityPreview struct {
 	UpstreamModel       string
 	UpstreamServiceTier string
@@ -187,10 +193,24 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 	if len(cfgs) > 0 {
 		cfg = cfgs[0]
 	}
+	return NewClientWithOptions(ClientOptions{BaseURL: baseURL, Config: cfg})
+}
+
+func NewClientWithOptions(options ClientOptions) *Client {
+	cfg := options.Config
+	var httpClient *http.Client
+	var streamOpenHTTPClient *http.Client
+	if options.Transports == nil {
+		httpClient = newHTTPClient(cfg)
+		streamOpenHTTPClient = newStreamOpenHTTPClient(cfg)
+	} else {
+		httpClient = &http.Client{Transport: options.Transports.Regular}
+		streamOpenHTTPClient = &http.Client{Transport: options.Transports.StreamOpen}
+	}
 	return &Client{
-		baseURL:                        strings.TrimRight(baseURL, "/"),
-		httpClient:                     newHTTPClient(cfg),
-		streamOpenHTTPClient:           newStreamOpenHTTPClient(cfg),
+		baseURL:                        strings.TrimRight(options.BaseURL, "/"),
+		httpClient:                     httpClient,
+		streamOpenHTTPClient:           streamOpenHTTPClient,
 		retryCount:                     cfg.UpstreamRetryCount,
 		retryDelay:                     cfg.UpstreamRetryDelay,
 		upstreamEndpointType:           normalizeEndpointType(cfg.UpstreamEndpointType),
@@ -211,15 +231,19 @@ func NewClient(baseURL string, cfgs ...config.Config) *Client {
 
 func PassThrough(ctx context.Context, cfg config.Config, authorization string, method string, path string, contentType string, body []byte) (int, string, []byte, error) {
 	client := NewClient(cfg.UpstreamBaseURL, cfg)
-	httpReq, err := http.NewRequestWithContext(ctx, method, client.baseURL+path, bytes.NewReader(body))
+	return client.PassThrough(ctx, authorization, method, path, contentType, body)
+}
+
+func (c *Client) PassThrough(ctx context.Context, authorization string, method string, path string, contentType string, body []byte) (int, string, []byte, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, "", nil, err
 	}
-	applyUpstreamHeaders(httpReq, config.UpstreamEndpointTypeResponses, authorization, client.anthropicVersion, "", client.upstreamUserAgent, client.masqueradeTarget, client.masqueradeClientVersion)
+	applyUpstreamHeaders(httpReq, config.UpstreamEndpointTypeResponses, authorization, c.anthropicVersion, "", c.upstreamUserAgent, c.masqueradeTarget, c.masqueradeClientVersion)
 	if contentType != "" {
 		httpReq.Header.Set("Content-Type", contentType)
 	}
-	resp, err := client.httpClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return 0, "", nil, err
 	}
@@ -244,6 +268,10 @@ func newHTTPClient(cfg config.Config) *http.Client {
 }
 
 func newStreamOpenHTTPClient(cfg config.Config) *http.Client {
+	return &http.Client{Transport: newStreamOpenTransport(cfg)}
+}
+
+func newStreamOpenTransport(cfg config.Config) *http.Transport {
 	streamCfg := cfg
 	streamOpenTimeout := streamCfg.StreamOpenTimeout
 	if streamOpenTimeout <= 0 {
@@ -253,7 +281,7 @@ func newStreamOpenHTTPClient(cfg config.Config) *http.Client {
 		streamOpenTimeout = streamCfg.FirstByteTimeout
 	}
 	streamCfg.FirstByteTimeout = streamOpenTimeout
-	return newHTTPClient(streamCfg)
+	return newTransport(streamCfg)
 }
 
 func (c *Client) configuredRetryCount() int {
