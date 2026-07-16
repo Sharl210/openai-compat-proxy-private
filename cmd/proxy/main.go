@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"openai-compat-proxy/internal/cacheinfo"
@@ -16,19 +20,29 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	runtimeCtx, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopRuntime()
+
 	store, err := config.NewRuntimeStore(".env")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	cfg := store.Active().Config
 	closeFn, err := logging.Init(cfg, os.Stdout)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer closeFn()
 	defer diagnostics.StartHeapCaptureSignalHandler(log.Printf)()
-	if err := store.StartWatching(context.Background(), 300*time.Millisecond, 5*time.Second); err != nil {
-		log.Fatal(err)
+	if err := store.StartWatching(runtimeCtx, 300*time.Millisecond, 5*time.Second); err != nil {
+		return err
 	}
 
 	var cacheMgr *cacheinfo.Manager
@@ -69,7 +83,7 @@ func main() {
 				}
 				return append([]string(nil), snapshot.DefaultProviderIDs...)
 			})
-			cacheMgr.Start(context.Background())
+			cacheMgr.Start(runtimeCtx)
 			defer cacheMgr.Stop()
 		}
 	}
@@ -93,7 +107,79 @@ func main() {
 		}()
 	}
 
-	if err := http.ListenAndServe(cfg.ListenAddr, httpapi.NewServerWithStore(store, cacheMgr, estimatorMgr)); err != nil {
-		log.Fatal(err)
+	apiServer := httpapi.NewServerWithStore(store, cacheMgr, estimatorMgr)
+	listener, err := net.Listen("tcp", cfg.ListenAddr)
+	if err != nil {
+		apiServer.Close()
+		return err
+	}
+	server := &http.Server{Handler: apiServer}
+	if err := serveHTTP(runtimeCtx, server, listener, apiServer.Close); err != nil {
+		return err
+	}
+	return nil
+}
+
+const httpShutdownTimeout = 30 * time.Second
+
+func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, closeHandler func()) error {
+	return serveHTTPWithShutdownTimeout(ctx, server, listener, closeHandler, httpShutdownTimeout)
+}
+
+func serveHTTPWithShutdownTimeout(ctx context.Context, server *http.Server, listener net.Listener, closeHandler func(), shutdownTimeout time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if server == nil {
+		return errors.New("http server is nil")
+	}
+	if listener == nil {
+		return errors.New("http listener is nil")
+	}
+	if closeHandler == nil {
+		closeHandler = func() {}
+	}
+	defer closeHandler()
+
+	serveResult := make(chan error, 1)
+	go func() {
+		serveResult <- server.Serve(listener)
+	}()
+
+	select {
+	case err := <-serveResult:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		shutdownErr := server.Shutdown(shutdownCtx)
+		if shutdownErr != nil {
+			closeErr := server.Close()
+			serveErr := <-serveResult
+			if errors.Is(closeErr, http.ErrServerClosed) {
+				closeErr = nil
+			}
+			if errors.Is(serveErr, http.ErrServerClosed) {
+				serveErr = nil
+			}
+			switch {
+			case closeErr != nil && serveErr != nil:
+				return errors.Join(shutdownErr, closeErr, serveErr)
+			case closeErr != nil:
+				return errors.Join(shutdownErr, closeErr)
+			case serveErr != nil:
+				return errors.Join(shutdownErr, serveErr)
+			default:
+				return shutdownErr
+			}
+		}
+		err := <-serveResult
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
 }
