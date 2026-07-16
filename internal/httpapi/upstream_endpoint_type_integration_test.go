@@ -3163,8 +3163,8 @@ func TestResponsesRouteUsesItemReferenceForOpenCodeMasqueradeFunctionCallFollowU
 	if strings.Contains(secondBody, `"previous_response_id"`) {
 		t.Fatalf("expected opencode masquerade follow-up to drop previous_response_id, got %s", secondBody)
 	}
-	if !strings.Contains(secondBody, `"type":"item_reference"`) || !strings.Contains(secondBody, `"id":"call_1"`) {
-		t.Fatalf("expected opencode masquerade follow-up to inject item_reference call_1, got %s", secondBody)
+	if !strings.Contains(secondBody, `"type":"item_reference"`) || !strings.Contains(secondBody, `"id":"fc_1"`) {
+		t.Fatalf("expected opencode masquerade follow-up to inject item_reference fc_1, got %s", secondBody)
 	}
 	if !strings.Contains(secondBody, `"type":"function_call_output"`) || !strings.Contains(secondBody, `"call_id":"call_1"`) {
 		t.Fatalf("expected opencode masquerade follow-up to preserve function_call_output, got %s", secondBody)

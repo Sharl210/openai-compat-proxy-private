@@ -1352,25 +1352,34 @@ func injectResponsesItemReferences(input []map[string]any, referencesByCallID ma
 	if len(input) == 0 || len(referencesByCallID) == 0 {
 		return input
 	}
-	existingReferences := make(map[string]struct{})
-	for _, item := range input {
-		if itemType, _ := item["type"].(string); itemType != "item_reference" {
-			continue
-		}
-		if itemID, _ := item["id"].(string); itemID != "" {
-			existingReferences[itemID] = struct{}{}
-		}
-	}
+	emittedReferences := make(map[string]struct{})
 	withReferences := make([]map[string]any, 0, len(input)+len(referencesByCallID))
 	for _, item := range input {
-		if itemType, _ := item["type"].(string); itemType == "function_call_output" {
-			callID, _ := item["call_id"].(string)
-			if strings.TrimSpace(referencesByCallID[callID]) != "" {
-				if _, exists := existingReferences[callID]; exists {
-					withReferences = append(withReferences, item)
+		if itemType, _ := item["type"].(string); itemType == "item_reference" {
+			itemID, _ := item["id"].(string)
+			canonicalID := strings.TrimSpace(referencesByCallID[itemID])
+			if canonicalID != "" {
+				itemID = canonicalID
+				item = cloneMap(item)
+				item["id"] = canonicalID
+			}
+			if itemID != "" {
+				if _, exists := emittedReferences[itemID]; exists {
 					continue
 				}
-				withReferences = append(withReferences, map[string]any{"type": "item_reference", "id": callID})
+				emittedReferences[itemID] = struct{}{}
+			}
+			withReferences = append(withReferences, item)
+			continue
+		}
+		if itemType, _ := item["type"].(string); itemType == "function_call_output" {
+			callID, _ := item["call_id"].(string)
+			referenceID := strings.TrimSpace(referencesByCallID[callID])
+			if referenceID != "" {
+				if _, exists := emittedReferences[referenceID]; !exists {
+					withReferences = append(withReferences, map[string]any{"type": "item_reference", "id": referenceID})
+					emittedReferences[referenceID] = struct{}{}
+				}
 			}
 		}
 		withReferences = append(withReferences, item)
@@ -1955,7 +1964,7 @@ func isReplayableResponsesReasoningBlock(block map[string]any) bool {
 	if model.IsSyntheticResponsesReasoningPlaceholder(block) {
 		return false
 	}
-	return stringValue(block["encrypted_content"]) != "" || normalizeResponsesReasoningInputText(reasoningTextFromResponsesBlock(block)) != ""
+	return stringValue(block["encrypted_content"]) != "" || normalizeResponsesReasoningInputText(reasoningTextFromResponsesBlock(block)) != "" || model.HasResponsesReasoningState(block)
 }
 
 func normalizeResponsesReasoningInputText(text string) string {

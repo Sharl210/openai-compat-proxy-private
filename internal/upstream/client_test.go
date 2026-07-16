@@ -3456,6 +3456,43 @@ func TestBuildResponsesRequestBodyDropsSyntheticReasoningPlaceholder(t *testing.
 	}
 }
 
+func TestBuildResponsesRequestBodyPreservesOpaqueProxyReasoningReplay(t *testing.T) {
+	req := model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{
+			{Role: "assistant", ReasoningBlocks: []map[string]any{{
+				"type":             "reasoning",
+				"id":               "rs_proxy",
+				"context":          "ctx_opaque",
+				"phase":            "analysis",
+				"vendor_reasoning": map[string]any{"opaque": "keep"},
+			}}},
+		},
+	}
+
+	body, err := buildResponsesRequestBody(req, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected opaque proxy reasoning item to replay, got %#v", input)
+	}
+	reasoning, _ := input[0].(map[string]any)
+	if reasoning["id"] != "rs_proxy" || reasoning["context"] != "ctx_opaque" || reasoning["phase"] != "analysis" {
+		t.Fatalf("expected opaque proxy reasoning state to survive replay, got %#v", reasoning)
+	}
+	vendor, _ := reasoning["vendor_reasoning"].(map[string]any)
+	if vendor["opaque"] != "keep" {
+		t.Fatalf("expected opaque vendor reasoning state to survive replay, got %#v", reasoning)
+	}
+}
+
 func TestBuildResponsesRequestBodyIgnoresInvisibleSyntheticReasoningResidueForCacheStableToolSequences(t *testing.T) {
 	cleanMessages := []model.CanonicalMessage{
 		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},
@@ -4742,8 +4779,8 @@ func TestBuildResponsesRequestBodyDropsPreviousResponseIDForOpenCodeMasquerade(t
 		t.Fatalf("expected item_reference plus function_call_output, got %#v", payload)
 	}
 	reference, _ := input[0].(map[string]any)
-	if reference["type"] != "item_reference" || reference["id"] != "call_1" {
-		t.Fatalf("expected item_reference call_1 before function output, got %#v", input)
+	if reference["type"] != "item_reference" || reference["id"] != "fc_1" {
+		t.Fatalf("expected item_reference fc_1 before function output, got %#v", input)
 	}
 	output, _ := input[1].(map[string]any)
 	if output["type"] != "function_call_output" || output["call_id"] != "call_1" {
@@ -4754,6 +4791,46 @@ func TestBuildResponsesRequestBodyDropsPreviousResponseIDForOpenCodeMasquerade(t
 	}
 	if got := payload["truncation"]; got != "auto" {
 		t.Fatalf("expected truncation to remain available for opencode masquerade responses upstream, got %#v", payload)
+	}
+}
+
+func TestInjectResponsesItemReferencesDeduplicatesExistingResponseItemReferences(t *testing.T) {
+	input := []map[string]any{
+		{"type": "function_call_output", "call_id": "call_1"},
+		{"type": "item_reference", "id": "fc_1"},
+		{"type": "function_call_output", "call_id": "call_2"},
+	}
+
+	got := injectResponsesItemReferences(input, map[string]string{"call_1": "fc_1", "call_2": "fc_1"})
+	if len(got) != 3 {
+		t.Fatalf("expected one shared item_reference and two outputs, got %#v", got)
+	}
+	if got[0]["type"] != "item_reference" || got[0]["id"] != "fc_1" {
+		t.Fatalf("expected generated reference before first output, got %#v", got)
+	}
+	if got[1]["type"] != "function_call_output" || got[1]["call_id"] != "call_1" {
+		t.Fatalf("expected first function output after reference, got %#v", got)
+	}
+	if got[2]["type"] != "function_call_output" || got[2]["call_id"] != "call_2" {
+		t.Fatalf("expected second function output without duplicate reference, got %#v", got)
+	}
+}
+
+func TestInjectResponsesItemReferencesNormalizesLegacyCallIDReference(t *testing.T) {
+	input := []map[string]any{
+		{"type": "item_reference", "id": "call_1"},
+		{"type": "function_call_output", "call_id": "call_1"},
+	}
+
+	got := injectResponsesItemReferences(input, map[string]string{"call_1": "fc_1"})
+	if len(got) != 2 {
+		t.Fatalf("expected one canonical reference and one function output, got %#v", got)
+	}
+	if got[0]["type"] != "item_reference" || got[0]["id"] != "fc_1" {
+		t.Fatalf("expected legacy call ID reference to normalize to fc_1, got %#v", got[0])
+	}
+	if got[1]["type"] != "function_call_output" || got[1]["call_id"] != "call_1" {
+		t.Fatalf("expected function output to remain unchanged, got %#v", got[1])
 	}
 }
 
