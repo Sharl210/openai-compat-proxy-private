@@ -136,7 +136,7 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 			clone.ToolCalls = append([]model.CanonicalToolCall(nil), msg.ToolCalls...)
 		}
 		if len(msg.ReasoningBlocks) > 0 {
-			clone.ReasoningBlocks = cloneReasoningBlocks(msg.ReasoningBlocks)
+			clone.ReasoningBlocks = cloneReasoningBlocksForHistory(msg.ReasoningBlocks)
 		}
 		cloned = append(cloned, clone)
 	}
@@ -230,7 +230,7 @@ func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes .
 		return model.CanonicalToolCall{}, nil, false
 	}
 	entry.Call.Arguments = arguments
-	return entry.Call, cloneReasoningBlocks(entry.ReasoningBlocks), true
+	return entry.Call, cloneReasoningBlocksForHistory(entry.ReasoningBlocks), true
 }
 
 func (s *responsesHistoryStore) LoadAny(responseID string) []model.CanonicalMessage {
@@ -281,7 +281,7 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 	for _, msg := range messages {
 		if msg.RecoveredToolCall != nil && msg.RecoveredToolCall.ID != "" && msg.RecoveredToolCall.Name != "" {
 			call := *msg.RecoveredToolCall
-			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks)}
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntry(stored)
 		}
 		if len(msg.ToolCalls) == 0 {
@@ -291,7 +291,7 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
-			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocks(msg.ReasoningBlocks)}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks)}
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntry(stored)
 		}
 	}
@@ -328,7 +328,7 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 		if key == "" || entry.SnapshotKey == "" || entry.Call.ID == "" || entry.Call.Name == "" {
 			continue
 		}
-		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocks(entry.ReasoningBlocks), ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize}
+		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocksForHistory(entry.ReasoningBlocks), ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize}
 		var valid bool
 		stored, valid = normalizeResponsesHistoryToolCallEntry(stored)
 		if !valid {
@@ -489,7 +489,7 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 		}
 		toolCalls = append(toolCalls, model.CanonicalToolCall{ID: callID, ResponseItemID: call.ID, Type: "function", Name: call.Name, Arguments: call.Arguments})
 	}
-	reasoningBlocks := cloneReasoningBlocks(result.ReasoningBlocks)
+	reasoningBlocks := reasoningBlocksFromResult(result)
 	if len(parts) == 0 && len(toolCalls) == 0 && len(reasoningBlocks) == 0 {
 		return nil
 	}
@@ -500,6 +500,51 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 		}
 	}
 	return []model.CanonicalMessage{msg}
+}
+
+func reasoningBlocksFromResult(result aggregate.Result) []map[string]any {
+	if len(result.ResponseOutputItems) > 0 {
+		outputReasoning := make([]map[string]any, 0, len(result.ResponseOutputItems))
+		seenOutputReasoning := make(map[string]int)
+		for _, item := range result.ResponseOutputItems {
+			if stringValue(item["type"]) != "reasoning" || model.IsSyntheticResponsesReasoningPlaceholder(item) {
+				continue
+			}
+			if itemID := stringValue(item["id"]); itemID != "" {
+				if index, exists := seenOutputReasoning[itemID]; exists {
+					outputReasoning[index] = item
+					continue
+				}
+				seenOutputReasoning[itemID] = len(outputReasoning)
+			}
+			outputReasoning = append(outputReasoning, item)
+		}
+		if len(outputReasoning) > 0 {
+			return cloneResponsesOutputReasoningBlocks(outputReasoning)
+		}
+	}
+	return cloneReasoningBlocksForHistory(result.ReasoningBlocks)
+}
+
+func cloneResponsesOutputReasoningBlocks(blocks []map[string]any) []map[string]any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block) == 0 || model.IsSyntheticResponsesReasoningPlaceholder(block) {
+			continue
+		}
+		copied := make(map[string]any, len(block))
+		for key, value := range block {
+			copied[key] = value
+		}
+		cloned = append(cloned, copied)
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
 }
 
 func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
@@ -524,6 +569,34 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 		return nil
 	}
 	return cloned
+}
+
+func cloneReasoningBlocksForHistory(blocks []map[string]any) []map[string]any {
+	if len(blocks) == 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if len(block) == 0 {
+			continue
+		}
+		if isSyntheticReasoningBlock(block) && !isRealResponsesReasoningState(block) {
+			continue
+		}
+		copied := make(map[string]any, len(block))
+		for key, value := range block {
+			copied[key] = value
+		}
+		cloned = append(cloned, copied)
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func isRealResponsesReasoningState(block map[string]any) bool {
+	return stringValue(block["type"]) == "reasoning" && stringValue(block["id"]) != "" && model.HasResponsesReasoningState(block)
 }
 
 func filterSyntheticReasoningBlocks(blocks []map[string]any) []map[string]any {

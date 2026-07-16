@@ -51,3 +51,36 @@ func TestResponsesHistoryPersistsCompressedLargeToolCallRecoveryArguments(t *tes
 		t.Fatalf("expected new loader to release compatibility raw arguments, got ok=%t bytes=%d", ok, len(entry.Call.Arguments))
 	}
 }
+
+func TestResponsesHistoryRecoveryIndexPreservesRealReasoningStateWithSyntheticSummary(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+
+	store.Save("openai", "resp-reasoning-call", []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{{
+			"type":              "reasoning",
+			"id":                "rs_real",
+			"encrypted_content": "enc_real",
+			"summary": []map[string]any{{
+				"type": "summary_text",
+				"text": "代理层占位",
+			}},
+		}},
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-reasoning",
+			Type:      "function",
+			Name:      "process",
+			Arguments: `{}`,
+		}},
+	}})
+
+	reloaded := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	_, reasoning, ok := reloaded.LoadToolCall("openai", "call-reasoning")
+	if !ok || len(reasoning) != 1 {
+		t.Fatalf("expected recovery index to preserve real reasoning state, got ok=%t reasoning=%#v", ok, reasoning)
+	}
+	if reasoning[0]["id"] != "rs_real" || reasoning[0]["encrypted_content"] != "enc_real" {
+		t.Fatalf("expected reasoning identity and encrypted state to survive recovery index, got %#v", reasoning[0])
+	}
+}

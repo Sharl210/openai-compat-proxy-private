@@ -318,6 +318,134 @@ func TestResponsesHistoryLoadToolCallByCallIDReturnsClone(t *testing.T) {
 	}
 }
 
+func TestAssistantHistoryMessagesFromResultPreservesReasoningOutputItemState(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		Reasoning: map[string]any{"summary": "thinking"},
+		ResponseOutputItems: []map[string]any{{
+			"id":                "rs_123",
+			"type":              "reasoning",
+			"encrypted_content": "enc_123",
+			"summary": []any{map[string]any{
+				"type": "summary_text",
+				"text": "thinking",
+			}},
+		}},
+	})
+
+	if len(messages) != 1 || len(messages[0].ReasoningBlocks) != 1 {
+		t.Fatalf("expected one preserved reasoning block, got %#v", messages)
+	}
+	block := messages[0].ReasoningBlocks[0]
+	if block["id"] != "rs_123" || block["encrypted_content"] != "enc_123" {
+		t.Fatalf("expected reasoning identity and encrypted state to survive history conversion, got %#v", block)
+	}
+}
+
+func TestAssistantHistoryMessagesFromResultUsesOrderedReasoningOutputItems(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		ReasoningBlocks: []map[string]any{{"id": "rs_fallback", "type": "reasoning", "encrypted_content": "fallback"}},
+		ResponseOutputItems: []map[string]any{
+			{"id": "rs_first", "type": "reasoning", "encrypted_content": "old"},
+			{"id": "rs_second", "type": "reasoning", "encrypted_content": "second"},
+			{"id": "rs_proxy", "type": "reasoning", "summary": []any{}},
+			{"id": "rs_first", "type": "reasoning", "encrypted_content": "latest"},
+		},
+	})
+
+	if len(messages) != 1 || len(messages[0].ReasoningBlocks) != 2 {
+		t.Fatalf("expected two ordered reasoning blocks, got %#v", messages)
+	}
+	blocks := messages[0].ReasoningBlocks
+	if blocks[0]["id"] != "rs_first" || blocks[0]["encrypted_content"] != "latest" {
+		t.Fatalf("expected first reasoning block to keep its position and latest state, got %#v", blocks)
+	}
+	if blocks[1]["id"] != "rs_second" || blocks[1]["encrypted_content"] != "second" {
+		t.Fatalf("expected second reasoning block to preserve order and state, got %#v", blocks)
+	}
+}
+
+func TestAssistantHistoryMessagesFromResultKeepsRealOutputItemWithPlaceholderText(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		ResponseOutputItems: []map[string]any{{
+			"id":                "rs_real",
+			"type":              "reasoning",
+			"encrypted_content": "enc_real",
+			"summary": []any{map[string]any{
+				"type": "summary_text",
+				"text": "代理层占位",
+			}},
+		}},
+	})
+
+	if len(messages) != 1 || len(messages[0].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real output reasoning item to survive placeholder text, got %#v", messages)
+	}
+	block := messages[0].ReasoningBlocks[0]
+	if block["id"] != "rs_real" || block["encrypted_content"] != "enc_real" {
+		t.Fatalf("expected real output reasoning state to survive, got %#v", block)
+	}
+}
+
+func TestResponsesHistoryPersistsRealOutputReasoningWithPlaceholderText(t *testing.T) {
+	base := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := assistantHistoryMessagesFromResult(aggregate.Result{
+		ResponseOutputItems: []map[string]any{{
+			"id":                "rs_real",
+			"type":              "reasoning",
+			"encrypted_content": "enc_real",
+			"summary": []any{map[string]any{
+				"type": "summary_text",
+				"text": "代理层占位",
+			}},
+		}},
+	})
+	store := newResponsesHistoryStore(2, "")
+
+	store.Save("provider", "resp_1", buildResponsesHistorySnapshot(base, assistant))
+	replayed := store.Load("provider", "resp_1")
+
+	if len(replayed) != 2 || len(replayed[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real output reasoning to survive history persistence, got %#v", replayed)
+	}
+	block := replayed[1].ReasoningBlocks[0]
+	if block["id"] != "rs_real" || block["encrypted_content"] != "enc_real" {
+		t.Fatalf("expected persisted real output reasoning state, got %#v", block)
+	}
+}
+
+func TestResponsesHistoryPersistsRealFallbackReasoningWithPlaceholderText(t *testing.T) {
+	base := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+	}}
+	assistant := assistantHistoryMessagesFromResult(aggregate.Result{
+		ReasoningBlocks: []map[string]any{{
+			"id":                "rs_fallback",
+			"type":              "reasoning",
+			"encrypted_content": "enc_fallback",
+			"summary": []any{map[string]any{
+				"type": "summary_text",
+				"text": "代理层占位",
+			}},
+		}},
+	})
+	store := newResponsesHistoryStore(2, "")
+
+	store.Save("provider", "resp_1", buildResponsesHistorySnapshot(base, assistant))
+	replayed := store.Load("provider", "resp_1")
+
+	if len(replayed) != 2 || len(replayed[1].ReasoningBlocks) != 1 {
+		t.Fatalf("expected real fallback reasoning to survive history persistence, got %#v", replayed)
+	}
+	block := replayed[1].ReasoningBlocks[0]
+	if block["id"] != "rs_fallback" || block["encrypted_content"] != "enc_fallback" {
+		t.Fatalf("expected persisted real fallback reasoning state, got %#v", block)
+	}
+}
+
 func TestRecoverResponseItemReferencesForMessagesUsesScopedToolCallIndex(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2}
 

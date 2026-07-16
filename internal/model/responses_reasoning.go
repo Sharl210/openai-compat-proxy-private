@@ -8,7 +8,7 @@ func IsSyntheticResponsesReasoningPlaceholder(item map[string]any) bool {
 	if stringMapValue(item, "type") != "reasoning" || stringMapValue(item, "id") != "rs_proxy" {
 		return false
 	}
-	if hasResponsesReasoningState(item) {
+	if HasResponsesReasoningState(item) {
 		return false
 	}
 	if summary, hasSummary := item["summary"]; hasSummary {
@@ -17,7 +17,9 @@ func IsSyntheticResponsesReasoningPlaceholder(item map[string]any) bool {
 	return isSyntheticResponsesReasoningText(stringMapValue(item, "thinking")) && isSyntheticResponsesReasoningText(stringMapValue(item, "text"))
 }
 
-func hasResponsesReasoningState(item map[string]any) bool {
+// HasResponsesReasoningState reports whether a Responses reasoning item carries
+// state beyond its display-only summary or text fields.
+func HasResponsesReasoningState(item map[string]any) bool {
 	for key := range item {
 		switch key {
 		case "id", "type", "summary", "thinking", "text":
