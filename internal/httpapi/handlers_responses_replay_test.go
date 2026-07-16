@@ -73,6 +73,63 @@ func TestResponsesStreamReplaysAdjacentToolProductionShapeAndEmitsBody(t *testin
 	assertReplayUpstreamInputHasAdjacentToolShape(t, upstreamRequest)
 }
 
+func TestResponsesCompactionLikeInputUsesNormalResponsesPath(t *testing.T) {
+	var gotPath string
+	var upstreamRequest map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_after_compaction","object":"response","status":"completed","output":[{"id":"msg_after_compaction","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"continued"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"continue"},
+			{"type":"compaction","id":"cmp_123","encrypted_content":"enc_payload","summary":[{"type":"summary_text","text":"condensed"}]}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/responses" {
+		t.Fatalf("expected compaction-like regular request to use /responses, got %q", gotPath)
+	}
+	input, _ := upstreamRequest["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected upstream to receive both original input items, got %#v", upstreamRequest["input"])
+	}
+	compaction, _ := input[1].(map[string]any)
+	if got, _ := compaction["type"].(string); got != "compaction" {
+		t.Fatalf("expected compaction item to remain an opaque input item, got %#v", compaction)
+	}
+	if got, _ := compaction["encrypted_content"].(string); got != "enc_payload" {
+		t.Fatalf("expected compaction encrypted_content to survive upstream request construction, got %#v", compaction)
+	}
+}
+
 func assertReplayUpstreamInputHasAdjacentToolShape(t *testing.T, request map[string]any) {
 	t.Helper()
 	input, _ := request["input"].([]any)
