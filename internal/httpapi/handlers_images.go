@@ -19,7 +19,6 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
-	"openai-compat-proxy/internal/upstream"
 )
 
 var imageArtifactRootDirOverride string
@@ -70,7 +69,8 @@ func handleImagesPassthrough(routePath string, upstreamPath string) http.Handler
 			defer cancel()
 		}
 
-		status, respContentType, payload, err := upstream.PassThrough(ctx, prepared.providerCfg, prepared.authorization, http.MethodPost, upstreamPath, contentType, body)
+		client := upstreamClientForProvider(r, prepared.providerID, prepared.providerCfg)
+		status, respContentType, payload, err := client.PassThrough(ctx, prepared.authorization, http.MethodPost, upstreamPath, contentType, body)
 		if err != nil {
 			if isUpstreamTimeout(err, ctx) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
@@ -115,7 +115,8 @@ func handleJSONPassthrough(routePath string, upstreamPath string) http.HandlerFu
 			defer cancel()
 		}
 
-		status, respContentType, payload, err := upstream.PassThrough(ctx, prepared.providerCfg, prepared.authorization, http.MethodPost, upstreamPath, prepared.contentType, body)
+		client := upstreamClientForProvider(r, prepared.providerID, prepared.providerCfg)
+		status, respContentType, payload, err := client.PassThrough(ctx, prepared.authorization, http.MethodPost, upstreamPath, prepared.contentType, body)
 		if err != nil {
 			if isUpstreamTimeout(err, ctx) {
 				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
@@ -134,6 +135,7 @@ func handleJSONPassthrough(routePath string, upstreamPath string) http.HandlerFu
 }
 
 type preparedImagesRequest struct {
+	providerID      string
 	providerCfg     config.Config
 	authorization   string
 	resolvedModel   string
@@ -143,6 +145,7 @@ type preparedImagesRequest struct {
 }
 
 type preparedJSONPassthroughRequest struct {
+	providerID    string
 	providerCfg   config.Config
 	authorization string
 	resolvedModel string
@@ -192,6 +195,7 @@ func prepareImagesRequest(w http.ResponseWriter, r *http.Request) (*preparedImag
 	}
 	requestedFormat, _ := extractRequestedImageResponseFormat(body, contentType)
 	return &preparedImagesRequest{
+		providerID:      providerID,
 		providerCfg:     providerCfg,
 		authorization:   authorization,
 		resolvedModel:   resolvedModel,
@@ -241,6 +245,7 @@ func prepareJSONPassthroughRequest(w http.ResponseWriter, r *http.Request) (*pre
 		return nil, false
 	}
 	return &preparedJSONPassthroughRequest{
+		providerID:    providerID,
 		providerCfg:   providerCfg,
 		authorization: authorization,
 		resolvedModel: resolvedModel,
