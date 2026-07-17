@@ -1724,6 +1724,9 @@ func buildPreservedResponsesToolPayload(tool model.CanonicalTool) map[string]any
 		if len(tool.Raw) > 0 {
 			preserved := cloneMap(tool.Raw)
 			preserved["type"] = tool.Type
+			if parameters, exists := preserved["parameters"]; exists && parameters == nil {
+				preserved["parameters"] = map[string]any{}
+			}
 			return preserved
 		}
 		return map[string]any{

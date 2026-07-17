@@ -28,6 +28,32 @@ func TestBuildResponsesUpstreamToolPayloadPreserveWebSearchOmitsFunctionFields(t
 	}
 }
 
+func TestBuildResponsesUpstreamToolPayloadNormalizesNullFunctionParameters(t *testing.T) {
+	payload := buildResponsesUpstreamToolPayload(model.CanonicalTool{
+		Type:        "function",
+		Name:        "get_current_time",
+		Description: "Get current time",
+		Raw: map[string]any{
+			"type":        "function",
+			"name":        "get_current_time",
+			"description": "Get current time",
+			"strict":      true,
+			"parameters":  nil,
+		},
+	}, config.ResponsesToolCompatModePreserve)
+
+	parameters, ok := payload["parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected function tool parameters to be an object, got %#v", payload["parameters"])
+	}
+	if len(parameters) != 0 {
+		t.Fatalf("expected empty function tool parameter schema, got %#v", parameters)
+	}
+	if strict, _ := payload["strict"].(bool); !strict {
+		t.Fatalf("expected preserved strict field, got %#v", payload)
+	}
+}
+
 func TestBuildResponsesUpstreamToolPayloadPreservesOfficialCodexRawToolFields(t *testing.T) {
 	tools := []model.CanonicalTool{
 		{
