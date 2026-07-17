@@ -214,6 +214,72 @@ func TestResponsesStreamPreservesRealReasoningItemLifecycle(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamCompletedSnapshotKeepsCompleteReasoningItem(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[],\"encrypted_content\":\"enc_initial\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"alpha\"}],\"encrypted_content\":\"enc_final\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"alpha\"}]}]}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	completedIndex := strings.LastIndex(body, "event: response.completed")
+	if completedIndex == -1 {
+		t.Fatalf("expected response.completed event, got %s", body)
+	}
+	completed := body[completedIndex:]
+	if !strings.Contains(completed, `"id":"rs_1"`) || !strings.Contains(completed, `"encrypted_content":"enc_final"`) {
+		t.Fatalf("expected completed snapshot to retain the complete reasoning item, got %s", completed)
+	}
+	if strings.Contains(completed, `"id":"rs_proxy"`) || strings.Count(completed, `"type":"reasoning"`) != 1 {
+		t.Fatalf("expected completed snapshot to contain exactly one real reasoning item, got %s", completed)
+	}
+}
+
+func TestResponsesStreamCompletedSnapshotMergesMultipleReasoningWithoutChangingOtherItems(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"one\"}],\"encrypted_content\":\"enc_1\",\"done_state\":\"keep\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_2\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"two\"}],\"encrypted_content\":\"enc_2\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"one\"}],\"terminal_state\":\"keep\"},{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"terminal_only\":\"keep\"},{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"two\"}]}]}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	completed := body[strings.LastIndex(body, "event: response.completed"):]
+	for _, expected := range []string{`"id":"rs_1"`, `"encrypted_content":"enc_1"`, `"done_state":"keep"`, `"terminal_state":"keep"`, `"terminal_only":"keep"`, `"id":"rs_2"`, `"encrypted_content":"enc_2"`} {
+		if !strings.Contains(completed, expected) {
+			t.Fatalf("expected completed snapshot to preserve %s, got %s", expected, completed)
+		}
+	}
+	if strings.Index(completed, `"id":"rs_1"`) > strings.Index(completed, `"id":"msg_1"`) || strings.Index(completed, `"id":"msg_1"`) > strings.Index(completed, `"id":"rs_2"`) {
+		t.Fatalf("expected reasoning/message order to remain stable, got %s", completed)
+	}
+}
+
 func TestResponsesStreamPreservesRealUpstreamReasoningText(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning.delta\n" +

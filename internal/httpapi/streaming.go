@@ -421,6 +421,58 @@ func (h *responseEventWriterHelper) responseOutputSnapshot() []any {
 	return out
 }
 
+func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any {
+	snapshot := h.responseOutputSnapshot()
+	rawItems, _ := rawOutput.([]any)
+	if len(rawItems) == 0 {
+		return snapshot
+	}
+	if len(snapshot) == 0 {
+		return cloneJSONValueForResponse(rawItems).([]any)
+	}
+
+	completeByID := make(map[string]map[string]any, len(snapshot))
+	realReasoning := make([]map[string]any, 0, len(snapshot))
+	for _, rawItem := range snapshot {
+		item, _ := rawItem.(map[string]any)
+		if stringValue(item["type"]) != "reasoning" {
+			continue
+		}
+		if itemID := responseToolItemStateID(item); itemID != "" {
+			completeByID[itemID] = item
+		}
+		if !model.IsSyntheticResponsesReasoningPlaceholder(item) {
+			realReasoning = append(realReasoning, item)
+		}
+	}
+
+	merged := make([]any, 0, len(rawItems))
+	realReasoningIndex := 0
+	for _, rawItem := range rawItems {
+		item, _ := rawItem.(map[string]any)
+		if stringValue(item["type"]) != "reasoning" {
+			merged = append(merged, cloneJSONValueForResponse(rawItem))
+			continue
+		}
+		itemID := responseToolItemStateID(item)
+		complete := completeByID[itemID]
+		if itemID == "" && realReasoningIndex < len(realReasoning) {
+			complete = realReasoning[realReasoningIndex]
+			realReasoningIndex++
+		}
+		if complete == nil {
+			merged = append(merged, cloneJSONValueForResponse(rawItem))
+			continue
+		}
+		combined := cloneJSONValueForResponse(item).(map[string]any)
+		for key, value := range complete {
+			combined[key] = cloneJSONValueForResponse(value)
+		}
+		merged = append(merged, combined)
+	}
+	return merged
+}
+
 func (h *responseEventWriterHelper) outputItemEventData(item map[string]any, data map[string]any) map[string]any {
 	if h.downstreamType != "responses" {
 		return data
@@ -932,9 +984,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			response["status"] = "completed"
 		}
 		normalizeResponsesCompletedFinishReason(response)
-		if _, ok := response["output"]; !ok {
-			response["output"] = h.responseOutputSnapshot()
-		}
+		response["output"] = h.completedResponseOutput(response["output"])
 		if model := stringValue(response["model"]); model != "" {
 			h.modelName = model
 		} else if h.modelName != "" {
@@ -971,9 +1021,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			response["status"] = "completed"
 		}
 		normalizeResponsesCompletedFinishReason(response)
-		if _, ok := response["output"]; !ok {
-			response["output"] = h.responseOutputSnapshot()
-		}
+		response["output"] = h.completedResponseOutput(response["output"])
 		if model := stringValue(response["model"]); model != "" {
 			h.modelName = model
 		} else if h.modelName != "" {
