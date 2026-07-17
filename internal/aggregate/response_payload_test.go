@@ -51,7 +51,7 @@ func TestResultFromResponsePayloadSeparatesReasoningBoldTitleFromFollowingConten
 	if got := stringValue(result.Reasoning["summary"]); got != "**标题**\n正文" {
 		t.Fatalf("expected reasoning summary title break, got %q", got)
 	}
-	if got := stringValue(result.ResponseOutputItems[0]["summary"].([]any)[0].(map[string]any)["text"]); got != "**标题**\n**后续**" {
+	if got := stringValue(result.ResponseOutputItems[0]["summary"].([]any)[0].(map[string]any)["text"]); got != "**标题**\n\n**后续**" {
 		t.Fatalf("expected reasoning output item title break, got %q", got)
 	}
 }

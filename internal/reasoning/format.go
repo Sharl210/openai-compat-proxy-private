@@ -23,7 +23,12 @@ func FormatText(text string) string {
 				builder.WriteString(text[index:endIndex])
 				lineStart = false
 				if endIndex < len(text) && text[endIndex] != '\n' && text[endIndex] != '\r' {
-					builder.WriteByte('\n')
+					next := text[endIndex:]
+					if strings.HasPrefix(next, "**") && strings.Index(next[2:], "**") >= 1 {
+						builder.WriteString("\n\n")
+					} else {
+						builder.WriteByte('\n')
+					}
 					lineStart = true
 				}
 				index = endIndex

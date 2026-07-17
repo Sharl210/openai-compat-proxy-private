@@ -801,7 +801,7 @@ func TestReasoningSummaryFromItemSeparatesBoldTitleFromFollowingContent(t *testi
 			map[string]any{"type": "summary_text", "text": "**标题****后续**"},
 		},
 	}
-	if got := reasoningSummaryFromItem(item); got != "**标题**\n**后续**" {
+	if got := reasoningSummaryFromItem(item); got != "**标题**\n\n**后续**" {
 		t.Fatalf("expected reasoning summary title break, got %q", got)
 	}
 }
