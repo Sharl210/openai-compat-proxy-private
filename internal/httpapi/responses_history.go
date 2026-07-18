@@ -178,14 +178,14 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 		}
 		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes}
 		s.retainedBytes += recoveryBytes
-		s.indexToolCallsLocked(providerID, key, messages, firstString(scopes...))
+		s.indexToolCallsLocked(providerID, key, messages, firstString(scopes...), nil)
 	} else {
 		storedBytes := snapshotBytes + recoveryBytes
 		snapshot, storedMessages := newResponsesConversationSnapshot(messages, storedBytes)
 		s.entries[key] = snapshot
 		s.retainedBytes += storedBytes
 		s.byResponseID[responseID] = key
-		s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...))
+		s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...), &snapshot)
 	}
 	s.order = append(s.order, key)
 	for len(s.order) > s.maxSize || (s.maxBytes > 0 && s.retainedBytes > s.maxBytes) {
@@ -274,25 +274,24 @@ func (s *responsesHistoryStore) deleteKeyLocked(key string) {
 	}
 }
 
-func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey string, messages []model.CanonicalMessage, scope string) {
+func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey string, messages []model.CanonicalMessage, scope string, snapshot *responsesConversationSnapshot) {
 	if providerID == "" || snapshotKey == "" || len(messages) == 0 {
 		return
 	}
-	for _, msg := range messages {
+	for messageIndex, msg := range messages {
 		if msg.RecoveredToolCall != nil && msg.RecoveredToolCall.ID != "" && msg.RecoveredToolCall.Name != "" {
 			call := *msg.RecoveredToolCall
 			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks)}
-			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntry(stored)
+			data, originalSize, ok := responsesHistoryCompressedFieldData(snapshot, messageIndex, 0, responsesHistoryCompressedRecoveredToolArguments)
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
-		if len(msg.ToolCalls) == 0 {
-			continue
-		}
-		for _, call := range msg.ToolCalls {
+		for toolIndex, call := range msg.ToolCalls {
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
 			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks)}
-			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntry(stored)
+			data, originalSize, ok := responsesHistoryCompressedFieldData(snapshot, messageIndex, toolIndex, responsesHistoryCompressedToolArguments)
+			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
 	}
 }

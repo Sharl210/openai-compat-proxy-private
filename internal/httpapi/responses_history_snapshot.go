@@ -24,11 +24,12 @@ const (
 )
 
 type responsesHistoryCompressedField struct {
-	MessageIndex int
-	ItemIndex    int
-	Kind         responsesHistoryCompressedFieldKind
-	OriginalSize int
-	Data         []byte
+	MessageIndex       int
+	ItemIndex          int
+	Kind               responsesHistoryCompressedFieldKind
+	OriginalSize       int
+	Data               []byte
+	RestoreRawImageURL bool
 }
 
 var responsesHistoryFlateWriterPool sync.Pool
@@ -50,7 +51,12 @@ func compressResponsesHistoryFields(messages []model.CanonicalMessage) []respons
 		for partIndex := range message.Parts {
 			part := &message.Parts[partIndex]
 			fields = compressResponsesHistoryField(fields, &part.Text, responsesHistoryCompressedField{MessageIndex: messageIndex, ItemIndex: partIndex, Kind: responsesHistoryCompressedPartText})
+			imageURL := part.ImageURL
+			fieldCount := len(fields)
 			fields = compressResponsesHistoryField(fields, &part.ImageURL, responsesHistoryCompressedField{MessageIndex: messageIndex, ItemIndex: partIndex, Kind: responsesHistoryCompressedPartImageURL})
+			if len(fields) > fieldCount && compactResponsesHistoryRawImageURL(part, imageURL) {
+				fields[len(fields)-1].RestoreRawImageURL = true
+			}
 		}
 		for toolIndex := range message.ToolCalls {
 			toolCall := &message.ToolCalls[toolIndex]
@@ -75,6 +81,51 @@ func compressResponsesHistoryField(fields []responsesHistoryCompressedField, val
 	field.Data = compressed
 	*value = ""
 	return append(fields, field)
+}
+
+func compactResponsesHistoryRawImageURL(part *model.CanonicalContentPart, imageURL string) bool {
+	if part == nil || imageURL == "" || len(part.Raw) == 0 {
+		return false
+	}
+	rawImage, _ := part.Raw["image_url"].(map[string]any)
+	if len(rawImage) == 0 {
+		return false
+	}
+	rawURL, _ := rawImage["url"].(string)
+	if rawURL != imageURL {
+		return false
+	}
+	compactRaw := make(map[string]any, len(part.Raw))
+	for key, value := range part.Raw {
+		compactRaw[key] = value
+	}
+	compactImage := make(map[string]any, len(rawImage))
+	for key, value := range rawImage {
+		if key != "url" {
+			compactImage[key] = value
+		}
+	}
+	compactRaw["image_url"] = compactImage
+	part.Raw = compactRaw
+	return true
+}
+
+func restoreResponsesHistoryRawImageURL(part *model.CanonicalContentPart, imageURL string) {
+	if part == nil || imageURL == "" {
+		return
+	}
+	rawImage, _ := part.Raw["image_url"].(map[string]any)
+	restoredRaw := make(map[string]any, len(part.Raw)+1)
+	for key, value := range part.Raw {
+		restoredRaw[key] = value
+	}
+	restoredImage := make(map[string]any, len(rawImage)+1)
+	for key, value := range rawImage {
+		restoredImage[key] = value
+	}
+	restoredImage["url"] = imageURL
+	restoredRaw["image_url"] = restoredImage
+	part.Raw = restoredRaw
 }
 
 func compressResponsesHistoryString(value string) ([]byte, bool) {
@@ -113,6 +164,28 @@ func compressResponsesHistoryToolCallEntry(entry responsesHistoryToolCallEntry) 
 	entry.ArgumentsCompressed = compressed
 	entry.Call.Arguments = ""
 	return entry
+}
+
+func compressResponsesHistoryToolCallEntryWithSnapshotField(entry responsesHistoryToolCallEntry, data []byte, originalSize int, ok bool) responsesHistoryToolCallEntry {
+	if !ok || len(data) == 0 || originalSize <= 0 {
+		return compressResponsesHistoryToolCallEntry(entry)
+	}
+	entry.ArgumentsOriginalSize = originalSize
+	entry.ArgumentsCompressed = data
+	entry.Call.Arguments = ""
+	return entry
+}
+
+func responsesHistoryCompressedFieldData(snapshot *responsesConversationSnapshot, messageIndex, itemIndex int, kind responsesHistoryCompressedFieldKind) ([]byte, int, bool) {
+	if snapshot == nil {
+		return nil, 0, false
+	}
+	for _, field := range snapshot.CompressedFields {
+		if field.MessageIndex == messageIndex && field.ItemIndex == itemIndex && field.Kind == kind {
+			return field.Data, field.OriginalSize, true
+		}
+	}
+	return nil, 0, false
 }
 
 func normalizeResponsesHistoryToolCallEntry(entry responsesHistoryToolCallEntry) (responsesHistoryToolCallEntry, bool) {
@@ -196,7 +269,12 @@ func restoreResponsesHistoryField(messages []model.CanonicalMessage, field respo
 		if field.ItemIndex < 0 || field.ItemIndex >= len(message.Parts) {
 			return false
 		}
-		message.Parts[field.ItemIndex].ImageURL = value
+		part := &message.Parts[field.ItemIndex]
+		part.ImageURL = value
+		if field.RestoreRawImageURL {
+			// 加载副本单独恢复，避免把 URL 重新留回缓存快照。
+			restoreResponsesHistoryRawImageURL(part, value)
+		}
 	case responsesHistoryCompressedToolArguments:
 		if field.ItemIndex < 0 || field.ItemIndex >= len(message.ToolCalls) {
 			return false

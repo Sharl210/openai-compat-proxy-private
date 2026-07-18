@@ -110,6 +110,54 @@ func TestResponsesHistoryStore_roundTrips_compressed_canonical_snapshot(t *testi
 	}
 }
 
+func TestResponsesHistoryStoreReleasesDuplicatedRawImageURLAfterCompression(t *testing.T) {
+	// Given
+	imageURL := "data:image/png;base64," + strings.Repeat("A", int(responsesHistoryCompressionMinSnapshotBytes))
+	messages := []model.CanonicalMessage{{
+		Role: "user",
+		Parts: []model.CanonicalContentPart{{
+			Type:     "input_image",
+			ImageURL: imageURL,
+			Raw: map[string]any{
+				"image_url": map[string]any{"url": imageURL, "detail": "high"},
+			},
+		}},
+	}}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	// When
+	store.Save("openai", "resp-image", messages)
+
+	// Then
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-image")]
+	if len(snapshot.CompressedFields) == 0 {
+		t.Fatal("expected large image URL to be compressed in the snapshot")
+	}
+	storedRaw, _ := snapshot.Messages[0].Parts[0].Raw["image_url"].(map[string]any)
+	if _, ok := storedRaw["url"]; ok {
+		t.Fatal("expected compressed snapshot to release the raw image URL duplicate")
+	}
+	if storedRaw["detail"] != "high" {
+		t.Fatalf("expected image metadata to remain in the snapshot, got %#v", storedRaw)
+	}
+	originalRaw, _ := messages[0].Parts[0].Raw["image_url"].(map[string]any)
+	if originalRaw["url"] != imageURL {
+		t.Fatalf("expected caller message to remain unchanged, got %#v", originalRaw)
+	}
+
+	loaded := store.Load("openai", "resp-image")
+	if len(loaded) != 1 || len(loaded[0].Parts) != 1 || loaded[0].Parts[0].ImageURL != imageURL {
+		t.Fatalf("expected image URL to round-trip, got %#v", loaded)
+	}
+	loadedRaw, _ := loaded[0].Parts[0].Raw["image_url"].(map[string]any)
+	if loadedRaw["url"] != imageURL || loadedRaw["detail"] != "high" {
+		t.Fatalf("expected loaded image metadata to be restored, got %#v", loadedRaw)
+	}
+	if _, ok := storedRaw["url"]; ok {
+		t.Fatal("expected loading to leave the stored compressed snapshot compact")
+	}
+}
+
 func TestResponsesHistoryStore_keeps_incompressible_strings_inline(t *testing.T) {
 	// Given
 	randomText := make([]byte, 128<<10)
@@ -210,6 +258,45 @@ func TestResponsesHistoryCompressesLargeToolCallRecoveryArguments(t *testing.T) 
 	loaded, _, ok := store.LoadToolCall("openai", "call-large")
 	if !ok || loaded.Arguments != arguments {
 		t.Fatalf("expected large recovery argument to round-trip, got ok=%t bytes=%d", ok, len(loaded.Arguments))
+	}
+}
+
+func TestResponsesHistorySharesCompressedToolArgumentsWithSnapshot(t *testing.T) {
+	// Given
+	arguments := `{"payload":"` + strings.Repeat("shared compressed tool argument ", 8192) + `"}`
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	// When
+	store.Save("openai", "resp-shared-tool", []model.CanonicalMessage{{
+		Role: "assistant",
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-shared-tool",
+			Type:      "function",
+			Name:      "process",
+			Arguments: arguments,
+		}},
+	}})
+
+	// Then
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-shared-tool")]
+	var snapshotArguments []byte
+	for _, field := range snapshot.CompressedFields {
+		if field.Kind == responsesHistoryCompressedToolArguments && field.MessageIndex == 0 && field.ItemIndex == 0 {
+			snapshotArguments = field.Data
+			break
+		}
+	}
+	entry, ok := store.toolCalls[responsesHistoryToolCallKey("openai", "call-shared-tool")]
+	if !ok || len(snapshotArguments) == 0 || len(entry.ArgumentsCompressed) == 0 {
+		t.Fatalf("expected snapshot and recovery entry to hold compressed arguments, got snapshot=%d recovery=%d present=%t", len(snapshotArguments), len(entry.ArgumentsCompressed), ok)
+	}
+	if &snapshotArguments[0] != &entry.ArgumentsCompressed[0] {
+		t.Fatal("expected snapshot and recovery entry to share one compressed argument allocation")
+	}
+
+	loaded, _, ok := store.LoadToolCall("openai", "call-shared-tool")
+	if !ok || loaded.Arguments != arguments {
+		t.Fatalf("expected shared compressed arguments to remain recoverable, got ok=%t bytes=%d", ok, len(loaded.Arguments))
 	}
 }
 
