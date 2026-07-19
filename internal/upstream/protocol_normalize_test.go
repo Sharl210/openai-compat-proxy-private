@@ -290,6 +290,121 @@ func TestNormalizeChatFrame_LegacyXMLToolCallWithPrefixTextPreservesTextAndConve
 	}
 }
 
+func TestNormalizeChatPayload_LegacyXMLToolCallsInterleaveTextAndPreserveInvalidMarkup(t *testing.T) {
+	legacyPayload := func(content string) map[string]any {
+		return normalizeChatPayload(map[string]any{
+			"id": "chat-legacy",
+			"choices": []any{map[string]any{
+				"message": map[string]any{"role": "assistant", "content": content},
+			}},
+		}, config.UpstreamThinkingTagStyleOff, config.UpstreamXMLToolCallStyleLegacy)
+	}
+	outputItem := func(t *testing.T, output []any, index int) map[string]any {
+		t.Helper()
+		item, _ := output[index].(map[string]any)
+		if item == nil {
+			t.Fatalf("expected output item %d to be a map, got %#v", index, output)
+		}
+		return item
+	}
+	messageText := func(t *testing.T, item map[string]any) string {
+		t.Helper()
+		content, _ := item["content"].([]any)
+		if len(content) != 1 {
+			t.Fatalf("expected one message content part, got %#v", item)
+		}
+		part, _ := content[0].(map[string]any)
+		if stringValue(part["type"]) != "output_text" {
+			t.Fatalf("expected output_text part, got %#v", item)
+		}
+		return stringValue(part["text"])
+	}
+
+	t.Run("interleaves every complete tool call", func(t *testing.T) {
+		payload := legacyPayload("prefix <tool_call><function=lookup><parameter=query>first</parameter></function></tool_call> between <tool_call><function=lookup><parameter=query>second</parameter></function></tool_call> suffix")
+		output, _ := payload["output"].([]any)
+		if len(output) != 5 {
+			t.Fatalf("expected text, tool, text, tool, text output ordering, got %#v", output)
+		}
+		for _, index := range []int{0, 2, 4} {
+			if got := stringValue(outputItem(t, output, index)["type"]); got != "message" {
+				t.Fatalf("expected message at index %d, got %#v", index, output)
+			}
+		}
+		for _, index := range []int{1, 3} {
+			if got := stringValue(outputItem(t, output, index)["type"]); got != "function_call" {
+				t.Fatalf("expected function_call at index %d, got %#v", index, output)
+			}
+		}
+		if got := messageText(t, outputItem(t, output, 0)); got != "prefix " {
+			t.Fatalf("expected prefix preserved, got %q", got)
+		}
+		if got := messageText(t, outputItem(t, output, 2)); got != " between " {
+			t.Fatalf("expected middle text preserved, got %q", got)
+		}
+		if got := messageText(t, outputItem(t, output, 4)); got != " suffix" {
+			t.Fatalf("expected suffix preserved, got %q", got)
+		}
+		firstTool := outputItem(t, output, 1)
+		secondTool := outputItem(t, output, 3)
+		if got := stringValue(firstTool["arguments"]); got != `{"query":"first"}` {
+			t.Fatalf("unexpected first tool arguments %q", got)
+		}
+		if got := stringValue(secondTool["arguments"]); got != `{"query":"second"}` {
+			t.Fatalf("unexpected second tool arguments %q", got)
+		}
+		if firstTool["id"] == secondTool["id"] || firstTool["call_id"] == secondTool["call_id"] {
+			t.Fatalf("expected distinct legacy tool identifiers, got %#v", output)
+		}
+	})
+
+	t.Run("converts standalone complete tool call", func(t *testing.T) {
+		payload := legacyPayload("<tool_call><function=lookup><parameter=query>weather</parameter></function></tool_call>")
+		output, _ := payload["output"].([]any)
+		if len(output) != 1 || stringValue(outputItem(t, output, 0)["type"]) != "function_call" {
+			t.Fatalf("expected standalone XML call to become one function_call, got %#v", output)
+		}
+	})
+
+	t.Run("preserves malformed and incomplete XML as text", func(t *testing.T) {
+		text := "prefix <tool_call><function=lookup><parameter=query>missing close"
+		payload := legacyPayload(text)
+		output, _ := payload["output"].([]any)
+		if len(output) != 1 || stringValue(outputItem(t, output, 0)["type"]) != "message" || messageText(t, outputItem(t, output, 0)) != text {
+			t.Fatalf("expected malformed XML to remain output text, got %#v", output)
+		}
+	})
+
+	t.Run("preserves malformed XML while converting a later valid call", func(t *testing.T) {
+		malformed := "prefix <tool_call>not a function</tool_call> then "
+		payload := legacyPayload(malformed + "<tool_call><function=lookup><parameter=query>weather</parameter></function></tool_call>")
+		output, _ := payload["output"].([]any)
+		if len(output) != 2 || stringValue(outputItem(t, output, 0)["type"]) != "message" || stringValue(outputItem(t, output, 1)["type"]) != "function_call" {
+			t.Fatalf("expected malformed text followed by a native function_call, got %#v", output)
+		}
+		if got := messageText(t, outputItem(t, output, 0)); got != malformed {
+			t.Fatalf("expected malformed XML to stay intact, got %q", got)
+		}
+		if got := stringValue(outputItem(t, output, 1)["arguments"]); got != `{"query":"weather"}` {
+			t.Fatalf("expected later valid tool call arguments, got %q", got)
+		}
+	})
+
+	t.Run("keeps XML text when compatibility is disabled", func(t *testing.T) {
+		text := "<tool_call><function=lookup><parameter=query>weather</parameter></function></tool_call>"
+		payload := normalizeChatPayload(map[string]any{
+			"id": "chat-legacy-off",
+			"choices": []any{map[string]any{
+				"message": map[string]any{"role": "assistant", "content": text},
+			}},
+		}, config.UpstreamThinkingTagStyleOff, config.UpstreamXMLToolCallStyleOff)
+		output, _ := payload["output"].([]any)
+		if len(output) != 1 || stringValue(outputItem(t, output, 0)["type"]) != "message" || messageText(t, outputItem(t, output, 0)) != text {
+			t.Fatalf("expected disabled XML compatibility to retain text, got %#v", output)
+		}
+	})
+}
+
 func TestNormalizeChatFrame_ToolCall(t *testing.T) {
 	// 测试 tool call 的转换 - 模拟上游 chat SSE 事件序列
 	// 1. tool_call 开始（index=0, id="tool_0", name="get_weather"）

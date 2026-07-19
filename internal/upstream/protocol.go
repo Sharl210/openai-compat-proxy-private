@@ -949,23 +949,91 @@ func legacyXMLToolCallEventsForState(item map[string]any, state *chatNormalizati
 	return legacyXMLToolCallEvents(item)
 }
 
-func appendLegacyXMLToolCallsFromContent(content []any, output []any) ([]any, []any) {
-	kept := make([]any, 0, len(content))
+func appendLegacyXMLToolCallsFromContent(content []any, output []any, messageID string) []any {
+	pendingContent := make([]any, 0, len(content))
+	messageCount := 0
+	toolCallCount := 0
+	appendMessage := func() {
+		if len(pendingContent) == 0 {
+			return
+		}
+		id := messageID
+		if messageCount > 0 {
+			id = fmt.Sprintf("%s_%d", messageID, messageCount)
+		}
+		output = append(output, map[string]any{
+			"id":      id,
+			"type":    "message",
+			"status":  "completed",
+			"role":    "assistant",
+			"content": pendingContent,
+		})
+		messageCount++
+		pendingContent = nil
+	}
+	appendOutputText := func(text string) {
+		if text != "" {
+			pendingContent = append(pendingContent, map[string]any{"type": "output_text", "text": text})
+		}
+	}
+
 	for _, raw := range content {
 		item, _ := raw.(map[string]any)
 		if stringValue(item["type"]) != "output_text" {
-			kept = append(kept, raw)
+			pendingContent = append(pendingContent, raw)
 			continue
 		}
-		toolItem := parseLegacyXMLToolCall(stringValue(item["text"]))
-		if toolItem == nil {
-			kept = append(kept, raw)
-			continue
+
+		remaining := stringValue(item["text"])
+		extractedToolCall := false
+		for {
+			prefix, toolItem, suffix, ok := extractNextLegacyXMLToolCallFromText(remaining)
+			if !ok {
+				if extractedToolCall {
+					appendOutputText(remaining)
+				} else {
+					pendingContent = append(pendingContent, raw)
+				}
+				break
+			}
+			extractedToolCall = true
+			appendOutputText(prefix)
+			appendMessage()
+
+			callID := fmt.Sprintf("legacy_xml_tool_%d", toolCallCount)
+			toolItem["id"] = callID
+			toolItem["call_id"] = callID
+			toolItem["status"] = "completed"
+			output = append(output, toolItem)
+			toolCallCount++
+			remaining = suffix
+			if remaining == "" {
+				break
+			}
 		}
-		toolItem["status"] = "completed"
-		output = append(output, toolItem)
 	}
-	return kept, output
+	appendMessage()
+	return output
+}
+
+func extractNextLegacyXMLToolCallFromText(text string) (string, map[string]any, string, bool) {
+	searchOffset := 0
+	for {
+		startOffset := strings.Index(text[searchOffset:], "<tool_call>")
+		if startOffset < 0 {
+			return "", nil, "", false
+		}
+		startOffset += searchOffset
+		endOffset := strings.Index(text[startOffset:], "</tool_call>")
+		if endOffset < 0 {
+			return "", nil, "", false
+		}
+		endOffset += startOffset + len("</tool_call>")
+		if toolItem := parseLegacyXMLToolCall(text[startOffset:endOffset]); toolItem != nil {
+			return text[:startOffset], toolItem, text[endOffset:], true
+		}
+		searchOffset = startOffset + len("<tool_call>")
+	}
 }
 
 func legacyXMLToolCallsFromChatContent(content []any, existingToolCallCount int, enabled bool) []any {
@@ -1210,17 +1278,14 @@ func normalizeChatPayload(payload map[string]any, thinkingTagStyle string, xmlTo
 	if messageID == "" {
 		messageID = "msg_proxy"
 	}
-	messageItem := map[string]any{"id": messageID, "type": "message", "status": "completed", "role": "assistant"}
 	content := normalizeChatMessageContent(message["content"])
-	if len(xmlToolCallStyle) > 0 && xmlToolCallStyle[0] == config.UpstreamXMLToolCallStyleLegacy {
-		content, output = appendLegacyXMLToolCallsFromContent(content, output)
-	}
 	if refusal := stringValue(message["refusal"]); refusal != "" {
 		content = append(content, map[string]any{"type": "refusal", "refusal": refusal})
 	}
-	if len(content) > 0 {
-		messageItem["content"] = content
-		output = append(output, messageItem)
+	if len(xmlToolCallStyle) > 0 && xmlToolCallStyle[0] == config.UpstreamXMLToolCallStyleLegacy {
+		output = appendLegacyXMLToolCallsFromContent(content, output, messageID)
+	} else if len(content) > 0 {
+		output = append(output, map[string]any{"id": messageID, "type": "message", "status": "completed", "role": "assistant", "content": content})
 	}
 	toolCalls, _ := message["tool_calls"].([]any)
 	for i, rawTool := range toolCalls {
@@ -1238,12 +1303,21 @@ func normalizeChatPayload(payload map[string]any, thinkingTagStyle string, xmlTo
 		extractState.implicitThinkingInitialized = true
 		extractState.implicitThinkingActive = true
 	}
-	for _, rawItem := range content {
-		if item, ok := rawItem.(map[string]any); ok && stringValue(item["type"]) == "output_text" {
-			text := stringValue(item["text"])
+	for _, rawOutput := range output {
+		item, _ := rawOutput.(map[string]any)
+		if stringValue(item["type"]) != "message" {
+			continue
+		}
+		messageContent, _ := item["content"].([]any)
+		for _, rawContent := range messageContent {
+			part, _ := rawContent.(map[string]any)
+			if stringValue(part["type"]) != "output_text" {
+				continue
+			}
+			text := stringValue(part["text"])
 			cleanText, extracted := extractContentAndReasoningTagsWithState(text, extractState)
 			reasoningContent += extracted
-			item["text"] = cleanText
+			part["text"] = cleanText
 		}
 	}
 	if extractState.pendingThinkingTag != "" && extractState.pendingThinking != "" {
