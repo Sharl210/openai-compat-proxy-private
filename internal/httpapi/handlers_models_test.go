@@ -556,6 +556,48 @@ func TestModelsUpstreamHTTPErrorMarksFailedStatus(t *testing.T) {
 	}
 }
 
+func TestModelsUpstream429PreservesStatusAndErrorDetails(t *testing.T) {
+	const upstreamBody = `{"error":{"code":"USAGE_LIMIT_EXCEEDED","message":"daily usage limit exceeded","type":"insufficient_quota"}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(upstreamBody))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "openai",
+			Enabled:         true,
+			UpstreamBaseURL: upstream.URL,
+			UpstreamAPIKey:  "test-key",
+			SupportsModels:  true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected upstream status 429, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode models 429 response: %v body=%s", err, rec.Body.String())
+	}
+	errorPayload, _ := payload["error"].(map[string]any)
+	if errorPayload["code"] != "USAGE_LIMIT_EXCEEDED" || errorPayload["message"] != "daily usage limit exceeded" || errorPayload["type"] != "insufficient_quota" {
+		t.Fatalf("expected upstream 429 error details to be preserved, got %#v", errorPayload)
+	}
+}
+
 func TestModelsConfiguredManualSupportWithoutUsableUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

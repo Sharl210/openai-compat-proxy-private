@@ -17,7 +17,9 @@ func TestDefaultOverlaySuffixRouting_resolvesRealtimeBaseBeforeProxyAxes(t *test
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
 	defer beta.Close()
-	server := NewServer(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"realtime-base-high-pro-ultra-noprompt","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -67,7 +69,10 @@ func TestDefaultOverlaySuffixRouting_preservesExactSuffixLikeLiteralOwner(t *tes
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{literalModel})
 	defer beta.Close()
-	server := NewServer(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	cfg.Providers[1].ManualModels = []string{literalModel}
+	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"`+literalModel+`","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -93,38 +98,84 @@ func TestDefaultOverlaySuffixRouting_preservesExactSuffixLikeLiteralOwner(t *tes
 	}
 }
 
-func TestResolveDefaultProviderSelectionFromRealtimeModels_preservesExactAndDerivedIntent(t *testing.T) {
-	// Given
+func TestDefaultOverlayRealtimeDiscovery_prefersExactSuffixLikeRawLiteral(t *testing.T) {
 	literalModel := "realtime-base-high-pro-ultra-noprompt"
 	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{literalModel})
 	defer beta.Close()
-	store := config.NewStaticRuntimeStore(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	req = req.WithContext(withRuntimeSnapshot(req.Context(), store.Active()))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	cfg.Providers[1].ManualModels = []string{literalModel}
+	store := config.NewStaticRuntimeStore(cfg)
+	req := overlayProviderSelectionRequest(store)
 
-	// When
-	exact, exactErr, exactOK := resolveDefaultProviderSelectionFromRealtimeModels(req, store.Active(), literalModel)
-	derived, derivedErr, derivedOK := resolveDefaultProviderSelectionFromRealtimeModels(req, store.Active(), "realtime-base-high-pro-ultra-noprompt-extra")
+	discovery, err, found := resolveDefaultProviderSelectionFromRealtimeModels(req, store.Active(), literalModel)
 
-	// Then
-	if exactErr != nil || !exactOK || exact.ProviderID != "beta" || !exact.ExactLiteral {
-		t.Fatalf("expected beta exact literal, got discovery=%#v ok=%t err=%v", exact, exactOK, exactErr)
+	if err != nil || !found {
+		t.Fatalf("expected exact realtime discovery, found=%t err=%v", found, err)
 	}
-	if derivedErr != nil || derivedOK {
-		t.Fatalf("expected malformed derived tail to be rejected, got discovery=%#v ok=%t err=%v", derived, derivedOK, derivedErr)
+	if discovery.ProviderID != "beta" || discovery.RawModelID != literalModel || !discovery.ExactLiteral || !discovery.SourceProxyModelIntent.IsExactLiteral {
+		t.Fatalf("expected beta exact literal discovery, got %#v", discovery)
 	}
 }
 
-func TestProviderSelectionForModelRequest_usesRealtimeExactBeforeDerivedOwner(t *testing.T) {
+func TestProviderSelectionForModelRequest_consumesRealtimeExactLiteralDiscovery(t *testing.T) {
+	literalModel := "realtime-base-high-pro-ultra-noprompt"
+	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{literalModel})
+	defer beta.Close()
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	cfg.Providers[1].ManualModels = []string{literalModel}
+	store := config.NewStaticRuntimeStore(cfg)
+	req := overlayProviderSelectionRequest(store)
+
+	resolveDefaultOverlayDiscoveryBeforeProviderSelection(req, literalModel)
+	if discovery, found := defaultOverlayDiscoveryFromRequest(req); !found || discovery.ProviderID != "beta" || discovery.RequestedModelID != literalModel {
+		t.Fatalf("expected beta discovery on request context, found=%t discovery=%#v", found, discovery)
+	}
+	_, _, providerID, resolvedModel, found, err := providerSelectionForModelRequest(req, literalModel)
+
+	if err != nil || !found || providerID != "beta" || resolvedModel != literalModel {
+		t.Fatalf("expected beta exact literal selection, provider=%q model=%q found=%t err=%v", providerID, resolvedModel, found, err)
+	}
+}
+
+func TestConfiguredProviderSelectionUsesFirstConfiguredProxyIntent(t *testing.T) {
 	// Given
 	literalModel := "realtime-base-high-pro-ultra-noprompt"
 	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{literalModel})
 	defer beta.Close()
-	store := config.NewStaticRuntimeStore(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	store := config.NewStaticRuntimeStore(cfg)
+	// When
+	exactProvider, exactModel, _, exactOK := configuredDefaultProviderSelection(store.Active(), literalModel, "")
+	derivedProvider, derivedModel, _, derivedOK := configuredDefaultProviderSelection(store.Active(), "realtime-base-high-pro-ultra-noprompt-extra", "")
+
+	// Then
+	if !exactOK || exactProvider != "alpha" || exactModel != "realtime-base-high" {
+		t.Fatalf("expected first configured proxy intent alpha, got provider=%q model=%q ok=%t", exactProvider, exactModel, exactOK)
+	}
+	if derivedOK {
+		t.Fatalf("expected malformed derived tail to avoid configured selection, got provider=%q model=%q", derivedProvider, derivedModel)
+	}
+}
+
+func TestProviderSelectionForModelRequestUsesConfiguredProxyIntentBeforeFallback(t *testing.T) {
+	// Given
+	literalModel := "realtime-base-high-pro-ultra-noprompt"
+	alpha := newOverlaySuffixUpstream(t, []string{"realtime-base"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{literalModel})
+	defer beta.Close()
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	store := config.NewStaticRuntimeStore(cfg)
 	exactRequest := overlayProviderSelectionRequest(store)
 	derivedRequest := overlayProviderSelectionRequest(store)
 
@@ -133,11 +184,11 @@ func TestProviderSelectionForModelRequest_usesRealtimeExactBeforeDerivedOwner(t 
 	_, _, derivedProvider, derivedModel, derivedOK, derivedErr := providerSelectionForModelRequest(derivedRequest, "realtime-base-high-pro-ultra-noprompt-extra")
 
 	// Then
-	if exactErr != nil || !exactOK || exactProvider != "beta" || exactModel != literalModel {
-		t.Fatalf("expected beta exact selection, got provider=%q model=%q ok=%t err=%v", exactProvider, exactModel, exactOK, exactErr)
+	if exactErr != nil || !exactOK || exactProvider != "alpha" || exactModel != "realtime-base-high" {
+		t.Fatalf("expected configured alpha selection, got provider=%q model=%q ok=%t err=%v", exactProvider, exactModel, exactOK, exactErr)
 	}
-	if derivedErr != nil || derivedOK {
-		t.Fatalf("expected malformed derived selection rejection, got provider=%q model=%q ok=%t err=%v", derivedProvider, derivedModel, derivedOK, derivedErr)
+	if derivedErr != nil || !derivedOK || derivedProvider != "beta" || derivedModel != "realtime-base-high-pro-ultra-noprompt-extra" {
+		t.Fatalf("expected deterministic fallback for malformed derived model, got provider=%q model=%q ok=%t err=%v", derivedProvider, derivedModel, derivedOK, derivedErr)
 	}
 }
 
@@ -162,7 +213,7 @@ type overlaySuffixUpstream struct {
 
 func newOverlaySuffixUpstream(t *testing.T, modelIDs []string) *overlaySuffixUpstream {
 	t.Helper()
-	upstream := &overlaySuffixUpstream{requests: make(chan overlaySuffixCapture, 1)}
+	upstream := &overlaySuffixUpstream{requests: make(chan overlaySuffixCapture, 8)}
 	upstream.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/models":

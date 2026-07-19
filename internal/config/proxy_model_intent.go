@@ -115,7 +115,7 @@ func staticModelMapAliasCandidates(entries []ModelMapEntry) []string {
 }
 
 func (p ProviderConfig) proxyModelIntentTargetCandidates() []string {
-	return append([]string(nil), p.VisibleModelIDs()...)
+	return p.RoutingModelCandidates()
 }
 
 func (p ProviderConfig) ParseProxyModelIntent(modelName string, rootNoPrompt bool) (model.ProxyModelIntent, bool) {
@@ -193,8 +193,37 @@ func ProxyModelIntentRoutingModel(intent model.ProxyModelIntent) string {
 }
 
 func (p ProviderConfig) proxyModelIntentCandidates() []string {
-	candidates := append([]string(nil), p.VisibleModelIDs()...)
-	candidates = append(candidates, staticModelMapAliasCandidates(p.ModelMap)...)
+	return p.RoutingModelCandidates()
+}
+
+func (p ProviderConfig) RoutingModelCandidates() []string {
+	candidates := make([]string, 0, len(p.ManualModels)+len(p.ModelMap)*2)
+	seen := make(map[string]struct{}, cap(candidates))
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, exists := seen[candidate]; exists {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	for _, manualModel := range p.ManualModels {
+		manualModel = strings.TrimSpace(manualModel)
+		if baseModel, ok := manualReasonSuffixStaticBase(manualModel); ok {
+			add(baseModel)
+			continue
+		}
+		if manualModel == "" || !isStaticModelPattern(manualModel) {
+			continue
+		}
+		add(manualModel)
+	}
+	for _, alias := range staticModelMapAliasCandidates(p.ModelMap) {
+		add(alias)
+	}
 	return candidates
 }
 

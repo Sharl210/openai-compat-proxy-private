@@ -31,6 +31,7 @@ type defaultOverlayDiscovery struct {
 	ProxyModelIntent       model.ProxyModelIntent
 	HasProxyModelIntent    bool
 	ExactLiteral           bool
+	InvalidProxyTail       bool
 }
 
 type routeContextKey string
@@ -364,154 +365,375 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 	if !ok || snapshot == nil {
 		return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 	}
-	if info, ok := routeInfoFromRequest(r); ok {
-		providerID := info.ProviderID
-		originalModel := canonicalModel
-		resolvedModel := canonicalModel
-		resolvedModelIsInternal := false
-		rootModelMapped := false
-		applyDiscovery := func(discovery defaultOverlayDiscovery) {
-			providerID = discovery.ProviderID
-			resolvedModel = discovery.RawModelID
+	info, ok := routeInfoFromRequest(r)
+	if !ok {
+		return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+	}
+	providerID := info.ProviderID
+	resolvedModel := canonicalModel
+	resolvedModelIsInternal := false
+	selectedProxyIntent := model.ProxyModelIntent{}
+	hasSelectedProxyIntent := false
+	usedDefaultOverlayDiscovery := false
+	usedDefaultProviderFallback := false
+	if !info.Legacy && canonicalModel != "" {
+		if discovery, discovered := defaultOverlayDiscoveryFromRequest(r); discovered && discovery.ProviderID == providerID && discovery.RequestedModelID == canonicalModel {
+			if discovery.InvalidProxyTail {
+				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+			}
+			resolvedModel = strings.TrimSpace(discovery.RawModelID)
+			if resolvedModel == "" {
+				resolvedModel = config.ProxyModelIntentRoutingModel(discovery.SourceProxyModelIntent)
+			}
 			resolvedModelIsInternal = true
 			if discovery.HasProxyModelIntent {
-				intent := discovery.ProxyModelIntent
-				if rootModelMapped {
-					intent.HasModelMapAlias = true
-				}
-				discovery.ProxyModelIntent = intent
-				*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+				selectedProxyIntent = discovery.SourceProxyModelIntent
+				hasSelectedProxyIntent = true
+				*r = *r.Clone(withProxyModelIntent(r.Context(), selectedProxyIntent))
 			}
-			*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), discovery))
-		}
-		if info.Legacy && canonicalModel != "" {
-			if rootIntent, mapped := resolveV1ProxyModelIntentForLegacyRequest(r, canonicalModel); mapped {
-				canonicalModel = rootIntent.CanonicalModel()
-				rootModelMapped = true
-			} else if requestEffort := requestEffortFromRouteContext(r); requestEffort != "" {
-				snapshot, _ = runtimeSnapshotFromRequest(r)
-				canonicalModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, requestEffort)
-			}
-			resolvedModel = canonicalModel
-			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, canonicalModel))
-			snapshot, _ = runtimeSnapshotFromRequest(r)
-			var realtimeDiscovery defaultOverlayDiscovery
-			var realtimeErr error
-			realtimeChecked := false
-			realtimeResolved := false
-			if defaultOverlayModelMayContainProxyIntent(snapshot, canonicalModel) {
-				realtimeChecked = true
-				realtimeDiscovery, realtimeErr, realtimeResolved = resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel)
-			}
-			if realtimeResolved && realtimeDiscovery.ExactLiteral {
-				applyDiscovery(realtimeDiscovery)
-			} else if resolvedID, modelForProvider, intent, ok := snapshot.ResolveDefaultProviderSelectionForProxyModel(canonicalModel); ok {
-				providerID = resolvedID
-				resolvedModel = modelForProvider
-				resolvedModelIsInternal = true
-				if rootModelMapped {
-					intent.HasModelMapAlias = true
-				}
-				*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
-			} else if resolvedID, modelForProvider, ok := snapshot.ResolveDefaultProviderSelectionForRequestEffort(canonicalModel, providerSelectionEffortFromRouteContext(r)); ok {
-				providerID = resolvedID
-				resolvedModel = modelForProvider
-				resolvedModelIsInternal = true
-			} else {
-				if !realtimeChecked {
-					realtimeDiscovery, realtimeErr, realtimeResolved = resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, canonicalModel)
-				}
-				if realtimeResolved {
-					applyDiscovery(realtimeDiscovery)
-				} else if realtimeErr != nil {
-					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, realtimeErr
-				} else if legacyModelsListEnforced(snapshot) && snapshot.Config.EnableDefaultProviderModelTags {
-					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-				} else if snapshot.Config.EnableNoPromptModelSuffix {
-					strippedModel, stripped := stripNoPromptModelSuffix(canonicalModel)
-					if !stripped {
-						if shouldBypassUsageRecorderForRequest(r) {
-							if len(snapshot.DefaultProviderIDs) > 0 {
-								providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
-							}
-						} else if legacyModelsListEnforced(snapshot) {
-							return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-						}
-					} else if resolvedID, modelForProvider, strippedOK := snapshot.ResolveDefaultProviderSelection(strippedModel); strippedOK {
-						if provider, err := snapshot.Config.ProviderByID(resolvedID); err == nil && provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) && !provider.HidesModel(canonicalModel) {
-							providerID = resolvedID
-							resolvedModel = modelForProvider
-							resolvedModelIsInternal = true
-						} else if legacyModelsListEnforced(snapshot) {
-							return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-						}
-					} else if legacyModelsListEnforced(snapshot) {
-						return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-					}
-				} else if shouldBypassUsageRecorderForRequest(r) {
-					if len(snapshot.DefaultProviderIDs) > 0 {
-						providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
-					}
-				} else if legacyModelsListEnforced(snapshot) {
-					return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
-				}
-			}
-		}
-		if provider, err := snapshot.Config.ProviderByID(providerID); err == nil {
-			if info.Legacy && hasNoPromptModelSuffix(originalModel) {
-				discovery, exactRawModel := defaultOverlayDiscoveryFromRequest(r)
-				if (!exactRawModel || discovery.ProviderID != providerID || discovery.RawModelID != originalModel) && (!provider.EffectiveNoPromptModelSuffix(snapshot.Config.EnableNoPromptModelSuffix) || provider.HidesModel(originalModel)) {
-					return config.ProviderConfig{}, config.Config{}, "", originalModel, false, nil
-				}
-			}
-			var explicitDiscovery defaultOverlayDiscovery
-			var explicitRealtimeErr error
-			explicitRealtimeChecked := false
-			explicitRealtimeResolved := false
-			if canonicalModel != "" && !resolvedModelIsInternal && !info.Legacy && explicitProviderModelMayContainProxyIntent(provider, canonicalModel, false) {
-				explicitRealtimeChecked = true
-				explicitDiscovery, explicitRealtimeErr, explicitRealtimeResolved = resolveExplicitProviderSelectionFromRealtimeModels(r, snapshot, providerID, provider, canonicalModel)
-				if explicitRealtimeResolved && explicitDiscovery.ExactLiteral {
-					applyDiscovery(explicitDiscovery)
-				}
-			}
-			if canonicalModel != "" && !resolvedModelIsInternal {
-				if internalModel, ok := provider.InternalModelID(resolvedModel, info.Legacy); ok {
-					if intent, parsed := provider.ParseProxyModelIntentWithReasoningMode(internalModel, snapshot.Config.EnableNoPromptModelSuffix, snapshot.Config.EffectiveEnableReasoningModeSuffix()); parsed {
-						matchedAlias := provider.ProxyModelIntentAllowsAlias(intent)
-						if mappedIntent, mapped := provider.ResolveMappedProxyModelIntent(intent); mapped {
-							intent = mappedIntent
-						}
-						if matchedAlias || provider.AllowsInternalProxyModelIntent(intent, snapshot.Config.EnableNoPromptModelSuffix) {
-							resolvedModel = config.ProxyModelIntentRoutingModel(intent)
-							*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
-						} else {
-							return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
-						}
-					} else if provider.HasProxyModelIntentCandidatePrefix(internalModel) {
-						return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
-					} else if !info.Legacy {
-						if !explicitRealtimeChecked {
-							explicitDiscovery, explicitRealtimeErr, explicitRealtimeResolved = resolveExplicitProviderSelectionFromRealtimeModels(r, snapshot, providerID, provider, canonicalModel)
-						}
-						if explicitRealtimeResolved {
-							applyDiscovery(explicitDiscovery)
-						} else if explicitRealtimeErr != nil {
-							return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, explicitRealtimeErr
-						} else {
-							resolvedModel = internalModel
-						}
-					} else {
-						resolvedModel = internalModel
-					}
-				} else {
-					return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
-				}
-			}
-			return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true, nil
 		}
 	}
-	return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+	if info.Legacy && canonicalModel != "" {
+		if discovery, discovered := defaultOverlayDiscoveryFromRequest(r); discovered && discovery.ProviderID != "" && discovery.RequestedModelID == canonicalModel {
+			if discovery.InvalidProxyTail {
+				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
+			}
+			providerID = discovery.ProviderID
+			resolvedModel = strings.TrimSpace(discovery.RawModelID)
+			if resolvedModel == "" {
+				resolvedModel = config.ProxyModelIntentRoutingModel(discovery.SourceProxyModelIntent)
+			}
+			resolvedModelIsInternal = true
+			if discovery.HasProxyModelIntent {
+				selectedProxyIntent = discovery.SourceProxyModelIntent
+				hasSelectedProxyIntent = true
+			}
+			usedDefaultOverlayDiscovery = true
+			ctx := context.WithValue(r.Context(), legacyRoutingModelKey, resolvedModel)
+			if hasSelectedProxyIntent {
+				ctx = withProxyModelIntent(ctx, selectedProxyIntent)
+			}
+			*r = *r.Clone(ctx)
+		} else if rootIntent, mapped := snapshot.Config.ResolveV1ProxyModelIntent(canonicalModel); mapped {
+			resolvedModel = rootIntent.CanonicalModel()
+			selectedProxyIntent = rootIntent
+			hasSelectedProxyIntent = true
+			resolvedModelIsInternal = true
+			*r = *r.Clone(withProxyModelIntent(r.Context(), rootIntent))
+		} else {
+			resolvedModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, providerSelectionEffortFromRouteContext(r))
+		}
+		if !usedDefaultOverlayDiscovery {
+			*r = *r.Clone(context.WithValue(r.Context(), legacyRoutingModelKey, resolvedModel))
+			if taggedProviderID, taggedModel, tagged, valid := realtimeOverlayRequestedModel(snapshot, resolvedModel); !valid && strings.HasPrefix(strings.TrimSpace(resolvedModel), "[") {
+				return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
+			} else if discovery, discovered := defaultOverlayDiscoveryFromRequest(r); discovered && discovery.ProviderID != "" && discovery.RequestedModelID == resolvedModel {
+				if discovery.InvalidProxyTail {
+					return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
+				}
+				providerID = discovery.ProviderID
+				resolvedModel = strings.TrimSpace(discovery.RawModelID)
+				if resolvedModel == "" {
+					resolvedModel = config.ProxyModelIntentRoutingModel(discovery.SourceProxyModelIntent)
+				}
+				resolvedModelIsInternal = true
+				if discovery.HasProxyModelIntent {
+					selectedProxyIntent = discovery.SourceProxyModelIntent
+					hasSelectedProxyIntent = true
+					*r = *r.Clone(withProxyModelIntent(r.Context(), selectedProxyIntent))
+				}
+			} else if tagged {
+				providerID = taggedProviderID
+				resolvedModel = taggedModel
+			} else if resolvedID, modelForProvider, intent, matched := configuredDefaultProviderSelection(snapshot, resolvedModel, providerSelectionEffortFromRouteContext(r)); matched {
+				providerID = resolvedID
+				resolvedModel = modelForProvider
+				resolvedModelIsInternal = true
+				if strings.TrimSpace(intent.BaseModel) != "" {
+					selectedProxyIntent = intent
+					hasSelectedProxyIntent = true
+					*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+				}
+			} else if len(snapshot.DefaultProviderIDs) > 0 {
+				providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
+				usedDefaultProviderFallback = true
+			}
+		}
+	}
+	provider, err := snapshot.Config.ProviderByID(providerID)
+	if err != nil || !provider.Enabled {
+		return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
+	}
+	if strings.TrimSpace(resolvedModel) == "" {
+		return provider, providerConfigForID(snapshot, providerID), providerID, "", true, nil
+	}
+	internalModel := resolvedModel
+	if !resolvedModelIsInternal {
+		var valid bool
+		internalModel, valid = provider.InternalModelID(resolvedModel, info.Legacy)
+		if !valid {
+			return config.ProviderConfig{}, config.Config{}, "", resolvedModel, false, nil
+		}
+	}
+	intent := selectedProxyIntent
+	parsed := hasSelectedProxyIntent
+	if !parsed {
+		intent, parsed = parseProviderProxyModelIntentForRouting(provider, internalModel, snapshot.Config.EnableNoPromptModelSuffix, snapshot.Config.EffectiveEnableReasoningModeSuffix())
+	}
+	if parsed {
+		if provider.HidesModel(intent.CanonicalModel()) {
+			return config.ProviderConfig{}, config.Config{}, "", internalModel, false, nil
+		}
+		sourceIntent := intent
+		if mappedIntent, mapped := provider.ResolveMappedProxyModelIntent(intent); mapped {
+			intent = mappedIntent
+		}
+		if provider.HidesModel(intent.CanonicalModel()) {
+			return config.ProviderConfig{}, config.Config{}, "", internalModel, false, nil
+		}
+		resolvedModel = config.ProxyModelIntentRoutingModel(sourceIntent)
+		*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+	} else if provider.HasProxyModelIntentCandidatePrefix(internalModel) ||
+		provider.HidesModel(internalModel) ||
+		(usedDefaultProviderFallback && !defaultFallbackAllowsUnconfiguredProxyTail(provider, internalModel, providerSelectionEffortFromRouteContext(r), snapshot.Config.EnableNoPromptModelSuffix)) {
+		return config.ProviderConfig{}, config.Config{}, "", internalModel, false, nil
+	} else {
+		requestEffort := providerSelectionEffortFromRouteContext(r)
+		mappedByProvider := providerModelMapMatches(provider, internalModel, requestEffort, snapshot.Config.EnableNoPromptModelSuffix)
+		if mappedModel, mappedEffort := provider.ResolveModelAndEffortWithRequestEffort(internalModel, requestEffort, provider.EnableReasoningEffortSuffix); mappedModel != internalModel || mappedEffort != "" {
+			if mappedByProvider {
+				resolvedModel = internalModel
+			} else {
+				resolvedModel = mappedModel
+			}
+			if mappedEffort != "" && !mappedByProvider {
+				intent = model.ProxyModelIntent{BaseModel: mappedModel, ReasoningEffort: mappedEffort}
+				*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+			}
+		} else {
+			resolvedModel = internalModel
+		}
+	}
+	return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true, nil
+}
+
+func resolveDefaultOverlayDiscoveryBeforeProviderSelection(r *http.Request, canonicalModel string) {
+	if r == nil || strings.TrimSpace(canonicalModel) == "" {
+		return
+	}
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil {
+		return
+	}
+	info, ok := routeInfoFromRequest(r)
+	if !ok || !info.Legacy {
+		return
+	}
+
+	if _, mapped := snapshot.Config.ResolveV1ProxyModelIntent(canonicalModel); mapped || v1ModelMapMatchesForRouting(snapshot, r, canonicalModel) {
+		return
+	}
+	_, _ = resolveDefaultOverlayDiscoveryForModel(r, snapshot, canonicalModel)
+}
+
+func resolveProviderModelDiscoveryBeforeProviderSelection(r *http.Request, canonicalModel string) {
+	resolveDefaultOverlayDiscoveryBeforeProviderSelection(r, canonicalModel)
+	if r == nil || strings.TrimSpace(canonicalModel) == "" {
+		return
+	}
+	snapshot, ok := runtimeSnapshotFromRequest(r)
+	if !ok || snapshot == nil {
+		return
+	}
+	info, ok := routeInfoFromRequest(r)
+	if !ok || info.Legacy {
+		return
+	}
+	provider, err := snapshot.Config.ProviderByID(info.ProviderID)
+	if err != nil || !provider.Enabled {
+		return
+	}
+	internalModel, ok := provider.InternalModelID(canonicalModel, false)
+	if !ok || providerModelIsHidden(provider, internalModel, providerSelectionEffortFromRouteContext(r)) {
+		return
+	}
+	configured := explicitProviderModelHasConfiguredRoute(provider, internalModel, snapshot.Config.EnableNoPromptModelSuffix, snapshot.Config.EffectiveEnableReasoningModeSuffix(), providerSelectionEffortFromRouteContext(r))
+	if configured && !explicitProviderModelMayContainProxyIntent(provider, canonicalModel, false) {
+		return
+	}
+	discovery, _, resolved := resolveExplicitProviderSelectionFromRealtimeModels(r, snapshot, info.ProviderID, provider, canonicalModel)
+	if resolved && (discovery.ExactLiteral || !configured) {
+		*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), discovery))
+	}
+}
+
+func explicitProviderModelHasConfiguredRoute(provider config.ProviderConfig, internalModel string, rootNoPrompt bool, rootReasoningMode bool, requestEffort string) bool {
+	if providerRoutingModelIsExactLiteral(provider, internalModel) {
+		return true
+	}
+	if intent, parsed := parseProviderProxyModelIntentForRouting(provider, internalModel, rootNoPrompt, rootReasoningMode); parsed {
+		return !provider.HidesModel(intent.CanonicalModel())
+	}
+	return providerModelMapMatches(provider, internalModel, requestEffort, rootNoPrompt)
+}
+
+func resolveDefaultOverlayDiscoveryForModel(r *http.Request, snapshot *config.RuntimeSnapshot, modelName string) (bool, error) {
+	taggedProviderID, externalModel, tagged, valid := realtimeOverlayRequestedModel(snapshot, modelName)
+	if !valid {
+		return false, nil
+	}
+	mayContainProxyIntent := defaultOverlayModelMayContainProxyIntent(snapshot, modelName)
+	if snapshot.Config.EnableDefaultProviderModelTags {
+		if !tagged {
+			return false, nil
+		}
+		if !mayContainProxyIntent {
+			taggedSnapshot := *snapshot
+			taggedSnapshot.DefaultProviderIDs = []string{taggedProviderID}
+			if _, _, _, configured := configuredDefaultProviderSelection(&taggedSnapshot, externalModel, providerSelectionEffortFromRouteContext(r)); configured {
+				return false, nil
+			}
+		}
+	} else if !mayContainProxyIntent {
+		if _, _, _, configured := configuredDefaultProviderSelection(snapshot, modelName, providerSelectionEffortFromRouteContext(r)); configured {
+			return false, nil
+		}
+	}
+	discovery, err, resolved := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, modelName)
+	if err != nil {
+		return false, err
+	}
+	if resolved {
+		*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), discovery))
+	}
+	return resolved, nil
+}
+
+func v1ModelMapMatchesForRouting(snapshot *config.RuntimeSnapshot, r *http.Request, modelName string) bool {
+	if snapshot == nil || len(snapshot.Config.V1ModelMap) == 0 {
+		return false
+	}
+	provider := config.ProviderConfig{ModelMap: snapshot.Config.V1ModelMap}
+	return providerModelMapMatches(provider, modelName, providerSelectionEffortFromRouteContext(r), snapshot.Config.EnableNoPromptModelSuffix)
+}
+
+func configuredDefaultProviderSelection(snapshot *config.RuntimeSnapshot, modelName string, requestEffort string) (string, string, model.ProxyModelIntent, bool) {
+	if snapshot == nil {
+		return "", modelName, model.ProxyModelIntent{}, false
+	}
+	for index := len(snapshot.DefaultProviderIDs) - 1; index >= 0; index-- {
+		providerID := snapshot.DefaultProviderIDs[index]
+		provider, err := snapshot.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		internalModel, ok := provider.InternalModelID(modelName, true)
+		if !ok || provider.HidesModel(internalModel) {
+			continue
+		}
+		if providerRoutingModelIsExactLiteral(provider, internalModel) {
+			return providerID, internalModel, model.ProxyModelIntent{BaseModel: internalModel, IsExactLiteral: true}, true
+		}
+	}
+	for _, providerID := range snapshot.DefaultProviderIDs {
+		provider, err := snapshot.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		internalModel, ok := provider.InternalModelID(modelName, true)
+		if !ok {
+			continue
+		}
+		if provider.HidesModel(internalModel) {
+			continue
+		}
+		if intent, parsed := parseProviderProxyModelIntentForRouting(provider, internalModel, snapshot.Config.EnableNoPromptModelSuffix, snapshot.Config.EffectiveEnableReasoningModeSuffix()); parsed {
+			if provider.HidesModel(intent.CanonicalModel()) {
+				continue
+			}
+			if provider.ProxyModelIntentAllowsAlias(intent) || providerRoutingModelContains(provider, intent.BaseModel) {
+				return providerID, config.ProxyModelIntentRoutingModel(intent), intent, true
+			}
+		}
+		if providerModelMapMatches(provider, internalModel, requestEffort, snapshot.Config.EnableNoPromptModelSuffix) {
+			return providerID, internalModel, model.ProxyModelIntent{}, true
+		}
+	}
+	return "", modelName, model.ProxyModelIntent{}, false
+}
+
+func providerRoutingModelIsExactLiteral(provider config.ProviderConfig, modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return false
+	}
+	for _, candidate := range provider.RoutingModelCandidates() {
+		if candidate == modelName {
+			return true
+		}
+	}
+	return false
+}
+
+func providerRoutingModelContains(provider config.ProviderConfig, modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	for _, candidate := range provider.RoutingModelCandidates() {
+		if candidate == modelName {
+			return true
+		}
+	}
+	return false
+}
+
+func providerModelMapMatches(provider config.ProviderConfig, modelName string, requestEffort string, enableNoPrompt bool) bool {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return false
+	}
+	candidates := []string{modelName}
+	if enableNoPrompt {
+		if strippedModel, stripped := stripNoPromptModelSuffix(modelName); stripped {
+			candidates = append(candidates, strippedModel)
+		}
+	}
+	parsed := parseProxyModelSuffixes(modelName)
+	if requestEffort = strings.TrimSpace(requestEffort); requestEffort != "" && parsed.baseModel != "" {
+		candidates = append(candidates, parsed.baseModel+"-"+requestEffort)
+	}
+	if parsed.baseModel != "" && parsed.baseModel != modelName {
+		candidates = append(candidates, parsed.baseModel)
+	}
+	for index := len(provider.ModelMap) - 1; index >= 0; index-- {
+		for _, candidate := range candidates {
+			if strings.TrimSpace(provider.ModelMap[index].Resolve(candidate)) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func defaultFallbackAllowsUnconfiguredProxyTail(provider config.ProviderConfig, modelName string, requestEffort string, enableNoPrompt bool) bool {
+	if !model.HasProxyModelIntentTail(modelName) {
+		return true
+	}
+	parsed := parseProxyModelSuffixes(modelName)
+	if !parsed.hasNoPrompt || parsed.reasoningEffort != "" || strings.TrimSpace(requestEffort) != "" {
+		return true
+	}
+	for _, effort := range model.ReasoningEfforts() {
+		if providerModelMapMatches(provider, parsed.baseModel+"-"+effort, "", enableNoPrompt) {
+			return false
+		}
+	}
+	return true
+}
+
+func parseProviderProxyModelIntentForRouting(provider config.ProviderConfig, modelName string, rootNoPrompt bool, rootReasoningMode bool) (model.ProxyModelIntent, bool) {
+	if intent, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(modelName, rootNoPrompt, rootReasoningMode, provider.VisibleModelIDs()); parsed && (intent.ReasoningMode != "" || intent.HasNoPrompt || intent.HasUltra) {
+		return intent, true
+	}
+	return provider.ParseProxyModelIntentWithReasoningMode(modelName, rootNoPrompt, rootReasoningMode)
 }
 
 func resolveV1ProxyModelIntentForLegacyRequest(r *http.Request, modelName string) (model.ProxyModelIntent, bool) {
@@ -520,7 +742,39 @@ func resolveV1ProxyModelIntentForLegacyRequest(r *http.Request, modelName string
 	if !ok || snapshot == nil {
 		return model.ProxyModelIntent{}, false
 	}
-	return snapshot.Config.ResolveV1ProxyModelIntentWithTargetCandidates(modelName, snapshot.DefaultVisibleModels)
+	return snapshot.Config.ResolveV1ProxyModelIntentWithTargetCandidates(modelName, defaultOverlayRoutingModelCandidates(snapshot))
+}
+
+func defaultOverlayRoutingModelCandidates(snapshot *config.RuntimeSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	candidates := make([]string, 0)
+	seen := make(map[string]struct{})
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, exists := seen[candidate]; exists {
+			return
+		}
+		seen[candidate] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	for _, providerID := range snapshot.DefaultProviderIDs {
+		provider, err := snapshot.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		for _, candidate := range provider.RoutingModelCandidates() {
+			add(candidate)
+		}
+	}
+	for _, rawModelID := range snapshot.DefaultModelRawIDs {
+		add(rawModelID)
+	}
+	return candidates
 }
 
 func refreshDefaultProviderOverlayCacheFromRequest(r *http.Request) {
@@ -662,16 +916,6 @@ func fetchLatestDefaultOverlay(snapshot *config.RuntimeSnapshot) ([]string, map[
 		}
 	}
 	return visible, owners, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, nil
-}
-
-func legacyModelsListEnforced(snapshot *config.RuntimeSnapshot) bool {
-	if snapshot == nil {
-		return false
-	}
-	if snapshot.Config.EnableDefaultProviderModelTags {
-		return len(snapshot.DefaultVisibleModels) > 0 || len(snapshot.DefaultTaggedVisibleModels) > 0
-	}
-	return len(snapshot.DefaultVisibleModels) > 0
 }
 
 func providerForRequest(r *http.Request) (config.ProviderConfig, bool) {

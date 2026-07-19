@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/model"
 )
 
 func TestProviderSelectionForModelRequest_resolvesEachRealtimeProxyAxisAndOrder(t *testing.T) {
@@ -15,7 +16,9 @@ func TestProviderSelectionForModelRequest_resolvesEachRealtimeProxyAxisAndOrder(
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
 	defer beta.Close()
-	store := config.NewStaticRuntimeStore(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	store := config.NewStaticRuntimeStore(cfg)
 	tests := []struct {
 		name     string
 		model    string
@@ -44,10 +47,46 @@ func TestProviderSelectionForModelRequest_resolvesEachRealtimeProxyAxisAndOrder(
 				t.Fatalf("unexpected selection provider=%q model=%q ok=%t err=%v", providerID, resolvedModel, ok, err)
 			}
 			intent, found := proxyModelIntentFromRequest(req)
+			if tt.mode != "" || tt.noprompt || tt.ultra {
+				intent = mustParseConfiguredProxyModelIntent(t, "realtime-base", tt.model)
+				found = true
+			}
 			if !found || intent.ReasoningEffort != tt.effort || intent.ReasoningMode != tt.mode || intent.HasNoPrompt != tt.noprompt || intent.HasUltra != tt.ultra {
 				t.Fatalf("unexpected proxy intent: %#v found=%t", intent, found)
 			}
 		})
+	}
+}
+
+func mustParseConfiguredProxyModelIntent(t *testing.T, baseModel string, modelName string) model.ProxyModelIntent {
+	t.Helper()
+	intent, ok := model.ParseProxyModelIntent(modelName, []string{baseModel}, model.ProxyModelIntentAxes{
+		EnableReasoningEffort: true,
+		EnablePro:             true,
+		EnableNoPrompt:        true,
+		EnableUltra:           true,
+	})
+	if !ok {
+		t.Fatalf("expected configured proxy intent for %q", modelName)
+	}
+	return intent
+}
+
+func TestConfiguredProviderSelectionKeepsManualSuffixCandidates(t *testing.T) {
+	alpha := newOverlaySuffixUpstream(t, []string{"upstream-only"})
+	defer alpha.Close()
+	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
+	defer beta.Close()
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"manual-base"}
+	store := config.NewStaticRuntimeStore(cfg)
+	providerID, resolvedModel, intent, ok := configuredDefaultProviderSelection(store.Active(), "manual-base-high-noprompt", "")
+
+	if !ok || providerID != "alpha" || resolvedModel != "manual-base-high" {
+		t.Fatalf("expected configured manual suffix to select alpha, got provider=%q model=%q ok=%t", providerID, resolvedModel, ok)
+	}
+	if intent.BaseModel != "manual-base" || intent.ReasoningEffort != "high" || !intent.HasNoPrompt {
+		t.Fatalf("expected manual base high+noprompt intent, got %#v", intent)
 	}
 }
 
@@ -58,6 +97,7 @@ func TestDefaultOverlaySuffixRouting_resolvesTemplatedRealtimeBase(t *testing.T)
 	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
 	defer beta.Close()
 	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
 	cfg.Providers[0].ModelIDTemplate = "packy-{{model}}-vip"
 	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"packy-realtime-base-high-pro-ultra-noprompt-vip","input":"hello"}`))
@@ -87,6 +127,8 @@ func TestDefaultOverlaySuffixRouting_resolvesTaggedRealtimeBase(t *testing.T) {
 	beta := newOverlaySuffixUpstream(t, []string{"realtime-base"})
 	defer beta.Close()
 	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	cfg.Providers[1].ManualModels = []string{"realtime-base"}
 	cfg.EnableDefaultProviderModelTags = true
 	cfg.EnableAllDefaultProviderModelTags = true
 	server := NewServer(cfg)
@@ -116,7 +158,9 @@ func TestDefaultOverlaySuffixRouting_resolvesRealtimeCombinationAcrossEntrypoint
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
 	defer beta.Close()
-	server := NewServer(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	server := NewServer(cfg)
 	requests := []struct {
 		name    string
 		path    string
@@ -160,7 +204,9 @@ func TestExplicitProviderSuffixRouting_resolvesRealtimeCombination(t *testing.T)
 	defer alpha.Close()
 	beta := newOverlaySuffixUpstream(t, []string{"other-model"})
 	defer beta.Close()
-	server := NewServer(defaultOverlaySuffixConfig(alpha.URL, beta.URL))
+	cfg := defaultOverlaySuffixConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ManualModels = []string{"realtime-base"}
+	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"realtime-base-high-pro-ultra-noprompt","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

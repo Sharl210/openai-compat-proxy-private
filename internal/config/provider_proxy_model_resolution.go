@@ -16,10 +16,11 @@ func (p ProviderConfig) ResolveExternalProxyModelIntentWithCandidates(externalMo
 	if !ok {
 		return ProviderProxyModelResolution{}, false
 	}
+	candidates := mergeProxyModelIntentCandidates(additionalCandidates, p.proxyModelIntentCandidates())
 	var sourceIntent model.ProxyModelIntent
 	var parsed bool
-	if len(additionalCandidates) > 0 {
-		sourceIntent, parsed = model.ParseProxyModelIntent(internalModel, additionalCandidates, p.proxyModelIntentAxes(internalModel, rootNoPrompt, rootReasoningMode))
+	if len(candidates) > 0 {
+		sourceIntent, parsed = model.ParseProxyModelIntent(internalModel, candidates, p.proxyModelIntentAxes(internalModel, rootNoPrompt, rootReasoningMode))
 	} else {
 		sourceIntent, parsed = p.ParseProxyModelIntentWithReasoningMode(internalModel, rootNoPrompt, rootReasoningMode)
 	}
@@ -34,7 +35,7 @@ func (p ProviderConfig) ResolveExternalProxyModelIntentWithCandidates(externalMo
 		return ProviderProxyModelResolution{}, false
 	}
 	matchedAlias := p.ProxyModelIntentAllowsAlias(sourceIntent)
-	if !matchedAlias && !proxyModelCandidateContains(additionalCandidates, sourceIntent.BaseModel) && !p.AllowsInternalProxyModelIntent(sourceIntent, rootNoPrompt) {
+	if !matchedAlias && !proxyModelCandidateContains(candidates, sourceIntent.BaseModel) && !p.AllowsInternalProxyModelIntent(sourceIntent, rootNoPrompt) {
 		return ProviderProxyModelResolution{}, false
 	}
 	resolvedIntent := sourceIntent
@@ -48,6 +49,25 @@ func (p ProviderConfig) ResolveExternalProxyModelIntentWithCandidates(externalMo
 		return ProviderProxyModelResolution{}, false
 	}
 	return ProviderProxyModelResolution{SourceIntent: sourceIntent, ResolvedIntent: resolvedIntent}, true
+}
+
+func mergeProxyModelIntentCandidates(primary []string, fallback []string) []string {
+	merged := make([]string, 0, len(primary)+len(fallback))
+	seen := make(map[string]struct{}, len(primary)+len(fallback))
+	for _, candidates := range [][]string{primary, fallback} {
+		for _, candidate := range candidates {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			merged = append(merged, candidate)
+		}
+	}
+	return merged
 }
 
 func proxyModelCandidateContains(candidates []string, modelName string) bool {

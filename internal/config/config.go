@@ -725,6 +725,7 @@ func (c Config) ResolveV1ModelForRequest(model string, requestEffort string) str
 	if trimmedModel == "" {
 		return model
 	}
+	originalModel := trimmedModel
 	if enabledModel, hasNoPrompt := stripEnabledNoPromptModelSuffix(trimmedModel, c.EnableNoPromptModelSuffix); hasNoPrompt {
 		trimmedModel = enabledModel
 	}
@@ -756,7 +757,7 @@ func (c Config) ResolveV1ModelForRequest(model string, requestEffort string) str
 		}
 		return mapped + "-" + effectiveEffort
 	}
-	return trimmedModel
+	return originalModel
 }
 
 func (c *Config) applyStartupOnlyFrom(previous Config) {

@@ -32,7 +32,7 @@ func resolveExplicitProviderSelectionFromRealtimeModels(r *http.Request, snapsho
 	}
 	entries := decodeModelEntries(bodies.visible)
 	visible := rawModelIDSet(entries)
-	rawIDs := visibleRawModelIDs(provider, decodeModelEntries(bodies.raw), visible)
+	rawIDs := routableRawModelIDs(provider, decodeModelEntries(bodies.raw), decodeModelEntries(bodies.visible))
 	if len(rawIDs) == 0 {
 		return defaultOverlayDiscovery{}, nil, false
 	}
@@ -73,6 +73,7 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 	providers := make([]realtimeOverlayProviderModels, 0, len(snapshot.DefaultProviderIDs))
 	exact := defaultOverlayDiscovery{}
 	exactMatches := 0
+	invalidTail := defaultOverlayDiscovery{}
 	var upstreamErr error
 	for _, providerID := range snapshot.DefaultProviderIDs {
 		if targetProviderID != "" && providerID != targetProviderID {
@@ -97,7 +98,7 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 		}
 		entries := decodeModelEntries(bodies.visible)
 		visible := rawModelIDSet(entries)
-		rawIDs := visibleRawModelIDs(provider, decodeModelEntries(bodies.raw), visible)
+		rawIDs := routableRawModelIDs(provider, decodeModelEntries(bodies.raw), decodeModelEntries(bodies.visible))
 		if len(rawIDs) == 0 {
 			continue
 		}
@@ -147,6 +148,15 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 			candidate.rawIDs,
 		)
 		if !resolved {
+			if invalidTail.ProviderID == "" && hasUnresolvedProxyTail(candidate.provider, candidate.config, externalModel, candidate.rawIDs) {
+				invalidTail = defaultOverlayDiscovery{
+					ProviderID:       candidate.providerID,
+					RequestedModelID: modelName,
+					RawModelID:       externalModel,
+					VisibleModelIDs:  candidate.visible,
+					InvalidProxyTail: true,
+				}
+			}
 			continue
 		}
 		derivedMatches++
@@ -164,9 +174,29 @@ func resolveDefaultProviderSelectionFromRealtimeModels(r *http.Request, snapshot
 		return defaultOverlayDiscovery{}, upstreamErr, false
 	}
 	if discovery.ProviderID == "" {
+		if invalidTail.ProviderID != "" {
+			return invalidTail, nil, true
+		}
 		return defaultOverlayDiscovery{}, upstreamErr, false
 	}
 	return discovery, nil, true
+}
+
+func hasUnresolvedProxyTail(provider config.ProviderConfig, providerCfg config.Config, externalModel string, rawModelIDs []string) bool {
+	internalModel, ok := provider.InternalModelID(externalModel, true)
+	if !ok {
+		return false
+	}
+	if _, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(internalModel, providerCfg.EnableNoPromptModelSuffix, providerCfg.EffectiveEnableReasoningModeSuffix(), rawModelIDs); parsed {
+		return false
+	}
+	for _, rawModelID := range rawModelIDs {
+		rawModelID = strings.TrimSpace(rawModelID)
+		if rawModelID != "" && strings.HasPrefix(internalModel, rawModelID+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 func realtimeOverlayRequestedModel(snapshot *config.RuntimeSnapshot, modelName string) (string, string, bool, bool) {
@@ -189,16 +219,31 @@ func realtimeOverlayRequestedModel(snapshot *config.RuntimeSnapshot, modelName s
 	return "", modelName, false, true
 }
 
-func visibleRawModelIDs(provider config.ProviderConfig, rawEntries []map[string]any, visible map[string]struct{}) []string {
-	modelIDs := make([]string, 0, len(rawEntries))
+func routableRawModelIDs(provider config.ProviderConfig, rawEntries []map[string]any, fallbackEntries []map[string]any) []string {
+	modelIDs := make([]string, 0, len(rawEntries)+len(fallbackEntries))
+	seen := make(map[string]struct{}, len(rawEntries)+len(fallbackEntries))
+	add := func(modelID string) {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			return
+		}
+		if _, exists := seen[modelID]; exists {
+			return
+		}
+		seen[modelID] = struct{}{}
+		modelIDs = append(modelIDs, modelID)
+	}
 	for _, entry := range rawEntries {
 		rawModelID, _ := entry["id"].(string)
-		rawModelID = strings.TrimSpace(rawModelID)
-		if rawModelID == "" {
-			continue
-		}
-		if _, allowed := visible[provider.ExternalModelID(rawModelID, true)]; allowed {
-			modelIDs = append(modelIDs, rawModelID)
+		add(rawModelID)
+	}
+	if len(modelIDs) > 0 {
+		return modelIDs
+	}
+	for _, entry := range fallbackEntries {
+		externalModelID, _ := entry["id"].(string)
+		if internalModelID, ok := provider.InternalModelID(externalModelID, true); ok {
+			add(internalModelID)
 		}
 	}
 	return modelIDs

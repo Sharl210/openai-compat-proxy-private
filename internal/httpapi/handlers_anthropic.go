@@ -34,6 +34,11 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		selectionEffort := clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false)
+		if selectionEffort != "" {
+			*r = *r.Clone(context.WithValue(r.Context(), routeProviderSelectionEffortKey, selectionEffort))
+		}
+		resolveDefaultOverlayDiscoveryBeforeProviderSelection(r, canon.Model)
 		provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 		if !ok {
 			if hasNoPromptModelSuffix(canon.Model) {
@@ -42,7 +47,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if writeUpstreamErrorForProtocol(w, selectionErr, clientReasoningProtocolMessages) {
 				return
 			}
-			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model cannot be routed")
 			return
 		}
 		if !provider.SupportsAnthropicMessages {

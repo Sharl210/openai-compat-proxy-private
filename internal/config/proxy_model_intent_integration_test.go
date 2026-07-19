@@ -99,3 +99,24 @@ func TestProviderConfigResolveMappedProxyModelIntent_appliesOnlyOneMap(t *testin
 		t.Fatalf("expected client-private axes to remain attached, got %#v", intent)
 	}
 }
+
+func TestProviderConfigResolveExternalProxyModelIntentKeepsManualCandidatesAlongsideRealtimeModels(t *testing.T) {
+	provider := ProviderConfig{
+		ManualModels:                []string{"manual-base"},
+		EnableReasoningEffortSuffix: true,
+	}
+
+	resolution, ok := provider.ResolveExternalProxyModelIntentWithCandidates(
+		"manual-base-high-noprompt",
+		true,
+		false,
+		[]string{"upstream-only"},
+	)
+
+	if !ok {
+		t.Fatal("expected manual base to remain a proxy-intent candidate when realtime models are also supplied")
+	}
+	if resolution.SourceIntent.BaseModel != "manual-base" || resolution.SourceIntent.ReasoningEffort != "high" || !resolution.SourceIntent.HasNoPrompt {
+		t.Fatalf("expected manual base with high+noprompt axes, got %#v", resolution.SourceIntent)
+	}
+}

@@ -11,7 +11,7 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
-func TestLegacyChatRouteChoosesProviderByExactModelOwner(t *testing.T) {
+func TestLegacyChatRouteChoosesProviderByConfiguredModelMap(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -28,7 +28,7 @@ func TestLegacyChatRouteChoosesProviderByExactModelOwner(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if got := rec.Header().Get("X-Provider-Name"); got != "alpha" {
-		t.Fatalf("expected X-Provider-Name alpha, got %q", got)
+		t.Fatalf("expected configured MODEL_MAP provider alpha, got %q", got)
 	}
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "alpha-chat-upstream" {
 		t.Fatalf("expected %s alpha-chat-upstream, got %q", headerProxyToUpstreamModel, got)
@@ -99,7 +99,7 @@ func TestExplicitProviderChatRouteDoesNotApplyRootV1ModelMap(t *testing.T) {
 	}
 }
 
-func TestLegacyChatRouteRejectsRootV1ModelMapTargetOutsideVisibleModels(t *testing.T) {
+func TestLegacyChatRouteRoutesRootV1ModelMapTargetOutsideVisibleModels(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -107,6 +107,7 @@ func TestLegacyChatRouteRejectsRootV1ModelMapTargetOutsideVisibleModels(t *testi
 
 	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
 	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("alias-missing", "missing-model")}
+	cfg.Providers[1].ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("missing-model", "missing-model-upstream")}
 	server := NewServer(cfg)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias-missing","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -114,14 +115,17 @@ func TestLegacyChatRouteRejectsRootV1ModelMapTargetOutsideVisibleModels(t *testi
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected mapped unknown model to return invalid_model, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root V1_MODEL_MAP target outside visible models to route, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "invalid_model") {
-		t.Fatalf("expected invalid_model error body, got %s", rec.Body.String())
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected provider MODEL_MAP owner beta, got %q", got)
 	}
-	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit for mapped unknown model, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "missing-model-upstream" {
+		t.Fatalf("expected V1_MODEL_MAP target to continue through provider MODEL_MAP, got %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only beta upstream to be hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
 	}
 }
 
@@ -350,7 +354,7 @@ func TestLegacyResponsesRouteAllowsTaggedModelMapHitOutsideVisibleModelsList(t *
 	}
 }
 
-func TestExplicitProviderResponsesRouteRejectsModelOutsideProviderModelsList(t *testing.T) {
+func TestExplicitProviderResponsesRouteAllowsModelOutsideProviderModelsList(t *testing.T) {
 	var modelsHits atomic.Int32
 	var responsesHits atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -390,14 +394,11 @@ func TestExplicitProviderResponsesRouteRejectsModelOutsideProviderModelsList(t *
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected explicit provider model outside models list to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected explicit provider model outside models list to route, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if modelsHits.Load() == 0 {
-		t.Fatalf("expected explicit provider validation to consult provider models list")
-	}
-	if responsesHits.Load() != 0 {
-		t.Fatalf("expected no upstream responses hit when model is outside provider models list, got %d", responsesHits.Load())
+	if responsesHits.Load() != 1 {
+		t.Fatalf("expected one upstream response hit for model outside provider models list, got %d", responsesHits.Load())
 	}
 }
 
@@ -593,133 +594,163 @@ func TestLegacyResponsesRouteAllowsReasoningSuffixForMappedTargetWhenNotExposedI
 	}
 }
 
-func TestLegacyResponsesRealtimeModels429SurfacesUpstreamErrorInsteadOfInvalidModel(t *testing.T) {
-	var modelsHits atomic.Int32
-	var responsesHits atomic.Int32
-	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/models":
-			modelsHits.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":"USAGE_LIMIT_EXCEEDED","message":"daily usage limit exceeded","type":"insufficient_quota"}}`))
-		case "/responses":
-			responsesHits.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer alpha.Close()
-	beta := newResponsesProviderUpstream(t, "beta")
-	defer beta.Close()
+func TestLegacyGenerationRoutesContinueWhenRealtimeModelsDiscoveryFails(t *testing.T) {
+	for _, discovery := range []struct {
+		name   string
+		status int
+	}{
+		{name: "429", status: http.StatusTooManyRequests},
+		{name: "503", status: http.StatusServiceUnavailable},
+	} {
+		t.Run(discovery.name, func(t *testing.T) {
+			var modelsHits atomic.Int32
+			var alphaResponsesHits atomic.Int32
+			alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/models":
+					modelsHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(discovery.status)
+					_, _ = w.Write([]byte(`{"error":{"code":"MODEL_DISCOVERY_FAILED","message":"model discovery unavailable"}}`))
+				case "/responses":
+					alphaResponsesHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[]}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer alpha.Close()
+			beta := newResponsesProviderUpstream(t, "beta")
+			defer beta.Close()
 
-	server := NewServer(config.Config{
-		DefaultProvider:             "alpha,beta",
-		EnableLegacyV1Routes:        true,
-		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
-		Providers: []config.ProviderConfig{
-			{
-				ID:                   "alpha",
-				Enabled:              true,
-				UpstreamBaseURL:      alpha.URL,
-				UpstreamAPIKey:       "alpha-key",
-				UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
-				SupportsResponses:    true,
-				SupportsModels:       true,
-			},
-			{
-				ID:                   "beta",
-				Enabled:              true,
-				UpstreamBaseURL:      beta.URL,
-				UpstreamAPIKey:       "beta-key",
-				UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
-				SupportsResponses:    true,
-				ManualModels:         []string{"beta-model"},
-			},
-		},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"alpha-live","input":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+			server := NewServer(config.Config{
+				DefaultProvider:             "alpha,beta",
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{
+					{
+						ID:                        "alpha",
+						Enabled:                   true,
+						UpstreamBaseURL:           alpha.URL,
+						UpstreamAPIKey:            "alpha-key",
+						UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+						SupportsChat:              true,
+						SupportsResponses:         true,
+						SupportsModels:            true,
+						SupportsAnthropicMessages: true,
+					},
+					{
+						ID:                        "beta",
+						Enabled:                   true,
+						UpstreamBaseURL:           beta.URL,
+						UpstreamAPIKey:            "beta-key",
+						UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+						SupportsChat:              true,
+						SupportsResponses:         true,
+						SupportsAnthropicMessages: true,
+						ManualModels:              []string{"beta-model"},
+					},
+				},
+			})
+			requests := []struct {
+				name    string
+				path    string
+				body    string
+				headers map[string]string
+			}{
+				{name: "responses", path: "/v1/responses", body: `{"model":"alpha-live","input":"hello"}`},
+				{name: "chat", path: "/v1/chat/completions", body: `{"model":"alpha-live","messages":[{"role":"user","content":"hello"}]}`},
+				{name: "messages", path: "/v1/messages", body: `{"model":"alpha-live","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`, headers: map[string]string{"anthropic-version": "2023-06-01"}},
+			}
+			for _, request := range requests {
+				t.Run(request.name, func(t *testing.T) {
+					req := httptest.NewRequest(http.MethodPost, request.path, strings.NewReader(request.body))
+					req.Header.Set("Content-Type", "application/json")
+					for key, value := range request.headers {
+						req.Header.Set(key, value)
+					}
+					rec := httptest.NewRecorder()
 
-	server.ServeHTTP(rec, req)
+					server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected upstream 429 to surface, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "USAGE_LIMIT_EXCEEDED") || !strings.Contains(body, "daily usage limit exceeded") {
-		t.Fatalf("expected upstream quota body to be preserved, got %s", body)
-	}
-	if strings.Contains(body, "requested model is not in models list") || strings.Contains(body, "invalid_model") {
-		t.Fatalf("expected upstream error not model availability error, got %s", body)
-	}
-	if modelsHits.Load() == 0 {
-		t.Fatalf("expected realtime /models lookup to be attempted")
-	}
-	if responsesHits.Load() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream response call after model discovery 429, alpha responses=%d beta hits=%d", responsesHits.Load(), beta.Hits())
+					if rec.Code != http.StatusOK {
+						t.Fatalf("expected generation to continue after model discovery %d, got %d body=%s", discovery.status, rec.Code, rec.Body.String())
+					}
+					if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+						t.Fatalf("expected default fallback provider beta, got %q", got)
+					}
+				})
+			}
+			if got := modelsHits.Load(); got != int32(len(requests)) {
+				t.Fatalf("expected one failed realtime discovery per generation route, got %d", got)
+			}
+			if alphaResponsesHits.Load() != 0 || beta.Hits() != len(requests) {
+				t.Fatalf("expected only default fallback generation calls, alpha=%d beta=%d", alphaResponsesHits.Load(), beta.Hits())
+			}
+		})
 	}
 }
 
-func TestExplicitProviderResponsesModelList429SurfacesUpstreamError(t *testing.T) {
-	var modelsHits atomic.Int32
-	var responsesHits atomic.Int32
-	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/models":
-			modelsHits.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":{"code":"USAGE_LIMIT_EXCEEDED","message":"daily usage limit exceeded","type":"insufficient_quota"}}`))
-		case "/responses":
-			responsesHits.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer alpha.Close()
+func TestExplicitProviderResponsesContinueWhenRealtimeModelsDiscoveryFails(t *testing.T) {
+	for _, discovery := range []struct {
+		name   string
+		status int
+	}{
+		{name: "429", status: http.StatusTooManyRequests},
+		{name: "503", status: http.StatusServiceUnavailable},
+	} {
+		t.Run(discovery.name, func(t *testing.T) {
+			var modelsHits atomic.Int32
+			var responsesHits atomic.Int32
+			alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/models":
+					modelsHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(discovery.status)
+					_, _ = w.Write([]byte(`{"error":{"code":"MODEL_DISCOVERY_FAILED","message":"model discovery unavailable"}}`))
+				case "/responses":
+					responsesHits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[]}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer alpha.Close()
 
-	server := NewServer(config.Config{
-		DefaultProvider:             "alpha",
-		EnableLegacyV1Routes:        true,
-		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
-		Providers: []config.ProviderConfig{{
-			ID:                   "alpha",
-			Enabled:              true,
-			UpstreamBaseURL:      alpha.URL,
-			UpstreamAPIKey:       "alpha-key",
-			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
-			SupportsResponses:    true,
-			SupportsModels:       true,
-		}},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"alpha-live","input":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer alpha-key")
-	rec := httptest.NewRecorder()
+			server := NewServer(config.Config{
+				DefaultProvider:             "alpha",
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{{
+					ID:                   "alpha",
+					Enabled:              true,
+					UpstreamBaseURL:      alpha.URL,
+					UpstreamAPIKey:       "alpha-key",
+					UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+					SupportsResponses:    true,
+					SupportsModels:       true,
+				}},
+			})
+			req := httptest.NewRequest(http.MethodPost, "/alpha/v1/responses", strings.NewReader(`{"model":"alpha-live","input":"hello"}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer alpha-key")
+			rec := httptest.NewRecorder()
 
-	server.ServeHTTP(rec, req)
+			server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected provider model preflight 429 to surface, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "USAGE_LIMIT_EXCEEDED") || !strings.Contains(body, "daily usage limit exceeded") {
-		t.Fatalf("expected upstream quota body to be preserved, got %s", body)
-	}
-	if strings.Contains(body, "requested model is not in models list") || strings.Contains(body, "invalid_model") {
-		t.Fatalf("expected upstream error not model availability error, got %s", body)
-	}
-	if modelsHits.Load() == 0 {
-		t.Fatalf("expected provider /models preflight to be attempted")
-	}
-	if responsesHits.Load() != 0 {
-		t.Fatalf("expected no upstream response call after model preflight 429, got %d", responsesHits.Load())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected explicit provider generation to continue after model discovery %d, got %d body=%s", discovery.status, rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("X-Provider-Name"); got != "alpha" {
+				t.Fatalf("expected explicit provider alpha, got %q", got)
+			}
+			if modelsHits.Load() != 1 || responsesHits.Load() != 1 {
+				t.Fatalf("expected failed discovery then one generation call, models=%d responses=%d", modelsHits.Load(), responsesHits.Load())
+			}
+		})
 	}
 }
 
@@ -749,7 +780,7 @@ func TestLegacyResponsesRouteAllowsUntaggedModelMapHitWhenTagModeEnabled(t *test
 	}
 }
 
-func TestLegacyResponsesRouteRejectsUnknownBareModelWhenTagModeEnabled(t *testing.T) {
+func TestLegacyResponsesRouteRoutesUnlistedBareModelWhenTagModeEnabled(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
 	beta := newResponsesProviderUpstream(t, "beta")
@@ -764,11 +795,66 @@ func TestLegacyResponsesRouteRejectsUnknownBareModelWhenTagModeEnabled(t *testin
 
 	server.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected unknown bare model to be rejected in tag mode, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected unlisted bare model to use default-group fallback in tag mode, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if alpha.Hits() != 0 || beta.Hits() != 0 {
-		t.Fatalf("expected no upstream hit for unknown bare model, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected unlisted bare model to route to default fallback beta, got %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only beta upstream hit for unlisted bare model, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestGenerationRoutingDoesNotRequestModelsForConfiguredOrFallbackRoutes(t *testing.T) {
+	var modelsHits atomic.Int32
+	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			modelsHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"display-only-alpha","object":"model"}]}`))
+		case "/responses":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"resp_alpha","object":"response","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.EnableDefaultProviderModelTags = true
+	cfg.Providers[1].ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("configured-alias", "configured-upstream")}
+	server := NewServer(cfg)
+	defer server.Close()
+
+	for _, test := range []struct {
+		name         string
+		model        string
+		wantProvider string
+	}{
+		{name: "configured model map", model: "configured-alias", wantProvider: "beta"},
+		{name: "unlisted fallback", model: "unlisted-bare-model", wantProvider: "beta"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"`+test.model+`","input":"hello"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("X-Provider-Name"); got != test.wantProvider {
+				t.Fatalf("expected provider %q, got %q", test.wantProvider, got)
+			}
+		})
+	}
+	if got := modelsHits.Load(); got != 0 {
+		t.Fatalf("expected generation routes not to request upstream /models, got %d requests", got)
 	}
 }
 
@@ -923,13 +1009,14 @@ func testLegacyModelRoutingConfig(alphaURL, betaURL string) config.Config {
 				UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
 				SupportsChat:              true,
 				SupportsResponses:         true,
+				SupportsModels:            true,
 				SupportsAnthropicMessages: true,
 				ModelMap: []config.ModelMapEntry{
 					config.NewModelMapEntry("alpha-chat", "alpha-chat-upstream"),
 					config.NewModelMapEntry("alpha-message", "alpha-message-upstream"),
 					config.NewModelMapEntry("#re:owned-(.*)", "alpha-$1-upstream"),
 				},
-				ManualModels: []string{"alpha-chat", "alpha-message"},
+				ManualModels: []string{"alpha-message"},
 			},
 			{
 				ID:                        "beta",
@@ -939,6 +1026,7 @@ func testLegacyModelRoutingConfig(alphaURL, betaURL string) config.Config {
 				UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
 				SupportsChat:              true,
 				SupportsResponses:         true,
+				SupportsModels:            true,
 				SupportsAnthropicMessages: true,
 			},
 		},

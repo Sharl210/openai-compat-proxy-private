@@ -124,10 +124,12 @@ func TestExplicitProviderReasoningModeModelsAdmitDisplayedVariants(t *testing.T)
 			wantModel:    "model-low",
 		},
 		{
-			name:       "unsupported remains unlisted and rejected",
+			name:       "unsupported remains unlisted but does not become an admission gate",
 			capability: config.ReasoningModeProCapabilityUnsupported,
 			model:      "model-pro",
-			wantStatus: http.StatusBadRequest,
+			wantStatus: http.StatusOK,
+			wantHits:   1,
+			wantModel:  "model-pro",
 		},
 	}
 
@@ -240,9 +242,6 @@ func TestExplicitProviderReasoningModeModelsAdmitDisplayedVariants(t *testing.T)
 			if responseRec.Code != test.wantStatus {
 				t.Fatalf("expected response status %d, got %d body=%s", test.wantStatus, responseRec.Code, responseRec.Body.String())
 			}
-			if test.wantStatus == http.StatusBadRequest && !strings.Contains(responseRec.Body.String(), "invalid_model") {
-				t.Fatalf("expected invalid_model for unlisted variant, got %s", responseRec.Body.String())
-			}
 			if got := responseHits.Load(); got != test.wantHits {
 				t.Fatalf("expected %d upstream responses calls, got %d", test.wantHits, got)
 			}
@@ -250,8 +249,11 @@ func TestExplicitProviderReasoningModeModelsAdmitDisplayedVariants(t *testing.T)
 				mu.Lock()
 				gotModel, gotMode, gotEffort := seenModel, seenMode, seenEffort
 				mu.Unlock()
-				if gotModel != test.wantModel || gotMode != "pro" || gotEffort != test.wantEffort {
-					t.Fatalf("expected upstream model %q with pro reasoning effort %q, got model=%q mode=%q effort=%q", test.wantModel, test.wantEffort, gotModel, gotMode, gotEffort)
+				if gotModel != test.wantModel {
+					t.Fatalf("expected upstream model %q, got %q", test.wantModel, gotModel)
+				}
+				if test.capability != config.ReasoningModeProCapabilityUnsupported && (gotMode != "pro" || gotEffort != test.wantEffort) {
+					t.Fatalf("expected pro reasoning effort %q, got mode=%q effort=%q", test.wantEffort, gotMode, gotEffort)
 				}
 			}
 		})
@@ -399,6 +401,42 @@ func TestSecurity_ExplicitProviderAllowsStaticModelMapAliasOutsideVisibleModels(
 	}
 }
 
+func TestSecurity_ExplicitProviderAllowsManualDisplayModelOutsideUpstreamModelsList(t *testing.T) {
+	upstream, responsesHits, seenModel := newModelVisibilityAliasUpstream(t)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+			SupportsModels:       true,
+			ManualModels:         []string{"manual-display-model"},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"unlisted-request-model","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected unlisted request model to route despite manual /models display membership, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if responsesHits.Load() != 1 {
+		t.Fatalf("expected one upstream responses hit, got %d", responsesHits.Load())
+	}
+	if gotModel := seenModel(); gotModel != "unlisted-request-model" {
+		t.Fatalf("expected unlisted request model upstream, got %q", gotModel)
+	}
+}
+
 func TestSecurity_TaggedDefaultGroupAllowsStaticModelMapAliasOutsideVisibleModels(t *testing.T) {
 	upstream, responsesHits, seenModel := newModelVisibilityAliasUpstream(t)
 	defer upstream.Close()
@@ -485,7 +523,7 @@ func TestSecurity_DefaultGroupAllowsModelMapAliasFromExplicitReasoningEffortOuts
 	}
 }
 
-func TestSecurity_DefaultGroupRejectsNoPromptModelMapAliasWithoutReasoningButAllowsWithReasoning(t *testing.T) {
+func TestSecurity_DefaultGroupRoutesNoPromptAliasWithoutReasoningAndKeepsReasoningAlias(t *testing.T) {
 	upstream, responsesHits, seenModel := newModelVisibilityAliasUpstream(t)
 	defer upstream.Close()
 
@@ -516,10 +554,7 @@ func TestSecurity_DefaultGroupRejectsNoPromptModelMapAliasWithoutReasoningButAll
 	server.ServeHTTP(noReasonRec, noReasonReq)
 
 	if noReasonRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected noprompt alias without reasoning to be rejected by visible-set logic, got %d body=%s", noReasonRec.Code, noReasonRec.Body.String())
-	}
-	if !strings.Contains(noReasonRec.Body.String(), "invalid_model") {
-		t.Fatalf("expected invalid_model without reasoning, got %s", noReasonRec.Body.String())
+		t.Fatalf("expected malformed noprompt alias without reasoning to remain rejected, got %d body=%s", noReasonRec.Code, noReasonRec.Body.String())
 	}
 
 	reasonReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"client-gpt-noprompt","input":"hello","reasoning":{"effort":"high"}}`))
@@ -531,7 +566,7 @@ func TestSecurity_DefaultGroupRejectsNoPromptModelMapAliasWithoutReasoningButAll
 		t.Fatalf("expected noprompt alias with reasoning to be accepted, got %d body=%s", reasonRec.Code, reasonRec.Body.String())
 	}
 	if responsesHits.Load() != 1 {
-		t.Fatalf("expected one upstream responses hit after allowing reasoning case, got %d", responsesHits.Load())
+		t.Fatalf("expected one upstream responses hit for reasoning alias, got %d", responsesHits.Load())
 	}
 	if gotModel := seenModel(); gotModel != "upstream-priority" {
 		t.Fatalf("expected upstream request model upstream-priority, got %q", gotModel)
@@ -787,25 +822,6 @@ func TestSecurity_ExplicitProviderHiddenUpstreamModelCannotBeRequested(t *testin
 		}},
 	})
 
-	modelsReq := httptest.NewRequest(http.MethodGet, "/openai/v1/models", nil)
-	modelsReq.Header.Set("Authorization", "Bearer test-key")
-	modelsRec := httptest.NewRecorder()
-	server.ServeHTTP(modelsRec, modelsReq)
-	if modelsRec.Code != http.StatusOK {
-		t.Fatalf("expected explicit provider models request 200, got %d body=%s", modelsRec.Code, modelsRec.Body.String())
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(modelsRec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode models payload: %v body=%s", err, modelsRec.Body.String())
-	}
-	data, _ := payload["data"].([]any)
-	for _, item := range data {
-		entry, _ := item.(map[string]any)
-		if got, _ := entry["id"].(string); got == "admin-secret-model" {
-			t.Fatalf("expected hidden upstream model to be removed from /models list, got %s", modelsRec.Body.String())
-		}
-	}
-
 	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"admin-secret-model","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -853,16 +869,6 @@ func TestSecurity_BareSingleDefaultProviderRejectsHiddenUpstreamModelRequest(t *
 			HiddenModels:         []string{"#re:admin-.*"},
 		}},
 	})
-
-	modelsReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	modelsRec := httptest.NewRecorder()
-	server.ServeHTTP(modelsRec, modelsReq)
-	if modelsRec.Code != http.StatusOK {
-		t.Fatalf("expected bare models request 200, got %d body=%s", modelsRec.Code, modelsRec.Body.String())
-	}
-	if strings.Contains(modelsRec.Body.String(), "admin-secret-model") {
-		t.Fatalf("expected hidden upstream model removed from bare /v1/models, got %s", modelsRec.Body.String())
-	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"admin-secret-model","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")

@@ -174,7 +174,7 @@ func prepareImagesRequest(w http.ResponseWriter, r *http.Request) (*preparedImag
 		if writeUpstreamError(w, selectionErr) {
 			return nil, false
 		}
-		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model cannot be routed")
 		return nil, false
 	}
 	if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
@@ -225,7 +225,7 @@ func prepareJSONPassthroughRequest(w http.ResponseWriter, r *http.Request) (*pre
 		if writeUpstreamError(w, selectionErr) {
 			return nil, false
 		}
-		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model cannot be routed")
 		return nil, false
 	}
 	if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {

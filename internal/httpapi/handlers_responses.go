@@ -407,6 +407,7 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 	if selectionEffort != "" {
 		*r = *r.Clone(context.WithValue(r.Context(), routeProviderSelectionEffortKey, selectionEffort))
 	}
+	resolveProviderModelDiscoveryBeforeProviderSelection(r, canon.Model)
 	provider, providerCfg, providerID, resolvedModel, ok, selectionErr := providerSelectionForModelRequest(r, canon.Model)
 	if !ok {
 		if hasNoPromptModelSuffix(canon.Model) {
@@ -415,7 +416,7 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		if writeUpstreamErrorForProtocol(w, selectionErr, clientReasoningProtocolResponses) {
 			return nil, false
 		}
-		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model is not in models list")
+		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model cannot be routed")
 		return nil, false
 	}
 	if !provider.SupportsResponses {
