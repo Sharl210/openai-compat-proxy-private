@@ -2739,7 +2739,23 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	}))
 	defer upstream.Close()
 
-	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
+	server := NewServer(config.Config{
+		DefaultProvider:             "anthropic",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		V1ModelMap:                  []config.ModelMapEntry{config.NewModelMapEntry("gpt-5", "provider-alias")},
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+			ModelMap:                  []config.ModelMapEntry{config.NewModelMapEntry("provider-alias", "deepseek-v4")},
+		}},
+	})
 
 	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
 	firstReq.Header.Set("Content-Type", "application/json")
@@ -2761,6 +2777,12 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
+	if got := secondRec.Header().Get(headerProxyToUpstreamModel); got != "deepseek-v4" {
+		t.Fatalf("expected restored native thinking to use final mapped model, got %q", got)
+	}
+	if !strings.Contains(secondBody, `"model":"deepseek-v4"`) {
+		t.Fatalf("expected restored native thinking payload to use final mapped model, got %s", secondBody)
+	}
 	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"internal reasoning"`) {
 		t.Fatalf("expected restored anthropic request to keep previous thinking block, got %s", secondBody)
 	}
@@ -2778,15 +2800,10 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	}
 }
 
-func TestResponsesRouteExposesAnthropicThinkingForClientReplay(t *testing.T) {
+func TestResponsesRouteRejectsClientSuppliedAnthropicThinkingReplay(t *testing.T) {
 	requestCount := 0
-	var secondBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-		bodyBytes, _ := io.ReadAll(r.Body)
-		if requestCount == 2 {
-			secondBody = string(bodyBytes)
-		}
 		w.Header().Set("Content-Type", "application/json")
 		if requestCount == 1 {
 			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"internal reasoning","signature":"sig_123"},{"type":"tool_use","id":"call_1","name":"search_web","input":{"query":"weather"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
@@ -2817,35 +2834,222 @@ func TestResponsesRouteExposesAnthropicThinkingForClientReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal output: %v", err)
 	}
-	if !strings.Contains(string(encodedOutput), `"type":"reasoning"`) || !strings.Contains(string(encodedOutput), `"encrypted_content":"sig_123"`) {
-		t.Fatalf("expected output to expose replayable reasoning item, got %s", encodedOutput)
+	if !strings.Contains(string(encodedOutput), `"type":"reasoning"`) || !strings.Contains(string(encodedOutput), `"encrypted_content":"sig_123"`) || strings.Contains(string(encodedOutput), `"signature":`) {
+		t.Fatalf("expected output to expose opaque reasoning without an internal signature field, got %s", encodedOutput)
 	}
 
-	secondInput := []string{`{"role":"user","content":"hello"}`}
-	for _, raw := range output {
-		encoded, err := json.Marshal(raw)
-		if err != nil {
-			t.Fatalf("marshal output item: %v", err)
-		}
-		secondInput = append(secondInput, string(encoded))
-	}
-	secondInput = append(secondInput, `{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}`)
-	secondBodyJSON := `{"model":"gpt-5","input":[` + strings.Join(secondInput, ",") + `]}`
+	secondBodyJSON := `{"model":"gpt-5","input":[{"role":"user","content":"hello"},{"type":"reasoning","thinking":"internal reasoning","encrypted_content":"sig_123","signature":"sig_123"},{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`
 	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(secondBodyJSON))
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondRec := httptest.NewRecorder()
 	server.ServeHTTP(secondRec, secondReq)
-	if secondRec.Code != http.StatusOK {
-		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	if secondRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected client-supplied opaque replay to fail before upstream, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"internal reasoning"`) || !strings.Contains(secondBody, `"signature":"sig_123"`) {
-		t.Fatalf("expected client replay to restore anthropic thinking block, got %s", secondBody)
+	if requestCount != 1 {
+		t.Fatalf("expected client-supplied opaque replay to make no second upstream request, got %d", requestCount)
 	}
-	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) {
-		t.Fatalf("expected client replay to restore function_call as tool_use, got %s", secondBody)
+}
+
+func TestResponsesRouteRejectsRawOpaqueReasoningFieldsBeforeNonResponsesUpstream(t *testing.T) {
+	inputs := []struct {
+		name string
+		item string
+	}{
+		{name: "empty signature", item: `{"type":"reasoning","thinking":"internal reasoning","signature":""}`},
+		{name: "empty encrypted content", item: `{"type":"reasoning","thinking":"internal reasoning","encrypted_content":""}`},
+		{name: "non string encrypted content", item: `{"type":"reasoning","thinking":"internal reasoning","encrypted_content":{"opaque":true}}`},
 	}
-	if !strings.Contains(secondBody, `"type":"tool_result"`) || !strings.Contains(secondBody, `"tool_use_id":"call_1"`) {
-		t.Fatalf("expected client replay to include tool_result, got %s", secondBody)
+	for _, endpointType := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		for _, input := range inputs {
+			t.Run(endpointType+"/"+input.name, func(t *testing.T) {
+				upstreamHits := 0
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					upstreamHits++
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"unexpected"}`))
+				}))
+				defer upstream.Close()
+
+				server := NewServer(config.Config{Providers: []config.ProviderConfig{{
+					ID:                        "target",
+					Enabled:                   true,
+					UpstreamBaseURL:           upstream.URL,
+					UpstreamAPIKey:            "test-key",
+					UpstreamEndpointType:      endpointType,
+					SupportsResponses:         true,
+					SupportsChat:              true,
+					SupportsAnthropicMessages: true,
+				}}})
+
+				request := httptest.NewRequest(http.MethodPost, "/target/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"},`+input.item+`]}`))
+				request.Header.Set("Content-Type", "application/json")
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, request)
+
+				if recorder.Code != http.StatusBadRequest {
+					t.Fatalf("expected raw opaque field to fail before upstream, got %d body=%s", recorder.Code, recorder.Body.String())
+				}
+				if upstreamHits != 0 {
+					t.Fatalf("expected raw opaque field to make no upstream request, got %d", upstreamHits)
+				}
+			})
+		}
+	}
+}
+
+func TestResponsesRouteTransformsPersistedReasoningForMappedChatUpstream(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "chat",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+			ModelMap:             []config.ModelMapEntry{config.NewModelMapEntry("client-alias", "deepseek-v4-flash")},
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/v1/responses", strings.NewReader(`{
+		"model":"client-alias",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_1","phase":"analysis","summary":[{"type":"summary_text","text":"need tool output"}]},
+			{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"weather\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "deepseek-v4-flash" {
+		t.Fatalf("expected provider-mapped final model in observability header, got %q", got)
+	}
+	for _, want := range []string{`"model":"deepseek-v4-flash"`, `"reasoning_content":"need tool output"`, `"id":"call_1"`, `"name":"lookup"`, `"role":"tool"`, `"tool_call_id":"call_1"`} {
+		if !strings.Contains(upstreamBody, want) {
+			t.Fatalf("expected mapped chat payload to preserve %s, got %s", want, upstreamBody)
+		}
+	}
+}
+
+func TestResponsesRouteTransformsPlaintextPersistedHistoryForMappedNonResponsesUpstreams(t *testing.T) {
+	for _, testCase := range []struct {
+		name         string
+		mappingScope string
+		endpointType string
+	}{
+		{name: "root map to chat", mappingScope: "root", endpointType: config.UpstreamEndpointTypeChat},
+		{name: "provider map to chat", mappingScope: "provider", endpointType: config.UpstreamEndpointTypeChat},
+		{name: "root map to anthropic", mappingScope: "root", endpointType: config.UpstreamEndpointTypeAnthropic},
+		{name: "provider map to anthropic", mappingScope: "provider", endpointType: config.UpstreamEndpointTypeAnthropic},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			const clientModel = "client-model"
+			const rootTargetModel = "root-target-model"
+			const providerTargetModel = "provider-target-model"
+			targetModel := rootTargetModel
+			if testCase.mappingScope == "provider" {
+				targetModel = providerTargetModel
+			}
+
+			var upstreamBody string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read upstream body: %v", err)
+				}
+				upstreamBody = string(body)
+				w.Header().Set("Content-Type", "application/json")
+				if testCase.endpointType == config.UpstreamEndpointTypeChat {
+					_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"` + targetModel + `","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+			}))
+			defer upstream.Close()
+
+			provider := config.ProviderConfig{
+				ID:                        "provider",
+				Enabled:                   true,
+				UpstreamBaseURL:           upstream.URL,
+				UpstreamAPIKey:            "test-key",
+				UpstreamEndpointType:      testCase.endpointType,
+				SupportsResponses:         true,
+				SupportsChat:              true,
+				SupportsAnthropicMessages: true,
+			}
+			cfg := config.Config{
+				DefaultProvider:             provider.ID,
+				DefaultProReasoningModeSet:  true,
+				DefaultProReasoningMode:     false,
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers:                   []config.ProviderConfig{provider},
+			}
+			if testCase.mappingScope == "root" {
+				cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry(clientModel, targetModel)}
+			} else {
+				cfg.Providers[0].ModelMap = []config.ModelMapEntry{config.NewModelMapEntry(clientModel, targetModel)}
+			}
+			server := NewServer(cfg)
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+				"model":"`+clientModel+`",
+				"input":[
+					{"role":"user","content":"find the answer"},
+					{"type":"reasoning","id":"reasoning_1","thinking":"need the tool result"},
+					{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"weather\"}"},
+					{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}
+				]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get(headerProxyToUpstreamModel); got != targetModel {
+				t.Fatalf("expected final mapped model %q, got %q", targetModel, got)
+			}
+			if !strings.Contains(upstreamBody, `"model":"`+targetModel+`"`) {
+				t.Fatalf("expected upstream payload model %q, got %s", targetModel, upstreamBody)
+			}
+			if testCase.endpointType == config.UpstreamEndpointTypeChat {
+				for _, want := range []string{`"reasoning_content":"need the tool result"`, `"id":"call_1"`, `"name":"lookup"`, `"role":"tool"`, `"tool_call_id":"call_1"`} {
+					if !strings.Contains(upstreamBody, want) {
+						t.Fatalf("expected chat history payload to preserve %s, got %s", want, upstreamBody)
+					}
+				}
+				return
+			}
+			for _, want := range []string{`"type":"thinking"`, `"thinking":"need the tool result"`, `"type":"tool_use"`, `"id":"call_1"`, `"type":"tool_result"`, `"tool_use_id":"call_1"`} {
+				if !strings.Contains(upstreamBody, want) {
+					t.Fatalf("expected anthropic history payload to preserve %s, got %s", want, upstreamBody)
+				}
+			}
+			if strings.Contains(upstreamBody, `"signature":`) {
+				t.Fatalf("expected plaintext thinking replay not to invent a signature, got %s", upstreamBody)
+			}
+		})
 	}
 }
 

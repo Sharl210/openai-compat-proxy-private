@@ -234,6 +234,12 @@ func TestBuildResponsePrependsReasoningBeforePreservedFunctionCall(t *testing.T)
 	if got, _ := output[0]["type"].(string); got != "reasoning" {
 		t.Fatalf("expected reasoning before function_call for client replay, got %#v", output)
 	}
+	if got, _ := output[0]["encrypted_content"].(string); got != "sig_123" {
+		t.Fatalf("expected Anthropic signature to be exposed as opaque encrypted content, got %#v", output[0])
+	}
+	if _, ok := output[0]["signature"]; ok {
+		t.Fatalf("expected internal Anthropic signature field omitted from Responses output, got %#v", output[0])
+	}
 	if got, _ := output[1]["type"].(string); got != "function_call" {
 		t.Fatalf("expected preserved function_call after reasoning, got %#v", output)
 	}
