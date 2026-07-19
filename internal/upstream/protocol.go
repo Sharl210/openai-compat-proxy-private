@@ -2135,9 +2135,9 @@ func normalizeAnthropicReasoningBlock(block map[string]any) map[string]any {
 	if stringValue(cloned["type"]) != "reasoning" {
 		return cloned
 	}
-	signature := stringValue(cloned["encrypted_content"])
+	signature := stringValue(cloned["signature"])
 	if signature == "" {
-		return nil
+		signature = stringValue(cloned["encrypted_content"])
 	}
 	text := reasoningTextFromResponsesBlock(cloned)
 	if text == "" {
@@ -2145,7 +2145,9 @@ func normalizeAnthropicReasoningBlock(block map[string]any) map[string]any {
 	}
 	normalized := map[string]any{"type": "thinking"}
 	normalized["thinking"] = text
-	normalized["signature"] = signature
+	if signature != "" {
+		normalized["signature"] = signature
+	}
 	return normalized
 }
 

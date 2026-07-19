@@ -2402,7 +2402,7 @@ func TestBuildAnthropicMessagesSkipsResponsesReasoningBlocksWithoutThinkingText(
 	}
 }
 
-func TestBuildAnthropicMessagesSkipsResponsesReasoningBlocksWithoutEncryptedContent(t *testing.T) {
+func TestBuildAnthropicMessagesTransformsPlaintextResponsesReasoningBlocksWithoutEncryptedContent(t *testing.T) {
 	messages := buildAnthropicMessages(model.CanonicalRequest{Messages: []model.CanonicalMessage{{
 		Role: "assistant",
 		ReasoningBlocks: []map[string]any{{
@@ -2418,13 +2418,20 @@ func TestBuildAnthropicMessagesSkipsResponsesReasoningBlocksWithoutEncryptedCont
 	}
 	assistantMsg, _ := messages[0].(map[string]any)
 	content, _ := assistantMsg["content"].([]any)
-	if len(content) != 1 {
-		t.Fatalf("expected unsigned responses reasoning block to be skipped, got %#v", assistantMsg)
+	if len(content) != 2 {
+		t.Fatalf("expected plaintext responses reasoning block plus assistant text, got %#v", assistantMsg)
 	}
-	text, _ := content[0].(map[string]any)
-	if got, _ := text["type"].(string); got != "text" {
-		t.Fatalf("expected only assistant text block, got %#v", content)
+	thinking, _ := content[0].(map[string]any)
+	if got, _ := thinking["type"].(string); got != "thinking" {
+		t.Fatalf("expected plaintext reasoning transformed to thinking, got %#v", thinking)
 	}
+	if got, _ := thinking["thinking"].(string); got != "上游不可回放的推理摘要" {
+		t.Fatalf("expected plaintext reasoning preserved, got %#v", thinking)
+	}
+	if _, exists := thinking["signature"]; exists {
+		t.Fatalf("expected no synthetic signature for plaintext reasoning, got %#v", thinking)
+	}
+	text, _ := content[1].(map[string]any)
 	if got, _ := text["text"].(string); got != "final answer" {
 		t.Fatalf("expected assistant text preserved, got %#v", text)
 	}
