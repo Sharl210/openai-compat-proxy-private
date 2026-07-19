@@ -477,9 +477,12 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		writeModelAllowanceError(w, err)
 		return nil, false
 	}
-	client := upstreamClientForProvider(r, providerID, providerCfg)
 	clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 	clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolResponses, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
+	intent, _ := proxyModelIntentFromRequest(r)
+	normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
+	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
+	client := upstreamClientForProvider(r, providerID, providerCfg)
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 		canon.IncludeUsage = true
 	}
@@ -502,9 +505,6 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 	}
 	applyProviderSystemPrompt(&canon, provider)
-	intent, _ := proxyModelIntentFromRequest(r)
-	normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
-	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
 		canon.Messages = recoverToolCallsForMessages(history, canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
 	}

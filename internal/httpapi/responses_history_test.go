@@ -446,6 +446,37 @@ func TestResponsesHistoryPersistsRealFallbackReasoningWithPlaceholderText(t *tes
 	}
 }
 
+func TestAssistantHistoryMessagesFromResultPreservesChatReasoningContent(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		Reasoning: map[string]any{"reasoning_content": "need the tool result before answering"},
+		ToolCalls: []aggregate.ToolCall{{CallID: "call_1", Name: "lookup", Arguments: `{"query":"weather"}`}},
+	})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant history message, got %#v", messages)
+	}
+	if messages[0].ReasoningContent != "need the tool result before answering" {
+		t.Fatalf("expected chat reasoning_content to persist, got %#v", messages[0])
+	}
+	if len(messages[0].ToolCalls) != 1 || messages[0].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected tool call to remain paired with reasoning, got %#v", messages[0])
+	}
+}
+
+func TestAssistantHistoryMessagesFromResultPrefersRealReasoningOverSyntheticSummary(t *testing.T) {
+	messages := assistantHistoryMessagesFromResult(aggregate.Result{
+		Reasoning: map[string]any{
+			"summary":           "代理层占位，以兼容不同上游情况",
+			"reasoning_content": "need the tool result before answering",
+		},
+		ToolCalls: []aggregate.ToolCall{{CallID: "call_1", Name: "lookup", Arguments: `{}`}},
+	})
+
+	if len(messages) != 1 || messages[0].ReasoningContent != "need the tool result before answering" {
+		t.Fatalf("expected real reasoning content to win over synthetic summary, got %#v", messages)
+	}
+}
+
 func TestRecoverResponseItemReferencesForMessagesUsesScopedToolCallIndex(t *testing.T) {
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2}
 

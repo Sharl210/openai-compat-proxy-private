@@ -493,12 +493,19 @@ func assistantHistoryMessagesFromResult(result aggregate.Result) []model.Canonic
 		return nil
 	}
 	msg := model.CanonicalMessage{Role: "assistant", Parts: parts, ToolCalls: toolCalls, ReasoningBlocks: reasoningBlocks}
-	if summary, _ := result.Reasoning["summary"].(string); summary != "" {
-		if !isSyntheticReasoningSummary(summary) {
-			msg.ReasoningContent = summary
-		}
+	if reasoningContent := reasoningContentFromResult(result); reasoningContent != "" && !isSyntheticReasoningSummary(reasoningContent) {
+		msg.ReasoningContent = reasoningContent
 	}
 	return []model.CanonicalMessage{msg}
+}
+
+func reasoningContentFromResult(result aggregate.Result) string {
+	for _, key := range []string{"reasoning_content", "thinking", "summary", "content", "delta", "text"} {
+		if value := stringValue(result.Reasoning[key]); value != "" && !isSyntheticReasoningSummary(value) {
+			return value
+		}
+	}
+	return ""
 }
 
 func reasoningBlocksFromResult(result aggregate.Result) []map[string]any {
