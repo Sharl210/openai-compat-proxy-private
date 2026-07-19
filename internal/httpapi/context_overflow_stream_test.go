@@ -176,6 +176,65 @@ func TestStreamingContextOverflow_staysTerminalSSEAfterDurableOutput(t *testing.
 	}
 }
 
+func TestStreamingContextOverflow_staysTerminalSSEAfterPartialReasoning(t *testing.T) {
+	for _, tc := range contextOverflowRouteCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := testutil.NewStreamingUpstream(t, []string{
+				"event: response.reasoning.delta\n" +
+					"data: {\"summary\":\"partial reasoning\"}\n\n",
+				upstreamContextOverflowEvent,
+			})
+			defer upstream.Close()
+
+			server := NewServer(testContextOverflowStreamConfig(upstream.URL))
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.streamBody))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.setHeaders != nil {
+				tc.setHeaders(req)
+			}
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected partial reasoning to preserve SSE status, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			partialReasoningIndex := strings.Index(body, "partial reasoning")
+			terminalIndex := strings.Index(body, tc.terminalMarker)
+			if partialReasoningIndex == -1 || terminalIndex == -1 || partialReasoningIndex >= terminalIndex {
+				t.Fatalf("expected partial reasoning before terminal overflow, got %s", body)
+			}
+			assertContextOverflowSignals(t, body)
+
+			switch tc.name {
+			case "responses":
+				partDoneIndex := strings.Index(body, "event: response.reasoning_summary_part.done")
+				itemDoneIndex := strings.LastIndex(body, "event: response.output_item.done")
+				if partDoneIndex == -1 || itemDoneIndex == -1 || !(partialReasoningIndex < partDoneIndex && partDoneIndex < itemDoneIndex && itemDoneIndex < terminalIndex) {
+					t.Fatalf("expected Responses reasoning lifecycle to close before failure, got %s", body)
+				}
+				if strings.Count(body, "event: response.failed") != 1 || strings.Contains(body, "event: response.completed") || strings.Contains(body, "event: error\n") {
+					t.Fatalf("expected exactly one normalized Responses failure terminal, got %s", body)
+				}
+			case "chat completions":
+				if strings.Count(body, `"finish_reason":"error"`) != 1 || !strings.Contains(body, "data: [DONE]") || strings.Contains(body, `"finish_reason":"stop"`) {
+					t.Fatalf("expected exactly one Chat error terminal and DONE marker, got %s", body)
+				}
+			case "anthropic messages":
+				thinkingStopIndex := strings.LastIndex(body[:terminalIndex], "event: content_block_stop")
+				messageStopIndex := strings.Index(body, "event: message_stop")
+				if thinkingStopIndex == -1 || messageStopIndex == -1 || !(partialReasoningIndex < thinkingStopIndex && thinkingStopIndex < terminalIndex && terminalIndex < messageStopIndex) {
+					t.Fatalf("expected Anthropic thinking lifecycle to close before error and message stop, got %s", body)
+				}
+				if strings.Count(body, "event: error") != 1 || strings.Contains(body, "event: message_delta") {
+					t.Fatalf("expected exactly one Anthropic error terminal without completion delta, got %s", body)
+				}
+			}
+		})
+	}
+}
+
 func testContextOverflowStreamConfig(upstreamURL string) config.Config {
 	return config.Config{
 		DefaultProvider:      "test",

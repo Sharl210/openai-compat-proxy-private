@@ -110,3 +110,43 @@ func TestBuildResponsePreservesExplicitStopReason(t *testing.T) {
 		t.Fatalf("expected stop_reason max_tokens, got %#v", resp["stop_reason"])
 	}
 }
+
+func TestBuildResponseTrimsOnlyVisibleTextTrailingCRLF(t *testing.T) {
+	result := aggregate.Result{
+		Text:      "first\r\nsecond \t\r\n",
+		Reasoning: map[string]any{"summary": "reasoning\r\n"},
+		ToolCalls: []aggregate.ToolCall{{
+			CallID:    "call_1",
+			Name:      "search_web",
+			Arguments: `{"query":"Quectel\r\n"}`,
+		}},
+	}
+
+	wantThinking := reasoningContentValue(result.Reasoning)
+	resp := BuildResponse(result, "req_123", "claude-sonnet-4-5")
+	content := resp["content"].([]map[string]any)
+	if got, _ := content[0]["thinking"].(string); got != wantThinking {
+		t.Fatalf("expected thinking unchanged, got %q", got)
+	}
+	if got, _ := content[1]["text"].(string); got != "first\r\nsecond \t" {
+		t.Fatalf("expected visible text tail normalized without changing internal CRLF or terminal whitespace, got %q", got)
+	}
+	input := content[2]["input"].(map[string]any)
+	if got, _ := input["query"].(string); got != "Quectel\r\n" {
+		t.Fatalf("expected tool arguments unchanged, got %q", got)
+	}
+	if result.Text != "first\r\nsecond \t\r\n" {
+		t.Fatalf("expected source result text unchanged, got %q", result.Text)
+	}
+	if got, _ := result.Reasoning["summary"].(string); got != "reasoning\r\n" {
+		t.Fatalf("expected source reasoning unchanged, got %q", got)
+	}
+}
+
+func TestBuildResponsePreservesRefusalTextTail(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{Refusal: "declined\r\n"}, "req_refusal", "claude-sonnet-4-5")
+	content := resp["content"].([]map[string]any)
+	if got, _ := content[0]["text"].(string); got != "declined\r\n" {
+		t.Fatalf("expected refusal text unchanged, got %q", got)
+	}
+}

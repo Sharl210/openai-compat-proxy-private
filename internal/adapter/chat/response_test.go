@@ -103,3 +103,41 @@ func TestBuildResponseFormatsReasoningContentTitle(t *testing.T) {
 		t.Fatalf("expected reasoning_content title to be separated, got %#v", message)
 	}
 }
+
+func TestBuildResponseTrimsOnlyVisibleTextTrailingCRLF(t *testing.T) {
+	result := aggregate.Result{
+		Text:      "first\r\nsecond \t\r\n",
+		Refusal:   "refusal\r\n",
+		Reasoning: map[string]any{"summary": "reasoning\r\n"},
+		ToolCalls: []aggregate.ToolCall{{
+			CallID:    "call_1",
+			Name:      "get_weather",
+			Arguments: `{"location":"Shanghai\r\n"}`,
+		}},
+	}
+
+	wantReasoning := reasoningContentValue(result.Reasoning)
+	resp := BuildResponse(result)
+	choices := resp["choices"].([]map[string]any)
+	message := choices[0]["message"].(map[string]any)
+	if got, _ := message["content"].(string); got != "first\r\nsecond \t" {
+		t.Fatalf("expected visible text tail normalized without changing internal CRLF or terminal whitespace, got %q", got)
+	}
+	if got, _ := message["refusal"].(string); got != "refusal\r\n" {
+		t.Fatalf("expected refusal unchanged, got %q", got)
+	}
+	if got, _ := message["reasoning_content"].(string); got != wantReasoning {
+		t.Fatalf("expected reasoning unchanged, got %q", got)
+	}
+	toolCalls := message["tool_calls"].([]map[string]any)
+	function := toolCalls[0]["function"].(map[string]any)
+	if got, _ := function["arguments"].(string); got != `{"location":"Shanghai\r\n"}` {
+		t.Fatalf("expected tool arguments unchanged, got %q", got)
+	}
+	if result.Text != "first\r\nsecond \t\r\n" {
+		t.Fatalf("expected source result text unchanged, got %q", result.Text)
+	}
+	if got, _ := result.Reasoning["summary"].(string); got != "reasoning\r\n" {
+		t.Fatalf("expected source reasoning unchanged, got %q", got)
+	}
+}

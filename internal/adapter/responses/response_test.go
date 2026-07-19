@@ -238,3 +238,174 @@ func TestBuildResponsePrependsReasoningBeforePreservedFunctionCall(t *testing.T)
 		t.Fatalf("expected preserved function_call after reasoning, got %#v", output)
 	}
 }
+
+func TestBuildResponseTrimsSyntheticOutputTextTrailingCRLF(t *testing.T) {
+	result := aggregate.Result{Text: "first\r\nsecond \t\r\n"}
+
+	resp := BuildResponse(result)
+	output := resp["output"].([]map[string]any)
+	content := output[0]["content"].([]map[string]any)
+	if got, _ := content[0]["text"].(string); got != "first\r\nsecond \t" {
+		t.Fatalf("expected visible text tail normalized without changing internal CRLF or terminal whitespace, got %q", got)
+	}
+	if result.Text != "first\r\nsecond \t\r\n" {
+		t.Fatalf("expected source result text unchanged, got %q", result.Text)
+	}
+}
+
+func TestBuildResponseNormalizesFinalResponseMessageOutputTextWithoutMutatingSource(t *testing.T) {
+	sourceContent := []map[string]any{
+		{"type": "output_text", "text": "first\r\nsecond\r\n"},
+		{"type": "output_text", "text": "final\r\nsecond \t\r\n"},
+		{"type": "refusal", "refusal": "declined\r\n"},
+		nil,
+	}
+	result := aggregate.Result{ResponseMessageContent: sourceContent}
+
+	resp := BuildResponse(result)
+	output := resp["output"].([]map[string]any)
+	content := output[0]["content"].([]map[string]any)
+	if got, _ := content[0]["text"].(string); got != "first\r\nsecond\r\n" {
+		t.Fatalf("expected earlier output_text unchanged, got %q", got)
+	}
+	if got, _ := content[1]["text"].(string); got != "final\r\nsecond \t" {
+		t.Fatalf("expected final output_text tail normalized, got %q", got)
+	}
+	if got, _ := content[2]["refusal"].(string); got != "declined\r\n" {
+		t.Fatalf("expected refusal content unchanged, got %q", got)
+	}
+	if content[3] != nil {
+		t.Fatalf("expected nil message content item preserved, got %#v", content[3])
+	}
+	if got, _ := sourceContent[0]["text"].(string); got != "first\r\nsecond\r\n" {
+		t.Fatalf("expected source message content unchanged, got %q", got)
+	}
+	if got, _ := sourceContent[1]["text"].(string); got != "final\r\nsecond \t\r\n" {
+		t.Fatalf("expected final source message content unchanged, got %q", got)
+	}
+	content[1]["text"] = "mutated response only"
+	if got, _ := sourceContent[1]["text"].(string); got != "final\r\nsecond \t\r\n" {
+		t.Fatalf("expected emitted response content to be deeply copied, source changed to %q", got)
+	}
+}
+
+func TestBuildResponseNormalizesOnlyFinalVisibleOutputTextAcrossPreservedAnyContent(t *testing.T) {
+	payload := map[string]any{
+		"id": "resp_upstream",
+		"output": []any{
+			map[string]any{
+				"id":     "msg_early",
+				"type":   "message",
+				"status": "completed",
+				"role":   "assistant",
+				"content": []any{
+					map[string]any{"type": "output_text", "text": "earlier message\r\n"},
+					map[string]any{"type": "refusal", "refusal": "earlier refusal\r\n"},
+				},
+			},
+			map[string]any{
+				"id":      "rs_1",
+				"type":    "reasoning",
+				"summary": "reasoning\r\n",
+			},
+			map[string]any{
+				"id":     "msg_final",
+				"type":   "message",
+				"status": "completed",
+				"role":   "assistant",
+				"content": []any{
+					map[string]any{"type": "output_text", "text": "earlier final part\r\n"},
+					map[string]any{"type": "refusal", "refusal": "final refusal\r\n"},
+					map[string]any{"type": "output_text", "text": "final visible\r\ninside \t\r\n"},
+				},
+			},
+			map[string]any{
+				"id":        "call_1",
+				"type":      "function_call",
+				"status":    "completed",
+				"call_id":   "call_1",
+				"name":      "search_web",
+				"arguments": `{"query":"Quectel\r\n"}`,
+			},
+		},
+	}
+	result, err := aggregate.ResultFromResponsePayload(payload)
+	if err != nil {
+		t.Fatalf("ResultFromResponsePayload() error = %v", err)
+	}
+
+	resp := BuildResponse(result)
+	output := resp["output"].([]map[string]any)
+	if len(output) != 4 {
+		t.Fatalf("expected four preserved output items, got %#v", output)
+	}
+	earlyContent := output[0]["content"].([]any)
+	if got := responseOutputText(t, earlyContent[0]); got != "earlier message\r\n" {
+		t.Fatalf("expected earlier message text unchanged, got %q", got)
+	}
+	if got := responseRefusal(t, earlyContent[1]); got != "earlier refusal\r\n" {
+		t.Fatalf("expected earlier refusal unchanged, got %q", got)
+	}
+	finalContent := output[2]["content"].([]any)
+	if got := responseOutputText(t, finalContent[0]); got != "earlier final part\r\n" {
+		t.Fatalf("expected earlier final-message text unchanged, got %q", got)
+	}
+	if got := responseRefusal(t, finalContent[1]); got != "final refusal\r\n" {
+		t.Fatalf("expected final refusal unchanged, got %q", got)
+	}
+	if got := responseOutputText(t, finalContent[2]); got != "final visible\r\ninside \t" {
+		t.Fatalf("expected only final visible output_text tail normalized, got %q", got)
+	}
+	if got, _ := output[3]["arguments"].(string); got != `{"query":"Quectel\r\n"}` {
+		t.Fatalf("expected tool arguments unchanged, got %q", got)
+	}
+	if got, _ := output[1]["summary"].(string); got != "reasoning\r\n" {
+		t.Fatalf("expected reasoning output unchanged, got %q", got)
+	}
+	if got := result.Refusal; got != "earlier refusal\r\nfinal refusal\r\n" {
+		t.Fatalf("expected source aggregate refusal unchanged, got %q", got)
+	}
+	if got := result.ToolCalls[0].Arguments; got != `{"query":"Quectel\r\n"}` {
+		t.Fatalf("expected source aggregate tool arguments unchanged, got %q", got)
+	}
+	resultFinalMessage := result.ResponseOutputItems[2]
+	resultFinalContent := resultFinalMessage["content"].([]any)
+	if got := responseOutputText(t, resultFinalContent[2]); got != "final visible\r\ninside \t\r\n" {
+		t.Fatalf("expected source aggregate output content unchanged, got %q", got)
+	}
+
+	sourceOutput := payload["output"].([]any)
+	sourceReasoning := sourceOutput[1].(map[string]any)
+	if got, _ := sourceReasoning["summary"].(string); got != "reasoning\r\n" {
+		t.Fatalf("expected source payload reasoning unchanged, got %q", got)
+	}
+	sourceFinalMessage := sourceOutput[2].(map[string]any)
+	sourceFinalContent := sourceFinalMessage["content"].([]any)
+	if got := responseOutputText(t, sourceFinalContent[2]); got != "final visible\r\ninside \t\r\n" {
+		t.Fatalf("expected source aggregate payload unchanged, got %q", got)
+	}
+	finalContent[2].(map[string]any)["text"] = "mutated response only"
+	if got := responseOutputText(t, sourceFinalContent[2]); got != "final visible\r\ninside \t\r\n" {
+		t.Fatalf("expected emitted content to be deeply copied, source changed to %q", got)
+	}
+}
+
+func responseOutputText(t *testing.T, value any) string {
+	t.Helper()
+	part, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected content part map, got %#v", value)
+	}
+	text, _ := part["text"].(string)
+	return text
+}
+
+func responseRefusal(t *testing.T, value any) string {
+	t.Helper()
+	part, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected content part map, got %#v", value)
+	}
+	refusal, _ := part["refusal"].(string)
+	return refusal
+}

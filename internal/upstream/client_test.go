@@ -2708,6 +2708,68 @@ func TestEventStreamProbeContextOverflowBeforeOutput_detectsLifecycleContextOver
 	}
 }
 
+func TestEventStreamProbeContextOverflowBeforeOutput_detectsOverflowAfterEmptyOutputLifecycle(t *testing.T) {
+	readCount := 0
+	stream := &EventStream{
+		resp:    &http.Response{Body: io.NopCloser(strings.NewReader(""))},
+		scanner: bufio.NewScanner(strings.NewReader("")),
+		readNext: func(*bufio.Scanner) ([]Event, error) {
+			readCount++
+			switch readCount {
+			case 1:
+				return []Event{{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_1"}}}}, nil
+			case 2:
+				return []Event{{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{}}}}}, nil
+			case 3:
+				return []Event{{Event: "error", Data: map[string]any{"error": map[string]any{"code": "context_length_exceeded", "message": "prompt is too long"}}}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+
+	overflow, err := stream.ProbeContextOverflowBeforeOutput()
+	if err != nil {
+		t.Fatalf("probe context overflow: %v", err)
+	}
+	if overflow == nil {
+		t.Fatal("expected empty output lifecycle to remain pre-output until overflow")
+	}
+	if readCount != 3 {
+		t.Fatalf("expected probe to read through empty lifecycle to overflow, got %d reads", readCount)
+	}
+}
+
+func TestEventStreamProbeContextOverflowBeforeOutput_classifiesDurableSemanticOutput(t *testing.T) {
+	tests := []struct {
+		name   string
+		event  Event
+		commit bool
+	}{
+		{name: "empty text delta", event: Event{Event: "response.output_text.delta", Data: map[string]any{"delta": " \t\r\n"}}, commit: false},
+		{name: "text delta", event: Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "answer"}}, commit: true},
+		{name: "empty reasoning summary part", event: Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"part": map[string]any{"type": "summary_text", "text": ""}}}, commit: false},
+		{name: "reasoning summary part", event: Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"part": map[string]any{"type": "summary_text", "text": "reasoning"}}}, commit: true},
+		{name: "empty message lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "msg_1", "type": "message", "content": []any{}}}}, commit: false},
+		{name: "message with output text", event: Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "msg_1", "type": "message", "content": []any{map[string]any{"type": "output_text", "text": "answer"}}}}}, commit: true},
+		{name: "empty reasoning lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{}}}}, commit: false},
+		{name: "empty reasoning summary item", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": " \r\n"}}}}}, commit: false},
+		{name: "opaque reasoning lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "encrypted_content": "opaque"}}}, commit: true},
+		{name: "tool lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "arguments": ""}}}, commit: true},
+		{name: "empty content text snapshot", event: Event{Event: "response.content_part.done", Data: map[string]any{"part": map[string]any{"type": "output_text", "text": ""}}}, commit: false},
+		{name: "content text snapshot", event: Event{Event: "response.content_part.done", Data: map[string]any{"part": map[string]any{"type": "output_text", "text": "answer"}}}, commit: false},
+		{name: "unknown content part", event: Event{Event: "response.content_part.done", Data: map[string]any{"part": map[string]any{"type": "output_image", "image_url": "https://example.test/image"}}}, commit: true},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := commitsDownstreamOutput(testCase.event); got != testCase.commit {
+				t.Fatalf("commitsDownstreamOutput(%#v) = %t, want %t", testCase.event, got, testCase.commit)
+			}
+		})
+	}
+}
+
 func TestEventStreamProbeContextOverflowBeforeOutput_detectsPendingContextOverflow(t *testing.T) {
 	// Given
 	stream := &EventStream{

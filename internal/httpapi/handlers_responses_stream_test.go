@@ -89,6 +89,40 @@ func TestResponsesStreamCompletedSnapshotCarriesFinalTextForResponsesClients(t *
 	}
 }
 
+func TestResponsesStreamCompletedSnapshotTrimsOnlyFinalVisibleTextLineEndings(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"first\\r\\n\"}]}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"msg_2\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"second \\t\\r\\n\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	completedIndex := strings.LastIndex(body, "event: response.completed")
+	if completedIndex == -1 {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	completed := body[completedIndex:]
+	if !strings.Contains(completed, `"text":"first\r\n"`) {
+		t.Fatalf("expected earlier message line ending preserved as internal output, got %s", completed)
+	}
+	if !strings.Contains(completed, `"text":"second \t"`) {
+		t.Fatalf("expected final visible text to retain terminal whitespace but drop CRLF, got %s", completed)
+	}
+	if strings.Contains(completed, `"text":"second \t\r\n"`) {
+		t.Fatalf("expected final visible text CRLF removed, got %s", completed)
+	}
+}
+
 func TestResponsesStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
 	chatResponse := `{
 		"id": "chatcmpl_json",
@@ -366,10 +400,10 @@ func TestResponsesStreamPreservesCompactionItemLifecycle(t *testing.T) {
 
 func TestResponseEventWriterHelperBeginsCompactionLifecycleByClosingSyntheticReasoning(t *testing.T) {
 	h := &responseEventWriterHelper{
-		downstreamType:    "responses",
-		syntheticInjected: true,
-		reasoningStarted:  true,
-		syntheticSummary:  &strings.Builder{},
+		downstreamType:            "responses",
+		syntheticInjected:         true,
+		syntheticReasoningStarted: true,
+		syntheticSummary:          &strings.Builder{},
 	}
 
 	h.beginCompactionLifecycle()
@@ -377,7 +411,7 @@ func TestResponseEventWriterHelperBeginsCompactionLifecycleByClosingSyntheticRea
 	if !h.compactionLifecycleStarted {
 		t.Fatal("expected compaction lifecycle state to be recorded")
 	}
-	if !h.reasoningClosed {
+	if !h.syntheticReasoningClosed {
 		t.Fatal("expected compaction lifecycle to close synthetic reasoning first")
 	}
 	if len(h.events) != 2 {
@@ -407,6 +441,23 @@ func TestResponsesWriterChatReasoningDeltaStartsReasoningLifecycleWithoutSynthet
 	}
 	if strings.Contains(body, `"id":"rs_proxy"`) {
 		t.Fatalf("expected no synthetic rs_proxy prelude in this path, got %s", body)
+	}
+}
+
+func TestResponsesWriterCompletedSnapshotIncludesSynthesizedChatReasoningSummary(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeChat,
+		upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_chat"}}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "alpha"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	)
+
+	completedIdx := strings.LastIndex(body, "event: response.completed")
+	if completedIdx == -1 {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	completed := body[completedIdx:]
+	if !strings.Contains(completed, `"id":"rs_chat_reasoning","summary":[{"text":"alpha","type":"summary_text"}]`) {
+		t.Fatalf("expected completed snapshot to retain synthesized reasoning summary, got %s", completed)
 	}
 }
 
@@ -802,6 +853,328 @@ func TestResponsesStreamTextSnapshotStrippingPreservesToolAndReasoningItems(t *t
 	}
 }
 
+func TestResponsesStreamSynthesizesMissingNativeReasoningAddedBeforeDone(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{
+			"id":                "rs_native",
+			"type":              "reasoning",
+			"encrypted_content": "enc_native",
+			"summary":           []any{map[string]any{"type": "summary_text", "text": "reasoning summary"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	addedIdx := strings.Index(body, "event: response.output_item.added\n"+`data: {"item":{"encrypted_content":"enc_native","id":"rs_native","summary":[],"type":"reasoning"},"output_index":0,"type":"response.output_item.added"}`)
+	doneIdx := strings.Index(body, "event: response.output_item.done\n"+`data: {"item":{"encrypted_content":"enc_native","id":"rs_native","summary":[{"text":"reasoning summary","type":"summary_text"}],"type":"reasoning"},"output_index":0,"type":"response.output_item.done"}`)
+	if addedIdx == -1 || doneIdx == -1 {
+		t.Fatalf("expected missing native reasoning lifecycle start to be synthesized, got %s", body)
+	}
+	if addedIdx >= doneIdx {
+		t.Fatalf("expected synthesized native reasoning added before done, got %s", body)
+	}
+}
+
+func TestResponsesStreamSuppressesDuplicateNativeReasoningItemDone(t *testing.T) {
+	reasoningDone := upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{
+		"id":      "rs_native",
+		"type":    "reasoning",
+		"summary": []any{map[string]any{"type": "summary_text", "text": "reasoning summary"}},
+	}}}
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		reasoningDone,
+		reasoningDone,
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	if count := strings.Count(body, "event: response.output_item.done"); count != 1 {
+		t.Fatalf("expected duplicate native reasoning done to be suppressed, got %d events: %s", count, body)
+	}
+}
+
+func TestResponsesStreamDoesNotDuplicateNativeReasoningSummaryPartAdded(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{
+			"item_id":       "rs_native",
+			"output_index":  0,
+			"summary_index": 0,
+			"part":          map[string]any{"type": "summary_text", "text": ""},
+		}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "alpha"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{
+			"item_id":       "rs_native",
+			"output_index":  0,
+			"summary_index": 0,
+			"part":          map[string]any{"type": "summary_text", "text": "alpha"},
+		}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "alpha"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	if count := strings.Count(body, "event: response.reasoning_summary_part.added"); count != 1 {
+		t.Fatalf("expected one native reasoning summary part start, got %d events: %s", count, body)
+	}
+	if count := strings.Count(body, "event: response.output_item.added"); count != 1 {
+		t.Fatalf("expected one native reasoning item start, got %d events: %s", count, body)
+	}
+}
+
+func TestResponsesStreamRetainsCompletedSummaryWhenReasoningItemDoneIsEmptyBeforeOverflow(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		item map[string]any
+	}{
+		{
+			name: "empty summary",
+			item: map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}},
+		},
+		{
+			name: "missing summary",
+			item: map[string]any{"id": "rs_native", "type": "reasoning"},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_native_overflow"}}},
+				upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
+				upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+				upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "finalized reasoning"}},
+				upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "finalized reasoning"}}},
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": testCase.item}},
+				upstream.Event{Event: "error", Data: map[string]any{"error": map[string]any{"type": "invalid_request_error", "code": "context_length_exceeded", "message": "prompt is too long: context_length_exceeded from upstream"}}},
+			)
+
+			partDone := `{"item_id":"rs_native","output_index":0,"part":{"text":"finalized reasoning","type":"summary_text"},"summary_index":0,"type":"response.reasoning_summary_part.done"}`
+			itemDone := `{"item":{"id":"rs_native","summary":[{"text":"finalized reasoning","type":"summary_text"}],"type":"reasoning"},"output_index":0,"type":"response.output_item.done"}`
+			partDoneIndex := strings.Index(body, partDone)
+			itemDoneIndex := strings.Index(body, itemDone)
+			failedIndex := strings.Index(body, `event: response.failed`)
+			if partDoneIndex == -1 || itemDoneIndex == -1 || failedIndex == -1 || !(partDoneIndex < itemDoneIndex && itemDoneIndex < failedIndex) {
+				t.Fatalf("expected finalized summary item closure before one overflow terminal, got %s", body)
+			}
+			if strings.Count(body, `event: response.reasoning_summary_text.done`) > 1 || strings.Count(body, `event: response.reasoning_summary_part.done`) != 1 || strings.Count(body, itemDone) != 1 {
+				t.Fatalf("expected each finalized reasoning lifecycle event exactly once, got %s", body)
+			}
+			if strings.Count(body, `event: response.failed`) != 1 || strings.Contains(body, `event: response.completed`) || strings.Contains(body, `event: response.done`) || strings.Contains(body, `event: response.incomplete`) {
+				t.Fatalf("expected exactly one failed terminal after lifecycle closure, got %s", body)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamRetainsSummaryDeltaForEmptyOrMissingTerminalPayloads(t *testing.T) {
+	tests := []struct {
+		name          string
+		summaryEvents []upstream.Event
+		item          map[string]any
+	}{
+		{
+			name: "summary text and part done are empty",
+			summaryEvents: []upstream.Event{
+				{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "text": ""}},
+				{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+			},
+			item: map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}},
+		},
+		{
+			name: "summary text and part done omit text",
+			summaryEvents: []upstream.Event{
+				{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0}},
+				{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text"}}},
+			},
+			item: map[string]any{"id": "rs_native", "type": "reasoning"},
+		},
+		{
+			name: "summary part done is empty without text done",
+			summaryEvents: []upstream.Event{
+				{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+			},
+			item: map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}},
+		},
+		{
+			name: "summary part done omits text without text done",
+			summaryEvents: []upstream.Event{
+				{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text"}}},
+			},
+			item: map[string]any{"id": "rs_native", "type": "reasoning"},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			events := []upstream.Event{
+				{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_native_overflow"}}},
+				{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
+				{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+				{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "finalized reasoning"}},
+			}
+			events = append(events, testCase.summaryEvents...)
+			events = append(events,
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": testCase.item}},
+				upstream.Event{Event: "error", Data: map[string]any{"error": map[string]any{"type": "invalid_request_error", "code": "context_length_exceeded", "message": "prompt is too long: context_length_exceeded from upstream"}}},
+			)
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, events...)
+
+			textDone := `{"item_id":"rs_native","output_index":0,"summary_index":0,"text":"finalized reasoning","type":"response.reasoning_summary_text.done"}`
+			partDone := `{"item_id":"rs_native","output_index":0,"part":{"text":"finalized reasoning","type":"summary_text"},"summary_index":0,"type":"response.reasoning_summary_part.done"}`
+			itemDone := `{"item":{"id":"rs_native","summary":[{"text":"finalized reasoning","type":"summary_text"}],"type":"reasoning"},"output_index":0,"type":"response.output_item.done"}`
+			textDoneIndex := strings.Index(body, textDone)
+			partDoneIndex := strings.Index(body, partDone)
+			itemDoneIndex := strings.Index(body, itemDone)
+			failedIndex := strings.Index(body, `event: response.failed`)
+			if textDoneIndex == -1 || partDoneIndex == -1 || itemDoneIndex == -1 || failedIndex == -1 || !(textDoneIndex < partDoneIndex && partDoneIndex < itemDoneIndex && itemDoneIndex < failedIndex) {
+				t.Fatalf("expected preserved summary lifecycle before overflow terminal, got %s", body)
+			}
+			if strings.Count(body, `event: response.reasoning_summary_text.done`) != 1 || strings.Count(body, `event: response.reasoning_summary_part.done`) != 1 || strings.Count(body, itemDone) != 1 || strings.Count(body, `event: response.failed`) != 1 {
+				t.Fatalf("expected exactly one closed reasoning lifecycle and failure terminal, got %s", body)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamDoesNotDuplicateCompletedReasoningSummaryText(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "finalized reasoning"}},
+		upstream.Event{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "text": "finalized reasoning"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	if count := strings.Count(body, "event: response.reasoning_summary_text.done"); count != 1 {
+		t.Fatalf("expected one completed reasoning summary text event, got %d events: %s", count, body)
+	}
+	if count := strings.Count(body, "event: response.reasoning_summary_part.done"); count != 1 {
+		t.Fatalf("expected terminal lifecycle to close the summary part once, got %d events: %s", count, body)
+	}
+}
+
+func TestResponsesStreamTextTailBuffersPreserveCompletedNonFinalContent(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_one", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "item_id": "msg_one", "content_index": 0, "delta": "first\r\n"}},
+		upstream.Event{Event: "response.content_part.done", Data: map[string]any{"output_index": 0, "item_id": "msg_one", "content_index": 0, "part": map[string]any{"type": "output_text", "text": "first\r\n"}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_one", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "first\r\n"}}}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "msg_two", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 1, "item_id": "msg_two", "content_index": 0, "delta": "second\r\n"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "msg_two", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "second\r\n"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_text", "status": "completed", "output": []any{
+			map[string]any{"id": "msg_one", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "first\r\n"}}},
+			map[string]any{"id": "msg_two", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "second\r\n"}}},
+		}}}},
+	)
+
+	firstTail := `{"content_index":0,"delta":"\r\n","item_id":"msg_one","output_index":0,"type":"response.output_text.delta"}`
+	firstTailIndex := strings.Index(body, firstTail)
+	firstDoneIndex := strings.Index(body, `"id":"msg_one"`)
+	completedIndex := strings.LastIndex(body, `event: response.completed`)
+	if firstTailIndex == -1 || completedIndex == -1 || firstTailIndex > completedIndex {
+		t.Fatalf("expected completed first message tail to be materialized before terminal, got %s", body)
+	}
+	completed := body[completedIndex:]
+	if !strings.Contains(completed, `"text":"first\r\n"`) || !strings.Contains(completed, `"text":"second"`) || strings.Contains(completed, `"text":"second\r\n"`) {
+		t.Fatalf("expected only final visible text tail to be trimmed, got %s", completed)
+	}
+	if firstDoneIndex == -1 {
+		t.Fatalf("expected first message lifecycle, got %s", body)
+	}
+}
+
+func TestResponsesStreamTextTailBuffersStayIsolatedByContentIndex(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_multi", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "item_id": "msg_multi", "content_index": 0, "delta": "first\r\n"}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "item_id": "msg_multi", "content_index": 1, "delta": "second\r\n"}},
+		upstream.Event{Event: "response.content_part.done", Data: map[string]any{"output_index": 0, "item_id": "msg_multi", "content_index": 0, "part": map[string]any{"type": "output_text", "text": "first\r\n"}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_multi", "status": "completed", "output": []any{map[string]any{"id": "msg_multi", "type": "message", "role": "assistant", "content": []any{
+			map[string]any{"type": "output_text", "text": "first\r\n"},
+			map[string]any{"type": "output_text", "text": "second\r\n"},
+		}}}}}},
+	)
+
+	firstTail := `{"content_index":0,"delta":"\r\n","item_id":"msg_multi","output_index":0,"type":"response.output_text.delta"}`
+	if !strings.Contains(body, firstTail) {
+		t.Fatalf("expected completed first content tail to be emitted independently, got %s", body)
+	}
+	completedIndex := strings.LastIndex(body, `event: response.completed`)
+	completed := body[completedIndex:]
+	if !strings.Contains(completed, `"text":"first\r\n"`) || !strings.Contains(completed, `"text":"second"`) || strings.Contains(completed, `"text":"second\r\n"`) {
+		t.Fatalf("expected only final content index tail to be trimmed, got %s", completed)
+	}
+}
+
+func TestResponsesStreamTextTailBuffersTrimFinalVisibleTextBeforeToolCall(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_final", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "item_id": "msg_final", "content_index": 0, "delta": "answer\r\n"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_final", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "answer\r\n"}}}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{}`}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_tool", "status": "completed", "output": []any{
+			map[string]any{"id": "msg_final", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "answer\r\n"}}},
+			map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{}`},
+		}}}},
+	)
+
+	if strings.Contains(body, `"item_id":"msg_final","output_index":0,"type":"response.output_text.delta"`) && strings.Contains(body, `"delta":"\r\n"`) {
+		t.Fatalf("expected final visible text tail to remain withheld before trailing tool output, got %s", body)
+	}
+	completedIndex := strings.LastIndex(body, `event: response.completed`)
+	if completedIndex == -1 {
+		t.Fatalf("expected completed event, got %s", body)
+	}
+	completed := body[completedIndex:]
+	if !strings.Contains(completed, `"text":"answer"`) || strings.Contains(completed, `"text":"answer\r\n"`) || !strings.Contains(completed, `"type":"function_call"`) {
+		t.Fatalf("expected trimmed final visible text and preserved trailing tool call, got %s", completed)
+	}
+}
+
+func TestResponsesStreamFailurePreservesCompletedTextTailBeforeTool(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_completed", "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 0, "item_id": "msg_completed", "content_index": 0, "delta": "answer\r\n"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "msg_completed", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "answer\r\n"}}}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"output_index": 2, "item_id": "msg_unfinished", "content_index": 0, "delta": "discard\r\n"}},
+		upstream.Event{Event: "response.failed", Data: map[string]any{"response": map[string]any{"status": "failed", "error": map[string]any{"type": "upstream_error", "code": "upstream_error", "message": "boom"}}}},
+	)
+
+	completedTail := `{"content_index":0,"delta":"\r\n","item_id":"msg_completed","output_index":0,"type":"response.output_text.delta"}`
+	completedTailIndex := strings.Index(body, completedTail)
+	toolIndex := strings.Index(body, `"id":"fc_1"`)
+	failedIndex := strings.Index(body, `event: response.failed`)
+	if completedTailIndex == -1 || toolIndex == -1 || failedIndex == -1 || !(toolIndex < completedTailIndex && completedTailIndex < failedIndex) {
+		t.Fatalf("expected completed message tail before failed terminal without losing tool ordering, got %s", body)
+	}
+	if strings.Count(body, `"item_id":"msg_unfinished"`) != 1 {
+		t.Fatalf("expected unfinished message tail to remain discarded on failure, got %s", body)
+	}
+	if strings.Count(body, `event: response.failed`) != 1 || strings.Contains(body, `event: response.completed`) || strings.Contains(body, `event: response.done`) {
+		t.Fatalf("expected one failed terminal only, got %s", body)
+	}
+}
+
+func TestResponsesStreamSynthesizesNativeReasoningLifecycleBeforeSummaryDelta(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "alpha"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{
+			"item_id":       "rs_native",
+			"output_index":  0,
+			"summary_index": 0,
+			"part":          map[string]any{"type": "summary_text", "text": "alpha"},
+		}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "alpha"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
+	)
+
+	addedIdx := strings.Index(body, `{"item":{"id":"rs_native","summary":[],"type":"reasoning"},"output_index":0,"type":"response.output_item.added"}`)
+	partIdx := strings.Index(body, `{"item_id":"rs_native","output_index":0,"part":{"text":"","type":"summary_text"},"summary_index":0,"type":"response.reasoning_summary_part.added"}`)
+	deltaIdx := strings.Index(body, `{"delta":"alpha","item_id":"rs_native","output_index":0,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	if addedIdx == -1 || partIdx == -1 || deltaIdx == -1 || !(addedIdx < partIdx && partIdx < deltaIdx) {
+		t.Fatalf("expected native summary delta to receive a complete preceding lifecycle, got %s", body)
+	}
+}
+
 func TestResponsesStreamFormatsReasoningItemTitle(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{
@@ -974,6 +1347,47 @@ func TestResponsesStreamTerminalFailureAfterSSEStartStaysInSSEProtocol(t *testin
 	}
 	if !strings.Contains(body, `"response":{"error"`) {
 		t.Fatalf("expected response.failed to carry a response error object after SSE start, got %s", body)
+	}
+}
+
+func TestResponsesStreamContextOverflowClosesNativeReasoningBeforeOneFailedTerminal(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_native_overflow"}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "partial reasoning"}},
+		upstream.Event{Event: "error", Data: map[string]any{"error": map[string]any{"type": "invalid_request_error", "code": "context_length_exceeded", "message": "prompt is too long: context_length_exceeded from upstream"}}},
+	)
+
+	partDoneIdx := strings.Index(body, `event: response.reasoning_summary_part.done`)
+	itemDoneIdx := strings.LastIndex(body, `event: response.output_item.done`)
+	failedIdx := strings.Index(body, `event: response.failed`)
+	if partDoneIdx == -1 || itemDoneIdx == -1 || failedIdx == -1 || !(partDoneIdx < itemDoneIdx && itemDoneIdx < failedIdx) {
+		t.Fatalf("expected native reasoning lifecycle to close before failed terminal, got %s", body)
+	}
+	if strings.Count(body, `event: response.failed`) != 1 {
+		t.Fatalf("expected exactly one failed terminal event, got %s", body)
+	}
+	if !strings.Contains(body, `"id":"resp_native_overflow"`) || !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected failed response to retain the response ID and normalized overflow details, got %s", body)
+	}
+	if strings.Contains(body, `event: response.completed`) || strings.Contains(body, `event: response.done`) || strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected overflow to emit no successful or incomplete terminal, got %s", body)
+	}
+}
+
+func TestResponsesStreamReasoningPartNotFoundIsNotReclassifiedAsContextOverflow(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_reasoning_missing"}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"output_index": 0, "item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "output_index": 0, "summary_index": 0, "delta": "partial reasoning"}},
+		upstream.Event{Event: "response.failed", Data: map[string]any{"response": map[string]any{"status": "failed", "error": map[string]any{"type": "invalid_request_error", "code": "invalid_request_error", "message": "reasoning part rs_opaque not found"}}}},
+	)
+
+	if strings.Contains(body, `context_length_exceeded`) || strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected missing reasoning part error to remain distinct from context overflow, got %s", body)
+	}
+	if !strings.Contains(body, `reasoning part rs_opaque not found`) {
+		t.Fatalf("expected original missing reasoning part error to remain visible, got %s", body)
 	}
 }
 
@@ -1642,6 +2056,13 @@ func TestProviderResponsesRouteDefersPlaceholderUntilFirstUpstreamEvent(t *testi
 	}
 }
 
+func TestCloneResponsesStreamStateInitializesLifecycleMaps(t *testing.T) {
+	state := cloneResponsesStreamState(nil, "req_test", config.UpstreamEndpointTypeResponses)
+	if state.reasoningSummaryParts == nil || state.reasoningSummaryPartClosed == nil || state.reasoningSummaryTextDone == nil || state.activeReasoningItems == nil || state.reasoningItemsClosed == nil || state.textTailBuffers == nil || state.completedTextItems == nil || state.completedTextParts == nil {
+		t.Fatalf("expected nil initial state to initialize all Responses lifecycle maps, got %#v", state)
+	}
+}
+
 func testResponsesConfig(upstreamURL string) config.Config {
 	return testResponsesConfigWithEndpoint(upstreamURL, config.UpstreamEndpointTypeResponses)
 }
@@ -1649,7 +2070,7 @@ func testResponsesConfig(upstreamURL string) config.Config {
 func renderResponsesWriterEvents(t *testing.T, endpointType string, events ...upstream.Event) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	state := &responsesStreamState{toolItems: map[string]*responsesToolItemState{}, toolIDAliases: map[string]string{}, upstreamEndpointType: endpointType}
+	state := newResponsesStreamState("", endpointType)
 	writer := &ResponsesEventWriter{w: rec, flusher: nil}
 	for _, evt := range events {
 		if err := writeResponsesEvent(writer, state, evt, nil); err != nil {

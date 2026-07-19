@@ -65,6 +65,38 @@ func TestStreamingContextOverflow_returnsHTTP400BeforeSSE_whenUpstreamSendsLifec
 	}
 }
 
+func TestStreamingContextOverflow_returnsHTTP400AfterEmptyOutputLifecycle(t *testing.T) {
+	for _, tc := range contextOverflowRouteCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := testutil.NewStreamingUpstream(t, []string{
+				upstreamContextOverflowCreatedEvent,
+				"event: response.output_item.added\n" +
+					"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+				upstreamContextOverflowEvent,
+			})
+			defer upstream.Close()
+			server := NewServer(testContextOverflowStreamConfig(upstream.URL))
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.streamBody))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.setHeaders != nil {
+				tc.setHeaders(req)
+			}
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected empty output lifecycle to remain pre-output, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if !json.Valid([]byte(body)) || strings.Contains(body, "event:") || strings.Contains(body, `response.output_item.added`) || strings.Contains(body, tc.terminalMarker) {
+				t.Fatalf("expected no SSE after empty output lifecycle, got %s", body)
+			}
+			assertContextOverflowSignals(t, body)
+		})
+	}
+}
+
 func TestStreamingFirstTerminalWins_whenSuccessPrecedesFailure(t *testing.T) {
 	for _, tc := range contextOverflowRouteCases() {
 		t.Run(tc.name, func(t *testing.T) {

@@ -369,7 +369,7 @@ func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWr
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
 	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
-	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokens(*canon)))
+	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokensWithContext(r.Context(), *canon)))
 	setProxyModelLimitContextHeader(w, provider, *canon)
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {

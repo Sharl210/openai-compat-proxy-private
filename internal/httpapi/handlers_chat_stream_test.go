@@ -221,6 +221,75 @@ func TestChatStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
 	}
 }
 
+func TestChatStreamRemovesOnlyTerminalTextLineEndings(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		chunkID:         "chatcmpl_tail",
+		toolIDAliases:   map[string]string{},
+		toolMeta:        map[string]map[string]string{},
+		toolIndex:       map[string]int{},
+		toolSent:        map[string]bool{},
+		pendingToolArgs: map[string]string{},
+	}
+
+	for _, event := range []upstream.Event{
+		{Event: "response.output_text.delta", Data: map[string]any{"delta": "first\r\nsecond \t\r"}},
+		{Event: "response.output_text.delta", Data: map[string]any{"delta": "\nthird\r"}},
+		{Event: "response.output_text.delta", Data: map[string]any{"delta": "\n\n"}},
+		{Event: "response.completed", Data: map[string]any{}},
+	} {
+		if err := writeChatEvent(rec, nil, state, event, false, nil); err != nil {
+			t.Fatalf("writeChatEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	var content strings.Builder
+	for _, chunk := range collectChatStreamChunks(t, rec.Body.String()) {
+		delta := chatDeltaFromChunk(t, chunk, rec.Body.String())
+		if text, _ := delta["content"].(string); text != "" {
+			content.WriteString(text)
+		}
+	}
+	if got := content.String(); got != "first\r\nsecond \t\r\nthird" {
+		t.Fatalf("expected internal CRLF and terminal whitespace preserved while terminal line endings are omitted, got %q; body=%s", got, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "data: [DONE]") {
+		t.Fatalf("expected terminal done marker, got %s", rec.Body.String())
+	}
+}
+
+func TestChatStreamDropsPendingTextLineEndingsOnFailure(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		chunkID:         "chatcmpl_tail_failure",
+		toolIDAliases:   map[string]string{},
+		toolMeta:        map[string]map[string]string{},
+		toolIndex:       map[string]int{},
+		toolSent:        map[string]bool{},
+		pendingToolArgs: map[string]string{},
+	}
+
+	for _, event := range []upstream.Event{
+		{Event: "response.output_text.delta", Data: map[string]any{"delta": "answer\r\n"}},
+		{Event: "response.failed", Data: map[string]any{"health_flag": "upstream_error", "message": "failed"}},
+	} {
+		if err := writeChatEvent(rec, nil, state, event, false, nil); err != nil {
+			t.Fatalf("writeChatEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	var content strings.Builder
+	for _, chunk := range collectChatStreamChunks(t, rec.Body.String()) {
+		delta := chatDeltaFromChunk(t, chunk, rec.Body.String())
+		if text, _ := delta["content"].(string); text != "" {
+			content.WriteString(text)
+		}
+	}
+	if got := content.String(); got != "answer" {
+		t.Fatalf("expected pending terminal line endings discarded before failure, got %q; body=%s", got, rec.Body.String())
+	}
+}
+
 func TestChatStreamChunksCarryIDAndModel(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +

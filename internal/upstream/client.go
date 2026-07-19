@@ -84,7 +84,7 @@ func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverf
 			if overflow := contextOverflowFromEvent(evt); overflow != nil {
 				return overflow, nil
 			}
-			if evt.Event != "response.created" && evt.Event != "response.in_progress" {
+			if commitsDownstreamOutput(evt) {
 				s.pendingEvents = append(s.pendingEvents, buffered...)
 				return nil, nil
 			}
@@ -104,6 +104,95 @@ func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverf
 		}
 		buffered = append(buffered, events...)
 	}
+}
+
+func commitsDownstreamOutput(evt Event) bool {
+	switch evt.Event {
+	case "response.created", "response.in_progress":
+		return false
+	case "response.output_text.delta", "response.refusal.delta", "response.function_call_arguments.delta":
+		return hasNonWhitespaceEventText(evt.Data, "delta")
+	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
+		return hasNonWhitespaceEventText(evt.Data, "thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text")
+	case "response.reasoning_summary_text.done":
+		return hasNonWhitespaceEventText(evt.Data, "text")
+	case "response.output_text.done":
+		return false
+	case "response.content_part.added":
+		part, _ := evt.Data["part"].(map[string]any)
+		return partHasDurableSemanticOutput(part)
+	case "response.content_part.done":
+		part, _ := evt.Data["part"].(map[string]any)
+		return strings.TrimSpace(stringValue(part["type"])) != "output_text" && partHasDurableSemanticOutput(part)
+	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		part, _ := evt.Data["part"].(map[string]any)
+		return hasNonWhitespaceEventText(part, "thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text")
+	case "response.output_item.added", "response.output_item.done":
+		item, _ := evt.Data["item"].(map[string]any)
+		return itemHasDurableSemanticOutput(item)
+	default:
+		return true
+	}
+}
+
+func hasNonWhitespaceEventText(data map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if strings.TrimSpace(stringValue(data[key])) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func partHasDurableSemanticOutput(part map[string]any) bool {
+	if part == nil {
+		return false
+	}
+	if strings.TrimSpace(stringValue(part["type"])) != "output_text" {
+		return true
+	}
+	return hasNonWhitespaceEventText(part, "text")
+}
+
+func itemHasDurableSemanticOutput(item map[string]any) bool {
+	if item == nil {
+		return false
+	}
+	itemType := strings.TrimSpace(stringValue(item["type"]))
+	switch itemType {
+	case "message", "reasoning":
+		if strings.TrimSpace(stringValue(item["encrypted_content"])) != "" {
+			return true
+		}
+		if hasNonWhitespaceEventText(item, "text", "content", "reasoning", "reasoning_content", "thinking") {
+			return true
+		}
+		for _, rawPart := range eventParts(item["summary"]) {
+			if hasNonWhitespaceEventText(rawPart, "thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text") {
+				return true
+			}
+		}
+		for _, rawPart := range eventParts(item["content"]) {
+			if partHasDurableSemanticOutput(rawPart) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
+}
+
+func eventParts(value any) []map[string]any {
+	parts, _ := value.([]any)
+	result := make([]map[string]any, 0, len(parts))
+	for _, rawPart := range parts {
+		part, _ := rawPart.(map[string]any)
+		if part != nil {
+			result = append(result, part)
+		}
+	}
+	return result
 }
 
 func contextOverflowFromEvent(evt Event) *PreOutputContextOverflow {

@@ -9,7 +9,7 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
-func TestAnthropicProjectionDropsBoundaryBlankTextDeltasAroundRealText(t *testing.T) {
+func TestAnthropicProjectionDropsOnlyTerminalTextLineEndings(t *testing.T) {
 	rec := httptest.NewRecorder()
 	flusher := flushRecorder{rec}
 	state := &anthropicStreamState{}
@@ -23,8 +23,8 @@ func TestAnthropicProjectionDropsBoundaryBlankTextDeltasAroundRealText(t *testin
 		t.Fatalf("writeAnthropicEvent(completed): %v", err)
 	}
 
-	if got := strings.Join(anthropicTextDeltasFromSSE(t, rec.Body.String()), ""); got != "12345678" {
-		t.Fatalf("expected boundary blank deltas to be omitted, got %q; body=%s", got, rec.Body.String())
+	if got := strings.Join(anthropicTextDeltasFromSSE(t, rec.Body.String()), ""); got != "\n12345678" {
+		t.Fatalf("expected leading line ending preserved and only terminal line endings omitted, got %q; body=%s", got, rec.Body.String())
 	}
 }
 
@@ -47,7 +47,7 @@ func TestAnthropicProjectionPreservesMiddleBlankTextDeltas(t *testing.T) {
 	}
 }
 
-func TestAnthropicProjectionPreservesIntentionallyBlankOnlyText(t *testing.T) {
+func TestAnthropicProjectionDropsBlankOnlyTerminalText(t *testing.T) {
 	rec := httptest.NewRecorder()
 	flusher := flushRecorder{rec}
 	state := &anthropicStreamState{}
@@ -61,8 +61,8 @@ func TestAnthropicProjectionPreservesIntentionallyBlankOnlyText(t *testing.T) {
 		t.Fatalf("writeAnthropicEvent(completed): %v", err)
 	}
 
-	if got := strings.Join(anthropicTextDeltasFromSSE(t, rec.Body.String()), ""); got != "\n\n\n" {
-		t.Fatalf("expected blank-only text to be preserved, got %q; body=%s", got, rec.Body.String())
+	if got := strings.Join(anthropicTextDeltasFromSSE(t, rec.Body.String()), ""); got != "" {
+		t.Fatalf("expected blank-only terminal text to be omitted, got %q; body=%s", got, rec.Body.String())
 	}
 }
 

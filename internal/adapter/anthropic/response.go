@@ -6,9 +6,11 @@ import (
 	"openai-compat-proxy/internal/aggregate"
 	reasoningtext "openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/syntaxrepair"
+	"openai-compat-proxy/internal/texttail"
 )
 
 func BuildResponse(result aggregate.Result, requestID string, modelName string) map[string]any {
+	visibleText := texttail.TrimTrailingCRLF(result.Text)
 	content := make([]map[string]any, 0, len(result.ToolCalls)+1)
 	if len(result.ReasoningBlocks) > 0 {
 		content = append(content, cloneReasoningBlocks(result.ReasoningBlocks)...)
@@ -21,7 +23,7 @@ func BuildResponse(result aggregate.Result, requestID string, modelName string) 
 	if result.Text != "" {
 		content = append(content, map[string]any{
 			"type": "text",
-			"text": result.Text,
+			"text": visibleText,
 		})
 	} else if result.Refusal != "" {
 		content = append(content, map[string]any{
@@ -41,7 +43,7 @@ func BuildResponse(result aggregate.Result, requestID string, modelName string) 
 	} else if len(content) == 0 {
 		content = append(content, map[string]any{
 			"type": "text",
-			"text": result.Text,
+			"text": visibleText,
 		})
 	}
 	stopReason := anthropicStopReason(result)

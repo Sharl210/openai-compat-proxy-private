@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,8 +57,7 @@ type anthropicStreamState struct {
 	textStarted       bool
 	textIndex         int
 	textStopped       bool
-	textRealSeen      bool
-	pendingTextBlank  string
+	textTail          visibleTextTailBuffer
 	thinkingStarted   bool
 	thinkingStopped   bool
 	signatureSent     bool
@@ -83,31 +83,46 @@ type anthropicStreamState struct {
 }
 
 type responsesStreamState struct {
-	createdSent          bool
-	createdResponseID    string
-	modelName            string
-	textStarted          bool
-	realReasoningSeen    bool
-	planningSent         bool
-	toolStatusSent       bool
-	reasoningStarted     bool
-	reasoningClosed      bool
-	realReasoningItemID  string
-	realReasoningSummary strings.Builder
-	formattedReasoning   map[string]*strings.Builder
-	syntheticInjected    bool
-	syntheticSummary     strings.Builder
-	toolItems            map[string]*responsesToolItemState
-	toolIDAliases        map[string]string
-	toolOrder            []string
-	outputItems          map[string]map[string]any
-	outputItemOrder      []string
-	textItemStarted      bool
-	textOutput           strings.Builder
-	upstreamEndpointType string
-	requestID            string
-	terminalSeen         bool
-	terminalFailure      *aggregate.TerminalFailureError
+	createdSent                bool
+	createdResponseID          string
+	modelName                  string
+	textStarted                bool
+	realReasoningSeen          bool
+	planningSent               bool
+	toolStatusSent             bool
+	syntheticReasoningStarted  bool
+	syntheticReasoningClosed   bool
+	realReasoningStarted       bool
+	realReasoningClosed        bool
+	realReasoningItemID        string
+	realReasoningSummary       strings.Builder
+	reasoningSummaryParts      map[string]map[int]*strings.Builder
+	reasoningSummaryPartClosed map[string]map[int]bool
+	reasoningSummaryTextDone   map[string]map[int]bool
+	activeReasoningItems       map[string]bool
+	reasoningItemsClosed       map[string]bool
+	formattedReasoning         map[string]*strings.Builder
+	syntheticInjected          bool
+	syntheticSummary           strings.Builder
+	toolItems                  map[string]*responsesToolItemState
+	toolIDAliases              map[string]string
+	toolOrder                  []string
+	outputItems                map[string]map[string]any
+	outputItemOrder            []string
+	textItemStarted            bool
+	textOutputs                map[responseTextTailKey]*strings.Builder
+	textTailBuffers            map[responseTextTailKey]*visibleTextTailBuffer
+	completedTextItems         map[string]bool
+	completedTextParts         map[responseTextTailKey]bool
+	upstreamEndpointType       string
+	requestID                  string
+	terminalSeen               bool
+	terminalFailure            *aggregate.TerminalFailureError
+}
+
+type responseTextTailKey struct {
+	itemID       string
+	contentIndex int
 }
 
 type responsesToolItemState struct {
@@ -145,11 +160,21 @@ type responseProjectionState struct {
 	outputItems                map[string]map[string]any
 	outputItemOrder            []string
 	textItemStarted            bool
-	textOutput                 *strings.Builder
-	reasoningStarted           bool
-	reasoningClosed            bool
+	textOutputs                map[responseTextTailKey]*strings.Builder
+	textTailBuffers            map[responseTextTailKey]*visibleTextTailBuffer
+	completedTextItems         map[string]bool
+	completedTextParts         map[responseTextTailKey]bool
+	syntheticReasoningStarted  bool
+	syntheticReasoningClosed   bool
+	realReasoningStarted       bool
+	realReasoningClosed        bool
 	realReasoningItemID        string
 	realReasoningSummary       *strings.Builder
+	reasoningSummaryParts      map[string]map[int]*strings.Builder
+	reasoningSummaryPartClosed map[string]map[int]bool
+	reasoningSummaryTextDone   map[string]map[int]bool
+	activeReasoningItems       map[string]bool
+	reasoningItemsClosed       map[string]bool
 	formattedReasoning         map[string]*strings.Builder
 	syntheticInjected          bool
 	realReasoningSeen          bool
@@ -173,11 +198,21 @@ type responseEventWriterHelper struct {
 	outputItems                map[string]map[string]any
 	outputItemOrder            []string
 	textItemStarted            bool
-	textOutput                 *strings.Builder
-	reasoningStarted           bool
-	reasoningClosed            bool
+	textOutputs                map[responseTextTailKey]*strings.Builder
+	textTailBuffers            map[responseTextTailKey]*visibleTextTailBuffer
+	completedTextItems         map[string]bool
+	completedTextParts         map[responseTextTailKey]bool
+	syntheticReasoningStarted  bool
+	syntheticReasoningClosed   bool
+	realReasoningStarted       bool
+	realReasoningClosed        bool
 	realReasoningItemID        string
 	realReasoningSummary       *strings.Builder
+	reasoningSummaryParts      map[string]map[int]*strings.Builder
+	reasoningSummaryPartClosed map[string]map[int]bool
+	reasoningSummaryTextDone   map[string]map[int]bool
+	activeReasoningItems       map[string]bool
+	reasoningItemsClosed       map[string]bool
 	formattedReasoning         map[string]*strings.Builder
 	syntheticInjected          bool
 	realReasoningSeen          bool
@@ -277,6 +312,15 @@ func (h *responseEventWriterHelper) ensureOutputItems() {
 	}
 }
 
+func (h *responseEventWriterHelper) ensureReasoningItemStates() {
+	if h.activeReasoningItems == nil {
+		h.activeReasoningItems = map[string]bool{}
+	}
+	if h.reasoningItemsClosed == nil {
+		h.reasoningItemsClosed = map[string]bool{}
+	}
+}
+
 func (h *responseEventWriterHelper) canonicalToolItemID(itemID string) string {
 	if itemID == "" {
 		return itemID
@@ -340,6 +384,9 @@ func (h *responseEventWriterHelper) ensureCreatedEvent() {
 }
 
 func (h *responseEventWriterHelper) currentResponseID() string {
+	if h.createdResponseID != "" {
+		return h.createdResponseID
+	}
 	for _, itemID := range h.toolOrder {
 		toolState := h.toolItems[itemID]
 		if toolState == nil || toolState.item == nil {
@@ -425,10 +472,10 @@ func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any
 	snapshot := h.responseOutputSnapshot()
 	rawItems, _ := rawOutput.([]any)
 	if len(rawItems) == 0 {
-		return snapshot
+		return trimResponseOutputTextLineEndings(snapshot)
 	}
 	if len(snapshot) == 0 {
-		return cloneJSONValueForResponse(rawItems).([]any)
+		return trimResponseOutputTextLineEndings(cloneJSONValueForResponse(rawItems).([]any))
 	}
 
 	completeByID := make(map[string]map[string]any, len(snapshot))
@@ -470,7 +517,27 @@ func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any
 		}
 		merged = append(merged, combined)
 	}
-	return merged
+	return trimResponseOutputTextLineEndings(merged)
+}
+
+func trimResponseOutputTextLineEndings(output []any) []any {
+	trimmed := cloneJSONValueForResponse(output).([]any)
+	for itemIndex := len(trimmed) - 1; itemIndex >= 0; itemIndex-- {
+		item, _ := trimmed[itemIndex].(map[string]any)
+		if stringValue(item["type"]) != "message" {
+			continue
+		}
+		content, _ := item["content"].([]any)
+		for contentIndex := len(content) - 1; contentIndex >= 0; contentIndex-- {
+			part, _ := content[contentIndex].(map[string]any)
+			if stringValue(part["type"]) != "output_text" {
+				continue
+			}
+			part["text"] = trimTrailingTextLineEndings(stringValue(part["text"]))
+			return trimmed
+		}
+	}
+	return trimmed
 }
 
 func (h *responseEventWriterHelper) outputItemEventData(item map[string]any, data map[string]any) map[string]any {
@@ -534,13 +601,34 @@ func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map
 		h.addEvent("response.output_item.added", h.outputItemEventData(item, map[string]any{"item": item}))
 		h.textItemStarted = true
 	}
+	contentIndex, ok := intValue(data["content_index"])
+	if !ok {
+		contentIndex = 0
+		data["content_index"] = contentIndex
+	}
+	key := responseTextTailKey{itemID: itemID, contentIndex: contentIndex}
 	if delta := stringValue(data["delta"]); delta != "" {
-		if h.textOutput == nil {
-			h.textOutput = &strings.Builder{}
+		if h.textTailBuffers == nil {
+			h.textTailBuffers = map[responseTextTailKey]*visibleTextTailBuffer{}
 		}
-		h.textOutput.WriteString(delta)
+		buffer := h.textTailBuffers[key]
+		if buffer == nil {
+			buffer = &visibleTextTailBuffer{}
+			h.textTailBuffers[key] = buffer
+		}
+		delta = buffer.Push(delta)
+		data["delta"] = delta
+		if h.textOutputs == nil {
+			h.textOutputs = map[responseTextTailKey]*strings.Builder{}
+		}
+		output := h.textOutputs[key]
+		if output == nil {
+			output = &strings.Builder{}
+			h.textOutputs[key] = output
+		}
+		output.WriteString(delta)
 		if item := h.outputItems[itemID]; item != nil {
-			item["content"] = []any{map[string]any{"type": "output_text", "text": h.textOutput.String()}}
+			setResponseOutputText(item, contentIndex, output.String())
 		}
 	}
 	if _, exists := data["output_index"]; !exists {
@@ -548,10 +636,156 @@ func (h *responseEventWriterHelper) outputTextDeltaData(data map[string]any) map
 			data["output_index"] = outputIndex
 		}
 	}
-	if _, exists := data["content_index"]; !exists {
-		data["content_index"] = 0
-	}
 	return data
+}
+
+func setResponseOutputText(item map[string]any, contentIndex int, text string) {
+	content, _ := item["content"].([]any)
+	for len(content) <= contentIndex {
+		content = append(content, map[string]any{"type": "output_text", "text": ""})
+	}
+	part, _ := content[contentIndex].(map[string]any)
+	if part == nil || stringValue(part["type"]) != "output_text" {
+		part = map[string]any{"type": "output_text"}
+		content[contentIndex] = part
+	}
+	part["text"] = text
+	item["content"] = content
+}
+
+func (h *responseEventWriterHelper) flushTextTailBuffer(key responseTextTailKey) {
+	buffer := h.textTailBuffers[key]
+	if buffer == nil || buffer.pending == "" {
+		return
+	}
+	delta := buffer.pending
+	buffer.Discard()
+	if output := h.textOutputs[key]; output != nil {
+		output.WriteString(delta)
+	}
+	if item := h.outputItems[key.itemID]; item != nil {
+		if output := h.textOutputs[key]; output != nil {
+			setResponseOutputText(item, key.contentIndex, output.String())
+		}
+	}
+	data := map[string]any{"item_id": key.itemID, "content_index": key.contentIndex, "delta": delta}
+	if outputIndex, ok := h.outputIndexForItem(key.itemID); ok {
+		data["output_index"] = outputIndex
+	}
+	h.addEvent("response.output_text.delta", data)
+}
+
+func (h *responseEventWriterHelper) completedTextTailKeys(excludeItemID string) []responseTextTailKey {
+	keys := make([]responseTextTailKey, 0)
+	for key, buffer := range h.textTailBuffers {
+		if key.itemID == excludeItemID || buffer == nil || buffer.pending == "" || !h.completedTextItems[key.itemID] {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(left, right int) bool {
+		leftOutputIndex, leftOK := h.outputIndexForItem(keys[left].itemID)
+		rightOutputIndex, rightOK := h.outputIndexForItem(keys[right].itemID)
+		if leftOK && rightOK && leftOutputIndex != rightOutputIndex {
+			return leftOutputIndex < rightOutputIndex
+		}
+		if keys[left].itemID != keys[right].itemID {
+			return keys[left].itemID < keys[right].itemID
+		}
+		return keys[left].contentIndex < keys[right].contentIndex
+	})
+	return keys
+}
+
+func (h *responseEventWriterHelper) flushCompletedTextTailBuffers(excludeItemID string) {
+	for _, key := range h.completedTextTailKeys(excludeItemID) {
+		h.flushTextTailBuffer(key)
+	}
+}
+
+func (h *responseEventWriterHelper) flushCompletedTextTailBuffersExcept(exclude responseTextTailKey) {
+	for _, key := range h.completedTextTailKeys("") {
+		if key == exclude {
+			continue
+		}
+		h.flushTextTailBuffer(key)
+	}
+}
+
+func (h *responseEventWriterHelper) markTextPartCompleted(itemID string, contentIndex int) {
+	if itemID == "" {
+		return
+	}
+	if h.completedTextParts == nil {
+		h.completedTextParts = map[responseTextTailKey]bool{}
+	}
+	h.completedTextParts[responseTextTailKey{itemID: itemID, contentIndex: contentIndex}] = true
+}
+
+func (h *responseEventWriterHelper) flushCompletedTextParts(exclude responseTextTailKey) {
+	keys := make([]responseTextTailKey, 0)
+	for key := range h.completedTextParts {
+		if key == exclude {
+			continue
+		}
+		if buffer := h.textTailBuffers[key]; buffer != nil && buffer.pending != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(left, right int) bool {
+		leftOutputIndex, leftOK := h.outputIndexForItem(keys[left].itemID)
+		rightOutputIndex, rightOK := h.outputIndexForItem(keys[right].itemID)
+		if leftOK && rightOK && leftOutputIndex != rightOutputIndex {
+			return leftOutputIndex < rightOutputIndex
+		}
+		if keys[left].itemID != keys[right].itemID {
+			return keys[left].itemID < keys[right].itemID
+		}
+		return keys[left].contentIndex < keys[right].contentIndex
+	})
+	for _, key := range keys {
+		h.flushTextTailBuffer(key)
+	}
+}
+
+func (h *responseEventWriterHelper) terminalVisibleTextTailKey() (responseTextTailKey, bool) {
+	for outputIndex := len(h.outputItemOrder) - 1; outputIndex >= 0; outputIndex-- {
+		itemID := h.outputItemOrder[outputIndex]
+		item := h.outputItems[itemID]
+		if stringValue(item["type"]) != "message" {
+			continue
+		}
+		var selected responseTextTailKey
+		found := false
+		for key, buffer := range h.textTailBuffers {
+			if h.canonicalToolItemID(key.itemID) != itemID || buffer == nil || buffer.pending == "" {
+				continue
+			}
+			if !found || key.contentIndex > selected.contentIndex {
+				selected, found = key, true
+			}
+		}
+		return selected, found
+	}
+	return responseTextTailKey{}, false
+}
+
+func (h *responseEventWriterHelper) flushSuccessfulTextTailBuffers() {
+	terminalKey, hasTerminalKey := h.terminalVisibleTextTailKey()
+	if !hasTerminalKey {
+		h.flushCompletedTextTailBuffers("")
+		h.flushCompletedTextParts(responseTextTailKey{})
+		return
+	}
+	h.flushCompletedTextTailBuffersExcept(terminalKey)
+	h.flushCompletedTextParts(terminalKey)
+	h.textTailBuffers[terminalKey].Discard()
+}
+
+func (h *responseEventWriterHelper) discardTextTailBuffers() {
+	for key := range h.textTailBuffers {
+		delete(h.textTailBuffers, key)
+	}
 }
 
 func stripStreamingTextSnapshots(event string, data map[string]any) map[string]any {
@@ -658,23 +892,26 @@ func (h *responseEventWriterHelper) shouldBufferCompatToolArgs() bool {
 
 func newResponsesStreamState(requestID, upstreamEndpointType string) *responsesStreamState {
 	return &responsesStreamState{
-		toolItems:            map[string]*responsesToolItemState{},
-		toolIDAliases:        map[string]string{},
-		outputItems:          map[string]map[string]any{},
-		outputItemOrder:      []string{},
-		upstreamEndpointType: upstreamEndpointType,
-		requestID:            requestID,
+		toolItems:                  map[string]*responsesToolItemState{},
+		toolIDAliases:              map[string]string{},
+		outputItems:                map[string]map[string]any{},
+		outputItemOrder:            []string{},
+		textOutputs:                map[responseTextTailKey]*strings.Builder{},
+		textTailBuffers:            map[responseTextTailKey]*visibleTextTailBuffer{},
+		completedTextItems:         map[string]bool{},
+		completedTextParts:         map[responseTextTailKey]bool{},
+		reasoningSummaryParts:      map[string]map[int]*strings.Builder{},
+		reasoningSummaryPartClosed: map[string]map[int]bool{},
+		reasoningSummaryTextDone:   map[string]map[int]bool{},
+		activeReasoningItems:       map[string]bool{},
+		reasoningItemsClosed:       map[string]bool{},
+		upstreamEndpointType:       upstreamEndpointType,
+		requestID:                  requestID,
 	}
 }
 
 func cloneResponsesStreamState(initialState *responsesStreamState, requestID, upstreamEndpointType string) *responsesStreamState {
-	state := &responsesStreamState{
-		toolItems:            map[string]*responsesToolItemState{},
-		toolIDAliases:        map[string]string{},
-		outputItems:          map[string]map[string]any{},
-		upstreamEndpointType: upstreamEndpointType,
-		requestID:            requestID,
-	}
+	state := newResponsesStreamState(requestID, upstreamEndpointType)
 	if initialState == nil {
 		return state
 	}
@@ -684,9 +921,16 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state.realReasoningSeen = initialState.realReasoningSeen
 	state.planningSent = initialState.planningSent
 	state.toolStatusSent = initialState.toolStatusSent
-	state.reasoningStarted = initialState.reasoningStarted
-	state.reasoningClosed = initialState.reasoningClosed
+	state.syntheticReasoningStarted = initialState.syntheticReasoningStarted
+	state.syntheticReasoningClosed = initialState.syntheticReasoningClosed
+	state.realReasoningStarted = initialState.realReasoningStarted
+	state.realReasoningClosed = initialState.realReasoningClosed
 	state.realReasoningItemID = initialState.realReasoningItemID
+	state.reasoningSummaryParts = initialState.reasoningSummaryParts
+	state.reasoningSummaryPartClosed = initialState.reasoningSummaryPartClosed
+	state.reasoningSummaryTextDone = initialState.reasoningSummaryTextDone
+	state.activeReasoningItems = initialState.activeReasoningItems
+	state.reasoningItemsClosed = initialState.reasoningItemsClosed
 	state.formattedReasoning = initialState.formattedReasoning
 	state.syntheticInjected = initialState.syntheticInjected
 	state.toolItems = initialState.toolItems
@@ -695,6 +939,10 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	state.outputItems = initialState.outputItems
 	state.outputItemOrder = append([]string(nil), initialState.outputItemOrder...)
 	state.textItemStarted = initialState.textItemStarted
+	state.textOutputs = initialState.textOutputs
+	state.textTailBuffers = initialState.textTailBuffers
+	state.completedTextItems = initialState.completedTextItems
+	state.completedTextParts = initialState.completedTextParts
 	state.terminalSeen = initialState.terminalSeen
 	state.terminalFailure = initialState.terminalFailure
 	if summary := initialState.syntheticSummary.String(); summary != "" {
@@ -711,6 +959,33 @@ func cloneResponsesStreamState(initialState *responsesStreamState, requestID, up
 	}
 	if state.outputItems == nil {
 		state.outputItems = map[string]map[string]any{}
+	}
+	if state.reasoningSummaryParts == nil {
+		state.reasoningSummaryParts = map[string]map[int]*strings.Builder{}
+	}
+	if state.reasoningSummaryPartClosed == nil {
+		state.reasoningSummaryPartClosed = map[string]map[int]bool{}
+	}
+	if state.reasoningSummaryTextDone == nil {
+		state.reasoningSummaryTextDone = map[string]map[int]bool{}
+	}
+	if state.activeReasoningItems == nil {
+		state.activeReasoningItems = map[string]bool{}
+	}
+	if state.reasoningItemsClosed == nil {
+		state.reasoningItemsClosed = map[string]bool{}
+	}
+	if state.textTailBuffers == nil {
+		state.textTailBuffers = map[responseTextTailKey]*visibleTextTailBuffer{}
+	}
+	if state.textOutputs == nil {
+		state.textOutputs = map[responseTextTailKey]*strings.Builder{}
+	}
+	if state.completedTextItems == nil {
+		state.completedTextItems = map[string]bool{}
+	}
+	if state.completedTextParts == nil {
+		state.completedTextParts = map[responseTextTailKey]bool{}
 	}
 	if state.requestID == "" {
 		state.requestID = requestID
@@ -735,11 +1010,11 @@ func startResponsesSyntheticPrelude(w http.ResponseWriter, flusher http.Flusher,
 }
 
 func (h *responseEventWriterHelper) closeSyntheticReasoning() {
-	if !h.syntheticInjected || !h.reasoningStarted || h.reasoningClosed {
+	if !h.syntheticInjected || !h.syntheticReasoningStarted || h.syntheticReasoningClosed {
 		return
 	}
 	if h.downstreamType != "responses" {
-		h.reasoningClosed = true
+		h.syntheticReasoningClosed = true
 		return
 	}
 	item := map[string]any{
@@ -748,7 +1023,7 @@ func (h *responseEventWriterHelper) closeSyntheticReasoning() {
 		"summary": []any{},
 	}
 	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceSynthetic}))
-	h.reasoningClosed = true
+	h.syntheticReasoningClosed = true
 }
 
 func (h *responseEventWriterHelper) markRealReasoningSeen() {
@@ -760,36 +1035,288 @@ func (h *responseEventWriterHelper) markRealReasoningSeen() {
 }
 
 func (h *responseEventWriterHelper) ensureRealReasoningLifecycleStarted() {
-	if h.downstreamType != "responses" || h.reasoningStarted || h.syntheticInjected {
+	if h.downstreamType != "responses" || h.realReasoningStarted {
 		return
 	}
 	h.realReasoningItemID = "rs_chat_reasoning"
-	item := map[string]any{
-		"id":      h.realReasoningItemID,
-		"type":    "reasoning",
-		"summary": []any{},
-	}
-	h.addEvent("response.output_item.added", h.outputItemEventData(item, map[string]any{"item": item}))
-	h.reasoningStarted = true
+	h.ensureReasoningLifecycleStarted(h.realReasoningItemID, -1, nil)
+	h.realReasoningStarted = true
 }
 
 func (h *responseEventWriterHelper) closeRealReasoningLifecycle() {
-	if h.downstreamType != "responses" || h.realReasoningItemID == "" || h.reasoningClosed {
+	if h.downstreamType != "responses" || h.realReasoningItemID == "" || h.realReasoningClosed {
 		return
 	}
-	summary := []any{}
-	if h.realReasoningSummary != nil {
+	h.closeReasoningLifecycle(h.realReasoningItemID)
+	h.realReasoningClosed = true
+}
+
+func (h *responseEventWriterHelper) closeAllReasoningLifecycles() {
+	if h.downstreamType != "responses" {
+		return
+	}
+	itemIDs := make([]string, 0, len(h.activeReasoningItems))
+	for itemID := range h.activeReasoningItems {
+		itemIDs = append(itemIDs, itemID)
+	}
+	sort.Slice(itemIDs, func(left, right int) bool {
+		leftIndex, leftOK := h.outputIndexForItem(itemIDs[left])
+		rightIndex, rightOK := h.outputIndexForItem(itemIDs[right])
+		if leftOK && rightOK && leftIndex != rightIndex {
+			return leftIndex < rightIndex
+		}
+		return itemIDs[left] < itemIDs[right]
+	})
+	for _, itemID := range itemIDs {
+		h.closeReasoningLifecycle(itemID)
+	}
+	if h.realReasoningItemID != "" {
+		h.realReasoningClosed = true
+	}
+}
+
+func (h *responseEventWriterHelper) closeReasoningLifecycle(itemID string) {
+	if h.downstreamType != "responses" || itemID == "" || !h.activeReasoningItems[itemID] {
+		return
+	}
+	outputIndex, _ := h.outputIndexForItem(itemID)
+	summary := h.reasoningSummaryPartsSnapshot(itemID)
+	h.closeAllReasoningSummaryParts(itemID, outputIndex)
+	if len(summary) == 0 && h.realReasoningSummary != nil && itemID == h.realReasoningItemID {
 		if text := h.realReasoningSummary.String(); text != "" {
-			summary = append(summary, map[string]any{"type": "summary_text", "text": text})
+			summary = []any{map[string]any{"type": "summary_text", "text": text}}
 		}
 	}
-	item := map[string]any{
-		"id":      h.realReasoningItemID,
-		"type":    "reasoning",
-		"summary": summary,
+	item := h.outputItems[h.canonicalToolItemID(itemID)]
+	if item == nil {
+		item = map[string]any{"id": itemID, "type": "reasoning", "summary": []any{}}
+	} else {
+		item = cloneJSONValueForResponse(item).(map[string]any)
 	}
+	if len(summary) > 0 {
+		item["summary"] = summary
+	}
+	item["id"] = itemID
+	item["type"] = "reasoning"
 	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}))
-	h.reasoningClosed = true
+	delete(h.activeReasoningItems, itemID)
+	if h.reasoningItemsClosed == nil {
+		h.reasoningItemsClosed = map[string]bool{}
+	}
+	h.reasoningItemsClosed[itemID] = true
+}
+
+func (h *responseEventWriterHelper) ensureReasoningLifecycleStarted(itemID string, upstreamOutputIndex int, sourceItem map[string]any) int {
+	if h.downstreamType != "responses" || itemID == "" {
+		return 0
+	}
+	if outputIndex, ok := h.outputIndexForItem(itemID); ok {
+		if h.reasoningItemsClosed != nil {
+			delete(h.reasoningItemsClosed, itemID)
+		}
+		if h.activeReasoningItems == nil {
+			h.activeReasoningItems = map[string]bool{}
+		}
+		h.activeReasoningItems[itemID] = true
+		return outputIndex
+	}
+	item := map[string]any{"id": itemID, "type": "reasoning", "summary": []any{}}
+	for key, value := range sourceItem {
+		if key == "summary" {
+			continue
+		}
+		item[key] = cloneJSONValueForResponse(value)
+	}
+	item["id"] = itemID
+	item["type"] = "reasoning"
+	item["summary"] = []any{}
+	data := map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}
+	if upstreamOutputIndex >= 0 {
+		data["output_index"] = upstreamOutputIndex
+	}
+	h.addEvent("response.output_item.added", h.outputItemEventData(item, data))
+	if h.activeReasoningItems == nil {
+		h.activeReasoningItems = map[string]bool{}
+	}
+	h.activeReasoningItems[itemID] = true
+	outputIndex, _ := h.outputIndexForItem(itemID)
+	return outputIndex
+}
+
+func (h *responseEventWriterHelper) ensureReasoningSummaryPartStarted(itemID string, outputIndex, summaryIndex int) {
+	if h.downstreamType != "responses" || itemID == "" {
+		return
+	}
+	if h.reasoningSummaryPartStarted(itemID, summaryIndex) {
+		return
+	}
+	h.markReasoningSummaryPartStarted(itemID, summaryIndex)
+	h.addEvent("response.reasoning_summary_part.added", map[string]any{
+		"item_id":                            itemID,
+		"output_index":                       outputIndex,
+		"summary_index":                      summaryIndex,
+		"part":                               map[string]any{"type": "summary_text", "text": ""},
+		aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+	})
+}
+
+func (h *responseEventWriterHelper) reasoningSummaryPartStarted(itemID string, summaryIndex int) bool {
+	return h.reasoningSummaryParts != nil && h.reasoningSummaryParts[itemID][summaryIndex] != nil
+}
+
+func (h *responseEventWriterHelper) markReasoningSummaryPartStarted(itemID string, summaryIndex int) {
+	if h.reasoningSummaryParts == nil {
+		h.reasoningSummaryParts = map[string]map[int]*strings.Builder{}
+	}
+	parts := h.reasoningSummaryParts[itemID]
+	if parts == nil {
+		parts = map[int]*strings.Builder{}
+		h.reasoningSummaryParts[itemID] = parts
+	}
+	parts[summaryIndex] = &strings.Builder{}
+	if closed := h.reasoningSummaryPartClosed[itemID]; closed != nil {
+		delete(closed, summaryIndex)
+	}
+	if done := h.reasoningSummaryTextDone[itemID]; done != nil {
+		delete(done, summaryIndex)
+	}
+}
+
+func (h *responseEventWriterHelper) markReasoningSummaryPartClosed(itemID string, summaryIndex int) {
+	if h.reasoningSummaryPartClosed == nil {
+		h.reasoningSummaryPartClosed = map[string]map[int]bool{}
+	}
+	closed := h.reasoningSummaryPartClosed[itemID]
+	if closed == nil {
+		closed = map[int]bool{}
+		h.reasoningSummaryPartClosed[itemID] = closed
+	}
+	closed[summaryIndex] = true
+}
+
+func (h *responseEventWriterHelper) closeReasoningSummaryPart(itemID string, outputIndex, summaryIndex int) {
+	if h.downstreamType != "responses" || itemID == "" || !h.reasoningSummaryPartStarted(itemID, summaryIndex) {
+		return
+	}
+	text := h.reasoningSummaryPartText(itemID, summaryIndex)
+	if text == "" && h.realReasoningSummary != nil && itemID == h.realReasoningItemID {
+		text = h.realReasoningSummary.String()
+	}
+	h.closeReasoningSummaryPartWithText(itemID, outputIndex, summaryIndex, text)
+}
+
+func (h *responseEventWriterHelper) closeAllReasoningSummaryParts(itemID string, outputIndex int) {
+	parts := h.reasoningSummaryParts[itemID]
+	if len(parts) == 0 {
+		return
+	}
+	indices := make([]int, 0, len(parts))
+	for summaryIndex := range parts {
+		indices = append(indices, summaryIndex)
+	}
+	sort.Ints(indices)
+	for _, summaryIndex := range indices {
+		h.closeReasoningSummaryPart(itemID, outputIndex, summaryIndex)
+	}
+}
+
+func (h *responseEventWriterHelper) reasoningSummaryPartsSnapshot(itemID string) []any {
+	parts := h.reasoningSummaryParts[itemID]
+	if len(parts) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(parts))
+	for summaryIndex := range parts {
+		indices = append(indices, summaryIndex)
+	}
+	sort.Ints(indices)
+	summary := make([]any, 0, len(indices))
+	for _, summaryIndex := range indices {
+		text := h.reasoningSummaryPartText(itemID, summaryIndex)
+		summary = append(summary, map[string]any{"type": "summary_text", "text": text})
+	}
+	return summary
+}
+
+func (h *responseEventWriterHelper) appendReasoningSummaryPartText(itemID string, summaryIndex int, text string) {
+	if text == "" || !h.reasoningSummaryPartStarted(itemID, summaryIndex) {
+		return
+	}
+	h.reasoningSummaryParts[itemID][summaryIndex].WriteString(text)
+}
+
+func (h *responseEventWriterHelper) setReasoningSummaryPartText(itemID string, summaryIndex int, text string) {
+	if !h.reasoningSummaryPartStarted(itemID, summaryIndex) {
+		return
+	}
+	builder := h.reasoningSummaryParts[itemID][summaryIndex]
+	builder.Reset()
+	builder.WriteString(text)
+}
+
+func (h *responseEventWriterHelper) reasoningSummaryPartText(itemID string, summaryIndex int) string {
+	if !h.reasoningSummaryPartStarted(itemID, summaryIndex) {
+		return ""
+	}
+	return h.reasoningSummaryParts[itemID][summaryIndex].String()
+}
+
+func (h *responseEventWriterHelper) closeReasoningSummaryPartWithText(itemID string, outputIndex, summaryIndex int, text string) {
+	if h.downstreamType != "responses" || itemID == "" || !h.reasoningSummaryPartStarted(itemID, summaryIndex) {
+		return
+	}
+	if h.reasoningSummaryPartClosedFor(itemID, summaryIndex) {
+		return
+	}
+	if !h.reasoningSummaryTextDoneFor(itemID, summaryIndex) {
+		h.addEvent("response.reasoning_summary_text.done", map[string]any{
+			"item_id":                            itemID,
+			"output_index":                       outputIndex,
+			"summary_index":                      summaryIndex,
+			"text":                               text,
+			aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+		})
+		h.markReasoningSummaryTextDone(itemID, summaryIndex)
+	}
+	if !h.reasoningSummaryPartClosedFor(itemID, summaryIndex) {
+		h.addEvent("response.reasoning_summary_part.done", map[string]any{
+			"item_id":                            itemID,
+			"output_index":                       outputIndex,
+			"summary_index":                      summaryIndex,
+			"part":                               map[string]any{"type": "summary_text", "text": text},
+			aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+		})
+	}
+	h.markReasoningSummaryPartClosed(itemID, summaryIndex)
+}
+
+func (h *responseEventWriterHelper) reasoningSummaryPartClosedFor(itemID string, summaryIndex int) bool {
+	return h.reasoningSummaryPartClosed != nil && h.reasoningSummaryPartClosed[itemID][summaryIndex]
+}
+
+func (h *responseEventWriterHelper) reasoningSummaryTextDoneFor(itemID string, summaryIndex int) bool {
+	return h.reasoningSummaryTextDone != nil && h.reasoningSummaryTextDone[itemID][summaryIndex]
+}
+
+func (h *responseEventWriterHelper) markReasoningSummaryTextDone(itemID string, summaryIndex int) {
+	if h.reasoningSummaryTextDone == nil {
+		h.reasoningSummaryTextDone = map[string]map[int]bool{}
+	}
+	done := h.reasoningSummaryTextDone[itemID]
+	if done == nil {
+		done = map[int]bool{}
+		h.reasoningSummaryTextDone[itemID] = done
+	}
+	done[summaryIndex] = true
+}
+
+func (h *responseEventWriterHelper) mergeStoredReasoningSummary(itemID string, item map[string]any) {
+	if reasoningSummaryFromItem(item) != "" {
+		return
+	}
+	if summary := h.reasoningSummaryPartsSnapshot(itemID); len(summary) > 0 {
+		item["summary"] = summary
+	}
 }
 
 func (h *responseEventWriterHelper) beginCompactionLifecycle() {
@@ -847,6 +1374,44 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		if itemType == "reasoning" {
 			item = reasoningtext.FormatBlock(item)
 			evt.Data["item"] = item
+			itemID := responseToolItemStateID(item)
+			upstreamOutputIndex, hasUpstreamOutputIndex := intValue(evt.Data["output_index"])
+			if !hasUpstreamOutputIndex {
+				upstreamOutputIndex = -1
+			}
+			if h.downstreamType == "responses" && itemID != "" && evt.Event == "response.output_item.added" {
+				evt.Data = h.outputItemEventData(item, evt.Data)
+				if h.activeReasoningItems == nil {
+					h.activeReasoningItems = map[string]bool{}
+				}
+				h.activeReasoningItems[itemID] = true
+			}
+			if h.downstreamType == "responses" && itemID != "" && evt.Event == "response.output_item.done" {
+				h.ensureReasoningItemStates()
+				if h.reasoningItemsClosed[itemID] {
+					result.skipWrite = true
+					return result, nil
+				}
+				if !h.activeReasoningItems[itemID] {
+					h.activeReasoningItems[itemID] = true
+				}
+				_, hadReasoningItem := h.outputIndexForItem(itemID)
+				outputIndex := h.ensureReasoningLifecycleStarted(itemID, upstreamOutputIndex, item)
+				if summary := reasoningSummaryFromItem(item); summary != "" && (!hadReasoningItem || h.reasoningSummaryPartStarted(itemID, 0)) {
+					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, 0)
+					h.closeReasoningSummaryPartWithText(itemID, outputIndex, 0, summary)
+				}
+				h.mergeStoredReasoningSummary(itemID, item)
+				if outputIndex, ok := h.outputIndexForItem(itemID); ok {
+					evt.Data["output_index"] = outputIndex
+				}
+				h.closeAllReasoningSummaryParts(itemID, outputIndex)
+				delete(h.activeReasoningItems, itemID)
+				h.reasoningItemsClosed[itemID] = true
+				if itemID == h.realReasoningItemID {
+					h.realReasoningClosed = true
+				}
+			}
 			if h.downstreamType == "responses" {
 				evt.Data = h.outputItemEventData(item, evt.Data)
 			}
@@ -863,6 +1428,16 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			evt.Data = h.outputItemEventData(item, evt.Data)
 		}
 		if itemType == "message" && h.downstreamType == "responses" {
+			if evt.Event == "response.output_item.done" {
+				itemID := responseToolItemStateID(item)
+				if itemID != "" {
+					if h.completedTextItems == nil {
+						h.completedTextItems = map[string]bool{}
+					}
+					h.completedTextItems[itemID] = true
+					h.flushCompletedTextTailBuffers(itemID)
+				}
+			}
 			evt.Data = h.outputItemEventData(item, evt.Data)
 		}
 		if isResponseToolCallItemType(itemType) {
@@ -917,8 +1492,26 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		h.closeRealReasoningLifecycle()
 		h.resetFormattedReasoning()
 		h.closeSyntheticReasoning()
-		h.reasoningStarted = true
 		evt.Data = h.outputTextDeltaData(evt.Data)
+		if stringValue(evt.Data["delta"]) == "" {
+			result.skipWrite = true
+		}
+	case "response.output_text.done", "response.content_part.done":
+		if h.downstreamType == "responses" {
+			itemID := stringValue(evt.Data["item_id"])
+			contentIndex, ok := intValue(evt.Data["content_index"])
+			if !ok {
+				contentIndex = 0
+			}
+			if evt.Event == "response.content_part.done" {
+				part, _ := evt.Data["part"].(map[string]any)
+				if stringValue(part["type"]) != "output_text" {
+					break
+				}
+			}
+			h.markTextPartCompleted(itemID, contentIndex)
+			h.flushCompletedTextParts(responseTextTailKey{itemID: itemID, contentIndex: contentIndex})
+		}
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
@@ -937,13 +1530,84 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				if h.realReasoningSummary != nil && h.realReasoningItemID != "" {
 					h.realReasoningSummary.WriteString(summary)
 				}
-				converted := map[string]any{"delta": summary, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}
+				outputIndex, _ := h.outputIndexForItem(h.realReasoningItemID)
+				h.ensureReasoningSummaryPartStarted(h.realReasoningItemID, outputIndex, 0)
+				h.appendReasoningSummaryPartText(h.realReasoningItemID, 0, summary)
+				converted := map[string]any{
+					"item_id":                            h.realReasoningItemID,
+					"output_index":                       outputIndex,
+					"summary_index":                      0,
+					"delta":                              summary,
+					aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+				}
 				if blocks, ok := evt.Data["blocks"]; ok {
 					converted["blocks"] = blocks
 				}
 				h.addEvent("response.reasoning_summary_text.delta", converted)
 			}
 			result.skipWrite = true
+		} else if h.downstreamType == "responses" {
+			itemID := stringValue(evt.Data["item_id"])
+			if itemID != "" {
+				upstreamOutputIndex, ok := intValue(evt.Data["output_index"])
+				if !ok {
+					upstreamOutputIndex = -1
+				}
+				outputIndex := h.ensureReasoningLifecycleStarted(itemID, upstreamOutputIndex, nil)
+				summaryIndex, ok := intValue(evt.Data["summary_index"])
+				if !ok {
+					summaryIndex = 0
+				}
+				switch evt.Event {
+				case "response.reasoning_summary_part.added":
+					h.markReasoningSummaryPartStarted(itemID, summaryIndex)
+				case "response.reasoning_summary_text.done":
+					if h.reasoningSummaryTextDoneFor(itemID, summaryIndex) {
+						result.skipWrite = true
+						return result, nil
+					}
+					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, summaryIndex)
+					if text := reasoningContentValue(evt.Data); text != "" {
+						h.setReasoningSummaryPartText(itemID, summaryIndex, text)
+					}
+					if text := h.reasoningSummaryPartText(itemID, summaryIndex); text != "" {
+						evt.Data["text"] = text
+					}
+					h.markReasoningSummaryTextDone(itemID, summaryIndex)
+				case "response.reasoning_summary_part.done":
+					if h.reasoningSummaryPartClosedFor(itemID, summaryIndex) {
+						result.skipWrite = true
+						return result, nil
+					}
+					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, summaryIndex)
+					if part, _ := evt.Data["part"].(map[string]any); part != nil {
+						if text := reasoningContentValue(part); text != "" {
+							h.setReasoningSummaryPartText(itemID, summaryIndex, text)
+						}
+					}
+					text := h.reasoningSummaryPartText(itemID, summaryIndex)
+					if !h.reasoningSummaryTextDoneFor(itemID, summaryIndex) {
+						h.addEvent("response.reasoning_summary_text.done", map[string]any{
+							"item_id":                            itemID,
+							"output_index":                       outputIndex,
+							"summary_index":                      summaryIndex,
+							"text":                               text,
+							aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+						})
+					}
+					evt.Data["part"] = map[string]any{"type": "summary_text", "text": text}
+					h.markReasoningSummaryTextDone(itemID, summaryIndex)
+					h.markReasoningSummaryPartClosed(itemID, summaryIndex)
+				default:
+					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, summaryIndex)
+					if evt.Event == "response.reasoning_summary_text.delta" {
+						h.appendReasoningSummaryPartText(itemID, summaryIndex, reasoningContentValue(evt.Data))
+					}
+				}
+				evt.Data["item_id"] = itemID
+				evt.Data["output_index"] = outputIndex
+				evt.Data["summary_index"] = summaryIndex
+			}
 		}
 	case "response.function_call_arguments.delta":
 		itemID, _ := evt.Data["item_id"].(string)
@@ -965,10 +1629,12 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		evt.Data = h.toolEventData(itemID, evt.Data)
 	case "response.completed":
 		h.terminalSeen = true
-		h.reasoningStarted = true
+		h.flushSuccessfulTextTailBuffers()
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
+		h.closeAllReasoningLifecycles()
+		h.closeSyntheticReasoning()
 		response, _ := evt.Data["response"].(map[string]any)
 		if response == nil {
 			response = map[string]any{}
@@ -1001,10 +1667,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				response["usage"] = cloneMap(usage)
 			}
 		}
-		h.closeRealReasoningLifecycle()
-		h.closeSyntheticReasoning()
 	case "response.done":
 		h.terminalSeen = true
+		h.flushSuccessfulTextTailBuffers()
+		h.closeAllReasoningLifecycles()
+		h.closeSyntheticReasoning()
 		// Mirror top-level usage into response object for compatibility
 		response, _ := evt.Data["response"].(map[string]any)
 		if response == nil {
@@ -1032,20 +1699,22 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				response["usage"] = cloneMap(usage)
 			}
 		}
-		h.closeRealReasoningLifecycle()
-		h.closeSyntheticReasoning()
 	case "error", "response.failed", "response.incomplete":
 		h.terminalSeen = true
-		h.reasoningStarted = true
+		h.flushCompletedTextTailBuffers("")
+		h.discardTextTailBuffers()
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
 		terminalFailure := terminalFailureFromEventData(evt.Data)
 		h.terminalFailure = terminalFailure
-		if evt.Event == "response.incomplete" || (evt.Event == "error" && contextoverflow.IsSignal(terminalFailure.HealthFlag, terminalFailure.Message)) {
+		if contextoverflow.IsSignal(terminalFailure.HealthFlag, terminalFailure.Message) {
+			evt.Event = "response.failed"
+			evt.Data = responsesTerminalFailureData(evt.Event, h.currentResponseID(), terminalFailure.HealthFlag, terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
+		} else if evt.Event == "response.incomplete" {
 			evt.Event = responsesTerminalFailureEvent(terminalFailure.HealthFlag)
 			if evt.Event == "response.failed" {
-				evt.Data = responsesTerminalFailureData(evt.Event, stringValue(evt.Data["request_id"]), terminalFailure.HealthFlag, terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
+				evt.Data = responsesTerminalFailureData(evt.Event, h.currentResponseID(), terminalFailure.HealthFlag, terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
 			} else {
 				evt.Data["health_flag"] = terminalFailure.HealthFlag
 				evt.Data["message"] = terminalFailure.Message
@@ -1054,8 +1723,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			evt.Data["health_flag"] = terminalFailure.HealthFlag
 			evt.Data["message"] = terminalFailure.Message
 		}
-		h.closeRealReasoningLifecycle()
+		h.closeAllReasoningLifecycles()
 		h.closeSyntheticReasoning()
+		if h.downstreamType == "responses" {
+			result.writeNow = &processEventCommand{Event: evt.Event, Data: evt.Data}
+		}
 	}
 	return result, nil
 }
@@ -1146,6 +1818,9 @@ func (w *ChatEventWriter) WriteEvent(event string, data map[string]any) error {
 			return err
 		}
 		skipOriginalWrite = result.skipWrite
+		if result.writeNow != nil {
+			evt = upstream.Event{Event: result.writeNow.Event, Data: result.writeNow.Data}
+		}
 
 		for _, cmd := range w.helper.events {
 			if err := w.writeProcessedEvent(cmd.Event, cmd.Data); err != nil {
@@ -1194,6 +1869,9 @@ func (w *AnthropicEventWriter) WriteEvent(event string, data map[string]any) err
 		result, err := doProcessResponseEvent(w.helper, evt)
 		if err != nil {
 			return err
+		}
+		if result.writeNow != nil {
+			evt = upstream.Event{Event: result.writeNow.Event, Data: result.writeNow.Data}
 		}
 
 		for _, cmd := range w.helper.events {
@@ -1316,6 +1994,7 @@ func responsesTerminalFailureData(event string, requestID string, healthFlag str
 		}
 	}
 	data["response"] = map[string]any{
+		"id":     requestID,
 		"status": "failed",
 		"error":  errObj,
 	}
@@ -1413,33 +2092,46 @@ func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w 
 
 func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	h := newResponseEventWriterHelper(writer.DownstreamType(), responseProjectionState{
-		createdSent:          state.createdSent,
-		createdResponseID:    state.createdResponseID,
-		modelName:            state.modelName,
-		toolIDAliases:        state.toolIDAliases,
-		toolItems:            state.toolItems,
-		toolOrder:            state.toolOrder,
-		outputItems:          state.outputItems,
-		outputItemOrder:      state.outputItemOrder,
-		textItemStarted:      state.textItemStarted,
-		textOutput:           &state.textOutput,
-		reasoningStarted:     state.reasoningStarted,
-		reasoningClosed:      state.reasoningClosed,
-		realReasoningItemID:  state.realReasoningItemID,
-		realReasoningSummary: &state.realReasoningSummary,
-		formattedReasoning:   state.formattedReasoning,
-		syntheticInjected:    state.syntheticInjected,
-		realReasoningSeen:    state.realReasoningSeen,
-		syntheticSummary:     &state.syntheticSummary,
-		requestID:            state.requestID,
-		upstreamEndpointType: state.upstreamEndpointType,
-		terminalSeen:         state.terminalSeen,
-		terminalFailure:      state.terminalFailure,
+		createdSent:                state.createdSent,
+		createdResponseID:          state.createdResponseID,
+		modelName:                  state.modelName,
+		toolIDAliases:              state.toolIDAliases,
+		toolItems:                  state.toolItems,
+		toolOrder:                  state.toolOrder,
+		outputItems:                state.outputItems,
+		outputItemOrder:            state.outputItemOrder,
+		textItemStarted:            state.textItemStarted,
+		textOutputs:                state.textOutputs,
+		textTailBuffers:            state.textTailBuffers,
+		completedTextItems:         state.completedTextItems,
+		completedTextParts:         state.completedTextParts,
+		syntheticReasoningStarted:  state.syntheticReasoningStarted,
+		syntheticReasoningClosed:   state.syntheticReasoningClosed,
+		realReasoningStarted:       state.realReasoningStarted,
+		realReasoningClosed:        state.realReasoningClosed,
+		realReasoningItemID:        state.realReasoningItemID,
+		realReasoningSummary:       &state.realReasoningSummary,
+		reasoningSummaryParts:      state.reasoningSummaryParts,
+		reasoningSummaryPartClosed: state.reasoningSummaryPartClosed,
+		reasoningSummaryTextDone:   state.reasoningSummaryTextDone,
+		activeReasoningItems:       state.activeReasoningItems,
+		reasoningItemsClosed:       state.reasoningItemsClosed,
+		formattedReasoning:         state.formattedReasoning,
+		syntheticInjected:          state.syntheticInjected,
+		realReasoningSeen:          state.realReasoningSeen,
+		syntheticSummary:           &state.syntheticSummary,
+		requestID:                  state.requestID,
+		upstreamEndpointType:       state.upstreamEndpointType,
+		terminalSeen:               state.terminalSeen,
+		terminalFailure:            state.terminalFailure,
 	})
 
 	result, err := doProcessResponseEvent(h, evt)
 	if err != nil {
 		return err
+	}
+	if result.writeNow != nil {
+		evt = upstream.Event{Event: result.writeNow.Event, Data: result.writeNow.Data}
 	}
 
 	state.toolIDAliases = h.toolIDAliases
@@ -1451,9 +2143,20 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.outputItems = h.outputItems
 	state.outputItemOrder = h.outputItemOrder
 	state.textItemStarted = h.textItemStarted
-	state.reasoningStarted = h.reasoningStarted
-	state.reasoningClosed = h.reasoningClosed
+	state.textOutputs = h.textOutputs
+	state.textTailBuffers = h.textTailBuffers
+	state.completedTextItems = h.completedTextItems
+	state.completedTextParts = h.completedTextParts
+	state.syntheticReasoningStarted = h.syntheticReasoningStarted
+	state.syntheticReasoningClosed = h.syntheticReasoningClosed
+	state.realReasoningStarted = h.realReasoningStarted
+	state.realReasoningClosed = h.realReasoningClosed
 	state.realReasoningItemID = h.realReasoningItemID
+	state.reasoningSummaryParts = h.reasoningSummaryParts
+	state.reasoningSummaryPartClosed = h.reasoningSummaryPartClosed
+	state.reasoningSummaryTextDone = h.reasoningSummaryTextDone
+	state.activeReasoningItems = h.activeReasoningItems
+	state.reasoningItemsClosed = h.reasoningItemsClosed
 	state.formattedReasoning = h.formattedReasoning
 	state.syntheticInjected = h.syntheticInjected
 	state.realReasoningSeen = h.realReasoningSeen
@@ -1469,16 +2172,6 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 
 	if result.skipWrite {
 		return nil
-	}
-
-	if state.terminalFailure != nil && (evt.Event == "response.incomplete" || (evt.Event == "error" && contextoverflow.IsSignal(state.terminalFailure.HealthFlag, state.terminalFailure.Message))) {
-		evt.Event = responsesTerminalFailureEvent(state.terminalFailure.HealthFlag)
-		if evt.Event == "response.failed" {
-			evt.Data = responsesTerminalFailureData(evt.Event, stringValue(evt.Data["request_id"]), state.terminalFailure.HealthFlag, state.terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
-		} else {
-			evt.Data["health_flag"] = state.terminalFailure.HealthFlag
-			evt.Data["message"] = state.terminalFailure.Message
-		}
 	}
 
 	if writer.DownstreamType() == "responses" {
@@ -1574,31 +2267,45 @@ func truncateForLog(text string, max int) string {
 }
 
 func newResponseEventWriterHelper(downstreamType string, state responseProjectionState) *responseEventWriterHelper {
-	return &responseEventWriterHelper{
-		downstreamType:       downstreamType,
-		upstreamEndpointType: state.upstreamEndpointType,
-		createdSent:          state.createdSent,
-		createdResponseID:    state.createdResponseID,
-		modelName:            state.modelName,
-		toolIDAliases:        state.toolIDAliases,
-		toolItems:            state.toolItems,
-		toolOrder:            state.toolOrder,
-		outputItems:          state.outputItems,
-		outputItemOrder:      state.outputItemOrder,
-		textItemStarted:      state.textItemStarted,
-		textOutput:           state.textOutput,
-		reasoningStarted:     state.reasoningStarted,
-		reasoningClosed:      state.reasoningClosed,
-		realReasoningItemID:  state.realReasoningItemID,
-		realReasoningSummary: state.realReasoningSummary,
-		formattedReasoning:   state.formattedReasoning,
-		syntheticInjected:    state.syntheticInjected,
-		realReasoningSeen:    state.realReasoningSeen,
-		syntheticSummary:     state.syntheticSummary,
-		requestID:            state.requestID,
-		terminalSeen:         state.terminalSeen,
-		terminalFailure:      state.terminalFailure,
+	helper := &responseEventWriterHelper{
+		downstreamType:             downstreamType,
+		upstreamEndpointType:       state.upstreamEndpointType,
+		createdSent:                state.createdSent,
+		createdResponseID:          state.createdResponseID,
+		modelName:                  state.modelName,
+		toolIDAliases:              state.toolIDAliases,
+		toolItems:                  state.toolItems,
+		toolOrder:                  state.toolOrder,
+		outputItems:                state.outputItems,
+		outputItemOrder:            state.outputItemOrder,
+		textItemStarted:            state.textItemStarted,
+		textOutputs:                state.textOutputs,
+		textTailBuffers:            state.textTailBuffers,
+		completedTextItems:         state.completedTextItems,
+		completedTextParts:         state.completedTextParts,
+		syntheticReasoningStarted:  state.syntheticReasoningStarted,
+		syntheticReasoningClosed:   state.syntheticReasoningClosed,
+		realReasoningStarted:       state.realReasoningStarted,
+		realReasoningClosed:        state.realReasoningClosed,
+		realReasoningItemID:        state.realReasoningItemID,
+		realReasoningSummary:       state.realReasoningSummary,
+		reasoningSummaryParts:      state.reasoningSummaryParts,
+		reasoningSummaryPartClosed: state.reasoningSummaryPartClosed,
+		reasoningSummaryTextDone:   state.reasoningSummaryTextDone,
+		activeReasoningItems:       state.activeReasoningItems,
+		reasoningItemsClosed:       state.reasoningItemsClosed,
+		formattedReasoning:         state.formattedReasoning,
+		syntheticInjected:          state.syntheticInjected,
+		realReasoningSeen:          state.realReasoningSeen,
+		syntheticSummary:           state.syntheticSummary,
+		requestID:                  state.requestID,
+		terminalSeen:               state.terminalSeen,
+		terminalFailure:            state.terminalFailure,
 	}
+	if downstreamType == "responses" {
+		helper.ensureReasoningItemStates()
+	}
+	return helper
 }
 
 func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flusher, text string) error {
@@ -1606,7 +2313,7 @@ func writeSyntheticResponsesReasoning(w http.ResponseWriter, flusher http.Flushe
 }
 
 func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher http.Flusher, state *responsesStreamState, text string) error {
-	if state != nil && !state.reasoningStarted {
+	if state != nil && !state.syntheticReasoningStarted {
 		item := map[string]any{
 			"id":      "rs_proxy",
 			"type":    "reasoning",
@@ -1637,7 +2344,7 @@ func writeSyntheticResponsesReasoningWithState(w http.ResponseWriter, flusher ht
 		if flusher != nil {
 			flusher.Flush()
 		}
-		state.reasoningStarted = true
+		state.syntheticReasoningStarted = true
 		state.syntheticInjected = true
 	}
 	text = sanitizeSyntheticReasoningText(text)
@@ -1832,14 +2539,6 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			"delta": map[string]any{"type": "text_delta", "text": delta},
 		})
 	}
-	flushPendingTextBlank := func() error {
-		if state.pendingTextBlank == "" {
-			return nil
-		}
-		blank := state.pendingTextBlank
-		state.pendingTextBlank = ""
-		return writeTextDelta(blank)
-	}
 	startThinkingBlock := func() error {
 		if state.thinkingStarted && !state.thinkingStopped {
 			return nil
@@ -2023,27 +2722,19 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			}
 		}
 	case "response.output_text.delta":
+		delta := stringValue(evt.Data["delta"])
+		if delta == "" {
+			return nil
+		}
+		delta = state.textTail.Push(delta)
+		if delta == "" {
+			return nil
+		}
 		if err := startTextBlock(); err != nil {
 			return err
 		}
 		state.textStarted = true
 		state.textStopped = false
-		delta := stringValue(evt.Data["delta"])
-		if delta == "" {
-			return nil
-		}
-		if strings.TrimSpace(delta) == "" {
-			state.pendingTextBlank += delta
-			return nil
-		}
-		if state.textRealSeen {
-			if err := flushPendingTextBlank(); err != nil {
-				return err
-			}
-		} else {
-			state.pendingTextBlank = ""
-		}
-		state.textRealSeen = true
 		return writeTextDelta(delta)
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
 		if block := firstReasoningBlock(evt.Data); len(block) > 0 {
@@ -2097,13 +2788,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
-		if !state.textRealSeen {
-			if err := flushPendingTextBlank(); err != nil {
-				return err
-			}
-		} else {
-			state.pendingTextBlank = ""
-		}
+		state.textTail.Discard()
 		if err := closeTextBlock(state, w, flusher); err != nil {
 			return err
 		}
@@ -2137,6 +2822,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		}
 	case "error", "response.failed", "response.incomplete":
 		state.terminalSeen = true
+		state.textTail.Discard()
 		terminalFailure := terminalFailureFromEventData(evt.Data)
 		state.terminalFailure = terminalFailure
 		if err := closeTextBlock(state, w, flusher); err != nil {
@@ -2398,6 +3084,7 @@ type chatStreamState struct {
 	pendingToolArgs     map[string]string
 	nextToolIx          int
 	reasoningTextActive bool
+	textTail            visibleTextTailBuffer
 	terminalSeen        bool
 	terminalFailure     *aggregate.TerminalFailureError
 	pendingReasoningTag string
@@ -2702,10 +3389,6 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.output_text.delta":
 		state.reasoningTextActive = false
-		state.textStarted = true
-		if err := ensureRoleSent(); err != nil {
-			return err
-		}
 		delta := stringValue(evt.Data["delta"])
 		if delta == "" && state.pendingReasoningTag == "" {
 			break
@@ -2726,11 +3409,19 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 		if reasoningContent != "" {
 			state.realReasoningSeen = true
+			if err := ensureRoleSent(); err != nil {
+				return err
+			}
 			if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
 				return err
 			}
 		}
+		cleanContent = state.textTail.Push(cleanContent)
 		if cleanContent != "" {
+			if err := ensureRoleSent(); err != nil {
+				return err
+			}
+			state.textStarted = true
 			if err := writeChatChunk(w, flusher, state, map[string]any{"content": cleanContent}, "", nil); err != nil {
 				return err
 			}
@@ -2784,6 +3475,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.completed", "response.done":
 		state.terminalSeen = true
+		state.textTail.Discard()
 		if response, _ := evt.Data["response"].(map[string]any); response != nil {
 			if id := stringValue(response["id"]); id != "" {
 				state.chunkID = id
@@ -2827,6 +3519,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "error", "response.failed", "response.incomplete":
 		state.terminalSeen = true
+		state.textTail.Discard()
 		state.terminalFailure = terminalFailureFromEventData(evt.Data)
 		return writeChatTerminalFailure(w, flusher, state.terminalFailure.HealthFlag, state.terminalFailure.Message, upstreamErrorObjectFromEventData(evt.Data))
 	}

@@ -3,10 +3,11 @@ package chat
 import (
 	"openai-compat-proxy/internal/aggregate"
 	reasoningtext "openai-compat-proxy/internal/reasoning"
+	"openai-compat-proxy/internal/texttail"
 )
 
 func BuildResponse(result aggregate.Result) map[string]any {
-	content := any(result.Text)
+	content := any(texttail.TrimTrailingCRLF(result.Text))
 	if len(result.ToolCalls) > 0 && result.Text == "" {
 		content = nil
 	}

@@ -5,6 +5,7 @@ import (
 
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/syntaxrepair"
+	"openai-compat-proxy/internal/texttail"
 )
 
 func BuildResponse(result aggregate.Result) map[string]any {
@@ -12,7 +13,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 	if len(result.ResponseOutputItems) > 0 {
 		output = append(output, filterResponseOutputItems(result.ResponseOutputItems)...)
 	}
-	content := result.ResponseMessageContent
+	content := cloneResponseMessageContent(result.ResponseMessageContent)
 	if len(content) == 0 && result.Text != "" {
 		content = []map[string]any{{
 			"type": "output_text",
@@ -53,6 +54,7 @@ func BuildResponse(result aggregate.Result) map[string]any {
 		}
 		output = append(output, item)
 	}
+	normalizeFinalVisibleOutputText(output)
 
 	response := map[string]any{
 		"id":                 buildResponseID(result),
@@ -149,6 +151,89 @@ func filterResponseOutputItems(items []map[string]any) []map[string]any {
 	return cloned
 }
 
+func cloneResponseMessageContent(content []map[string]any) []map[string]any {
+	if content == nil {
+		return nil
+	}
+	cloned := make([]map[string]any, len(content))
+	for index, item := range content {
+		cloned[index] = cloneResponseMessageContentPart(item)
+	}
+	return cloned
+}
+
+func cloneResponseOutputItemContent(content any) any {
+	switch typed := content.(type) {
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, rawPart := range typed {
+			if part, _ := rawPart.(map[string]any); part != nil {
+				cloned[index] = cloneResponseMessageContentPart(part)
+				continue
+			}
+			cloned[index] = rawPart
+		}
+		return cloned
+	case []map[string]any:
+		return cloneResponseMessageContent(typed)
+	default:
+		return content
+	}
+}
+
+func cloneResponseMessageContentPart(part map[string]any) map[string]any {
+	if part == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(part))
+	for key, value := range part {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func normalizeFinalVisibleOutputText(output []map[string]any) {
+	for outputIndex := len(output) - 1; outputIndex >= 0; outputIndex-- {
+		item := output[outputIndex]
+		if stringValue(item["type"]) != "message" {
+			continue
+		}
+		if normalizeFinalVisibleOutputTextInContent(item["content"]) {
+			return
+		}
+	}
+}
+
+func normalizeFinalVisibleOutputTextInContent(content any) bool {
+	switch typed := content.(type) {
+	case []any:
+		for index := len(typed) - 1; index >= 0; index-- {
+			if part, _ := typed[index].(map[string]any); normalizeOutputTextPart(part) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for index := len(typed) - 1; index >= 0; index-- {
+			if normalizeOutputTextPart(typed[index]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeOutputTextPart(part map[string]any) bool {
+	if stringValue(part["type"]) != "output_text" {
+		return false
+	}
+	text, ok := part["text"].(string)
+	if !ok {
+		return false
+	}
+	part["text"] = texttail.TrimTrailingCRLF(text)
+	return true
+}
+
 func hasResponsesOutputItemType(items []map[string]any, itemType string) bool {
 	for _, item := range items {
 		if stringValue(item["type"]) == itemType {
@@ -196,6 +281,11 @@ func cloneOutputItems(input []map[string]any) []map[string]any {
 		copy := make(map[string]any, len(item))
 		for k, v := range item {
 			copy[k] = v
+		}
+		if itemType, _ := copy["type"].(string); itemType == "message" {
+			if content, exists := copy["content"]; exists {
+				copy["content"] = cloneResponseOutputItemContent(content)
+			}
 		}
 		if itemType, _ := copy["type"].(string); itemType == "function_call" {
 			if _, exists := copy["parameters"]; !exists {

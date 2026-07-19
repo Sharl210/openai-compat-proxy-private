@@ -271,14 +271,18 @@ func TestResponsesStreamKeepsChatThinkTagsInRealReasoningBlock(t *testing.T) {
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 	proxyAddedIdx := strings.Index(body, `{"item":{"id":"rs_proxy"`)
-	realReasoningIdx := strings.Index(body, `{"delta":"internal reasoning","type":"response.reasoning_summary_text.delta"}`)
+	realReasoningAddedIdx := strings.Index(body, "event: response.output_item.added\n"+`data: {"item":{"id":"rs_chat_reasoning"`)
+	realReasoningPartAddedIdx := strings.Index(body, `{"item_id":"rs_chat_reasoning","output_index":1,"part":{"text":"","type":"summary_text"},"summary_index":0,"type":"response.reasoning_summary_part.added"}`)
+	realReasoningIdx := strings.Index(body, `{"delta":"internal reasoning","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	realReasoningPartDoneIdx := strings.Index(body, `{"item_id":"rs_chat_reasoning","output_index":1,"part":{"text":"internal reasoning","type":"summary_text"},"summary_index":0,"type":"response.reasoning_summary_part.done"}`)
+	realReasoningDoneIdx := strings.Index(body, `{"item":{"id":"rs_chat_reasoning","summary":[{"text":"internal reasoning","type":"summary_text"}],"type":"reasoning"},"output_index":1,"type":"response.output_item.done"}`)
 	proxyDoneIdx := strings.Index(body, `event: response.output_item.done`+"\n"+`data: {"item":{"id":"rs_proxy"`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final answer","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
-	if proxyAddedIdx == -1 || realReasoningIdx == -1 || proxyDoneIdx == -1 || textIdx == -1 {
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final answer","item_id":"msg_proxy","output_index":2,"type":"response.output_text.delta"}`)
+	if proxyAddedIdx == -1 || realReasoningAddedIdx == -1 || realReasoningPartAddedIdx == -1 || realReasoningIdx == -1 || realReasoningPartDoneIdx == -1 || realReasoningDoneIdx == -1 || proxyDoneIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected synthetic lifecycle, real reasoning and final text, got %s", body)
 	}
-	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < realReasoningIdx && realReasoningIdx < textIdx) {
-		t.Fatalf("expected proxy lifecycle to close before real reasoning and text, got %s", body)
+	if !(proxyAddedIdx < proxyDoneIdx && proxyDoneIdx < realReasoningAddedIdx && realReasoningAddedIdx < realReasoningPartAddedIdx && realReasoningPartAddedIdx < realReasoningIdx && realReasoningIdx < realReasoningPartDoneIdx && realReasoningPartDoneIdx < realReasoningDoneIdx && realReasoningDoneIdx < textIdx) {
+		t.Fatalf("expected proxy lifecycle to close before the complete real reasoning lifecycle and text, got %s", body)
 	}
 	if strings.Contains(body, `<think>`) || strings.Contains(body, `</think>`) {
 		t.Fatalf("expected think tags to be removed from final output text, got %s", body)
@@ -291,6 +295,39 @@ func TestResponsesStreamKeepsChatThinkTagsInRealReasoningBlock(t *testing.T) {
 	}
 	if strings.Contains(body, `{"delta":"…","type":"response.reasoning_summary_text.delta"}`) {
 		t.Fatalf("expected real reasoning path to avoid synthetic ellipsis ticks, got %s", body)
+	}
+}
+
+func TestResponsesStreamChatReasoningOverflowClosesLifecycleBeforeFailedTerminal(t *testing.T) {
+	upstream := newChatStreamingUpstream(t, []string{
+		"data: {\"id\":\"chat-overflow\",\"choices\":[{\"delta\":{\"content\":\"<think>partial reasoning\"}}]}\n\n",
+		"event: error\n" +
+			"data: {\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"prompt is too long: context_length_exceeded from upstream\"}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfigWithEndpointAndThinkingStyle(upstream.URL, config.UpstreamEndpointTypeChat, config.UpstreamThinkingTagStyleLegacy))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	partDoneIdx := strings.Index(body, `event: response.reasoning_summary_part.done`)
+	itemDoneIdx := strings.LastIndex(body, `event: response.output_item.done`)
+	failedIdx := strings.Index(body, `event: response.failed`)
+	if rec.Code != http.StatusOK || partDoneIdx == -1 || itemDoneIdx == -1 || failedIdx == -1 || !(partDoneIdx < itemDoneIdx && itemDoneIdx < failedIdx) {
+		t.Fatalf("expected chat reasoning lifecycle to close before failed terminal, got status=%d body=%s", rec.Code, body)
+	}
+	if strings.Count(body, `event: response.failed`) != 1 || strings.Contains(body, `event: response.completed`) || strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected exactly one failed terminal without successful or incomplete terminal, got %s", body)
+	}
+	if !strings.Contains(body, `"id":"chat-overflow"`) || !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected preserved response ID and recognized overflow details, got %s", body)
 	}
 }
 
@@ -324,9 +361,9 @@ func TestResponsesStreamProgressivelyEmitsThinkReasoningBeforeClosingTag(t *test
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
-	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
+	abcIdx := strings.Index(body, `{"delta":"abc","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	defIdx := strings.Index(body, `{"delta":"def","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":2,"type":"response.output_text.delta"}`)
 	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected progressive reasoning deltas before final text, got %s", body)
 	}
@@ -365,9 +402,9 @@ func TestResponsesStreamProgressivelyEmitsReasoningTagBeforeClosingTag(t *testin
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
-	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
+	abcIdx := strings.Index(body, `{"delta":"abc","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	defIdx := strings.Index(body, `{"delta":"def","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":2,"type":"response.output_text.delta"}`)
 	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected progressive <reasoning> deltas before final text, got %s", body)
 	}
@@ -409,9 +446,9 @@ func TestResponsesStreamDefaultsToReasoningUntilClosingTagWhenStyleEnabled(t *te
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	abcIdx := strings.Index(body, `{"delta":"abc","type":"response.reasoning_summary_text.delta"}`)
-	defIdx := strings.Index(body, `{"delta":"def","type":"response.reasoning_summary_text.delta"}`)
-	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
+	abcIdx := strings.Index(body, `{"delta":"abc","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	defIdx := strings.Index(body, `{"delta":"def","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	textIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":2,"type":"response.output_text.delta"}`)
 	if abcIdx == -1 || defIdx == -1 || textIdx == -1 {
 		t.Fatalf("expected implicit reasoning deltas before final text, got %s", body)
 	}
@@ -450,16 +487,16 @@ func TestResponsesStreamDoesNotReenterImplicitReasoningAfterFirstClose(t *testin
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	alphaIdx := strings.Index(body, `{"delta":"alpha","type":"response.reasoning_summary_text.delta"}`)
-	finalIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
-	trailingIdx := strings.Index(body, `{"content_index":0,"delta":" trailing text","item_id":"msg_proxy","output_index":1,"type":"response.output_text.delta"}`)
+	alphaIdx := strings.Index(body, `{"delta":"alpha","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`)
+	finalIdx := strings.Index(body, `{"content_index":0,"delta":"final","item_id":"msg_proxy","output_index":2,"type":"response.output_text.delta"}`)
+	trailingIdx := strings.Index(body, `{"content_index":0,"delta":" trailing text","item_id":"msg_proxy","output_index":2,"type":"response.output_text.delta"}`)
 	if alphaIdx == -1 || finalIdx == -1 || trailingIdx == -1 {
 		t.Fatalf("expected one implicit reasoning phase followed by stable output text, got %s", body)
 	}
 	if !(alphaIdx < finalIdx && finalIdx < trailingIdx) {
 		t.Fatalf("expected post-close text deltas to stay as output text, got %s", body)
 	}
-	if strings.Contains(body[finalIdx:], `{"delta":" trailing text","type":"response.reasoning_summary_text.delta"}`) {
+	if strings.Contains(body[finalIdx:], `{"delta":" trailing text","item_id":"rs_chat_reasoning","output_index":1,"summary_index":0,"type":"response.reasoning_summary_text.delta"}`) {
 		t.Fatalf("expected no re-entry into implicit reasoning after first close, got %s", body)
 	}
 }
@@ -497,7 +534,7 @@ func TestResponsesStreamSkipsWhitespaceOnlyOutputAfterThinkExtraction(t *testing
 	if strings.Contains(body, `event: response.output_text.delta`) {
 		t.Fatalf("expected whitespace-only text left after think extraction to be suppressed, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"fetch_webpage","status":"in_progress","type":"function_call"},"output_index":1,"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"fetch_webpage","status":"in_progress","type":"function_call"},"output_index":2,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected tool event to remain after suppressing blank text block, got %s", body)
 	}
 }
@@ -537,7 +574,7 @@ func TestResponsesStreamSkipsSplitWhitespaceOnlyFrameAfterThinkExtraction(t *tes
 	if strings.Contains(body, `event: response.output_text.delta`) {
 		t.Fatalf("expected split whitespace-only text frame after think extraction to be suppressed, got %s", body)
 	}
-	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"fetch_webpage","status":"in_progress","type":"function_call"},"output_index":1,"type":"response.output_item.added"}`) {
+	if !strings.Contains(body, `{"item":{"arguments":"","call_id":"call_1","id":"call_1","name":"fetch_webpage","status":"in_progress","type":"function_call"},"output_index":2,"type":"response.output_item.added"}`) {
 		t.Fatalf("expected tool event to remain after suppressing split blank text block, got %s", body)
 	}
 }

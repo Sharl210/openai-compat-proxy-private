@@ -170,6 +170,100 @@ func TestChatUpstreamToolArgsPreservedInResponsesNonStream(t *testing.T) {
 	}
 }
 
+func TestChatUpstreamLegacyXMLToolCallsNormalizeInResponsesNonStream(t *testing.T) {
+	for _, testCase := range []struct {
+		name         string
+		content      string
+		wantTypes    []string
+		wantText     []string
+		wantArgument string
+	}{
+		{
+			name:         "prefix and suffix",
+			content:      "before <tool_call><function=lookup><parameter=query>weather</parameter></function></tool_call> after",
+			wantTypes:    []string{"message", "function_call", "message"},
+			wantText:     []string{"before ", " after"},
+			wantArgument: `{"query":"weather"}`,
+		},
+		{
+			name:         "standalone",
+			content:      "<tool_call><function=lookup><parameter=query>weather</parameter></function></tool_call>",
+			wantTypes:    []string{"function_call"},
+			wantArgument: `{"query":"weather"}`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			upstream := newChatFormatUpstream(t, fmt.Sprintf(`{"id":"chatcmpl_xml","choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, testCase.content))
+			defer upstream.Close()
+
+			server := NewServer(config.Config{
+				DefaultProvider:             "openai",
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				UpstreamXMLToolCallStyle:    config.UpstreamXMLToolCallStyleLegacy,
+				Providers: []config.ProviderConfig{{
+					ID:                       "openai",
+					Enabled:                  true,
+					UpstreamBaseURL:          upstream.URL,
+					UpstreamAPIKey:           "test-key",
+					UpstreamEndpointType:     config.UpstreamEndpointTypeChat,
+					UpstreamXMLToolCallStyle: config.UpstreamXMLToolCallStyleLegacy,
+					SupportsResponses:        true,
+					SupportsChat:             true,
+				}},
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+
+			var response map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("unmarshal response: %v body=%s", err, rec.Body.String())
+			}
+			output, _ := response["output"].([]any)
+			if len(output) != len(testCase.wantTypes) {
+				t.Fatalf("expected output types %v, got %#v", testCase.wantTypes, output)
+			}
+			var textParts []string
+			var tool map[string]any
+			for index, raw := range output {
+				item, _ := raw.(map[string]any)
+				if got := stringValue(item["type"]); got != testCase.wantTypes[index] {
+					t.Fatalf("expected output item %d type %q, got %#v", index, testCase.wantTypes[index], item)
+				}
+				switch stringValue(item["type"]) {
+				case "message":
+					content, _ := item["content"].([]any)
+					for _, rawPart := range content {
+						part, _ := rawPart.(map[string]any)
+						if stringValue(part["type"]) == "output_text" {
+							textParts = append(textParts, stringValue(part["text"]))
+						}
+					}
+				case "function_call":
+					tool = item
+				}
+			}
+			if strings.Join(textParts, "\x00") != strings.Join(testCase.wantText, "\x00") {
+				t.Fatalf("expected preserved text parts %q, got %q", testCase.wantText, textParts)
+			}
+			if tool == nil || stringValue(tool["arguments"]) != testCase.wantArgument {
+				t.Fatalf("expected native function_call arguments %q, got %#v", testCase.wantArgument, tool)
+			}
+			for _, text := range textParts {
+				if strings.Contains(text, "<tool_call>") || strings.Contains(text, "</tool_call>") {
+					t.Fatalf("expected complete legacy XML markup to stay out of output_text, got %#v", output)
+				}
+			}
+		})
+	}
+}
+
 func TestChatUpstreamToolArgsPreservedInChatDownstreamNonStream(t *testing.T) {
 	// Chat upstream returns tool_calls with JSON string arguments
 	chatResponse := `{
@@ -1188,6 +1282,54 @@ func TestChatStreamingUpstreamToolArgsPreservedInResponsesStream(t *testing.T) {
 	}
 }
 
+func TestChatUpstreamLegacyXMLToolCallNormalizesInResponsesStream(t *testing.T) {
+	events := []string{
+		"data: {\"id\":\"chatcmpl_xml\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"before <tool_call><function=lookup><parameter=query>weather</parameter></function></tool_call> after\"}}]}\n\n",
+		"data: {\"id\":\"chatcmpl_xml\",\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5},\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\"}]}\n\n",
+		"data: [DONE]\n\n",
+	}
+	upstream := newChatStreamingUpstream(t, events)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:          "openai",
+		EnableLegacyV1Routes:     true,
+		UpstreamXMLToolCallStyle: config.UpstreamXMLToolCallStyleLegacy,
+		Providers: []config.ProviderConfig{{
+			ID:                       "openai",
+			Enabled:                  true,
+			UpstreamBaseURL:          upstream.URL,
+			UpstreamAPIKey:           "test-key",
+			UpstreamEndpointType:     config.UpstreamEndpointTypeChat,
+			UpstreamXMLToolCallStyle: config.UpstreamXMLToolCallStyleLegacy,
+			SupportsResponses:        true,
+			SupportsChat:             true,
+		}},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	prefixIndex := strings.Index(body, `"delta":"before "`)
+	toolIndex := strings.Index(body, `"type":"function_call"`)
+	suffixIndex := strings.Index(body, `"delta":" after"`)
+	if prefixIndex == -1 || toolIndex == -1 || suffixIndex == -1 || !(prefixIndex < toolIndex && toolIndex < suffixIndex) {
+		t.Fatalf("expected prefix, function_call, suffix ordering, got %s", body)
+	}
+	if !strings.Contains(body, `"arguments":"{\"query\":\"weather\"}"`) {
+		t.Fatalf("expected native function_call JSON arguments, got %s", body)
+	}
+	if strings.Contains(body, "<tool_call>") || strings.Contains(body, "</tool_call>") || strings.Contains(body, `\u003ctool_call\u003e`) || strings.Contains(body, `\u003c/tool_call\u003e`) {
+		t.Fatalf("expected complete legacy XML markup not to leak into Responses stream, got %s", body)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Streaming: anthropic upstream → responses downstream
 // ---------------------------------------------------------------------------
@@ -1235,9 +1377,11 @@ func TestAnthropicStreamingUpstreamToolArgsPreservedInResponsesStream(t *testing
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
 
-	// Check Tokyo appears in the accumulated arguments
-	if !strings.Contains(body, "Tokyo") {
-		t.Fatalf("expected accumulated arguments to contain Tokyo, got %s", body)
+	if !strings.Contains(body, `"type":"function_call"`) || strings.Contains(body, `"type":"tool_use"`) {
+		t.Fatalf("expected Anthropic tool_use to normalize into a native Responses function_call, got %s", body)
+	}
+	if !strings.Contains(body, `"call_id":"call_1"`) || !strings.Contains(body, `"arguments":"{\"city\":\"Tokyo\"}"`) {
+		t.Fatalf("expected accumulated Anthropic tool arguments preserved as a JSON string, got %s", body)
 	}
 }
 
@@ -1296,6 +1440,53 @@ func TestAnthropicStreamingUpstreamKeepsFinalTextAfterTwoPriorToolRoundsInRespon
 	}
 	if !strings.Contains(body, `event: response.completed`) {
 		t.Fatalf("expected completed event after final text, got %s", body)
+	}
+}
+
+func TestAnthropicStreamingUpstreamReasoningOverflowClosesLifecycleBeforeFailedTerminal(t *testing.T) {
+	events := []string{
+		"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_overflow\",\"type\":\"message\",\"role\":\"assistant\"}}\n\n",
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"partial reasoning\"}}\n\n",
+		"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"prompt is too long: context_length_exceeded from upstream\"}}\n\n",
+	}
+	upstream := newAnthropicStreamingUpstream(t, events)
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"claude-sonnet-4-5",
+		"stream":true,
+		"input":"hello"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	partDoneIdx := strings.Index(body, `event: response.reasoning_summary_part.done`)
+	itemDoneIdx := strings.LastIndex(body, `event: response.output_item.done`)
+	failedIdx := strings.Index(body, `event: response.failed`)
+	if rec.Code != http.StatusOK || partDoneIdx == -1 || itemDoneIdx == -1 || failedIdx == -1 || !(partDoneIdx < itemDoneIdx && itemDoneIdx < failedIdx) {
+		t.Fatalf("expected Anthropic reasoning lifecycle to close before failed terminal, got status=%d body=%s", rec.Code, body)
+	}
+	if strings.Count(body, `event: response.failed`) != 1 || strings.Contains(body, `event: response.completed`) || strings.Contains(body, `event: response.incomplete`) {
+		t.Fatalf("expected exactly one failed terminal without successful or incomplete terminal, got %s", body)
+	}
+	if !strings.Contains(body, `"id":"msg_overflow"`) || !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected preserved response ID and recognized overflow details, got %s", body)
 	}
 }
 
