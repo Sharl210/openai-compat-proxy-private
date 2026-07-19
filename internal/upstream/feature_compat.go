@@ -94,10 +94,44 @@ func hasUnsupportedPersistedResponsesItem(items []map[string]any, upstreamEndpoi
 		case "compaction", "item_reference", "program", "program_output":
 			return true
 		}
+		if itemType == "reasoning" {
+			if !hasRepresentablePersistedReasoningItem(item, upstreamEndpointType) {
+				return true
+			}
+			continue
+		}
 		if _, ok := item["phase"]; ok {
 			return true
 		}
-		if _, encrypted := item["encrypted_content"]; encrypted && upstreamEndpointType != config.UpstreamEndpointTypeAnthropic {
+		if _, encrypted := item["encrypted_content"]; encrypted {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRepresentablePersistedReasoningItem(item map[string]any, upstreamEndpointType string) bool {
+	thinking := strings.TrimSpace(stringValue(item["thinking"]))
+	if _, hasEncryptedContent := item["encrypted_content"]; hasEncryptedContent {
+		return false
+	}
+	if _, hasSignature := item["signature"]; hasSignature {
+		return false
+	}
+	return thinking != "" || hasPersistedReasoningText(item)
+}
+
+func hasPersistedReasoningText(item map[string]any) bool {
+	if strings.TrimSpace(stringValue(item["thinking"])) != "" || strings.TrimSpace(stringValue(item["text"])) != "" {
+		return true
+	}
+	summary, ok := item["summary"].([]any)
+	if !ok {
+		return false
+	}
+	for _, raw := range summary {
+		block, _ := raw.(map[string]any)
+		if strings.TrimSpace(stringValue(block["text"])) != "" || strings.TrimSpace(stringValue(block["summary_text"])) != "" {
 			return true
 		}
 	}

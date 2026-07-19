@@ -696,10 +696,10 @@ func TestResponsesRejectsPersistedEncryptedReasoningForChatUpstream(t *testing.T
 		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if upstreamCalls != 0 {
-		t.Fatalf("expected no chat upstream call, got %d", upstreamCalls)
+		t.Fatalf("expected no chat upstream call for opaque persisted reasoning, got %d", upstreamCalls)
 	}
 	if !strings.Contains(rec.Body.String(), "persisted responses item") {
-		t.Fatalf("expected persisted responses item error, got %s", rec.Body.String())
+		t.Fatalf("expected persisted reasoning compatibility error, got %s", rec.Body.String())
 	}
 }
 

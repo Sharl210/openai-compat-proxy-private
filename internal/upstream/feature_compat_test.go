@@ -76,6 +76,106 @@ func TestCheckResponsesFeatureCompatibilityDropsEncryptedReasoningIncludeOutside
 	}
 }
 
+func TestCheckResponsesFeatureCompatibilityAllowsRepresentablePersistedReasoning(t *testing.T) {
+	chatReasoning := model.CanonicalRequest{ResponseInputItems: []map[string]any{{
+		"type":    "reasoning",
+		"phase":   "analysis",
+		"summary": []any{map[string]any{"type": "summary_text", "text": "need tool output"}},
+	}}}
+	if err := CheckResponsesFeatureCompatibility(chatReasoning, config.UpstreamEndpointTypeChat); err != nil {
+		t.Fatalf("chat upstream should accept representable reasoning: %v", err)
+	}
+
+	anthropicReasoning := model.CanonicalRequest{ResponseInputItems: []map[string]any{{
+		"type":     "reasoning",
+		"phase":    "analysis",
+		"thinking": "need tool output",
+	}}}
+	if err := CheckResponsesFeatureCompatibility(anthropicReasoning, config.UpstreamEndpointTypeAnthropic); err != nil {
+		t.Fatalf("anthropic upstream should accept plaintext replayable reasoning: %v", err)
+	}
+}
+
+func TestCheckResponsesFeatureCompatibilityRejectsNonRepresentablePersistedReasoning(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		item map[string]any
+	}{
+		{
+			name: "opaque only",
+			item: map[string]any{
+				"type":              "reasoning",
+				"phase":             "analysis",
+				"encrypted_content": "opaque",
+			},
+		},
+		{
+			name: "plaintext plus opaque state",
+			item: map[string]any{
+				"type":              "reasoning",
+				"phase":             "analysis",
+				"summary":           []any{map[string]any{"type": "summary_text", "text": "replayable text"}},
+				"encrypted_content": "opaque",
+			},
+		},
+		{
+			name: "thinking plus opaque state without provenance",
+			item: map[string]any{
+				"type":              "reasoning",
+				"thinking":          "replayable text",
+				"encrypted_content": "opaque",
+			},
+		},
+		{
+			name: "thinking plus signature without encrypted content",
+			item: map[string]any{
+				"type":      "reasoning",
+				"thinking":  "replayable text",
+				"signature": "sig_123",
+			},
+		},
+		{
+			name: "thinking plus empty signature",
+			item: map[string]any{
+				"type":      "reasoning",
+				"thinking":  "replayable text",
+				"signature": "",
+			},
+		},
+		{
+			name: "thinking plus non string encrypted content",
+			item: map[string]any{
+				"type":              "reasoning",
+				"thinking":          "replayable text",
+				"encrypted_content": map[string]any{"opaque": true},
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := model.CanonicalRequest{ResponseInputItems: []map[string]any{testCase.item}}
+			for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+				if err := CheckResponsesFeatureCompatibility(req, endpoint); err == nil {
+					t.Fatalf("%s upstream should reject %s persisted reasoning", endpoint, testCase.name)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckResponsesFeatureCompatibilityRejectsMatchingOpaqueThinkingSignature(t *testing.T) {
+	req := model.CanonicalRequest{ResponseInputItems: []map[string]any{{
+		"type":              "reasoning",
+		"thinking":          "native thinking",
+		"encrypted_content": "sig_123",
+		"signature":         "sig_123",
+	}}}
+	for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		if err := CheckResponsesFeatureCompatibility(req, endpoint); err == nil {
+			t.Fatalf("%s upstream should reject client-supplied opaque thinking signature replay", endpoint)
+		}
+	}
+}
+
 func TestClassifyResponsesFeatureCompatibilityDistinguishesAllowMapAndReject(t *testing.T) {
 	tests := []struct {
 		name     string
