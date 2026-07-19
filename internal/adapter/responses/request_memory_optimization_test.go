@@ -207,6 +207,272 @@ func TestDecodeRequestMemoryOptimizationFixturePreservesTypedMultimodalSemantics
 	}
 }
 
+func TestDecodeRequestTextOnlyMessageFastPathPreservesDynamicFields(t *testing.T) {
+	requestBody := []byte(`{
+		"model":"gpt-5.6",
+		"input":[{
+			"type":"message",
+			"id":"msg_text_only",
+			"role":"user",
+			"content":[
+				{"type":"input_text","text":"first","vendor_text":{"keep":true}},
+				{"type":"text","text":"second","vendor_metadata":[1,{"keep":"yes"}]},
+				{"type":"output_text","text":null}
+			],
+			"vendor_message":{"nested":{"keep":true}}
+		}]
+	}`)
+	var original map[string]any
+	if err := json.Unmarshal(requestBody, &original); err != nil {
+		t.Fatalf("unmarshal original request body: %v", err)
+	}
+
+	canon, err := DecodeRequest(bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	wantInput, _ := original["input"].([]any)
+	gotInput := make([]any, len(canon.ResponseInputItems))
+	for index := range canon.ResponseInputItems {
+		gotInput[index] = canon.ResponseInputItems[index]
+	}
+	if !reflect.DeepEqual(gotInput, wantInput) {
+		t.Fatalf("expected text-only message fields to remain lossless, got %#v want %#v", gotInput, wantInput)
+	}
+	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
+		t.Fatalf("expected one canonical user message, got %#v", canon.Messages)
+	}
+	parts := canon.Messages[0].Parts
+	if len(parts) != 3 || parts[0].Text != "first" || parts[1].Text != "second" || parts[2].Text != "" {
+		t.Fatalf("expected canonical text parts preserved, got %#v", parts)
+	}
+}
+
+func TestDecodeRequestTextOnlyMessageFastPathBoundarySemantics(t *testing.T) {
+	tests := []struct {
+		name     string
+		item     string
+		wantText []string
+	}{
+		{
+			name:     "omitted content",
+			item:     `{"type":"message","role":"user","vendor_case":{"keep":true}}`,
+			wantText: []string{},
+		},
+		{
+			name:     "null content",
+			item:     `{"type":"message","role":"user","content":null,"vendor_case":{"keep":true}}`,
+			wantText: []string{},
+		},
+		{
+			name:     "empty content string",
+			item:     `{"type":"message","role":"user","content":"","vendor_case":{"keep":true}}`,
+			wantText: []string{},
+		},
+		{
+			name:     "undefined content string",
+			item:     `{"type":"message","role":"user","content":"undefined","vendor_case":{"keep":true}}`,
+			wantText: []string{},
+		},
+		{
+			name:     "bracketed undefined content string",
+			item:     `{"type":"message","role":"user","content":"[undefined]","vendor_case":{"keep":true}}`,
+			wantText: []string{},
+		},
+		{
+			name:     "omitted text field",
+			item:     `{"type":"message","role":"user","content":[{"type":"input_text","vendor_part":{"keep":true}}],"vendor_case":{"keep":true}}`,
+			wantText: []string{""},
+		},
+		{
+			name:     "null text field",
+			item:     `{"type":"message","role":"user","content":[{"type":"input_text","text":null,"vendor_part":{"keep":true}}],"vendor_case":{"keep":true}}`,
+			wantText: []string{""},
+		},
+		{
+			name:     "empty text field",
+			item:     `{"type":"message","role":"user","content":[{"type":"input_text","text":"","vendor_part":{"keep":true}}],"vendor_case":{"keep":true}}`,
+			wantText: []string{""},
+		},
+		{
+			name:     "literal undefined text field",
+			item:     `{"type":"message","role":"user","content":[{"type":"input_text","text":"undefined","vendor_part":{"keep":true}}],"vendor_case":{"keep":true}}`,
+			wantText: []string{"undefined"},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			rawItem, canon, err := decodeSingleResponsesInputItem(t, testCase.item)
+			if err != nil {
+				t.Fatalf("DecodeRequest error: %v", err)
+			}
+			if _, ok := decodeTextOnlyMessageInputItem(rawItem); !ok {
+				t.Fatal("expected text-only message to remain fast-path eligible")
+			}
+			if !canon.ResponseInputItemsAreOriginal {
+				t.Fatalf("expected raw-first forwarding to remain enabled, got %#v", canon)
+			}
+			assertResponsesInputItemMatchesRaw(t, canon, rawItem)
+			if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
+				t.Fatalf("expected one canonical user message, got %#v", canon.Messages)
+			}
+			assertCanonicalTextParts(t, canon.Messages[0], testCase.wantText)
+		})
+	}
+}
+
+func TestDecodeRequestTextOnlyMessageFastPathFallsBackForBoundaryPredicates(t *testing.T) {
+	tests := []struct {
+		name         string
+		item         string
+		wantOriginal bool
+		wantErr      bool
+		verify       func(*testing.T, model.CanonicalRequest)
+	}{
+		{
+			name:         "assistant tool calls null",
+			item:         `{"type":"message","role":"assistant","content":"hello","tool_calls":null,"vendor_case":{"keep":true}}`,
+			wantOriginal: false,
+			verify: func(t *testing.T, canon model.CanonicalRequest) {
+				t.Helper()
+				if len(canon.Messages) != 1 || canon.Messages[0].Role != "assistant" || len(canon.Messages[0].ToolCalls) != 0 {
+					t.Fatalf("expected assistant fallback without tool calls, got %#v", canon.Messages)
+				}
+				assertCanonicalTextParts(t, canon.Messages[0], []string{"hello"})
+			},
+		},
+		{
+			name:         "tool call id null",
+			item:         `{"type":"message","role":"tool","content":"hello","tool_call_id":null,"vendor_case":{"keep":true}}`,
+			wantOriginal: true,
+			verify: func(t *testing.T, canon model.CanonicalRequest) {
+				t.Helper()
+				if len(canon.Messages) != 1 || canon.Messages[0].Role != "tool" || canon.Messages[0].ToolCallID != "" {
+					t.Fatalf("expected tool fallback with an empty tool call id, got %#v", canon.Messages)
+				}
+				assertCanonicalTextParts(t, canon.Messages[0], []string{"hello"})
+			},
+		},
+		{
+			name:    "malformed text field",
+			item:    `{"type":"message","role":"user","content":[{"type":"input_text","text":42}]}`,
+			wantErr: true,
+		},
+		{
+			name:         "mixed text and reasoning",
+			item:         `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"},{"type":"reasoning","id":"rs_real","summary":[{"type":"summary_text","text":"thinking"}],"encrypted_content":"enc_real","vendor_reasoning":{"keep":true}}],"vendor_case":{"keep":true}}`,
+			wantOriginal: true,
+			verify: func(t *testing.T, canon model.CanonicalRequest) {
+				t.Helper()
+				if len(canon.Messages) != 1 || len(canon.Messages[0].ReasoningBlocks) != 1 {
+					t.Fatalf("expected fallback to preserve the reasoning block, got %#v", canon.Messages)
+				}
+				assertCanonicalTextParts(t, canon.Messages[0], []string{"answer"})
+				block := canon.Messages[0].ReasoningBlocks[0]
+				if block["encrypted_content"] != "enc_real" {
+					t.Fatalf("expected opaque reasoning state preserved, got %#v", block)
+				}
+				vendor, _ := block["vendor_reasoning"].(map[string]any)
+				if vendor["keep"] != true {
+					t.Fatalf("expected unknown reasoning field preserved, got %#v", block)
+				}
+			},
+		},
+		{
+			name:         "mixed text and image",
+			item:         `{"type":"message","role":"user","content":[{"type":"input_text","text":"describe"},{"type":"input_image","image_url":{"url":"https://example.test/image.png","detail":"high","vendor_image":{"keep":true}}}],"vendor_case":{"keep":true}}`,
+			wantOriginal: true,
+			verify: func(t *testing.T, canon model.CanonicalRequest) {
+				t.Helper()
+				if len(canon.Messages) != 1 || len(canon.Messages[0].Parts) != 2 {
+					t.Fatalf("expected fallback to preserve text and image parts, got %#v", canon.Messages)
+				}
+				assertCanonicalTextParts(t, model.CanonicalMessage{Parts: canon.Messages[0].Parts[:1]}, []string{"describe"})
+				image := canon.Messages[0].Parts[1]
+				if image.Type != "input_image" || image.ImageURL != "https://example.test/image.png" {
+					t.Fatalf("expected canonical image part, got %#v", image)
+				}
+				rawImage, _ := image.Raw["image_url"].(map[string]any)
+				vendor, _ := rawImage["vendor_image"].(map[string]any)
+				if rawImage["detail"] != "high" || vendor["keep"] != true {
+					t.Fatalf("expected image fields preserved, got %#v", image)
+				}
+			},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			rawItem, canon, err := decodeSingleResponsesInputItem(t, testCase.item)
+			if _, ok := decodeTextOnlyMessageInputItem(rawItem); ok {
+				t.Fatal("expected boundary case to fall back to the existing decoder")
+			}
+			if testCase.wantErr {
+				if err == nil {
+					t.Fatal("expected fallback decoder to reject malformed content")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeRequest error: %v", err)
+			}
+			if canon.ResponseInputItemsAreOriginal != testCase.wantOriginal {
+				t.Fatalf("ResponseInputItemsAreOriginal=%v, want %v", canon.ResponseInputItemsAreOriginal, testCase.wantOriginal)
+			}
+			assertResponsesInputItemMatchesRaw(t, canon, rawItem)
+			testCase.verify(t, canon)
+		})
+	}
+}
+
+func decodeSingleResponsesInputItem(t *testing.T, item string) (map[string]any, model.CanonicalRequest, error) {
+	t.Helper()
+	requestBody := []byte(`{"model":"gpt-5.6","input":[` + item + `]}`)
+	var original map[string]any
+	if err := json.Unmarshal(requestBody, &original); err != nil {
+		t.Fatalf("unmarshal original request body: %v", err)
+	}
+	input, _ := original["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected one original input item, got %#v", original["input"])
+	}
+	rawItem, _ := input[0].(map[string]any)
+	if rawItem == nil {
+		t.Fatalf("expected object input item, got %#v", input[0])
+	}
+	canon, err := DecodeRequest(bytes.NewReader(requestBody))
+	return rawItem, canon, err
+}
+
+func assertResponsesInputItemMatchesRaw(t *testing.T, canon model.CanonicalRequest, rawItem map[string]any) {
+	t.Helper()
+	gotInput := make([]any, len(canon.ResponseInputItems))
+	for index := range canon.ResponseInputItems {
+		gotInput[index] = canon.ResponseInputItems[index]
+	}
+	if !reflect.DeepEqual(gotInput, []any{rawItem}) {
+		t.Fatalf("expected raw input item preserved for raw-first forwarding, got %#v want %#v", gotInput, rawItem)
+	}
+}
+
+func assertCanonicalTextParts(t *testing.T, message model.CanonicalMessage, wantText []string) {
+	t.Helper()
+	if len(message.Parts) != len(wantText) {
+		t.Fatalf("expected %d canonical text parts, got %#v", len(wantText), message.Parts)
+	}
+	if len(wantText) == 0 && message.Parts == nil {
+		t.Fatalf("expected empty content to preserve the existing non-nil canonical parts slice")
+	}
+	for index, want := range wantText {
+		part := message.Parts[index]
+		if part.Type != "text" || part.Text != want {
+			t.Fatalf("canonical text part %d = %#v, want text %q", index, part, want)
+		}
+	}
+}
+
 func decodeMemoryOptimizationFixture(t *testing.T) (map[string]any, model.CanonicalRequest) {
 	t.Helper()
 	body, err := os.ReadFile("testdata/memory-optimization-semantic-request.json")

@@ -606,6 +606,9 @@ func decodeInputItem(raw json.RawMessage, rawMap map[string]any) (map[string]any
 		return preserved, model.CanonicalMessage{Role: role, Parts: parts, ToolCalls: toolCalls}, true, false, nil
 	}
 	if role, _ := rawMap["role"].(string); role != "" {
+		if msg, ok := decodeTextOnlyMessageInputItem(rawMap); ok {
+			return preserveResponsesInputItem(rawMap), msg, true, false, nil
+		}
 		var msg message
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			return nil, model.CanonicalMessage{}, false, false, err
@@ -687,6 +690,66 @@ func decodeInputItem(raw json.RawMessage, rawMap map[string]any) (map[string]any
 		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID, ReasoningBlocks: reasoningBlocks}, true, false, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, false, nil
+}
+
+func decodeTextOnlyMessageInputItem(rawMap map[string]any) (model.CanonicalMessage, bool) {
+	if _, hasToolCalls := rawMap["tool_calls"]; hasToolCalls {
+		return model.CanonicalMessage{}, false
+	}
+	if _, hasToolCallID := rawMap["tool_call_id"]; hasToolCallID {
+		return model.CanonicalMessage{}, false
+	}
+
+	role, _ := rawMap["role"].(string)
+	content, hasContent := rawMap["content"]
+	if !hasContent || content == nil {
+		return model.CanonicalMessage{Role: role, Parts: make([]model.CanonicalContentPart, 0)}, true
+	}
+	if text, ok := content.(string); ok {
+		if isUndefinedString(text) {
+			return model.CanonicalMessage{Role: role, Parts: make([]model.CanonicalContentPart, 0)}, true
+		}
+		return model.CanonicalMessage{
+			Role:  role,
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: text}},
+		}, true
+	}
+
+	rawParts, ok := content.([]any)
+	if !ok {
+		return model.CanonicalMessage{}, false
+	}
+	parts := make([]model.CanonicalContentPart, 0, len(rawParts))
+	for _, rawPart := range rawParts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			return model.CanonicalMessage{}, false
+		}
+		partType, ok := part["type"].(string)
+		if !ok {
+			return model.CanonicalMessage{}, false
+		}
+		switch partType {
+		case "input_text", "output_text", "text":
+			text, ok := textOnlyContentPartText(part)
+			if !ok {
+				return model.CanonicalMessage{}, false
+			}
+			parts = append(parts, model.CanonicalContentPart{Type: "text", Text: text})
+		default:
+			return model.CanonicalMessage{}, false
+		}
+	}
+	return model.CanonicalMessage{Role: role, Parts: parts}, true
+}
+
+func textOnlyContentPartText(part map[string]any) (string, bool) {
+	text, exists := part["text"]
+	if !exists || text == nil {
+		return "", true
+	}
+	value, ok := text.(string)
+	return value, ok
 }
 
 func preserveResponsesInputItem(rawMap map[string]any) map[string]any {
