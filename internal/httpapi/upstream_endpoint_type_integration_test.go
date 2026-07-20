@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/testutil"
 )
 
@@ -263,8 +265,12 @@ func TestResponsesRouteRejectsSemanticFeaturesBeforeNonResponsesUpstream(t *test
 				if rec.Code != http.StatusBadRequest {
 					t.Fatalf("expected preflight 400, got %d body=%s", rec.Code, rec.Body.String())
 				}
-				if !strings.Contains(rec.Body.String(), "unsupported_upstream_feature") {
-					t.Fatalf("expected stable unsupported feature error, got %s", rec.Body.String())
+				expectedErrorCode := "unsupported_upstream_feature"
+				if feature.name == "persisted reasoning item" && endpointType == config.UpstreamEndpointTypeAnthropic {
+					expectedErrorCode = "invalid_request"
+				}
+				if !strings.Contains(rec.Body.String(), expectedErrorCode) {
+					t.Fatalf("expected %s error, got %s", expectedErrorCode, rec.Body.String())
 				}
 				if upstreamHits != 0 {
 					t.Fatalf("expected no upstream request, got %d", upstreamHits)
@@ -2800,10 +2806,15 @@ func TestResponsesRouteRestoresPreviousAnthropicThinkingBlocksOnFollowUp(t *test
 	}
 }
 
-func TestResponsesRouteRejectsClientSuppliedAnthropicThinkingReplay(t *testing.T) {
+func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.T) {
 	requestCount := 0
+	var secondBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
+		if requestCount == 2 {
+			body, _ := io.ReadAll(r.Body)
+			secondBody = string(body)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if requestCount == 1 {
 			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"internal reasoning","signature":"sig_123"},{"type":"tool_use","id":"call_1","name":"search_web","input":{"query":"weather"}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`))
@@ -2838,16 +2849,167 @@ func TestResponsesRouteRejectsClientSuppliedAnthropicThinkingReplay(t *testing.T
 		t.Fatalf("expected output to expose opaque reasoning without an internal signature field, got %s", encodedOutput)
 	}
 
-	secondBodyJSON := `{"model":"gpt-5","input":[{"role":"user","content":"hello"},{"type":"reasoning","thinking":"internal reasoning","encrypted_content":"sig_123","signature":"sig_123"},{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`
+	var opaqueReasoning map[string]any
+	for _, raw := range output {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "reasoning" {
+			opaqueReasoning = item
+			break
+		}
+	}
+	if opaqueReasoning == nil {
+		t.Fatalf("expected server-issued opaque reasoning output, got %#v", output)
+	}
+	opaqueJSON, err := json.Marshal(opaqueReasoning)
+	if err != nil {
+		t.Fatalf("marshal opaque reasoning: %v", err)
+	}
+	secondBodyJSON := `{"model":"gpt-5","input":[{"role":"user","content":"hello"},` + string(opaqueJSON) + `,{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}]}`
 	secondReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(secondBodyJSON))
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondRec := httptest.NewRecorder()
 	server.ServeHTTP(secondRec, secondReq)
-	if secondRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected client-supplied opaque replay to fail before upstream, got %d body=%s", secondRec.Code, secondRec.Body.String())
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("expected server-issued opaque replay to succeed, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if requestCount != 1 {
-		t.Fatalf("expected client-supplied opaque replay to make no second upstream request, got %d", requestCount)
+	if requestCount != 2 || !strings.Contains(secondBody, `"signature":"sig_123"`) {
+		t.Fatalf("expected second upstream request to use server-held native thinking signature, count=%d body=%s", requestCount, secondBody)
+	}
+	nestedBody := `{"model":"gpt-5","input":[{"role":"assistant","content":[` + string(opaqueJSON) + `]},{"role":"user","content":"continue"}]}`
+	nestedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(nestedBody))
+	nestedReq.Header.Set("Content-Type", "application/json")
+	nestedRec := httptest.NewRecorder()
+	server.ServeHTTP(nestedRec, nestedReq)
+	if nestedRec.Code != http.StatusOK || requestCount != 3 || !strings.Contains(secondBody, `"signature":"sig_123"`) {
+		t.Fatalf("expected nested server-issued opaque replay to use server-held native thinking signature, status=%d calls=%d body=%s", nestedRec.Code, requestCount, secondBody)
+	}
+	for _, testCase := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "unknown", mutate: func(item map[string]any) { item["encrypted_content"] = "unknown" }},
+		{name: "tampered", mutate: func(item map[string]any) { item["thinking"] = "tampered" }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			item := cloneJSONValueForResponse(opaqueReasoning).(map[string]any)
+			testCase.mutate(item)
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				t.Fatalf("marshal %s opaque item: %v", testCase.name, err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[`+string(encoded)+`]}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || requestCount != 3 {
+				t.Fatalf("expected %s opaque replay rejection before upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, requestCount, rec.Body.String())
+			}
+		})
+	}
+	for _, testCase := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "nested unknown", mutate: func(item map[string]any) { item["encrypted_content"] = "unknown" }},
+		{name: "nested tampered", mutate: func(item map[string]any) { item["thinking"] = "tampered" }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			item := cloneJSONValueForResponse(opaqueReasoning).(map[string]any)
+			testCase.mutate(item)
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				t.Fatalf("marshal %s opaque item: %v", testCase.name, err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"assistant","content":[`+string(encoded)+`]}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || requestCount != 3 {
+				t.Fatalf("expected %s opaque replay rejection before upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, requestCount, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestResponsesRouteRejectsOpaqueThinkingAcrossProviderAndModelScope(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		storedProvider string
+		requestPath    string
+		storedModel    string
+		requestModel   string
+		providers      []config.ProviderConfig
+	}{
+		{
+			name:           "cross provider",
+			storedProvider: "source",
+			requestPath:    "/target/v1/responses",
+			storedModel:    "gpt-5",
+			requestModel:   "gpt-5",
+			providers: []config.ProviderConfig{
+				{ID: "source", Enabled: true, UpstreamBaseURL: "https://source.example/v1", UpstreamAPIKey: "source-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true},
+				{ID: "target", Enabled: true, UpstreamBaseURL: "https://target.example/v1", UpstreamAPIKey: "target-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true},
+			},
+		},
+		{
+			name:           "cross model",
+			storedProvider: "source",
+			requestPath:    "/source/v1/responses",
+			storedModel:    "model-a",
+			requestModel:   "client-b",
+			providers: []config.ProviderConfig{{
+				ID:                   "source",
+				Enabled:              true,
+				UpstreamBaseURL:      "https://source.example/v1",
+				UpstreamAPIKey:       "source-key",
+				UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic,
+				SupportsResponses:    true,
+				ModelMap: []config.ModelMapEntry{
+					config.NewModelMapEntry("client-a", "model-a"),
+					config.NewModelMapEntry("client-b", "model-b"),
+				},
+			}},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var upstreamHits atomic.Int32
+			for index := range testCase.providers {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					upstreamHits.Add(1)
+					http.Error(w, "unexpected upstream request", http.StatusBadGateway)
+				}))
+				defer upstream.Close()
+				testCase.providers[index].UpstreamBaseURL = upstream.URL
+			}
+			server := NewServer(config.Config{DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: testCase.providers})
+			storedProvider, err := server.store.Active().Config.ProviderByID(testCase.storedProvider)
+			if err != nil {
+				t.Fatalf("lookup stored provider: %v", err)
+			}
+			scope := responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+				ProviderID:                testCase.storedProvider,
+				DownstreamEndpoint:        canonicalV1ResponsesPath,
+				UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+				NormalizedUpstreamBaseURL: storedProvider.UpstreamBaseURL,
+				FinalUpstreamModel:        testCase.storedModel,
+				CredentialFingerprint:     authorizationFingerprint("Bearer " + storedProvider.UpstreamAPIKey),
+				InboundCallerFingerprint:  "anonymous",
+			})
+			native := map[string]any{"type": "thinking", "thinking": "server-held", "signature": "sig_server"}
+			server.history.Save(testCase.storedProvider, "resp_server", []model.CanonicalMessage{{Role: "assistant", ReasoningBlocks: []map[string]any{native}}}, scope)
+			public := responsesOpaqueThinkingPublicBlock(native, 0)
+			encoded, err := json.Marshal(public)
+			if err != nil {
+				t.Fatalf("marshal public opaque thinking: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, testCase.requestPath, strings.NewReader(`{"model":"`+testCase.requestModel+`","input":[`+string(encoded)+`]}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || upstreamHits.Load() != 0 {
+				t.Fatalf("expected %s opaque replay rejection before upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, upstreamHits.Load(), rec.Body.String())
+			}
+		})
 	}
 }
 

@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -15,14 +17,15 @@ import (
 )
 
 type responsesHistoryStore struct {
-	mu            sync.RWMutex
-	entries       map[string]responsesConversationSnapshot
-	byResponseID  map[string]string
-	toolCalls     map[string]responsesHistoryToolCallEntry
-	order         []string
-	maxSize       int
-	maxBytes      int64
-	retainedBytes int64
+	mu             sync.RWMutex
+	entries        map[string]responsesConversationSnapshot
+	byResponseID   map[string]string
+	toolCalls      map[string]responsesHistoryToolCallEntry
+	opaqueThinking map[string]responsesHistoryOpaqueThinkingEntry
+	order          []string
+	maxSize        int
+	maxBytes       int64
+	retainedBytes  int64
 
 	toolCallRecoveryIndexPath   string
 	toolCallRecoveryIndexLoaded bool
@@ -32,6 +35,7 @@ type responsesConversationSnapshot struct {
 	Messages         []model.CanonicalMessage
 	CompressedFields []responsesHistoryCompressedField
 	Bytes            int64
+	Scope            string
 }
 
 type responsesHistoryToolCallEntry struct {
@@ -40,6 +44,22 @@ type responsesHistoryToolCallEntry struct {
 	ReasoningBlocks       []map[string]any
 	ArgumentsCompressed   []byte `json:"arguments_compressed,omitempty"`
 	ArgumentsOriginalSize int    `json:"arguments_original_size,omitempty"`
+}
+
+type responsesHistoryOpaqueThinkingEntry struct {
+	SnapshotKey  string
+	MessageIndex int
+	BlockIndex   int
+}
+
+type responsesHistoryReplayProvenance struct {
+	ProviderID                string `json:"provider_id"`
+	DownstreamEndpoint        string `json:"downstream_endpoint"`
+	UpstreamEndpointType      string `json:"upstream_endpoint_type"`
+	NormalizedUpstreamBaseURL string `json:"normalized_upstream_base_url"`
+	FinalUpstreamModel        string `json:"final_upstream_model"`
+	CredentialFingerprint     string `json:"credential_fingerprint"`
+	InboundCallerFingerprint  string `json:"inbound_caller_fingerprint"`
 }
 
 const defaultResponsesHistoryMaxSize = 512
@@ -62,6 +82,7 @@ func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *re
 		entries:                   map[string]responsesConversationSnapshot{},
 		byResponseID:              map[string]string{},
 		toolCalls:                 map[string]responsesHistoryToolCallEntry{},
+		opaqueThinking:            map[string]responsesHistoryOpaqueThinkingEntry{},
 		maxSize:                   maxSize,
 		maxBytes:                  defaultResponsesHistoryMaxBytes,
 		toolCallRecoveryIndexPath: strings.TrimSpace(toolCallRecoveryIndexPath),
@@ -92,8 +113,45 @@ func responsesHistoryScopedToolCallKey(providerID, callID, scope string) string 
 }
 
 func responsesHistoryToolCallScope(upstreamBaseURL, modelName, authMode, authorization string) string {
-	parts := []string{strings.TrimSpace(upstreamBaseURL), strings.TrimSpace(modelName), strings.TrimSpace(authMode), authorizationFingerprint(authorization)}
-	return strings.Join(parts, "|")
+	return responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+		NormalizedUpstreamBaseURL: normalizeResponsesHistoryUpstreamBaseURL(upstreamBaseURL),
+		FinalUpstreamModel:        strings.TrimSpace(modelName),
+		CredentialFingerprint:     authorizationFingerprint(authorization),
+	})
+}
+
+func responsesHistoryReplayScope(provenance responsesHistoryReplayProvenance) string {
+	provenance.ProviderID = strings.TrimSpace(provenance.ProviderID)
+	provenance.DownstreamEndpoint = strings.TrimSpace(provenance.DownstreamEndpoint)
+	provenance.UpstreamEndpointType = strings.TrimSpace(provenance.UpstreamEndpointType)
+	provenance.NormalizedUpstreamBaseURL = normalizeResponsesHistoryUpstreamBaseURL(provenance.NormalizedUpstreamBaseURL)
+	provenance.FinalUpstreamModel = strings.TrimSpace(provenance.FinalUpstreamModel)
+	provenance.CredentialFingerprint = strings.TrimSpace(provenance.CredentialFingerprint)
+	provenance.InboundCallerFingerprint = strings.TrimSpace(provenance.InboundCallerFingerprint)
+	encoded, err := json.Marshal(provenance)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeResponsesHistoryUpstreamBaseURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimRight(strings.TrimSpace(raw), "/")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	if (parsed.Scheme == "http" && strings.HasSuffix(parsed.Host, ":80")) || (parsed.Scheme == "https" && strings.HasSuffix(parsed.Host, ":443")) {
+		parsed.Host = strings.TrimSuffix(parsed.Host, ":80")
+		parsed.Host = strings.TrimSuffix(parsed.Host, ":443")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func authorizationFingerprint(authorization string) string {
@@ -161,6 +219,9 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 	if s.toolCalls == nil {
 		s.toolCalls = map[string]responsesHistoryToolCallEntry{}
 	}
+	if s.opaqueThinking == nil {
+		s.opaqueThinking = map[string]responsesHistoryOpaqueThinkingEntry{}
+	}
 	if err := s.loadToolCallRecoveryIndexLocked(); err != nil {
 		log.Printf("warning: failed to load responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
 	}
@@ -176,16 +237,18 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 			s.mu.Unlock()
 			return
 		}
-		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes}
+		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes, Scope: firstString(scopes...)}
 		s.retainedBytes += recoveryBytes
 		s.indexToolCallsLocked(providerID, key, messages, firstString(scopes...), nil)
 	} else {
 		storedBytes := snapshotBytes + recoveryBytes
 		snapshot, storedMessages := newResponsesConversationSnapshot(messages, storedBytes)
+		snapshot.Scope = firstString(scopes...)
 		s.entries[key] = snapshot
 		s.retainedBytes += storedBytes
 		s.byResponseID[responseID] = key
 		s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...), &snapshot)
+		s.indexOpaqueThinkingLocked(providerID, key, storedMessages, firstString(scopes...))
 	}
 	s.order = append(s.order, key)
 	for len(s.order) > s.maxSize || (s.maxBytes > 0 && s.retainedBytes > s.maxBytes) {
@@ -200,16 +263,46 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 }
 
 func (s *responsesHistoryStore) Load(providerID, responseID string) []model.CanonicalMessage {
+	return s.LoadScoped(providerID, responseID, "")
+}
+
+func (s *responsesHistoryStore) LoadScoped(providerID, responseID, scope string) []model.CanonicalMessage {
 	if s == nil || providerID == "" || responseID == "" {
 		return nil
 	}
 	s.mu.RLock()
 	stored, ok := s.entries[responsesHistoryKey(providerID, responseID)]
 	s.mu.RUnlock()
-	if !ok || len(stored.Messages) == 0 {
+	if !ok || (scope != "" && stored.Scope != scope) || len(stored.Messages) == 0 {
 		return nil
 	}
 	return loadResponsesConversationSnapshot(stored)
+}
+
+func (s *responsesHistoryStore) LoadOpaqueThinking(providerID, scope string, publicBlock map[string]any) (map[string]any, bool) {
+	if s == nil || providerID == "" || scope == "" {
+		return nil, false
+	}
+	fingerprint, ok := responsesOpaqueThinkingPublicFingerprint(publicBlock)
+	if !ok {
+		return nil, false
+	}
+	s.mu.RLock()
+	entry, found := s.opaqueThinking[responsesHistoryScopedToolCallKey(providerID, fingerprint, scope)]
+	snapshot, snapshotFound := s.entries[entry.SnapshotKey]
+	s.mu.RUnlock()
+	if !found || !snapshotFound || entry.MessageIndex < 0 || entry.MessageIndex >= len(snapshot.Messages) {
+		return nil, false
+	}
+	blocks := snapshot.Messages[entry.MessageIndex].ReasoningBlocks
+	if entry.BlockIndex < 0 || entry.BlockIndex >= len(blocks) {
+		return nil, false
+	}
+	block := cloneReasoningBlocksForHistory([]map[string]any{blocks[entry.BlockIndex]})
+	if len(block) != 1 || !hasOpaqueThinkingState(block[0]) {
+		return nil, false
+	}
+	return block[0], true
 }
 
 func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes ...string) (model.CanonicalToolCall, []map[string]any, bool) {
@@ -266,10 +359,22 @@ func (s *responsesHistoryStore) deleteKeyLocked(key string) {
 	}
 	delete(s.entries, key)
 	s.deleteToolCallsForKeyLocked(key)
+	s.deleteOpaqueThinkingForKeyLocked(key)
 	for responseID, indexedKey := range s.byResponseID {
 		if indexedKey == key {
 			delete(s.byResponseID, responseID)
 			return
+		}
+	}
+}
+
+func (s *responsesHistoryStore) deleteOpaqueThinkingForKeyLocked(snapshotKey string) {
+	if snapshotKey == "" || len(s.opaqueThinking) == 0 {
+		return
+	}
+	for key, entry := range s.opaqueThinking {
+		if entry.SnapshotKey == snapshotKey {
+			delete(s.opaqueThinking, key)
 		}
 	}
 }
@@ -294,6 +399,63 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
 	}
+}
+
+func (s *responsesHistoryStore) indexOpaqueThinkingLocked(providerID, snapshotKey string, messages []model.CanonicalMessage, scope string) {
+	if providerID == "" || snapshotKey == "" || scope == "" || len(messages) == 0 {
+		return
+	}
+	for messageIndex, message := range messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		for blockIndex, block := range message.ReasoningBlocks {
+			if !hasOpaqueThinkingState(block) {
+				continue
+			}
+			publicBlock := responsesOpaqueThinkingPublicBlock(block, blockIndex)
+			fingerprint, ok := responsesOpaqueThinkingPublicFingerprint(publicBlock)
+			if !ok {
+				continue
+			}
+			s.opaqueThinking[responsesHistoryScopedToolCallKey(providerID, fingerprint, scope)] = responsesHistoryOpaqueThinkingEntry{SnapshotKey: snapshotKey, MessageIndex: messageIndex, BlockIndex: blockIndex}
+		}
+	}
+}
+
+func hasOpaqueThinkingState(block map[string]any) bool {
+	return strings.TrimSpace(stringValue(block["signature"])) != "" || strings.TrimSpace(stringValue(block["encrypted_content"])) != ""
+}
+
+func responsesOpaqueThinkingPublicBlock(block map[string]any, index int) map[string]any {
+	public := cloneJSONValueForResponse(block).(map[string]any)
+	if stringValue(public["type"]) == "thinking" {
+		public["type"] = "reasoning"
+	}
+	if signature := stringValue(public["signature"]); signature != "" && stringValue(public["encrypted_content"]) == "" {
+		public["encrypted_content"] = signature
+	}
+	delete(public, "signature")
+	if stringValue(public["id"]) == "" {
+		if index == 0 {
+			public["id"] = "rs_upstream"
+		} else {
+			public["id"] = "rs_upstream_" + strconv.Itoa(index)
+		}
+	}
+	return public
+}
+
+func responsesOpaqueThinkingPublicFingerprint(block map[string]any) (string, bool) {
+	if len(block) == 0 || stringValue(block["type"]) != "reasoning" || strings.TrimSpace(stringValue(block["encrypted_content"])) == "" || strings.TrimSpace(stringValue(block["signature"])) != "" {
+		return "", false
+	}
+	encoded, err := json.Marshal(block)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), true
 }
 
 func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {

@@ -153,7 +153,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = withUpstreamTransportPool(ctx, s.upstreamTransports)
 		r = r.Clone(withRuntimeSnapshot(withRouteInfo(ctx, info), snapshot))
 		r.URL.Path = info.CanonicalPath
-		if shouldUseRootLegacyProxyAuth(info, snapshot) {
+		useRootLegacyAuth := shouldUseRootLegacyProxyAuth(info, snapshot)
+		if useRootLegacyAuth {
 			if err := auth.ValidateProxyAuth(r, snapshot.Config.ProxyAPIKey); err != nil {
 				errorsx.WriteJSON(w, http.StatusUnauthorized, "unauthorized", "invalid proxy api key")
 				return
@@ -164,12 +165,29 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		r = r.Clone(withInboundCallerIdentity(r.Context(), authorizedCallerIdentity(r, snapshot.Config, provider, info.Legacy, useRootLegacyAuth)))
 		setConfigVersionHeaders(w, snapshot, info.ProviderID)
 		s.mux.ServeHTTP(w, r)
 		return
 	}
 
 	errorsx.WriteJSON(w, http.StatusNotFound, "not_found", "route not found")
+}
+
+func authorizedCallerIdentity(r *http.Request, cfg config.Config, provider config.ProviderConfig, legacy bool, useRootLegacyAuth bool) string {
+	if useRootLegacyAuth && cfg.ProxyAPIKey != "" {
+		return authorizationFingerprint("root:" + cfg.ProxyAPIKey)
+	}
+	if legacy && cfg.ProxyAPIKey != "" && auth.ValidateProxyAuth(r, cfg.ProxyAPIKey) == nil {
+		return authorizationFingerprint("root:" + cfg.ProxyAPIKey)
+	}
+	if provider.ProxyAPIKeyDisabled() {
+		return "anonymous"
+	}
+	if key := provider.EffectiveProxyAPIKey(cfg.ProxyAPIKey); key != "" {
+		return authorizationFingerprint("provider:" + provider.ID + ":" + key)
+	}
+	return "anonymous"
 }
 
 func (s *Server) reconcileUpstreamTransports(_ *config.RuntimeSnapshot) {
