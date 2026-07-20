@@ -631,6 +631,35 @@ func TestCollectorAppendsReasoningBlocksAcrossDeltas(t *testing.T) {
 	}
 }
 
+func TestCollectorReplacesSnapshotsForInterleavedReasoningBlockIdentities(t *testing.T) {
+	c := NewCollector()
+	c.Accept(upstream.Event{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_blocks"}}})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{map[string]any{"type": "thinking", "thinking": "A"}}}, ReasoningBlockIdentity: "stream-a:0"})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{map[string]any{"type": "thinking", "thinking": "B"}}}, ReasoningBlockIdentity: "stream-a:1"})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{map[string]any{"type": "thinking", "thinking": "A+"}}}, ReasoningBlockIdentity: "stream-a:0"})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{map[string]any{"type": "thinking", "thinking": "B+"}}}, ReasoningBlockIdentity: "stream-a:1"})
+	c.Accept(upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"finish_reason": "end_turn"}}})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if len(result.ReasoningBlocks) != 2 {
+		t.Fatalf("expected two interleaved reasoning blocks, got %#v", result.ReasoningBlocks)
+	}
+	if got := stringValue(result.ReasoningBlocks[0]["thinking"]); got != "A+" {
+		t.Fatalf("expected first block latest snapshot, got %#v", result.ReasoningBlocks)
+	}
+	if got := stringValue(result.ReasoningBlocks[1]["thinking"]); got != "B+" {
+		t.Fatalf("expected second block latest snapshot, got %#v", result.ReasoningBlocks)
+	}
+	for _, block := range result.ReasoningBlocks {
+		if _, found := block["reasoning_block_identity"]; found {
+			t.Fatalf("unexpected internal reasoning identity in result block: %#v", block)
+		}
+	}
+}
+
 // TestPayloadToSyntheticCanonicalEvents_SyntheticFlag verifies that synthetic events
 // carry ProviderMeta["synthetic"]=true so they can be distinguished from real upstream events.
 func TestPayloadToSyntheticCanonicalEvents_SyntheticFlag(t *testing.T) {

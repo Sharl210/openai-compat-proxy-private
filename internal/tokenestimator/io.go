@@ -41,6 +41,16 @@ func SaveBucketState(providersDir string, key BucketKey, state *BucketState) err
 	return atomicWrite(txtPath, []byte(RenderBucketState(*state)))
 }
 
+func RemoveBucketState(providersDir string, key BucketKey) error {
+	jsonPath, txtPath := BucketPaths(providersDir, key)
+	for _, path := range []string{jsonPath, txtPath} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func atomicWrite(path string, data []byte) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)

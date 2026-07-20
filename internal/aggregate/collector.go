@@ -52,6 +52,7 @@ type Collector struct {
 	toolCalls               map[string]*ToolCall
 	order                   []string
 	reasoning               map[string]any
+	reasoningBlockIndexes   map[string]int
 	serviceTier             string
 	responseMessageContent  []map[string]any
 	messageContentParts     map[string]map[int]map[string]any
@@ -65,9 +66,10 @@ type Collector struct {
 
 func NewCollector() *Collector {
 	return &Collector{
-		toolCalls:           map[string]*ToolCall{},
-		reasoning:           map[string]any{},
-		messageContentParts: map[string]map[int]map[string]any{},
+		toolCalls:             map[string]*ToolCall{},
+		reasoning:             map[string]any{},
+		reasoningBlockIndexes: map[string]int{},
+		messageContentParts:   map[string]map[int]map[string]any{},
 	}
 }
 
@@ -293,12 +295,28 @@ func (c *Collector) Accept(evt upstream.Event) {
 				}
 				existing, _ := c.reasoning[k].([]any)
 				merged := append([]any(nil), existing...)
+				validBlockCount := 0
+				for _, rawBlock := range rawBlocks {
+					if block, _ := rawBlock.(map[string]any); len(block) > 0 {
+						validBlockCount++
+					}
+				}
 				for _, rawBlock := range rawBlocks {
 					block, _ := rawBlock.(map[string]any)
 					if len(block) == 0 {
 						continue
 					}
-					merged = mergeCumulativeReasoningBlock(merged, block)
+					cloned := cloneOutputItem(block)
+					if evt.ReasoningBlockIdentity != "" && validBlockCount == 1 {
+						if index, found := c.reasoningBlockIndexes[evt.ReasoningBlockIdentity]; found && index < len(merged) {
+							merged[index] = cloned
+							continue
+						}
+						c.reasoningBlockIndexes[evt.ReasoningBlockIdentity] = len(merged)
+						merged = append(merged, cloned)
+						continue
+					}
+					merged = mergeCumulativeReasoningBlock(merged, cloned)
 				}
 				if len(merged) > 0 {
 					c.reasoning[k] = merged

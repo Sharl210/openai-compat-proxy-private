@@ -2,6 +2,8 @@ package tokenestimator
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -93,6 +95,168 @@ func TestRecordObservationBoundsSeenRequestIDsAndAllowsEvictedIDs(t *testing.T) 
 	state := mgr.GetBucketState(obs.Bucket)
 	if state == nil || state.SampleCount != int64(defaultRecentSampleLimit+2) {
 		t.Fatalf("expected %d recorded observations, got %#v", defaultRecentSampleLimit+2, state)
+	}
+}
+
+func TestRecordObservationEvictsLeastRecentlyUsedBucketAfterCommit(t *testing.T) {
+	root := t.TempDir()
+	mgr := NewManager(root, time.UTC, func() []string { return []string{"codex-2"} })
+	mgr.bucketLimit = 2
+	observation := func(model string) Observation {
+		return Observation{Bucket: BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: model}, BaseEstimate: 100, InputTokens: 120, CachedTokens: 20, UncachedInputTokens: 100, Shape: ShapePlain}
+	}
+	for _, modelName := range []string{"model-a", "model-b"} {
+		if err := mgr.RecordObservation("req-"+modelName, observation(modelName)); err != nil {
+			t.Fatalf("RecordObservation(%s) error: %v", modelName, err)
+		}
+	}
+	if state := mgr.GetBucketState(observation("model-a").Bucket); state == nil {
+		t.Fatal("expected model-a state before eviction")
+	}
+	if err := mgr.RecordObservation("req-model-c", observation("model-c")); err != nil {
+		t.Fatalf("RecordObservation(model-c) error: %v", err)
+	}
+	if _, found := mgr.buckets[observation("model-b").Bucket]; found {
+		t.Fatalf("expected least-recently-used model-b to be evicted, buckets=%#v", mgr.buckets)
+	}
+	for _, modelName := range []string{"model-a", "model-c"} {
+		jsonPath, txtPath := BucketPaths(root, observation(modelName).Bucket)
+		if _, err := os.Stat(jsonPath); err != nil {
+			t.Fatalf("expected committed %s JSON state: %v", modelName, err)
+		}
+		if _, err := os.Stat(txtPath); err != nil {
+			t.Fatalf("expected committed %s summary state: %v", modelName, err)
+		}
+	}
+	jsonPath, txtPath := BucketPaths(root, observation("model-b").Bucket)
+	for _, path := range []string{jsonPath, txtPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected evicted state file removed after successor commit: path=%s err=%v", filepath.Base(path), err)
+		}
+	}
+}
+
+func TestManagerCachesLazilyLoadedBucketAndKeepsItRecent(t *testing.T) {
+	root := t.TempDir()
+	manager := NewManager(root, time.UTC, func() []string { return []string{"codex-2"} })
+	manager.bucketLimit = 2
+	newState := func(modelName string) *BucketState {
+		return &BucketState{
+			SchemaVersion:         schemaVersion,
+			EstimatorVersion:      estimatorVersion,
+			ProviderID:            "codex-2",
+			EndpointType:          "responses",
+			FinalUpstreamRawModel: modelName,
+			SafeModelName:         SafeModelName(modelName),
+		}
+	}
+	keyA := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-a"}
+	keyB := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-b"}
+	keyC := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-c"}
+	if err := SaveBucketState(root, keyA, newState(keyA.Model)); err != nil {
+		t.Fatalf("save lazy bucket: %v", err)
+	}
+	if err := manager.RecordObservation("req-b", Observation{Bucket: keyB, BaseEstimate: 100, InputTokens: 120, UncachedInputTokens: 120, Shape: ShapePlain}); err != nil {
+		t.Fatalf("record model-b: %v", err)
+	}
+	if state := manager.GetBucketState(keyA); state == nil {
+		t.Fatal("expected lazy disk bucket to load")
+	}
+	if err := manager.RecordObservation("req-c", Observation{Bucket: keyC, BaseEstimate: 100, InputTokens: 120, UncachedInputTokens: 120, Shape: ShapePlain}); err != nil {
+		t.Fatalf("record model-c: %v", err)
+	}
+	if _, found := manager.buckets[keyB]; found {
+		t.Fatalf("expected model-b to be evicted after lazy model-a access, buckets=%#v", manager.buckets)
+	}
+	if _, found := manager.buckets[keyA]; !found {
+		t.Fatalf("expected lazily loaded model-a to remain cached, buckets=%#v", manager.buckets)
+	}
+}
+
+func TestManagerRestoresPersistedAccessOrderAcrossRestart(t *testing.T) {
+	root := t.TempDir()
+	keyA := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-a"}
+	keyB := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-b"}
+	keyC := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-c"}
+	for index, key := range []BucketKey{keyA, keyB, keyC} {
+		state := &BucketState{
+			SchemaVersion:         schemaVersion,
+			EstimatorVersion:      estimatorVersion,
+			ProviderID:            key.ProviderID,
+			EndpointType:          key.EndpointType,
+			FinalUpstreamRawModel: key.Model,
+			SafeModelName:         SafeModelName(key.Model),
+			LastAccessedAt:        time.Unix(int64(index+1), 0).UTC(),
+		}
+		if err := SaveBucketState(root, key, state); err != nil {
+			t.Fatalf("save %s: %v", key.Model, err)
+		}
+	}
+	manager := &Manager{
+		providersDir: root,
+		enabledFn:    func() []string { return []string{"codex-2"} },
+		buckets:      map[BucketKey]*BucketState{},
+		bucketLimit:  2,
+	}
+	if err := manager.loadExistingBuckets(); err != nil {
+		t.Fatalf("load existing buckets: %v", err)
+	}
+	if _, found := manager.buckets[keyA]; found {
+		t.Fatalf("expected oldest persisted access to be evicted, buckets=%#v", manager.buckets)
+	}
+	if _, found := manager.buckets[keyB]; !found {
+		t.Fatalf("expected newer bucket model-b to remain, buckets=%#v", manager.buckets)
+	}
+	if _, found := manager.buckets[keyC]; !found {
+		t.Fatalf("expected newest bucket model-c to remain, buckets=%#v", manager.buckets)
+	}
+}
+
+func TestManagerPersistsReadAccessOrderAcrossRestart(t *testing.T) {
+	root := t.TempDir()
+	keyA := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-a"}
+	keyB := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-b"}
+	keyC := BucketKey{ProviderID: "codex-2", EndpointType: "responses", Model: "model-c"}
+	for index, key := range []BucketKey{keyA, keyB, keyC} {
+		state := &BucketState{
+			SchemaVersion:         schemaVersion,
+			EstimatorVersion:      estimatorVersion,
+			ProviderID:            key.ProviderID,
+			EndpointType:          key.EndpointType,
+			FinalUpstreamRawModel: key.Model,
+			SafeModelName:         SafeModelName(key.Model),
+			LastAccessedAt:        time.Unix(int64(index+1), 0).UTC(),
+		}
+		if err := SaveBucketState(root, key, state); err != nil {
+			t.Fatalf("save %s: %v", key.Model, err)
+		}
+	}
+
+	manager := NewManager(root, time.UTC, func() []string { return []string{"codex-2"} })
+	if state := manager.GetBucketState(keyA); state == nil {
+		t.Fatal("expected model-a state to be loaded")
+	}
+	if err := manager.Flush(context.Background()); err != nil {
+		t.Fatalf("flush read access state: %v", err)
+	}
+
+	restarted := &Manager{
+		providersDir: root,
+		location:     time.UTC,
+		enabledFn:    func() []string { return []string{"codex-2"} },
+		buckets:      map[BucketKey]*BucketState{},
+		bucketLimit:  2,
+	}
+	if err := restarted.loadExistingBuckets(); err != nil {
+		t.Fatalf("load existing buckets after restart: %v", err)
+	}
+	if _, found := restarted.buckets[keyB]; found {
+		t.Fatalf("expected least-recently-read model-b to be evicted, buckets=%#v", restarted.buckets)
+	}
+	for _, key := range []BucketKey{keyA, keyC} {
+		if _, found := restarted.buckets[key]; !found {
+			t.Fatalf("expected %s to remain after restart, buckets=%#v", key.Model, restarted.buckets)
+		}
 	}
 }
 

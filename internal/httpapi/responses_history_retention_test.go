@@ -385,6 +385,53 @@ func TestResponsesHistoryRejectsInvalidCompressedToolCallMetadata(t *testing.T) 
 	}
 }
 
+func TestResponsesHistoryRecoveryIndexAcceptsExactSizeBoundaryAndRejectsOversizeBeforeRead(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	index := responsesHistoryToolCallRecoveryIndexFile{
+		Version: 1,
+		Order:   []string{"openai::resp-boundary"},
+		ToolCalls: map[string]responsesHistoryToolCallEntry{
+			"openai::call-boundary": {
+				SnapshotKey: "openai::resp-boundary",
+				Call: model.CanonicalToolCall{
+					ID:        "call-boundary",
+					Type:      "function",
+					Name:      "process",
+					Arguments: `{}`,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("marshal recovery index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, data, 0o600); err != nil {
+		t.Fatalf("write recovery index: %v", err)
+	}
+
+	boundaryStore := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	boundaryStore.toolCallRecoveryIndexMaxBytes = int64(len(data))
+	if call, _, ok := boundaryStore.LoadToolCall("openai", "call-boundary"); !ok || call.Arguments != `{}` {
+		t.Fatalf("expected exact boundary legacy recovery index to load, got ok=%t call=%#v", ok, call)
+	}
+
+	oversizedStore := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	oversizedStore.toolCallRecoveryIndexMaxBytes = int64(len(data) - 1)
+	if _, _, ok := oversizedStore.LoadToolCall("openai", "call-boundary"); ok {
+		t.Fatal("expected oversized recovery index to be rejected")
+	}
+	if len(oversizedStore.toolCalls) != 0 || oversizedStore.retainedBytes != 0 {
+		t.Fatalf("expected oversized index to leave no retained recovery state, calls=%d bytes=%d", len(oversizedStore.toolCalls), oversizedStore.retainedBytes)
+	}
+	if !oversizedStore.toolCallRecoveryIndexLoaded {
+		t.Fatal("expected oversized recovery index to be marked handled after rejection")
+	}
+	if err := oversizedStore.loadToolCallRecoveryIndexLocked(); err != nil {
+		t.Fatalf("expected repeated oversized-index load to avoid another failure, got %v", err)
+	}
+}
+
 func TestResponsesHistoryRejectsTruncatedCompressedToolCallBeforeRetention(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
 	arguments := `{"payload":"` + strings.Repeat("truncated tool argument ", 4096) + `"}`
