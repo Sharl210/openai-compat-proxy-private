@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -377,6 +378,34 @@ func TestProviderSelectionForTaggedLegacyModelMapAliasRoutesWithoutVisibleModel(
 		t.Fatalf("expected openai/client-alias selection before provider mapping, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
 	}
 	_ = server
+}
+
+func TestProviderSelectionForRootMappedDiscoveredModelDoesNotFallBackToLastProvider(t *testing.T) {
+	store := config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "target,fallback",
+		EnableLegacyV1Routes: true,
+		V1ModelMap:           []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.6-sol", "gpt-5.6-sol-xhigh")},
+		Providers: []config.ProviderConfig{
+			{ID: "target", Enabled: true, SupportsResponses: true},
+			{ID: "fallback", Enabled: true, SupportsResponses: true, ManualModels: []string{"deepseek-v4-pro"}},
+		},
+	})
+	snapshot := store.Active()
+	snapshot.DefaultModelOwners["gpt-5.6-sol"] = "target"
+	snapshot.DefaultModelRawIDs["gpt-5.6-sol"] = "gpt-5.6-sol"
+	if providerID, modelID, ok := snapshot.ResolveDefaultProviderSelectionForRequestEffort("gpt-5.6-sol", "xhigh"); !ok || providerID != "target" || modelID != "gpt-5.6-sol" {
+		t.Fatalf("expected discovered model owner lookup to resolve target/gpt-5.6-sol, got providerID=%q model=%q ok=%v", providerID, modelID, ok)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req = req.Clone(withRuntimeSnapshot(withRouteInfo(req.Context(), routeInfo{ProviderID: "fallback", Legacy: true, CanonicalPath: canonicalV1ResponsesPath}), snapshot))
+	provider, _, providerID, resolvedModel, ok, err := providerSelectionForModelRequest(req, "gpt-5.6-sol")
+	if err != nil {
+		t.Fatalf("expected provider selection without error, got %v", err)
+	}
+	if !ok || providerID != "target" || provider.ID != "target" || resolvedModel != "gpt-5.6-sol-xhigh" {
+		t.Fatalf("expected root mapped discovered model to select target and preserve the mapped effort, got providerID=%q provider=%q model=%q ok=%v", providerID, provider.ID, resolvedModel, ok)
+	}
 }
 
 func TestProviderSelectionForLegacyNoPromptReasoningSuffix(t *testing.T) {

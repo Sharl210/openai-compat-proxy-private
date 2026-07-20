@@ -62,6 +62,45 @@ func TestDefaultOverlaySuffixRouting_resolvesRealtimeBaseBeforeProxyAxes(t *test
 	}
 }
 
+func TestRootV1ModelMapDiscoversMappedTargetOwnerBeforeDefaultFallback(t *testing.T) {
+	target := newOverlaySuffixUpstream(t, []string{"gpt-5.6-sol"})
+	defer target.Close()
+	fallback := newOverlaySuffixUpstream(t, []string{"deepseek-v4-pro"})
+	defer fallback.Close()
+	cfg := defaultOverlaySuffixConfig(target.URL, fallback.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.6-sol", "gpt-5.6-sol-xhigh")}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root mapped realtime model to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "alpha" {
+		t.Fatalf("expected mapped target owner alpha, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.6-sol" {
+		t.Fatalf("expected mapped target base model, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "xhigh" {
+		t.Fatalf("expected mapped xhigh reasoning effort, got %q", got)
+	}
+	if fallback.responseHits.Load() != 0 {
+		t.Fatalf("expected no fallback upstream calls, got %d", fallback.responseHits.Load())
+	}
+	captured := <-target.requests
+	if got := captured.body["model"]; got != "gpt-5.6-sol" {
+		t.Fatalf("expected target upstream model, got %#v", got)
+	}
+	reasoning, _ := captured.body["reasoning"].(map[string]any)
+	if reasoning["effort"] != "xhigh" {
+		t.Fatalf("expected target upstream xhigh effort, got %#v", reasoning)
+	}
+}
+
 func TestDefaultOverlaySuffixRouting_preservesExactSuffixLikeLiteralOwner(t *testing.T) {
 	// Given
 	literalModel := "realtime-base-high-pro-ultra-noprompt"

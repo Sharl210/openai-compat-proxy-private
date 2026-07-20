@@ -95,6 +95,96 @@ func TestCollectorDoesNotDuplicateTextWhenDeltaAndDoneContainSameOutputText(t *t
 	}
 }
 
+func TestCollectorCoalescesCumulativeReasoningBlocks(t *testing.T) {
+	c := NewCollector()
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{
+		"reasoning_content": "first",
+		"blocks":            []any{map[string]any{"type": "thinking", "thinking": "first"}},
+	}})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{
+		"reasoning_content": " second",
+		"blocks":            []any{map[string]any{"type": "thinking", "thinking": "first second", "signature": "sig_1"}},
+	}})
+	c.Accept(upstream.Event{Event: "response.completed", Data: map[string]any{}})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if len(result.ReasoningBlocks) != 1 {
+		t.Fatalf("expected one coalesced reasoning block, got %#v", result.ReasoningBlocks)
+	}
+	if got := result.ReasoningBlocks[0]["thinking"]; got != "first second" {
+		t.Fatalf("expected final reasoning text, got %#v", got)
+	}
+	if got := result.ReasoningBlocks[0]["signature"]; got != "sig_1" {
+		t.Fatalf("expected final reasoning signature, got %#v", got)
+	}
+}
+
+func TestCollectorKeepsDistinctReasoningBlocksWithDifferentSignatures(t *testing.T) {
+	c := NewCollector()
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{
+		"blocks": []any{map[string]any{"type": "thinking", "thinking": "same text", "signature": "sig_1"}},
+	}})
+	c.Accept(upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{
+		"blocks": []any{map[string]any{"type": "thinking", "thinking": "same text", "signature": "sig_2"}},
+	}})
+	c.Accept(upstream.Event{Event: "response.completed", Data: map[string]any{}})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if len(result.ReasoningBlocks) != 2 {
+		t.Fatalf("expected distinct signed reasoning blocks, got %#v", result.ReasoningBlocks)
+	}
+}
+
+func TestCollectorPreservesCompletedContentPartsWhenOutputItemIsEmpty(t *testing.T) {
+	c := NewCollector()
+	c.Accept(upstream.Event{
+		Event: "response.content_part.done",
+		Data: map[string]any{
+			"item_id":       "msg_1",
+			"content_index": 0,
+			"part": map[string]any{
+				"type": "output_text",
+				"text": "hello from completed part",
+			},
+		},
+	})
+	c.Accept(upstream.Event{
+		Event: "response.output_item.done",
+		Data: map[string]any{
+			"item": map[string]any{
+				"id":      "msg_1",
+				"type":    "message",
+				"content": []any{},
+			},
+		},
+	})
+	c.Accept(upstream.Event{Event: "response.completed", Data: map[string]any{}})
+
+	result, err := c.Result()
+	if err != nil {
+		t.Fatalf("Collector.Result() returned error: %v", err)
+	}
+	if result.Text != "hello from completed part" {
+		t.Fatalf("expected completed part text, got %q", result.Text)
+	}
+	if len(result.ResponseMessageContent) != 1 || result.ResponseMessageContent[0]["text"] != "hello from completed part" {
+		t.Fatalf("expected completed part in message content, got %#v", result.ResponseMessageContent)
+	}
+	if len(result.ResponseOutputItems) != 1 {
+		t.Fatalf("expected one message output item, got %#v", result.ResponseOutputItems)
+	}
+	content, _ := result.ResponseOutputItems[0]["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected completed part in output item, got %#v", result.ResponseOutputItems[0])
+	}
+}
+
 func TestCollectorPreservesServiceTierFromCompletedResponse(t *testing.T) {
 	c := NewCollector()
 
@@ -154,14 +244,14 @@ func TestCollectorDropsSyntheticReasoningSummaryBeforeRealReasoning(t *testing.T
 		Event: "response.reasoning.delta",
 		Data: map[string]any{
 			InternalReasoningSourceKey: ReasoningSourceSynthetic,
-			"summary":                 "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
+			"summary":                  "**推理中**\n\n代理层占位，以兼容不同上游情况，便于客户端记录推理时长\n\n",
 		},
 	})
 	c.Accept(upstream.Event{
 		Event: "response.reasoning.delta",
 		Data: map[string]any{
 			InternalReasoningSourceKey: ReasoningSourceUpstream,
-			"summary":                 "真实推理",
+			"summary":                  "真实推理",
 		},
 	})
 	c.Accept(upstream.Event{

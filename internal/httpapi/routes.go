@@ -391,6 +391,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 	selectedProxyIntent := model.ProxyModelIntent{}
 	hasSelectedProxyIntent := false
 	usedDefaultOverlayDiscovery := false
+	usedRootMappedProviderSelection := false
 	usedDefaultProviderFallback := false
 	if !info.Legacy && canonicalModel != "" {
 		if discovery, discovered := defaultOverlayDiscoveryFromRequest(r); discovered && discovery.ProviderID == providerID && discovery.RequestedModelID == canonicalModel {
@@ -436,6 +437,11 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			hasSelectedProxyIntent = true
 			resolvedModelIsInternal = true
 			*r = *r.Clone(withProxyModelIntent(r.Context(), rootIntent))
+			if resolvedID, modelForProvider, matched := snapshot.ResolveDefaultProviderSelectionForRequestEffort(rootIntent.BaseModel, rootIntent.ReasoningEffort); matched {
+				providerID = resolvedID
+				resolvedModel = modelForProvider
+				usedRootMappedProviderSelection = true
+			}
 		} else {
 			resolvedModel = snapshot.Config.ResolveV1ModelForRequest(canonicalModel, providerSelectionEffortFromRouteContext(r))
 		}
@@ -461,18 +467,20 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			} else if tagged {
 				providerID = taggedProviderID
 				resolvedModel = taggedModel
-			} else if resolvedID, modelForProvider, intent, matched := configuredDefaultProviderSelection(snapshot, resolvedModel, providerSelectionEffortFromRouteContext(r)); matched {
-				providerID = resolvedID
-				resolvedModel = modelForProvider
-				resolvedModelIsInternal = true
-				if strings.TrimSpace(intent.BaseModel) != "" {
-					selectedProxyIntent = intent
-					hasSelectedProxyIntent = true
-					*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+			} else if !usedRootMappedProviderSelection {
+				if resolvedID, modelForProvider, intent, matched := configuredDefaultProviderSelection(snapshot, resolvedModel, providerSelectionEffortFromRouteContext(r)); matched {
+					providerID = resolvedID
+					resolvedModel = modelForProvider
+					resolvedModelIsInternal = true
+					if strings.TrimSpace(intent.BaseModel) != "" {
+						selectedProxyIntent = intent
+						hasSelectedProxyIntent = true
+						*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
+					}
+				} else if len(snapshot.DefaultProviderIDs) > 0 {
+					providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
+					usedDefaultProviderFallback = true
 				}
-			} else if len(snapshot.DefaultProviderIDs) > 0 {
-				providerID = snapshot.DefaultProviderIDs[len(snapshot.DefaultProviderIDs)-1]
-				usedDefaultProviderFallback = true
 			}
 		}
 	}
@@ -546,7 +554,13 @@ func resolveDefaultOverlayDiscoveryBeforeProviderSelection(r *http.Request, cano
 		return
 	}
 
-	if _, mapped := snapshot.Config.ResolveV1ProxyModelIntent(canonicalModel); mapped || v1ModelMapMatchesForRouting(snapshot, r, canonicalModel) {
+	if rootIntent, mapped := snapshot.Config.ResolveV1ProxyModelIntentWithTargetCandidates(canonicalModel, defaultOverlayRoutingModelCandidates(snapshot)); mapped {
+		if _, _, _, configured := configuredDefaultProviderSelection(snapshot, rootIntent.CanonicalModel(), providerSelectionEffortFromRouteContext(r)); !configured {
+			_, _ = resolveDefaultOverlayDiscoveryForModel(r, snapshot, rootIntent.CanonicalModel())
+		}
+		return
+	}
+	if v1ModelMapMatchesForRouting(snapshot, r, canonicalModel) {
 		return
 	}
 	_, _ = resolveDefaultOverlayDiscoveryForModel(r, snapshot, canonicalModel)
