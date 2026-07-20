@@ -298,7 +298,7 @@ func (c *Collector) Accept(evt upstream.Event) {
 					if len(block) == 0 {
 						continue
 					}
-					merged = append(merged, cloneOutputItem(block))
+					merged = mergeCumulativeReasoningBlock(merged, block)
 				}
 				if len(merged) > 0 {
 					c.reasoning[k] = merged
@@ -314,6 +314,43 @@ func (c *Collector) Accept(evt upstream.Event) {
 			c.reasoning[k] = v
 		}
 	}
+}
+
+func mergeCumulativeReasoningBlock(existing []any, next map[string]any) []any {
+	next = cloneOutputItem(next)
+	for index := len(existing) - 1; index >= 0; index-- {
+		previous, _ := existing[index].(map[string]any)
+		if !isCumulativeReasoningBlock(previous, next) {
+			continue
+		}
+		existing[index] = next
+		return existing
+	}
+	return append(existing, next)
+}
+
+func isCumulativeReasoningBlock(previous, next map[string]any) bool {
+	if stringValue(previous["type"]) != stringValue(next["type"]) {
+		return false
+	}
+	previousSignature := stringValue(previous["signature"])
+	nextSignature := stringValue(next["signature"])
+	if previousSignature != "" && nextSignature != "" && previousSignature != nextSignature {
+		return false
+	}
+	previousText := reasoningBlockText(previous)
+	nextText := reasoningBlockText(next)
+	if previousText == "" || nextText == "" {
+		return true
+	}
+	return strings.HasPrefix(nextText, previousText) || strings.HasPrefix(previousText, nextText)
+}
+
+func reasoningBlockText(block map[string]any) string {
+	if text := stringValue(block["thinking"]); text != "" {
+		return text
+	}
+	return stringValue(block["text"])
 }
 
 func (c *Collector) recordMessageContentPart(data map[string]any) {
