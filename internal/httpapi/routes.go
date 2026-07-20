@@ -48,6 +48,7 @@ const legacyRoutingModelKey routeContextKey = "legacy-routing-model"
 const proxyModelIntentKey routeContextKey = "proxy-model-intent"
 const defaultOverlayDiscoveryKey routeContextKey = "default-overlay-discovery"
 const upstreamTransportPoolKey routeContextKey = "upstream-transport-pool"
+const inboundCallerIdentityKey routeContextKey = "inbound-caller-identity"
 
 const (
 	canonicalV1ModelsPath            = "/v1/models"
@@ -152,6 +153,21 @@ func withResponsesHistory(ctx context.Context, history *responsesHistoryStore) c
 func responsesHistoryFromRequest(r *http.Request) *responsesHistoryStore {
 	history, _ := r.Context().Value(responsesHistoryContextKey).(*responsesHistoryStore)
 	return history
+}
+
+func withInboundCallerIdentity(ctx context.Context, identity string) context.Context {
+	return context.WithValue(ctx, inboundCallerIdentityKey, identity)
+}
+
+func inboundCallerIdentityFromRequest(r *http.Request) string {
+	if r == nil {
+		return "anonymous"
+	}
+	identity, _ := r.Context().Value(inboundCallerIdentityKey).(string)
+	if identity == "" {
+		return "anonymous"
+	}
+	return identity
 }
 
 func resolveRouteInfo(path string, cfg config.Config) (routeInfo, error) {
@@ -414,7 +430,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 				ctx = withProxyModelIntent(ctx, selectedProxyIntent)
 			}
 			*r = *r.Clone(ctx)
-		} else if rootIntent, mapped := snapshot.Config.ResolveV1ProxyModelIntent(canonicalModel); mapped {
+		} else if rootIntent, mapped := snapshot.Config.ResolveV1ProxyModelIntentWithTargetCandidates(canonicalModel, defaultOverlayRoutingModelCandidates(snapshot)); mapped {
 			resolvedModel = rootIntent.CanonicalModel()
 			selectedProxyIntent = rootIntent
 			hasSelectedProxyIntent = true
