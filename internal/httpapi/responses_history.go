@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -27,8 +29,9 @@ type responsesHistoryStore struct {
 	maxBytes       int64
 	retainedBytes  int64
 
-	toolCallRecoveryIndexPath   string
-	toolCallRecoveryIndexLoaded bool
+	toolCallRecoveryIndexPath     string
+	toolCallRecoveryIndexMaxBytes int64
+	toolCallRecoveryIndexLoaded   bool
 }
 
 type responsesConversationSnapshot struct {
@@ -66,6 +69,8 @@ const defaultResponsesHistoryMaxSize = 512
 
 const defaultResponsesHistoryMaxBytes int64 = 256 << 20
 
+const defaultResponsesHistoryToolCallRecoveryIndexMaxBytes int64 = defaultResponsesHistoryMaxBytes
+
 const responsesHistoryToolCallRecoveryIndexVersion = 1
 
 type responsesHistoryToolCallRecoveryIndexFile struct {
@@ -79,13 +84,14 @@ func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *re
 		maxSize = defaultResponsesHistoryMaxSize
 	}
 	return &responsesHistoryStore{
-		entries:                   map[string]responsesConversationSnapshot{},
-		byResponseID:              map[string]string{},
-		toolCalls:                 map[string]responsesHistoryToolCallEntry{},
-		opaqueThinking:            map[string]responsesHistoryOpaqueThinkingEntry{},
-		maxSize:                   maxSize,
-		maxBytes:                  defaultResponsesHistoryMaxBytes,
-		toolCallRecoveryIndexPath: strings.TrimSpace(toolCallRecoveryIndexPath),
+		entries:                       map[string]responsesConversationSnapshot{},
+		byResponseID:                  map[string]string{},
+		toolCalls:                     map[string]responsesHistoryToolCallEntry{},
+		opaqueThinking:                map[string]responsesHistoryOpaqueThinkingEntry{},
+		maxSize:                       maxSize,
+		maxBytes:                      defaultResponsesHistoryMaxBytes,
+		toolCallRecoveryIndexPath:     strings.TrimSpace(toolCallRecoveryIndexPath),
+		toolCallRecoveryIndexMaxBytes: defaultResponsesHistoryToolCallRecoveryIndexMaxBytes,
 	}
 }
 
@@ -462,19 +468,32 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 	if s == nil || s.toolCallRecoveryIndexLoaded || s.toolCallRecoveryIndexPath == "" {
 		return nil
 	}
-	data, err := os.ReadFile(s.toolCallRecoveryIndexPath)
+	maxBytes := s.toolCallRecoveryIndexMaxBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultResponsesHistoryToolCallRecoveryIndexMaxBytes
+	}
+	fileHandle, err := os.Open(s.toolCallRecoveryIndexPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			s.toolCallRecoveryIndexLoaded = true
 			return nil
 		}
+		s.toolCallRecoveryIndexLoaded = true
 		return err
+	}
+	defer fileHandle.Close()
+	data, err := io.ReadAll(io.LimitReader(fileHandle, maxBytes+1))
+	s.toolCallRecoveryIndexLoaded = true
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > maxBytes {
+		return fmt.Errorf("responses tool-call recovery index exceeds %d bytes", maxBytes)
 	}
 	var file responsesHistoryToolCallRecoveryIndexFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return err
 	}
-	s.toolCallRecoveryIndexLoaded = true
 	if file.Version != 0 && file.Version != responsesHistoryToolCallRecoveryIndexVersion {
 		return nil
 	}
