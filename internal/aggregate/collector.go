@@ -2,6 +2,7 @@ package aggregate
 
 import (
 	"errors"
+	"sort"
 	"strings"
 
 	reasoningtext "openai-compat-proxy/internal/reasoning"
@@ -53,6 +54,7 @@ type Collector struct {
 	reasoning               map[string]any
 	serviceTier             string
 	responseMessageContent  []map[string]any
+	messageContentParts     map[string]map[int]map[string]any
 	outputItems             []map[string]any
 	unsupportedContentTypes []string
 	refusal                 string
@@ -62,7 +64,11 @@ type Collector struct {
 }
 
 func NewCollector() *Collector {
-	return &Collector{toolCalls: map[string]*ToolCall{}, reasoning: map[string]any{}}
+	return &Collector{
+		toolCalls:           map[string]*ToolCall{},
+		reasoning:           map[string]any{},
+		messageContentParts: map[string]map[int]map[string]any{},
+	}
 }
 
 func (c *Collector) Accept(evt upstream.Event) {
@@ -84,6 +90,8 @@ func (c *Collector) Accept(evt upstream.Event) {
 			c.text.WriteString(delta)
 			c.hasTextDelta = true
 		}
+	case "response.content_part.done":
+		c.recordMessageContentPart(evt.Data)
 	case "response.function_call_arguments.delta":
 		itemID, _ := evt.Data["item_id"].(string)
 		delta, _ := evt.Data["delta"].(string)
@@ -116,6 +124,11 @@ func (c *Collector) Accept(evt upstream.Event) {
 			return
 		}
 		outputItem := cloneMessageOutputItemForAggregation(item, c.text.String(), c.hasTextDelta)
+		if itemType, _ := item["type"].(string); itemType == "message" {
+			if itemID, _ := item["id"].(string); itemID != "" {
+				outputItem = c.mergeCompletedMessageContentParts(outputItem, itemID)
+			}
+		}
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
 			outputItem = reasoningtext.FormatBlock(outputItem)
 		}
@@ -301,6 +314,49 @@ func (c *Collector) Accept(evt upstream.Event) {
 			c.reasoning[k] = v
 		}
 	}
+}
+
+func (c *Collector) recordMessageContentPart(data map[string]any) {
+	itemID, _ := data["item_id"].(string)
+	part, _ := data["part"].(map[string]any)
+	if itemID == "" || part == nil {
+		return
+	}
+	contentIndex := 0
+	switch value := data["content_index"].(type) {
+	case int:
+		contentIndex = value
+	case float64:
+		contentIndex = int(value)
+	}
+	parts := c.messageContentParts[itemID]
+	if parts == nil {
+		parts = map[int]map[string]any{}
+		c.messageContentParts[itemID] = parts
+	}
+	parts[contentIndex] = cloneOutputItem(part)
+}
+
+func (c *Collector) mergeCompletedMessageContentParts(item map[string]any, itemID string) map[string]any {
+	content, _ := item["content"].([]any)
+	if len(content) > 0 {
+		return item
+	}
+	parts := c.messageContentParts[itemID]
+	if len(parts) == 0 {
+		return item
+	}
+	indexes := make([]int, 0, len(parts))
+	for index := range parts {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	content = make([]any, 0, len(indexes))
+	for _, index := range indexes {
+		content = append(content, cloneOutputItem(parts[index]))
+	}
+	item["content"] = content
+	return item
 }
 
 func (c *Collector) Result() (Result, error) {

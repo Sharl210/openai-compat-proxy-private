@@ -87,3 +87,50 @@ func TestProxyBufferHandlersReturnCompletedOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesProxyBufferPreservesCompletedContentPartWhenOutputItemIsEmpty(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.created\n" +
+			"data: {\"response\":{\"id\":\"resp_proxy_buffer\"}}\n\n" +
+			"event: response.content_part.done\n" +
+			"data: {\"item_id\":\"msg_1\",\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"hello from completed part\"}}\n\n" +
+			"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"response\":{\"finish_reason\":\"stop\"}}\n\n"))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "openai",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyProxyBuffer,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+			SupportsResponses:         true,
+			SupportsChat:              true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"text":"hello from completed part"`) {
+		t.Fatalf("expected completed part in proxy-buffer output, got %s", rec.Body.String())
+	}
+}
