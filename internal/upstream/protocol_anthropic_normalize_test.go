@@ -324,6 +324,31 @@ func TestNormalizeAnthropicFrame_PreservesSignatureDelta(t *testing.T) {
 	}
 }
 
+func TestNormalizeAnthropicFrameKeepsReasoningBlockIdentityInternal(t *testing.T) {
+	state := &anthropicNormalizationState{responseID: "msg_123", reasoningBlocks: map[int]map[string]any{}}
+	frames := []*sseFrame{
+		{Event: "content_block_start", Data: `{"index":0,"content_block":{"type":"thinking","thinking":""}}`},
+		{Event: "content_block_delta", Data: `{"index":0,"delta":{"type":"thinking_delta","thinking":"alpha"}}`},
+	}
+	for _, frame := range frames {
+		events, _, err := normalizeAnthropicFrame(frame, state)
+		if err != nil {
+			t.Fatalf("normalizeAnthropicFrame error: %v", err)
+		}
+		for _, event := range events {
+			if event.Event != "response.reasoning.delta" {
+				continue
+			}
+			if event.ReasoningBlockIdentity != "msg_123:0" {
+				t.Fatalf("expected internal reasoning identity, got %#v", event)
+			}
+			if _, found := event.Data["reasoning_block_identity"]; found {
+				t.Fatalf("internal identity leaked into event data: %#v", event.Data)
+			}
+		}
+	}
+}
+
 func TestNormalizeAnthropicFrame_Error(t *testing.T) {
 	frame := &sseFrame{Event: "error", Data: `{"error":{"type":"invalid_request","message":"bad request"}}`}
 	state := &anthropicNormalizationState{}

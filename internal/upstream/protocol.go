@@ -1158,7 +1158,7 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 				state.reasoningBlocks = map[int]map[string]any{}
 			}
 			state.reasoningBlocks[index] = cloneMap(block)
-			events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{cloneMap(block)}}})
+			events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{cloneMap(block)}}, ReasoningBlockIdentity: anthropicReasoningBlockIdentity(state, index)})
 		}
 	case "content_block_delta":
 		index := int(numberValue(payload["index"]))
@@ -1181,13 +1181,13 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 				if block := state.reasoningBlocks[index]; block != nil {
 					blocks = []any{cloneMap(block)}
 				}
-				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": text, "blocks": blocks}})
+				events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": text, "blocks": blocks}, ReasoningBlockIdentity: anthropicReasoningBlockIdentity(state, index)})
 			}
 		case "signature_delta":
 			if signature := stringValue(delta["signature"]); signature != "" {
 				if block := state.reasoningBlocks[index]; block != nil {
 					block["signature"] = stringValue(block["signature"]) + signature
-					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{cloneMap(block)}}})
+					events = append(events, Event{Event: "response.reasoning.delta", Data: map[string]any{"blocks": []any{cloneMap(block)}}, ReasoningBlockIdentity: anthropicReasoningBlockIdentity(state, index)})
 				}
 			}
 		case "input_json_delta":
@@ -1251,6 +1251,13 @@ func normalizeAnthropicFrame(frame *sseFrame, state *anthropicNormalizationState
 	}
 	shadowRecord(events, frame, state.provider)
 	return events, false, nil
+}
+
+func anthropicReasoningBlockIdentity(state *anthropicNormalizationState, index int) string {
+	if state == nil {
+		return ""
+	}
+	return state.responseID + ":" + strconv.Itoa(index)
 }
 
 func normalizeChatPayload(payload map[string]any, thinkingTagStyle string, xmlToolCallStyle ...string) map[string]any {
