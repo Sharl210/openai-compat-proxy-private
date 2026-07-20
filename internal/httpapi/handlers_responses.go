@@ -28,6 +28,7 @@ type preparedResponsesRequest struct {
 	client                    *upstream.Client
 	reasoningModeFallback     *reasoningModeFallbackCoordinator
 	history                   *responsesHistoryStore
+	historyScope              string
 	usageRecorder             usageRecorderFunc
 }
 
@@ -57,6 +58,7 @@ func handleResponses() http.HandlerFunc {
 		authorization := prepared.authorization
 		usageRecorder := prepared.usageRecorder
 		history := prepared.history
+		historyScope := prepared.historyScope
 
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
@@ -137,7 +139,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
-				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
+				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), historyScope)
 			}
 			return
 		}
@@ -172,7 +174,7 @@ func handleResponses() http.HandlerFunc {
 			normalized := responsesadapter.BuildResponse(result)
 			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
-				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
+				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), historyScope)
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -246,7 +248,7 @@ func handleResponses() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, authorization))
+			history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), historyScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -355,7 +357,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			prepared.history.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), responsesHistoryToolCallScope(prepared.providerCfg.UpstreamBaseURL, canon.Model, canon.AuthMode, prepared.authorization))
+			prepared.history.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), prepared.historyScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -483,17 +485,29 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
 	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	client := upstreamClientForProvider(r, providerID, providerCfg)
+	historyScope := responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+		ProviderID:                providerID,
+		DownstreamEndpoint:        r.URL.Path,
+		UpstreamEndpointType:      providerCfg.UpstreamEndpointType,
+		NormalizedUpstreamBaseURL: providerCfg.UpstreamBaseURL,
+		FinalUpstreamModel:        canon.Model,
+		CredentialFingerprint:     authorizationFingerprint(authorization),
+		InboundCallerFingerprint:  inboundCallerIdentityFromRequest(r),
+	})
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 		canon.IncludeUsage = true
+	}
+	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+		if !rehydrateOpaqueAnthropicThinking(history, &canon, providerID, historyScope) {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "opaque thinking replay must match server-held history")
+			return nil, false
+		}
 	}
 	previousHistoryRestored := false
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
 			currentMessages := prepareCanonicalMessages(canon.Messages)
-			if previousHistory := history.Load(providerID, previousResponseID); len(previousHistory) > 0 {
-				canon.Messages = append(previousHistory, currentMessages...)
-				previousHistoryRestored = true
-			} else if previousHistory := history.LoadAny(previousResponseID); len(previousHistory) > 0 {
+			if previousHistory := history.LoadScoped(providerID, previousResponseID, historyScope); len(previousHistory) > 0 {
 				canon.Messages = append(previousHistory, currentMessages...)
 				previousHistoryRestored = true
 			} else {
@@ -506,11 +520,11 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	}
 	applyProviderSystemPrompt(&canon, provider)
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
-		canon.Messages = recoverToolCallsForMessages(history, canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
+		canon.Messages = recoverToolCallsForMessages(history, canon.Messages, providerID, historyScope)
 	}
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeResponses && providerCfg.MasqueradeTarget == config.MasqueradeTargetOpenCode {
 		if previousResponseIDFromItems(canon.ResponseInputItems) != "" {
-			canon.ResponseItemReferencesByCallID = recoverResponseItemReferencesForMessages(history, canon.Messages, providerID, responsesHistoryToolCallScope(providerCfg.UpstreamBaseURL, canon.Model, authMode, authorization))
+			canon.ResponseItemReferencesByCallID = recoverResponseItemReferencesForMessages(history, canon.Messages, providerID, historyScope)
 		}
 	}
 	applyProviderMaxOutputTokens(&canon, provider)
@@ -575,8 +589,73 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		client:                    client,
 		reasoningModeFallback:     reasoningModeFallback,
 		history:                   history,
+		historyScope:              historyScope,
 		usageRecorder:             usageRecorder,
 	}, true
+}
+
+func rehydrateOpaqueAnthropicThinking(history *responsesHistoryStore, canon *model.CanonicalRequest, providerID, scope string) bool {
+	if canon == nil {
+		return false
+	}
+	hasOpaqueInput := false
+	for _, item := range canon.ResponseInputItems {
+		if stringValue(item["type"]) != "reasoning" {
+			continue
+		}
+		if _, ok := item["encrypted_content"]; ok {
+			hasOpaqueInput = true
+		}
+		if _, ok := item["signature"]; ok {
+			hasOpaqueInput = true
+		}
+	}
+	for _, message := range canon.Messages {
+		for _, block := range message.ReasoningBlocks {
+			if _, hasEncrypted := block["encrypted_content"]; hasEncrypted {
+				hasOpaqueInput = true
+			}
+			if _, hasSignature := block["signature"]; hasSignature {
+				hasOpaqueInput = true
+			}
+		}
+	}
+	if !hasOpaqueInput {
+		return true
+	}
+	rehydrated := 0
+	for messageIndex := range canon.Messages {
+		for blockIndex, block := range canon.Messages[messageIndex].ReasoningBlocks {
+			if _, hasEncrypted := block["encrypted_content"]; !hasEncrypted {
+				if _, hasSignature := block["signature"]; !hasSignature {
+					continue
+				}
+			}
+			serverBlock, ok := history.LoadOpaqueThinking(providerID, scope, block)
+			if !ok {
+				return false
+			}
+			canon.Messages[messageIndex].ReasoningBlocks[blockIndex] = serverBlock
+			rehydrated++
+		}
+	}
+	if rehydrated == 0 {
+		return false
+	}
+	filtered := make([]map[string]any, 0, len(canon.ResponseInputItems))
+	for _, item := range canon.ResponseInputItems {
+		if stringValue(item["type"]) == "reasoning" {
+			if _, hasEncrypted := item["encrypted_content"]; hasEncrypted {
+				continue
+			}
+			if _, hasSignature := item["signature"]; hasSignature {
+				continue
+			}
+		}
+		filtered = append(filtered, item)
+	}
+	canon.ResponseInputItems = filtered
+	return true
 }
 
 func logNonStreamResponsesOutput(requestID string, normalized map[string]any) {

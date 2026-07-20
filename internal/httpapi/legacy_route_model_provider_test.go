@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,6 +160,58 @@ func TestLegacyResponsesRouteV1ModelMapTargetKeepsReasoningSuffixBehavior(t *tes
 	}
 	if alpha.Hits() != 1 || beta.Hits() != 0 {
 		t.Fatalf("expected only alpha upstream to be hit, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyResponsesRouteRootV1ModelMapSelectsMappedTargetFamilyOwner(t *testing.T) {
+	var targetBody string
+	var fallbackHits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		targetBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"resp_target","object":"response","status":"completed","output":[{"id":"msg_target","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer target.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackHits.Add(1)
+		http.Error(w, "unexpected fallback", http.StatusBadGateway)
+	}))
+	defer fallback.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "fallback,target",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		V1ModelMap:                  []config.ModelMapEntry{config.NewModelMapEntry("gpt-5.6-sol", "gpt-5.6-sol-xhigh")},
+		Providers: []config.ProviderConfig{
+			{ID: "fallback", Enabled: true, UpstreamBaseURL: fallback.URL, UpstreamAPIKey: "fallback-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, ManualModels: []string{"fallback-model"}},
+			{ID: "target", Enabled: true, UpstreamBaseURL: target.URL, UpstreamAPIKey: "target-key", UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true, ManualModels: []string{"gpt-5.6-sol"}, EnableReasoningEffortSuffix: false, ExposeReasoningSuffixModels: false},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected mapped bare Responses request to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "target" {
+		t.Fatalf("expected mapped target family owner target, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "gpt-5.6-sol" {
+		t.Fatalf("expected mapped target base upstream model, got %q", got)
+	}
+	if got := rec.Header().Get("X-Proxy-To-Upstream-Reasoning-Effort"); got != "xhigh" {
+		t.Fatalf("expected mapped target xhigh effort, got %q", got)
+	}
+	if fallbackHits.Load() != 0 {
+		t.Fatalf("expected no fallback upstream calls, got %d", fallbackHits.Load())
+	}
+	if !strings.Contains(targetBody, `"model":"gpt-5.6-sol"`) || !strings.Contains(targetBody, `"effort":"xhigh"`) || strings.Contains(targetBody, `"model":"gpt-5.6-sol-xhigh"`) {
+		t.Fatalf("expected target upstream base model with xhigh reasoning, got %s", targetBody)
 	}
 }
 
