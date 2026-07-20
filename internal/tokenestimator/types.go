@@ -40,6 +40,7 @@ type BucketState struct {
 	SafeModelName             string          `json:"safe_model_name"`
 	CreatedAt                 time.Time       `json:"created_at"`
 	UpdatedAt                 time.Time       `json:"updated_at"`
+	LastAccessedAt            time.Time       `json:"last_accessed_at,omitempty"`
 	SampleCount               int64           `json:"sample_count"`
 	UsableSampleCount         int64           `json:"usable_sample_count"`
 	DiscardedSampleCount      int64           `json:"discarded_sample_count"`

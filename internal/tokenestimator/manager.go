@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 const (
 	defaultRecentSampleLimit = 64
 	defaultSeenRequestLimit  = 64
+	defaultBucketLimit       = 512
 	schemaVersion            = 1
 	estimatorVersion         = 1
 )
@@ -41,6 +43,8 @@ type Manager struct {
 	enabledFn        func() []string
 	mu               sync.RWMutex
 	buckets          map[BucketKey]*BucketState
+	bucketOrder      []BucketKey
+	bucketLimit      int
 	seenRequests     map[string]struct{}
 	seenRequestOrder []string
 	recentLimit      int
@@ -59,6 +63,7 @@ func NewManager(providersDir string, location *time.Location, enabledFn func() [
 		location:         location,
 		enabledFn:        enabledFn,
 		buckets:          map[BucketKey]*BucketState{},
+		bucketLimit:      defaultBucketLimit,
 		seenRequests:     map[string]struct{}{},
 		recentLimit:      defaultRecentSampleLimit,
 		seenRequestLimit: defaultSeenRequestLimit,
@@ -68,7 +73,13 @@ func NewManager(providersDir string, location *time.Location, enabledFn func() [
 }
 
 func (m *Manager) loadExistingBuckets() error {
+	type persistedBucket struct {
+		key   BucketKey
+		state *BucketState
+	}
+	var loadedBuckets []persistedBucket
 	providerIDs := m.enabledFn()
+	sort.Strings(providerIDs)
 	for _, providerID := range providerIDs {
 		for _, endpointType := range []string{"responses", "chat", "anthropic"} {
 			root := filepath.Join(m.providersDir, "Token_Estimator", "SYSTEM_JSON_FILES", providerID, endpointType)
@@ -92,23 +103,49 @@ func (m *Manager) loadExistingBuckets() error {
 					return err
 				}
 				key := BucketKey{ProviderID: state.ProviderID, EndpointType: state.EndpointType, Model: state.FinalUpstreamRawModel}
-				m.buckets[key] = &state
+				loadedBuckets = append(loadedBuckets, persistedBucket{key: key, state: &state})
 			}
+		}
+	}
+	sort.SliceStable(loadedBuckets, func(i, j int) bool {
+		left, right := loadedBuckets[i], loadedBuckets[j]
+		leftAccess := bucketAccessTime(left.state)
+		rightAccess := bucketAccessTime(right.state)
+		if !leftAccess.Equal(rightAccess) {
+			return leftAccess.Before(rightAccess)
+		}
+		return bucketKeyLess(left.key, right.key)
+	})
+	limit := m.effectiveBucketLimit()
+	firstRetained := 0
+	if len(loadedBuckets) > limit {
+		firstRetained = len(loadedBuckets) - limit
+	}
+	for _, bucket := range loadedBuckets[firstRetained:] {
+		m.buckets[bucket.key] = bucket.state
+		m.bucketOrder = append(m.bucketOrder, bucket.key)
+	}
+	for _, bucket := range loadedBuckets[:firstRetained] {
+		if err := RemoveBucketState(m.providersDir, bucket.key); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func (m *Manager) GetBucketState(key BucketKey) *BucketState {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	state := m.buckets[key]
 	if state == nil {
 		loaded, _ := LoadBucketState(m.providersDir, key)
-		return loaded
+		if loaded != nil {
+			m.cacheLoadedBucketLocked(key, loaded)
+		}
+		return cloneBucketState(loaded)
 	}
-	clone := *state
-	return &clone
+	m.touchBucketLocked(key, true)
+	return cloneBucketState(state)
 }
 
 func (m *Manager) ConservativeAdmissionLimit(key BucketKey, configuredLimit int, currentShape ShapeClass) (int, bool) {
@@ -242,10 +279,11 @@ func (m *Manager) RecordObservation(requestID string, obs Observation) error {
 	if _, exists := m.seenRequests[requestID]; exists {
 		return nil
 	}
-	state := m.ensureBucketLocked(obs)
+	state := m.bucketStateForObservationLocked(obs)
 	state.SampleCount++
 	state.UsableSampleCount++
 	state.UpdatedAt = obs.RecordedAt
+	state.LastAccessedAt = obs.RecordedAt
 	state.ProtocolSignature = obs.ProtocolSignature
 	state.EstimatorSignature = obs.EstimatorSignature
 	state.FinalUpstreamRawModel = obs.Bucket.Model
@@ -289,9 +327,19 @@ func (m *Manager) RecordObservation(requestID string, obs Observation) error {
 	if len(state.RecentSamples) > m.recentLimit {
 		state.RecentSamples = state.RecentSamples[len(state.RecentSamples)-m.recentLimit:]
 	}
+	if err := SaveBucketState(m.providersDir, obs.Bucket, cloneBucketState(state)); err != nil {
+		return err
+	}
+	if err := m.cacheCommittedBucketLocked(obs.Bucket, state); err != nil {
+		if previous := m.buckets[obs.Bucket]; previous == nil {
+			if rollbackErr := RemoveBucketState(m.providersDir, obs.Bucket); rollbackErr != nil {
+				return fmt.Errorf("evict token estimator bucket: %w (rollback %v)", err, rollbackErr)
+			}
+		}
+		return err
+	}
 	m.recordSeenRequestLocked(requestID)
-	clone := *state
-	return SaveBucketState(m.providersDir, obs.Bucket, &clone)
+	return nil
 }
 
 func (m *Manager) recordSeenRequestLocked(requestID string) {
@@ -305,13 +353,12 @@ func (m *Manager) recordSeenRequestLocked(requestID string) {
 	m.seenRequestOrder = m.seenRequestOrder[1:]
 }
 
-func (m *Manager) ensureBucketLocked(obs Observation) *BucketState {
+func (m *Manager) bucketStateForObservationLocked(obs Observation) *BucketState {
 	if state := m.buckets[obs.Bucket]; state != nil {
-		return state
+		return cloneBucketState(state)
 	}
 	loaded, _ := LoadBucketState(m.providersDir, obs.Bucket)
 	if loaded != nil {
-		m.buckets[obs.Bucket] = loaded
 		return loaded
 	}
 	state := &BucketState{
@@ -326,16 +373,113 @@ func (m *Manager) ensureBucketLocked(obs Observation) *BucketState {
 		ConfidenceLevel:       "cold",
 		RuntimeReady:          false,
 	}
-	m.buckets[obs.Bucket] = state
 	return state
+}
+
+func (m *Manager) touchBucketLocked(key BucketKey, persistAccess bool) {
+	for index, existing := range m.bucketOrder {
+		if existing != key {
+			continue
+		}
+		m.bucketOrder = append(m.bucketOrder[:index], m.bucketOrder[index+1:]...)
+		break
+	}
+	m.bucketOrder = append(m.bucketOrder, key)
+	if persistAccess {
+		if state := m.buckets[key]; state != nil {
+			state.LastAccessedAt = time.Now().In(m.location)
+		}
+	}
+}
+
+func (m *Manager) cacheLoadedBucketLocked(key BucketKey, state *BucketState) {
+	if _, found := m.buckets[key]; found {
+		m.touchBucketLocked(key, false)
+		return
+	}
+	if len(m.bucketOrder) >= m.effectiveBucketLimit() {
+		oldest := m.bucketOrder[0]
+		if err := RemoveBucketState(m.providersDir, oldest); err != nil {
+			return
+		}
+		m.bucketOrder = m.bucketOrder[1:]
+		delete(m.buckets, oldest)
+	}
+	m.buckets[key] = state
+	m.touchBucketLocked(key, false)
+}
+
+func (m *Manager) cacheCommittedBucketLocked(key BucketKey, state *BucketState) error {
+	if _, found := m.buckets[key]; found {
+		m.buckets[key] = state
+		m.touchBucketLocked(key, false)
+		return nil
+	}
+	if len(m.bucketOrder) >= m.effectiveBucketLimit() {
+		oldest := m.bucketOrder[0]
+		if err := RemoveBucketState(m.providersDir, oldest); err != nil {
+			return err
+		}
+		m.bucketOrder = m.bucketOrder[1:]
+		delete(m.buckets, oldest)
+	}
+	m.buckets[key] = state
+	m.touchBucketLocked(key, false)
+	return nil
+}
+
+func (m *Manager) effectiveBucketLimit() int {
+	if m.bucketLimit > 0 {
+		return m.bucketLimit
+	}
+	return defaultBucketLimit
+}
+
+func bucketAccessTime(state *BucketState) time.Time {
+	if state != nil && !state.LastAccessedAt.IsZero() {
+		return state.LastAccessedAt
+	}
+	if state != nil {
+		return state.UpdatedAt
+	}
+	return time.Time{}
+}
+
+func bucketKeyLess(left, right BucketKey) bool {
+	if left.ProviderID != right.ProviderID {
+		return left.ProviderID < right.ProviderID
+	}
+	if left.EndpointType != right.EndpointType {
+		return left.EndpointType < right.EndpointType
+	}
+	return left.Model < right.Model
+}
+
+func cloneBucketState(state *BucketState) *BucketState {
+	if state == nil {
+		return nil
+	}
+	clone := *state
+	if len(state.RecentSamples) > 0 {
+		clone.RecentSamples = make([]SampleSummary, len(state.RecentSamples))
+		for index, sample := range state.RecentSamples {
+			clone.RecentSamples[index] = sample
+			if len(sample.FeatureCounts) > 0 {
+				clone.RecentSamples[index].FeatureCounts = make(map[string]int64, len(sample.FeatureCounts))
+				for key, value := range sample.FeatureCounts {
+					clone.RecentSamples[index].FeatureCounts[key] = value
+				}
+			}
+		}
+	}
+	return &clone
 }
 
 func (m *Manager) Flush(ctx context.Context) error {
 	m.mu.RLock()
 	buckets := make(map[BucketKey]*BucketState, len(m.buckets))
 	for k, v := range m.buckets {
-		clone := *v
-		buckets[k] = &clone
+		buckets[k] = cloneBucketState(v)
 	}
 	m.mu.RUnlock()
 	for key, state := range buckets {
