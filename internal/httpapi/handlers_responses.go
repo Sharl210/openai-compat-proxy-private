@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	responsesadapter "openai-compat-proxy/internal/adapter/responses"
 	"openai-compat-proxy/internal/aggregate"
@@ -29,6 +30,7 @@ type preparedResponsesRequest struct {
 	reasoningModeFallback     *reasoningModeFallbackCoordinator
 	history                   *responsesHistoryStore
 	historyScope              string
+	portableHistoryScope      string
 	usageRecorder             usageRecorderFunc
 }
 
@@ -59,6 +61,7 @@ func handleResponses() http.HandlerFunc {
 		usageRecorder := prepared.usageRecorder
 		history := prepared.history
 		historyScope := prepared.historyScope
+		portableHistoryScope := prepared.portableHistoryScope
 
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
@@ -139,7 +142,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
-				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), historyScope)
+				saveResponsesHistorySnapshot(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), historyScope, portableHistoryScope)
 			}
 			return
 		}
@@ -174,7 +177,7 @@ func handleResponses() http.HandlerFunc {
 			normalized := responsesadapter.BuildResponse(result)
 			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
-				history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), historyScope)
+				saveResponsesHistorySnapshot(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), historyScope, portableHistoryScope)
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -248,7 +251,7 @@ func handleResponses() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			history.Save(providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), historyScope)
+			saveResponsesHistorySnapshot(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), historyScope, portableHistoryScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -357,7 +360,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			prepared.history.Save(prepared.providerID, responseID, buildResponsesHistorySnapshot(canon.Messages, assistantHistoryMessagesFromResult(result)), prepared.historyScope)
+			saveResponsesHistorySnapshot(prepared.history, prepared.providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), prepared.historyScope, prepared.portableHistoryScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -485,38 +488,64 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
 	authMode := authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 	client := upstreamClientForProvider(r, providerID, providerCfg)
+	inboundCallerFingerprint := inboundCallerIdentityFromRequest(r)
 	historyScope := responsesHistoryReplayScope(responsesHistoryReplayProvenance{
 		ProviderID:                providerID,
-		DownstreamEndpoint:        r.URL.Path,
+		DownstreamEndpoint:        responsesHistoryDownstreamEndpoint(r),
 		UpstreamEndpointType:      providerCfg.UpstreamEndpointType,
 		NormalizedUpstreamBaseURL: providerCfg.UpstreamBaseURL,
 		FinalUpstreamModel:        canon.Model,
 		CredentialFingerprint:     authorizationFingerprint(authorization),
-		InboundCallerFingerprint:  inboundCallerIdentityFromRequest(r),
+		InboundCallerFingerprint:  inboundCallerFingerprint,
 	})
+	portableHistoryScope := responsesHistoryPortableScope(inboundCallerFingerprint)
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 		canon.IncludeUsage = true
 	}
-	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-		if !rehydrateOpaqueAnthropicThinking(history, &canon, providerID, historyScope) {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "opaque thinking replay must match server-held history")
+	portableReasoningProjection := false
+	if !compact {
+		var valid bool
+		portableReasoningProjection, valid = projectPersistedResponsesReasoning(history, &canon, providerID, historyScope, portableHistoryScope, providerCfg.UpstreamEndpointType)
+		if !valid {
+			errorCode := "invalid_request"
+			errorMessage := "opaque thinking replay must match server-held history"
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeChat {
+				errorCode = "unsupported_upstream_feature"
+				errorMessage = "unsupported upstream feature: persisted responses item requires a responses upstream"
+			}
+			errorsx.WriteJSON(w, http.StatusBadRequest, errorCode, errorMessage)
 			return nil, false
 		}
 	}
 	previousHistoryRestored := false
-	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses && shouldRestorePreviousConversation(canon.Messages) {
+	portableHistoryRestored := false
+	if !compact && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
 			currentMessages := prepareCanonicalMessages(canon.Messages)
-			if previousHistory := history.LoadScoped(providerID, previousResponseID, historyScope); len(previousHistory) > 0 {
+			previousHistory := history.LoadScoped(providerID, previousResponseID, historyScope)
+			switch {
+			case len(previousHistory) > 0 && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses:
 				canon.Messages = append(previousHistory, currentMessages...)
 				previousHistoryRestored = true
-			} else {
+			case len(previousHistory) == 0:
+				portableHistory := history.LoadPortable(previousResponseID, portableHistoryScope)
+				if len(portableHistory) > 0 {
+					canon.Messages = append(portableHistory, currentMessages...)
+					previousHistoryRestored = true
+					portableHistoryRestored = true
+				} else {
+					canon.Messages = currentMessages
+				}
+			default:
 				canon.Messages = currentMessages
 			}
 		}
 	}
 	if !previousHistoryRestored {
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
+	}
+	if portableReasoningProjection || portableHistoryRestored {
+		clearResponsesNativeReplayState(&canon)
 	}
 	applyProviderSystemPrompt(&canon, provider)
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
@@ -528,6 +557,10 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	applyProviderMaxOutputTokens(&canon, provider)
+	if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
+		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+		return nil, false
+	}
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 	applyProxyModelIntentReasoningMode(r, &canon)
 	enforceSuffixReasoningModePrecedence(&canon)
@@ -590,72 +623,167 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		reasoningModeFallback:     reasoningModeFallback,
 		history:                   history,
 		historyScope:              historyScope,
+		portableHistoryScope:      portableHistoryScope,
 		usageRecorder:             usageRecorder,
 	}, true
 }
 
-func rehydrateOpaqueAnthropicThinking(history *responsesHistoryStore, canon *model.CanonicalRequest, providerID, scope string) bool {
-	if canon == nil {
-		return false
+func responsesHistoryDownstreamEndpoint(r *http.Request) string {
+	if info, ok := routeInfoFromRequest(r); ok && info.CanonicalPath != "" {
+		return info.CanonicalPath
 	}
-	hasOpaqueInput := false
-	for _, item := range canon.ResponseInputItems {
-		if stringValue(item["type"]) != "reasoning" {
+	if r == nil {
+		return ""
+	}
+	return r.URL.Path
+}
+
+func projectPersistedResponsesReasoning(history *responsesHistoryStore, canon *model.CanonicalRequest, providerID, nativeScope, portableScope, upstreamEndpointType string) (bool, bool) {
+	if canon == nil {
+		return false, false
+	}
+	portableProjection := false
+	for messageIndex := range canon.Messages {
+		blocks := canon.Messages[messageIndex].ReasoningBlocks
+		if len(blocks) == 0 {
 			continue
 		}
-		if _, ok := item["encrypted_content"]; ok {
-			hasOpaqueInput = true
-		}
-		if _, ok := item["signature"]; ok {
-			hasOpaqueInput = true
-		}
-	}
-	for _, message := range canon.Messages {
-		for _, block := range message.ReasoningBlocks {
-			if _, hasEncrypted := block["encrypted_content"]; hasEncrypted {
-				hasOpaqueInput = true
+		projectedBlocks := make([]map[string]any, 0, len(blocks))
+		changed := false
+		for _, block := range blocks {
+			if !hasOpaqueResponsesReasoningState(block) {
+				projectedBlocks = append(projectedBlocks, block)
+				continue
 			}
-			if _, hasSignature := block["signature"]; hasSignature {
-				hasOpaqueInput = true
-			}
-		}
-	}
-	if !hasOpaqueInput {
-		return true
-	}
-	rehydrated := 0
-	for messageIndex := range canon.Messages {
-		for blockIndex, block := range canon.Messages[messageIndex].ReasoningBlocks {
-			if _, hasEncrypted := block["encrypted_content"]; !hasEncrypted {
-				if _, hasSignature := block["signature"]; !hasSignature {
-					continue
+			serverBlock, nativeMatch := history.LoadOpaqueThinking(providerID, nativeScope, block)
+			switch {
+			case nativeMatch && upstreamEndpointType == config.UpstreamEndpointTypeAnthropic:
+				projectedBlocks = append(projectedBlocks, serverBlock)
+				changed = true
+			case nativeMatch && upstreamEndpointType == config.UpstreamEndpointTypeResponses:
+				projectedBlocks = append(projectedBlocks, block)
+			case nativeMatch || history.HasPortableOpaqueThinking(portableScope, block):
+				portableProjection = true
+				changed = true
+				if portableBlock := portableResponsesReasoningBlock(block); len(portableBlock) > 0 {
+					projectedBlocks = append(projectedBlocks, portableBlock)
 				}
+			default:
+				return false, false
 			}
-			serverBlock, ok := history.LoadOpaqueThinking(providerID, scope, block)
-			if !ok {
-				return false
-			}
-			canon.Messages[messageIndex].ReasoningBlocks[blockIndex] = serverBlock
-			rehydrated++
+		}
+		if changed {
+			canon.Messages[messageIndex].ReasoningBlocks = projectedBlocks
+			canon.Messages[messageIndex].ReasoningContent = portableResponsesReasoningText(projectedBlocks)
 		}
 	}
-	if rehydrated == 0 {
+
+	filteredItems := make([]map[string]any, 0, len(canon.ResponseInputItems))
+	for _, item := range canon.ResponseInputItems {
+		if !hasOpaqueResponsesReasoningState(item) {
+			filteredItems = append(filteredItems, item)
+			continue
+		}
+		_, nativeMatch := history.LoadOpaqueThinking(providerID, nativeScope, item)
+		if nativeMatch && upstreamEndpointType == config.UpstreamEndpointTypeResponses {
+			filteredItems = append(filteredItems, item)
+			continue
+		}
+		if !nativeMatch && !history.HasPortableOpaqueThinking(portableScope, item) {
+			return false, false
+		}
+		if upstreamEndpointType != config.UpstreamEndpointTypeAnthropic || !nativeMatch {
+			portableProjection = true
+		}
+	}
+	canon.ResponseInputItems = filteredItems
+	return portableProjection, true
+}
+
+func hasOpaqueResponsesReasoningState(block map[string]any) bool {
+	if stringValue(block["type"]) != "reasoning" {
 		return false
 	}
-	filtered := make([]map[string]any, 0, len(canon.ResponseInputItems))
-	for _, item := range canon.ResponseInputItems {
-		if stringValue(item["type"]) == "reasoning" {
-			if _, hasEncrypted := item["encrypted_content"]; hasEncrypted {
-				continue
+	if _, hasEncryptedContent := block["encrypted_content"]; hasEncryptedContent {
+		return true
+	}
+	_, hasSignature := block["signature"]
+	return hasSignature
+}
+
+func portableResponsesReasoningBlock(block map[string]any) map[string]any {
+	if portableResponsesReasoningText([]map[string]any{block}) == "" {
+		return nil
+	}
+	portable := map[string]any{"type": "reasoning"}
+	if thinking := stringValue(block["thinking"]); thinking != "" {
+		portable["thinking"] = thinking
+	}
+	if text := stringValue(block["text"]); text != "" {
+		portable["text"] = text
+	}
+	if summary, ok := block["summary"]; ok {
+		portable["summary"] = cloneJSONValueForResponse(summary)
+	}
+	return portable
+}
+
+func portableResponsesReasoningText(blocks []map[string]any) string {
+	var builder strings.Builder
+	for _, block := range blocks {
+		if thinking := stringValue(block["thinking"]); thinking != "" {
+			builder.WriteString(thinking)
+			continue
+		}
+		if text := stringValue(block["text"]); text != "" {
+			builder.WriteString(text)
+			continue
+		}
+		switch summary := block["summary"].(type) {
+		case string:
+			builder.WriteString(summary)
+		case []any:
+			for _, item := range summary {
+				appendPortableResponsesReasoningSummaryText(&builder, item)
 			}
-			if _, hasSignature := item["signature"]; hasSignature {
-				continue
+		case []map[string]any:
+			for _, item := range summary {
+				appendPortableResponsesReasoningSummaryText(&builder, item)
 			}
 		}
-		filtered = append(filtered, item)
 	}
-	canon.ResponseInputItems = filtered
-	return true
+	return builder.String()
+}
+
+func appendPortableResponsesReasoningSummaryText(builder *strings.Builder, raw any) {
+	item, _ := raw.(map[string]any)
+	if len(item) == 0 {
+		return
+	}
+	if text := stringValue(item["text"]); text != "" {
+		builder.WriteString(text)
+		return
+	}
+	if text := stringValue(item["summary_text"]); text != "" {
+		builder.WriteString(text)
+		return
+	}
+	if nested, _ := item["summary_text"].(map[string]any); len(nested) > 0 {
+		builder.WriteString(stringValue(nested["text"]))
+	}
+}
+
+func clearResponsesNativeReplayState(canon *model.CanonicalRequest) {
+	if canon == nil {
+		return
+	}
+	canon.ResponseInputItemsAreOriginal = false
+	canon.ResponseItemReferencesByCallID = nil
+	delete(canon.PreservedTopLevelFields, "previous_response_id")
+	for _, item := range canon.ResponseInputItems {
+		preserved, _ := item["__openai_compat_responses_top_level"].(map[string]any)
+		delete(preserved, "previous_response_id")
+	}
 }
 
 func logNonStreamResponsesOutput(requestID string, normalized map[string]any) {

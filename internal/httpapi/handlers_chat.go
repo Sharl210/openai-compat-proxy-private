@@ -70,6 +70,7 @@ func handleChat() http.HandlerFunc {
 			return
 		}
 		client := upstreamClientForProvider(r, providerID, providerCfg)
+		history := responsesHistoryFromRequest(r)
 		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolChat, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
@@ -77,10 +78,27 @@ func handleChat() http.HandlerFunc {
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 		applyProviderSystemPrompt(&canon, provider)
 		var reasoningModeFallback *reasoningModeFallbackCoordinator
+		historyScope := ""
 		if ok {
 			intent, _ := proxyModelIntentFromRequest(r)
 			normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				historyScope = responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+					ProviderID:                providerID,
+					DownstreamEndpoint:        canonicalV1ChatCompletionsPath,
+					UpstreamEndpointType:      providerCfg.UpstreamEndpointType,
+					NormalizedUpstreamBaseURL: providerCfg.UpstreamBaseURL,
+					FinalUpstreamModel:        canon.Model,
+					CredentialFingerprint:     authorizationFingerprint(authorization),
+					InboundCallerFingerprint:  inboundCallerIdentityFromRequest(r),
+				})
+				canon.Messages = recoverAnthropicThinkingForAssistantToolCalls(history, canon.Messages, providerID, historyScope)
+			}
 			applyProviderMaxOutputTokens(&canon, provider)
+			if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+				return
+			}
 			finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 			applyProxyModelIntentReasoningMode(r, &canon)
 			enforceSuffixReasoningModePrecedence(&canon)
@@ -183,7 +201,8 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 			flusher := startSSE(w)
-			if err := writeChatSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder); err != nil {
+			result, err := writeChatSSELive(ctx, stream, w, flusher, canon, providerCfg.UpstreamEndpointType, providerCfg.UpstreamThinkingTagStyle, usageRecorder)
+			if err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					return
@@ -194,6 +213,9 @@ func handleChat() http.HandlerFunc {
 				}
 				_ = writeChatTerminalFailure(w, flusher, "upstreamStreamBroken", err.Error(), nil)
 				return
+			}
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.Messages, result)
 			}
 			return
 		}
@@ -225,6 +247,9 @@ func handleChat() http.HandlerFunc {
 			if len(result.UnsupportedContentTypes) > 0 {
 				errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported chat output content")
 				return
+			}
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.Messages, result)
 			}
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 			w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
@@ -285,6 +310,9 @@ func handleChat() http.HandlerFunc {
 		if len(result.UnsupportedContentTypes) > 0 {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported chat output content")
 			return
+		}
+		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+			saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.Messages, result)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

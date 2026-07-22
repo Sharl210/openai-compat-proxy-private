@@ -748,12 +748,14 @@ func TestMessagesStreamResetsStopReasonAfterToolUseFollowedByText(t *testing.T) 
 	}
 }
 
-func TestMessagesStreamForwardsReasoningSummaryTextDelta(t *testing.T) {
+func TestMessagesStreamDoesNotReplayReasoningSummaryDonePrefix(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
 			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
-		"event: response.reasoning_summary_text.delta\n" +
-			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"正文\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"text\":\"**标题****正文**\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题****正文**\"}]}}\n\n",
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
 	})
@@ -783,14 +785,97 @@ func TestMessagesStreamForwardsReasoningSummaryTextDelta(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"\n正文"`) {
-		t.Fatalf("expected reasoning summary text delta to be forwarded as thinking, got %s", body)
+	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"**正文**"`) {
+		t.Fatalf("expected append-only thinking chunks, got %s", body)
+	}
+	if strings.Contains(body, `"thinking":"\n**标题**\n\n**正文**\n"`) {
+		t.Fatalf("expected formatted full buffer not to be replayed as a thinking delta, got %s", body)
+	}
+}
+
+func TestMessagesStreamCompletesReasoningSummaryFromItemDone(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题****正文**\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"**正文**"`) {
+		t.Fatalf("expected item.done to append the missing thinking suffix, got %s", body)
+	}
+}
+
+func TestMessagesStreamEmitsMissingReasoningSummaryIndexes(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"text\":\"**标题****正文**\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题****正文**\"},{\"type\":\"summary_text\",\"text\":\"second\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if strings.Count(body, `"thinking":"\n**标题**\n\n**正文**\n"`) != 1 || strings.Count(body, `"thinking":"second"`) != 1 {
+		t.Fatalf("expected each summary index exactly once, got %s", body)
 	}
 }
 
 func TestReasoningContentValueFormatsThinkingText(t *testing.T) {
-	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**\n正文" {
-		t.Fatalf("expected thinking title to be separated, got %q", got)
+	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**正文" {
+		t.Fatalf("expected non-paired thinking span unchanged, got %q", got)
 	}
 }
 
@@ -801,8 +886,8 @@ func TestReasoningSummaryFromItemSeparatesBoldTitleFromFollowingContent(t *testi
 			map[string]any{"type": "summary_text", "text": "**标题****后续**"},
 		},
 	}
-	if got := reasoningSummaryFromItem(item); got != "**标题**\n\n**后续**" {
-		t.Fatalf("expected reasoning summary title break, got %q", got)
+	if got := reasoningSummaryFromItem(item); got != "\n**标题**\n\n**后续**\n" {
+		t.Fatalf("expected exact adjacent reasoning pair formatting, got %q", got)
 	}
 }
 

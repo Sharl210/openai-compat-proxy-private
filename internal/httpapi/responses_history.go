@@ -16,6 +16,7 @@ import (
 
 	"openai-compat-proxy/internal/aggregate"
 	"openai-compat-proxy/internal/model"
+	"openai-compat-proxy/internal/syntaxrepair"
 )
 
 type responsesHistoryStore struct {
@@ -38,13 +39,16 @@ type responsesConversationSnapshot struct {
 	Messages         []model.CanonicalMessage
 	CompressedFields []responsesHistoryCompressedField
 	Bytes            int64
+	ResponseID       string
 	Scope            string
+	PortableScope    string
 }
 
 type responsesHistoryToolCallEntry struct {
 	SnapshotKey           string
 	Call                  model.CanonicalToolCall
 	ReasoningBlocks       []map[string]any
+	ToolCallSequenceHash  string `json:"tool_call_sequence_hash,omitempty"`
 	ArgumentsCompressed   []byte `json:"arguments_compressed,omitempty"`
 	ArgumentsOriginalSize int    `json:"arguments_original_size,omitempty"`
 }
@@ -63,6 +67,11 @@ type responsesHistoryReplayProvenance struct {
 	FinalUpstreamModel        string `json:"final_upstream_model"`
 	CredentialFingerprint     string `json:"credential_fingerprint"`
 	InboundCallerFingerprint  string `json:"inbound_caller_fingerprint"`
+}
+
+type responsesHistoryPortableProvenance struct {
+	Purpose                  string `json:"purpose"`
+	InboundCallerFingerprint string `json:"inbound_caller_fingerprint"`
 }
 
 const defaultResponsesHistoryMaxSize = 512
@@ -142,6 +151,22 @@ func responsesHistoryReplayScope(provenance responsesHistoryReplayProvenance) st
 	return hex.EncodeToString(sum[:])
 }
 
+func responsesHistoryPortableScope(inboundCallerFingerprint string) string {
+	provenance := responsesHistoryPortableProvenance{
+		Purpose:                  "responses_portable_history_v1",
+		InboundCallerFingerprint: strings.TrimSpace(inboundCallerFingerprint),
+	}
+	if provenance.InboundCallerFingerprint == "" {
+		return ""
+	}
+	encoded, err := json.Marshal(provenance)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
 func normalizeResponsesHistoryUpstreamBaseURL(raw string) string {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -208,6 +233,14 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 }
 
 func (s *responsesHistoryStore) Save(providerID, responseID string, messages []model.CanonicalMessage, scopes ...string) {
+	s.save(providerID, responseID, messages, firstString(scopes...), "")
+}
+
+func (s *responsesHistoryStore) SaveWithPortableScope(providerID, responseID string, messages []model.CanonicalMessage, scope, portableScope string) {
+	s.save(providerID, responseID, messages, scope, portableScope)
+}
+
+func (s *responsesHistoryStore) save(providerID, responseID string, messages []model.CanonicalMessage, scope, portableScope string) {
 	if s == nil || providerID == "" || responseID == "" || len(messages) == 0 {
 		return
 	}
@@ -243,18 +276,20 @@ func (s *responsesHistoryStore) Save(providerID, responseID string, messages []m
 			s.mu.Unlock()
 			return
 		}
-		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes, Scope: firstString(scopes...)}
+		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes, ResponseID: responseID, Scope: scope, PortableScope: portableScope}
 		s.retainedBytes += recoveryBytes
-		s.indexToolCallsLocked(providerID, key, messages, firstString(scopes...), nil)
+		s.indexToolCallsLocked(providerID, key, messages, scope, nil)
 	} else {
 		storedBytes := snapshotBytes + recoveryBytes
 		snapshot, storedMessages := newResponsesConversationSnapshot(messages, storedBytes)
-		snapshot.Scope = firstString(scopes...)
+		snapshot.ResponseID = responseID
+		snapshot.Scope = scope
+		snapshot.PortableScope = portableScope
 		s.entries[key] = snapshot
 		s.retainedBytes += storedBytes
 		s.byResponseID[responseID] = key
-		s.indexToolCallsLocked(providerID, key, storedMessages, firstString(scopes...), &snapshot)
-		s.indexOpaqueThinkingLocked(providerID, key, storedMessages, firstString(scopes...))
+		s.indexToolCallsLocked(providerID, key, storedMessages, scope, &snapshot)
+		s.indexOpaqueThinkingLocked(providerID, key, storedMessages, scope)
 	}
 	s.order = append(s.order, key)
 	for len(s.order) > s.maxSize || (s.maxBytes > 0 && s.retainedBytes > s.maxBytes) {
@@ -285,6 +320,27 @@ func (s *responsesHistoryStore) LoadScoped(providerID, responseID, scope string)
 	return loadResponsesConversationSnapshot(stored)
 }
 
+func (s *responsesHistoryStore) LoadPortable(responseID, portableScope string) []model.CanonicalMessage {
+	if s == nil || responseID == "" || portableScope == "" {
+		return nil
+	}
+	s.mu.RLock()
+	var matched responsesConversationSnapshot
+	matchCount := 0
+	for _, snapshot := range s.entries {
+		if snapshot.ResponseID != responseID || snapshot.PortableScope != portableScope || len(snapshot.Messages) == 0 {
+			continue
+		}
+		matched = snapshot
+		matchCount++
+	}
+	s.mu.RUnlock()
+	if matchCount != 1 {
+		return nil
+	}
+	return loadResponsesConversationSnapshot(matched)
+}
+
 func (s *responsesHistoryStore) LoadOpaqueThinking(providerID, scope string, publicBlock map[string]any) (map[string]any, bool) {
 	if s == nil || providerID == "" || scope == "" {
 		return nil, false
@@ -311,9 +367,54 @@ func (s *responsesHistoryStore) LoadOpaqueThinking(providerID, scope string, pub
 	return block[0], true
 }
 
+func (s *responsesHistoryStore) HasPortableOpaqueThinking(portableScope string, publicBlock map[string]any) bool {
+	if s == nil || portableScope == "" {
+		return false
+	}
+	fingerprint, ok := responsesOpaqueThinkingPublicFingerprint(publicBlock)
+	if !ok {
+		return false
+	}
+	s.mu.RLock()
+	snapshots := make([]responsesConversationSnapshot, 0, len(s.entries))
+	for _, snapshot := range s.entries {
+		if snapshot.PortableScope == portableScope && len(snapshot.Messages) > 0 {
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	s.mu.RUnlock()
+	matchCount := 0
+	for _, snapshot := range snapshots {
+		for _, message := range loadResponsesConversationSnapshot(snapshot) {
+			for blockIndex, block := range message.ReasoningBlocks {
+				if !hasOpaqueThinkingState(block) {
+					continue
+				}
+				candidate, candidateOK := responsesOpaqueThinkingPublicFingerprint(responsesOpaqueThinkingPublicBlock(block, blockIndex))
+				if !candidateOK || candidate != fingerprint {
+					continue
+				}
+				matchCount++
+				if matchCount > 1 {
+					return false
+				}
+			}
+		}
+	}
+	return matchCount == 1
+}
+
 func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes ...string) (model.CanonicalToolCall, []map[string]any, bool) {
-	if s == nil || providerID == "" || callID == "" {
+	entry, ok := s.loadToolCallEntry(providerID, callID, scopes...)
+	if !ok {
 		return model.CanonicalToolCall{}, nil, false
+	}
+	return entry.Call, cloneReasoningBlocksForHistory(entry.ReasoningBlocks), true
+}
+
+func (s *responsesHistoryStore) loadToolCallEntry(providerID, callID string, scopes ...string) (responsesHistoryToolCallEntry, bool) {
+	if s == nil || providerID == "" || callID == "" {
+		return responsesHistoryToolCallEntry{}, false
 	}
 	s.mu.Lock()
 	if err := s.loadToolCallRecoveryIndexLocked(); err != nil {
@@ -322,14 +423,14 @@ func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes .
 	entry, ok := s.toolCalls[responsesHistoryScopedToolCallKey(providerID, callID, firstString(scopes...))]
 	s.mu.Unlock()
 	if !ok || entry.Call.ID == "" || entry.Call.Name == "" {
-		return model.CanonicalToolCall{}, nil, false
+		return responsesHistoryToolCallEntry{}, false
 	}
 	arguments, ok := loadResponsesHistoryToolCallArguments(entry)
 	if !ok {
-		return model.CanonicalToolCall{}, nil, false
+		return responsesHistoryToolCallEntry{}, false
 	}
 	entry.Call.Arguments = arguments
-	return entry.Call, cloneReasoningBlocksForHistory(entry.ReasoningBlocks), true
+	return entry, true
 }
 
 func (s *responsesHistoryStore) LoadAny(responseID string) []model.CanonicalMessage {
@@ -396,11 +497,12 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			data, originalSize, ok := responsesHistoryCompressedFieldData(snapshot, messageIndex, 0, responsesHistoryCompressedRecoveredToolArguments)
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
+		sequenceHash := assistantToolCallSequenceHash(msg.ToolCalls)
 		for toolIndex, call := range msg.ToolCalls {
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
-			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks)}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks), ToolCallSequenceHash: sequenceHash}
 			data, originalSize, ok := responsesHistoryCompressedFieldData(snapshot, messageIndex, toolIndex, responsesHistoryCompressedToolArguments)
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
@@ -508,7 +610,7 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 		if key == "" || entry.SnapshotKey == "" || entry.Call.ID == "" || entry.Call.Name == "" {
 			continue
 		}
-		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocksForHistory(entry.ReasoningBlocks), ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize}
+		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocksForHistory(entry.ReasoningBlocks), ToolCallSequenceHash: entry.ToolCallSequenceHash, ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize}
 		var valid bool
 		stored, valid = normalizeResponsesHistoryToolCallEntry(stored)
 		if !valid {
@@ -612,6 +714,134 @@ func recoverToolCallsForMessages(history *responsesHistoryStore, messages []mode
 		}
 	}
 	return recovered
+}
+
+func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) []model.CanonicalMessage {
+	if len(messages) == 0 || providerID == "" || history == nil {
+		return messages
+	}
+	scope := firstString(scopes...)
+	if scope == "" {
+		return messages
+	}
+	recovered := append([]model.CanonicalMessage(nil), messages...)
+	for messageIndex := range recovered {
+		message := &recovered[messageIndex]
+		if message.Role != "assistant" || len(message.ToolCalls) == 0 || len(message.ReasoningBlocks) > 0 {
+			continue
+		}
+
+		var serverBlocks []map[string]any
+		sequenceHash := assistantToolCallSequenceHash(message.ToolCalls)
+		if sequenceHash == "" {
+			continue
+		}
+		matched := true
+		seenToolCallIDs := map[string]struct{}{}
+		for _, candidate := range message.ToolCalls {
+			if strings.TrimSpace(candidate.ID) == "" {
+				matched = false
+				break
+			}
+			if _, duplicate := seenToolCallIDs[candidate.ID]; duplicate {
+				matched = false
+				break
+			}
+			seenToolCallIDs[candidate.ID] = struct{}{}
+			storedEntry, ok := history.loadToolCallEntry(providerID, candidate.ID, scope)
+			if !ok || storedEntry.ToolCallSequenceHash != sequenceHash || len(storedEntry.ReasoningBlocks) == 0 || !assistantToolCallsMatchForAnthropicThinkingReplay(candidate, storedEntry.Call) {
+				matched = false
+				break
+			}
+			blocks := storedEntry.ReasoningBlocks
+			if serverBlocks == nil {
+				serverBlocks = blocks
+				continue
+			}
+			if !reasoningBlocksMatchForAnthropicThinkingReplay(serverBlocks, blocks) {
+				matched = false
+				break
+			}
+		}
+		if matched && len(serverBlocks) > 0 {
+			message.ReasoningBlocks = serverBlocks
+		}
+	}
+	return recovered
+}
+
+func assistantToolCallSequenceHash(toolCalls []model.CanonicalToolCall) string {
+	if len(toolCalls) == 0 {
+		return ""
+	}
+	normalized := make([]map[string]string, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		if strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.Name) == "" {
+			return ""
+		}
+		normalized = append(normalized, map[string]string{
+			"id":        strings.TrimSpace(call.ID),
+			"type":      normalizedAnthropicThinkingReplayToolType(call.Type),
+			"name":      strings.TrimSpace(call.Name),
+			"arguments": normalizedAnthropicThinkingReplayArguments(call.Arguments),
+		})
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}
+
+func assistantToolCallsMatchForAnthropicThinkingReplay(candidate, stored model.CanonicalToolCall) bool {
+	if strings.TrimSpace(candidate.ID) == "" || candidate.ID != stored.ID {
+		return false
+	}
+	if normalizedAnthropicThinkingReplayToolType(candidate.Type) != normalizedAnthropicThinkingReplayToolType(stored.Type) {
+		return false
+	}
+	if strings.TrimSpace(candidate.Name) != strings.TrimSpace(stored.Name) {
+		return false
+	}
+	return normalizedAnthropicThinkingReplayArguments(candidate.Arguments) == normalizedAnthropicThinkingReplayArguments(stored.Arguments)
+}
+
+func normalizedAnthropicThinkingReplayToolType(value string) string {
+	if normalized := strings.TrimSpace(value); normalized != "" {
+		return normalized
+	}
+	return "function"
+}
+
+func normalizedAnthropicThinkingReplayArguments(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if normalized, ok := syntaxrepair.RepairJSON(trimmed); ok {
+		return normalized
+	}
+	return trimmed
+}
+
+func reasoningBlocksMatchForAnthropicThinkingReplay(left, right []map[string]any) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	encodedLeft, err := json.Marshal(left)
+	if err != nil {
+		return false
+	}
+	encodedRight, err := json.Marshal(right)
+	if err != nil {
+		return false
+	}
+	return string(encodedLeft) == string(encodedRight)
+}
+
+func saveChatAnthropicThinkingHistory(history *responsesHistoryStore, providerID, scope string, messages []model.CanonicalMessage, result aggregate.Result) {
+	if history == nil || providerID == "" || scope == "" || strings.TrimSpace(result.ResponseID) == "" {
+		return
+	}
+	saveResponsesHistorySnapshot(history, providerID, result.ResponseID, messages, assistantHistoryMessagesFromResult(result), scope)
 }
 
 func recoverResponseItemReferencesForMessages(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) map[string]string {
@@ -850,6 +1080,18 @@ func isInvisibleReasoningResidue(summary string) bool {
 }
 
 func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
+	return cloneCanonicalMessages(selectResponsesHistoryMessages(base, assistant))
+}
+
+func saveResponsesHistorySnapshot(history *responsesHistoryStore, providerID, responseID string, base []model.CanonicalMessage, assistant []model.CanonicalMessage, scopes ...string) {
+	var portableScope string
+	if len(scopes) > 1 {
+		portableScope = scopes[1]
+	}
+	history.SaveWithPortableScope(providerID, responseID, selectResponsesHistoryMessages(base, assistant), firstString(scopes...), portableScope)
+}
+
+func selectResponsesHistoryMessages(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {
 	snapshot := make([]model.CanonicalMessage, 0, len(base)+len(assistant))
 	for _, msg := range base {
 		switch msg.Role {
@@ -857,14 +1099,14 @@ func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []mo
 			if msg.Role == "tool" && shouldDropToolMessageFromHistory(msg) {
 				continue
 			}
-			snapshot = append(snapshot, cloneCanonicalMessages([]model.CanonicalMessage{msg})...)
+			snapshot = append(snapshot, msg)
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
-				snapshot = append(snapshot, cloneCanonicalMessages([]model.CanonicalMessage{msg})...)
+				snapshot = append(snapshot, msg)
 			}
 		}
 	}
-	snapshot = append(snapshot, cloneCanonicalMessages(assistant)...)
+	snapshot = append(snapshot, assistant...)
 	return snapshot
 }
 

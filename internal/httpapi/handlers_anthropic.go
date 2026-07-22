@@ -95,6 +95,10 @@ func handleAnthropicMessages() http.HandlerFunc {
 		intent, _ := proxyModelIntentFromRequest(r)
 		normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
 		applyProviderMaxOutputTokens(&canon, provider)
+		if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
+			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+			return
+		}
 		finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 		applyProxyModelIntentReasoningMode(r, &canon)
 		enforceSuffixReasoningModePrecedence(&canon)

@@ -1183,7 +1183,7 @@ func TestResponsesStreamFormatsReasoningItemTitle(t *testing.T) {
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
 	)
 
-	if !strings.Contains(body, `"text":"**标题**\n正文","type":"summary_text"`) {
+	if !strings.Contains(body, `"text":"**标题**正文","type":"summary_text"`) {
 		t.Fatalf("expected reasoning item title to be separated, got %s", body)
 	}
 }
@@ -1191,12 +1191,15 @@ func TestResponsesStreamFormatsReasoningItemTitle(t *testing.T) {
 func TestResponsesStreamFormatsReasoningTitleAcrossEvents(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**标题**"}},
-		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "正文"}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**正文**"}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
 	)
 
-	if !strings.Contains(body, `"delta":"**标题**"`) || !strings.Contains(body, `"delta":"\n正文"`) {
-		t.Fatalf("expected reasoning title formatting across events, got %s", body)
+	if !strings.Contains(body, `"delta":"**标题**"`) || !strings.Contains(body, `"delta":"**正文**"`) {
+		t.Fatalf("expected append-only reasoning events, got %s", body)
+	}
+	if strings.Contains(body, `"delta":"\n**标题**\n\n**正文**\n"`) {
+		t.Fatalf("expected formatted full buffer not to be replayed as a Responses delta, got %s", body)
 	}
 }
 

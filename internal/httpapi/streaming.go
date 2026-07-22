@@ -51,35 +51,36 @@ func isInvisibleSyntheticReasoningText(text string) bool {
 type usageRecorderFunc func(map[string]any)
 
 type anthropicStreamState struct {
-	messageStarted    bool
-	messageID         string
-	modelName         string
-	textStarted       bool
-	textIndex         int
-	textStopped       bool
-	textTail          visibleTextTailBuffer
-	thinkingStarted   bool
-	thinkingStopped   bool
-	signatureSent     bool
-	thinkingIndex     int
-	thinkingType      string
-	thinkingSignature string
-	toolStarted       bool
-	toolIndex         int
-	toolStopped       bool
-	stopReason        string
-	nextIndex         int
-	realThinkingSeen  bool
-	reasoningText     strings.Builder
-	planningSent      bool
-	toolStatusSent    bool
-	toolItemID        string
-	toolDeltaSent     bool
-	pendingToolArgs   map[string]string
-	toolMeta          map[string]map[string]string
-	emittedToolItems  map[string]bool
-	terminalSeen      bool
-	terminalFailure   *aggregate.TerminalFailureError
+	messageStarted     bool
+	messageID          string
+	modelName          string
+	textStarted        bool
+	textIndex          int
+	textStopped        bool
+	textTail           visibleTextTailBuffer
+	thinkingStarted    bool
+	thinkingStopped    bool
+	signatureSent      bool
+	thinkingIndex      int
+	thinkingType       string
+	thinkingSignature  string
+	toolStarted        bool
+	toolIndex          int
+	toolStopped        bool
+	stopReason         string
+	nextIndex          int
+	realThinkingSeen   bool
+	reasoningText      strings.Builder
+	reasoningSummaries map[reasoningSummaryKey]*reasoningSummaryState
+	planningSent       bool
+	toolStatusSent     bool
+	toolItemID         string
+	toolDeltaSent      bool
+	pendingToolArgs    map[string]string
+	toolMeta           map[string]map[string]string
+	emittedToolItems   map[string]bool
+	terminalSeen       bool
+	terminalFailure    *aggregate.TerminalFailureError
 }
 
 type responsesStreamState struct {
@@ -123,6 +124,16 @@ type responsesStreamState struct {
 type responseTextTailKey struct {
 	itemID       string
 	contentIndex int
+}
+
+type reasoningSummaryKey struct {
+	itemID       string
+	summaryIndex int
+}
+
+type reasoningSummaryState struct {
+	emitted strings.Builder
+	done    bool
 }
 
 type responsesToolItemState struct {
@@ -257,7 +268,8 @@ func (h *responseEventWriterHelper) formatReasoningEvent(evt *upstream.Event) {
 	case "response.reasoning_summary_text.done":
 		key = "text"
 	}
-	if key != "" {
+	summaryTextEvent := key != ""
+	if key != "" && (h.downstreamType == "responses" || !summaryTextEvent) {
 		if text, ok := evt.Data[key].(string); ok && text != "" {
 			evt.Data[key] = h.formatReasoningContentDelta(key, text)
 		}
@@ -291,6 +303,72 @@ func formatStreamingReasoningDelta(previous *strings.Builder, delta string) stri
 	previous.Reset()
 	previous.WriteString(combined)
 	return formattedDelta
+}
+
+func formatStreamingReasoningSnapshot(previous *strings.Builder, snapshot string) string {
+	if previous == nil || snapshot == "" {
+		return snapshot
+	}
+	emitted := previous.String()
+	normalized := reasoningtext.FormatText(snapshot)
+	if snapshot == emitted || normalized == emitted {
+		return ""
+	}
+	if strings.HasPrefix(snapshot, emitted) {
+		return formatStreamingReasoningDelta(previous, strings.TrimPrefix(snapshot, emitted))
+	}
+	if strings.HasPrefix(normalized, emitted) {
+		formattedDelta := strings.TrimPrefix(normalized, emitted)
+		previous.Reset()
+		previous.WriteString(normalized)
+		return formattedDelta
+	}
+	return ""
+}
+
+func formatStreamingReasoningSummary(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string, summaryIndex int, text string, snapshot bool) string {
+	if text == "" {
+		return ""
+	}
+	if itemID == "" {
+		itemID = "default-reasoning-summary"
+	}
+	if *states == nil {
+		*states = map[reasoningSummaryKey]*reasoningSummaryState{}
+	}
+	key := reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}
+	state := (*states)[key]
+	if state == nil {
+		state = &reasoningSummaryState{}
+		(*states)[key] = state
+	}
+	if snapshot {
+		if state.done {
+			return ""
+		}
+		state.done = true
+		return formatStreamingReasoningSnapshot(&state.emitted, text)
+	}
+	return formatStreamingReasoningDelta(&state.emitted, text)
+}
+
+func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reasoningSummaryState, item map[string]any) []string {
+	parts, _ := item["summary"].([]any)
+	if len(parts) == 0 {
+		return nil
+	}
+	itemID := stringValue(item["id"])
+	deltas := make([]string, 0, len(parts))
+	for summaryIndex, rawPart := range parts {
+		part, _ := rawPart.(map[string]any)
+		if part == nil {
+			continue
+		}
+		if delta := formatStreamingReasoningSummary(states, itemID, summaryIndex, stringValue(part["text"]), true); delta != "" {
+			deltas = append(deltas, delta)
+		}
+	}
+	return deltas
 }
 
 func (h *responseEventWriterHelper) ensureToolItemState(itemID string) *responsesToolItemState {
@@ -1372,8 +1450,10 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.output_item.added", "response.output_item.done":
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" {
-			item = reasoningtext.FormatBlock(item)
-			evt.Data["item"] = item
+			if h.downstreamType == "responses" {
+				item = reasoningtext.FormatBlock(item)
+				evt.Data["item"] = item
+			}
 			itemID := responseToolItemStateID(item)
 			upstreamOutputIndex, hasUpstreamOutputIndex := intValue(evt.Data["output_index"])
 			if !hasUpstreamOutputIndex {
@@ -2709,17 +2789,20 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return startToolBlock(item)
 		}
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
-			if summary := reasoningSummaryFromItem(item); summary != "" {
+			for _, summary := range formatStreamingReasoningItemSummary(&state.reasoningSummaries, item) {
 				state.realThinkingSeen = true
 				if err := startThinkingBlock(); err != nil {
 					return err
 				}
-				return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+				if err := writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
 					"type":  "content_block_delta",
 					"index": state.thinkingIndex,
 					"delta": map[string]any{"type": "thinking_delta", "thinking": summary},
-				})
+				}); err != nil {
+					return err
+				}
 			}
+			return nil
 		}
 	case "response.output_text.delta":
 		delta := stringValue(evt.Data["delta"])
@@ -2736,7 +2819,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		state.textStarted = true
 		state.textStopped = false
 		return writeTextDelta(delta)
-	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
+	case "response.reasoning.delta":
 		if block := firstReasoningBlock(evt.Data); len(block) > 0 {
 			if blockType, _ := block["type"].(string); blockType != "" {
 				state.thinkingType = blockType
@@ -2745,7 +2828,34 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				state.thinkingSignature = signature
 			}
 		}
-		if delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentValue(evt.Data)); delta != "" {
+		delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data))
+		if delta != "" {
+			state.realThinkingSeen = true
+			if err := startThinkingBlock(); err != nil {
+				return err
+			}
+			return writeAnthropicSSEEvent(w, flusher, "content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": state.thinkingIndex,
+				"delta": map[string]any{"type": "thinking_delta", "thinking": delta},
+			})
+		}
+	case "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+		if block := firstReasoningBlock(evt.Data); len(block) > 0 {
+			if blockType, _ := block["type"].(string); blockType != "" {
+				state.thinkingType = blockType
+			}
+			if signature, _ := block["signature"].(string); signature != "" {
+				state.thinkingSignature = signature
+			}
+		}
+		itemID := stringValue(evt.Data["item_id"])
+		summaryIndex, ok := intValue(evt.Data["summary_index"])
+		if !ok {
+			summaryIndex = 0
+		}
+		delta := formatStreamingReasoningSummary(&state.reasoningSummaries, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done")
+		if delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
 				return err
@@ -3074,6 +3184,7 @@ type chatStreamState struct {
 	textStarted         bool
 	realReasoningSeen   bool
 	reasoningText       strings.Builder
+	reasoningSummaries  map[reasoningSummaryKey]*reasoningSummaryState
 	thinkingTagStyle    string
 	planningSent        bool
 	toolStatusSent      bool
@@ -3090,7 +3201,7 @@ type chatStreamState struct {
 	pendingReasoningTag string
 }
 
-func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) error {
+func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
 	state := chatStreamState{
 		chunkID:          "chatcmpl_proxy",
 		modelName:        req.Model,
@@ -3111,8 +3222,9 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 	}
 	writer := NewChatEventWriter(w, flusher, &state, helper, usageRecorder)
 	if err := writeSSEPadding(w, flusher); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
+	collector := aggregate.NewCollector()
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realReasoningSeen },
 		func() error {
@@ -3123,19 +3235,24 @@ func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.
 		},
 		func() error { return writeSSEHeartbeat(w, flusher, state.terminalSeen) },
 		func(evt upstream.Event) error {
+			collector.Accept(evt)
 			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
 	if err != nil && !state.terminalSeen {
-		return err
+		return aggregate.Result{}, err
 	}
 	if !state.terminalSeen {
-		return io.ErrUnexpectedEOF
+		return aggregate.Result{}, io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return nil
+		return aggregate.Result{}, state.terminalFailure
 	}
-	return nil
+	result, err := collector.Result()
+	if err != nil {
+		return aggregate.Result{}, err
+	}
+	return result, nil
 }
 
 func waitSyntheticLeadTime(ctx context.Context) error {
@@ -3339,13 +3456,15 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
-		if reasoningContent := reasoningSummaryFromItem(item); reasoningContent != "" {
-			state.realReasoningSeen = true
-			if err := ensureRoleSent(); err != nil {
-				return err
-			}
-			if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
-				return err
+		if itemType, _ := item["type"].(string); itemType == "reasoning" {
+			for _, reasoningContent := range formatStreamingReasoningItemSummary(&state.reasoningSummaries, item) {
+				state.realReasoningSeen = true
+				if err := ensureRoleSent(); err != nil {
+					return err
+				}
+				if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": reasoningContent}, "", nil); err != nil {
+					return err
+				}
 			}
 		}
 		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
@@ -3426,12 +3545,29 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 				return err
 			}
 		}
-	case "response.reasoning.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+	case "response.reasoning.delta":
 		if !state.reasoningTextActive {
 			state.reasoningText.Reset()
 			state.reasoningTextActive = true
 		}
-		if delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentValue(evt.Data)); delta != "" {
+		delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data))
+		if delta != "" {
+			state.realReasoningSeen = true
+			if err := ensureRoleSent(); err != nil {
+				return err
+			}
+			if err := writeChatChunk(w, flusher, state, map[string]any{"reasoning_content": delta}, "", nil); err != nil {
+				return err
+			}
+		}
+	case "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+		itemID := stringValue(evt.Data["item_id"])
+		summaryIndex, ok := intValue(evt.Data["summary_index"])
+		if !ok {
+			summaryIndex = 0
+		}
+		delta := formatStreamingReasoningSummary(&state.reasoningSummaries, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done")
+		if delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
 				return err
@@ -3762,9 +3898,13 @@ func isResponseToolCallItemType(itemType string) bool {
 }
 
 func reasoningContentValue(data map[string]any) string {
+	return reasoningtext.FormatText(reasoningContentRawValue(data))
+}
+
+func reasoningContentRawValue(data map[string]any) string {
 	for _, key := range []string{"thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text"} {
 		if text, _ := data[key].(string); text != "" {
-			return reasoningtext.FormatText(text)
+			return text
 		}
 	}
 	return ""

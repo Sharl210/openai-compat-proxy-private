@@ -63,7 +63,7 @@ func estimateResponsesHistoryToolCallEntryBytes(entry responsesHistoryToolCallEn
 	if entry.ArgumentsOriginalSize > len(entry.Call.Arguments) {
 		callBytes += int64(entry.ArgumentsOriginalSize - len(entry.Call.Arguments))
 	}
-	return callBytes + estimateDynamicValueBytes(entry.ReasoningBlocks)
+	return callBytes + int64(len(entry.ToolCallSequenceHash)) + estimateDynamicValueBytes(entry.ReasoningBlocks)
 }
 
 func estimateDynamicValueBytes(value any) int64 {

@@ -193,6 +193,57 @@ func TestRequestUnmarshalJSONPreservesUnknownTopLevelFieldsSeparately(t *testing
 	}
 }
 
+func TestDecodeRequestDropsSyntheticResponsesReasoningPlaceholder(t *testing.T) {
+	canon, err := DecodeRequest(strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_proxy","summary":[{"type":"summary_text","text":"\u200b"}]},
+			{"type":"function_call","call_id":"call_123","name":"search","arguments":"{}"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if !canon.HasSyntheticReasoningReplay {
+		t.Fatalf("expected synthetic reasoning replay marker, got %#v", canon)
+	}
+	if len(canon.ResponseInputItems) != 2 {
+		t.Fatalf("expected synthetic reasoning input omitted from preserved items, got %#v", canon.ResponseInputItems)
+	}
+	for _, item := range canon.ResponseInputItems {
+		if item["type"] == "reasoning" {
+			t.Fatalf("expected synthetic reasoning item omitted, got %#v", item)
+		}
+	}
+	for _, message := range canon.Messages {
+		if len(message.ReasoningBlocks) > 0 || message.ReasoningContent != "" {
+			t.Fatalf("expected synthetic reasoning item omitted from canonical messages, got %#v", message)
+		}
+	}
+}
+
+func TestDecodeRequestKeepsNonSyntheticResponsesReasoningItem(t *testing.T) {
+	canon, err := DecodeRequest(strings.NewReader(`{
+		"model":"gpt-5",
+		"input":[
+			{"type":"reasoning","id":"rs_chat_reasoning","summary":[{"type":"summary_text","text":"real reasoning"}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.HasSyntheticReasoningReplay {
+		t.Fatalf("expected non-synthetic reasoning item to remain distinct, got %#v", canon)
+	}
+	if len(canon.ResponseInputItems) != 1 || canon.ResponseInputItems[0]["id"] != "rs_chat_reasoning" {
+		t.Fatalf("expected non-synthetic reasoning item preserved, got %#v", canon.ResponseInputItems)
+	}
+	if len(canon.Messages) != 1 || canon.Messages[0].ReasoningContent != "real reasoning" {
+		t.Fatalf("expected non-synthetic reasoning message preserved, got %#v", canon.Messages)
+	}
+}
+
 func TestDecodeRequestPreservesResponsesStatefulFields(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

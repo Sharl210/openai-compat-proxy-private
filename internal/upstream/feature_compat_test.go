@@ -96,6 +96,26 @@ func TestCheckResponsesFeatureCompatibilityAllowsRepresentablePersistedReasoning
 	}
 }
 
+func TestCheckResponsesFeatureCompatibilityAllowsSummaryOnlyReasoningFromProductionReplay(t *testing.T) {
+	req := model.CanonicalRequest{ResponseInputItems: []map[string]any{
+		{
+			"type":    "reasoning",
+			"id":      "rs_chat_reasoning",
+			"summary": []any{map[string]any{"type": "summary_text", "text": "first reasoning"}},
+		},
+		{
+			"type":    "reasoning",
+			"id":      "rs_chat_reasoning",
+			"summary": []any{map[string]any{"type": "summary_text", "text": "second reasoning"}},
+		},
+	}}
+	for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		if err := CheckResponsesFeatureCompatibility(req, endpoint); err != nil {
+			t.Fatalf("%s upstream should accept summary-only production replay: %v", endpoint, err)
+		}
+	}
+}
+
 func TestCheckResponsesFeatureCompatibilityRejectsNonRepresentablePersistedReasoning(t *testing.T) {
 	for _, testCase := range []struct {
 		name string

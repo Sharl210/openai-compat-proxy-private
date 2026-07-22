@@ -111,31 +111,47 @@ func hasUnsupportedPersistedResponsesItem(items []map[string]any, upstreamEndpoi
 }
 
 func hasRepresentablePersistedReasoningItem(item map[string]any, upstreamEndpointType string) bool {
-	thinking := strings.TrimSpace(stringValue(item["thinking"]))
 	if _, hasEncryptedContent := item["encrypted_content"]; hasEncryptedContent {
 		return false
 	}
 	if _, hasSignature := item["signature"]; hasSignature {
 		return false
 	}
-	return thinking != "" || hasPersistedReasoningText(item)
+	return hasPersistedReasoningText(item)
 }
 
 func hasPersistedReasoningText(item map[string]any) bool {
 	if strings.TrimSpace(stringValue(item["thinking"])) != "" || strings.TrimSpace(stringValue(item["text"])) != "" {
 		return true
 	}
-	summary, ok := item["summary"].([]any)
-	if !ok {
-		return false
-	}
-	for _, raw := range summary {
-		block, _ := raw.(map[string]any)
-		if strings.TrimSpace(stringValue(block["text"])) != "" || strings.TrimSpace(stringValue(block["summary_text"])) != "" {
-			return true
+	return hasPersistedReasoningSummary(item["summary"])
+}
+
+func hasPersistedReasoningSummary(summary any) bool {
+	switch typed := summary.(type) {
+	case []any:
+		for _, raw := range typed {
+			if hasPersistedReasoningSummaryItem(raw) {
+				return true
+			}
+		}
+	case []map[string]any:
+		for _, block := range typed {
+			if hasPersistedReasoningSummaryItem(block) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func hasPersistedReasoningSummaryItem(raw any) bool {
+	block, _ := raw.(map[string]any)
+	if strings.TrimSpace(stringValue(block["text"])) != "" || strings.TrimSpace(stringValue(block["summary_text"])) != "" {
+		return true
+	}
+	nested, _ := block["summary_text"].(map[string]any)
+	return strings.TrimSpace(stringValue(nested["text"])) != ""
 }
 
 func hasEncryptedReasoningInclude(includes []string) bool {

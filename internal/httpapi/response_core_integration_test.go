@@ -703,7 +703,7 @@ func TestResponsesRejectsPersistedEncryptedReasoningForChatUpstream(t *testing.T
 	}
 }
 
-func TestResponsesPreviousResponseIDDoesNotRestoreHistoryAcrossProviderScope(t *testing.T) {
+func TestResponsesPreviousResponseIDRestoresPortableHistoryAcrossProviderScope(t *testing.T) {
 	var mimoUpstreamBody string
 	codexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
@@ -820,11 +820,14 @@ func TestResponsesPreviousResponseIDDoesNotRestoreHistoryAcrossProviderScope(t *
 			}
 		}
 	}
-	if foundHistoricalToolCall {
-		t.Fatalf("expected cross-provider previous_response_id history to stay isolated, got %s", mimoUpstreamBody)
+	if !foundHistoricalToolCall {
+		t.Fatalf("expected caller-owned cross-provider previous_response_id history to be restored, got %s", mimoUpstreamBody)
 	}
 	if !foundCurrentUserMessage {
 		t.Fatalf("expected current continue user message in mimo upstream body, got %s", mimoUpstreamBody)
+	}
+	if strings.Contains(mimoUpstreamBody, `"previous_response_id"`) {
+		t.Fatalf("expected portable replay to clear the native previous_response_id, got %s", mimoUpstreamBody)
 	}
 }
 

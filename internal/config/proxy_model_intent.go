@@ -15,6 +15,7 @@ func (c Config) ResolveV1ProxyModelIntentWithTargetCandidates(modelName string, 
 	intent, ok := model.ParseProxyModelIntent(modelName, staticModelMapAliasCandidates(c.V1ModelMap), model.ProxyModelIntentAxes{
 		EnableReasoningEffort: true,
 		EnablePro:             true,
+		EnableAdaptive:        true,
 		EnableNoPrompt:        c.EnableNoPromptModelSuffix,
 		EnableUltra:           true,
 	})
@@ -136,6 +137,7 @@ func (p ProviderConfig) proxyModelIntentAxes(modelName string, rootNoPrompt bool
 	return model.ProxyModelIntentAxes{
 		EnableReasoningEffort: p.EnableReasoningEffortSuffix || p.HasManualReasonSuffixForModel(modelName),
 		EnablePro:             p.EffectiveEnableReasoningModeSuffix(rootReasoningMode),
+		EnableAdaptive:        true,
 		EnableNoPrompt:        p.EffectiveNoPromptModelSuffix(rootNoPrompt),
 		EnableUltra:           true,
 	}

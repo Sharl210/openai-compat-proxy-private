@@ -211,7 +211,7 @@ func normalizeCanonicalModelAndReasoningForProxyModelIntent(canon *modelpkg.Cano
 }
 
 func normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(canon *modelpkg.CanonicalRequest, sourceModel string, requestEffort string, provider config.ProviderConfig, providerCfg config.Config, intent modelpkg.ProxyModelIntent) {
-	if intent.IsExactLiteral || intent.HasModelMapAlias || intent.ReasoningEffort != "" || intent.ReasoningMode != "" || intent.HasNoPrompt || intent.HasUltra {
+	if intent.IsExactLiteral || intent.HasModelMapAlias || intent.ReasoningEffort != "" || intent.ReasoningMode != "" || intent.HasAdaptive || intent.HasNoPrompt || intent.HasUltra {
 		normalizeCanonicalModelAndReasoningForProxyModelIntent(canon, sourceModel, requestEffort, provider, providerCfg, intent)
 		return
 	}

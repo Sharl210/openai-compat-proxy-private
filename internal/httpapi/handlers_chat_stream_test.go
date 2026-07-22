@@ -797,15 +797,16 @@ func TestChatEventWriterKeepsLaterToolArgumentDeltaAfterReasoningAndTextInCompat
 	}
 }
 
-func TestChatEventWriterFormatsReasoningTitleAcrossChunks(t *testing.T) {
+func TestChatEventWriterDoesNotReplayReasoningTitleAcrossChunks(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
 	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
 	writer := NewChatEventWriter(rec, nil, state, helper, nil)
 
 	for _, evt := range []upstream.Event{
-		{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": "**标题**"}},
-		{Event: "response.reasoning.delta", Data: map[string]any{"reasoning_content": "正文"}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_1", "summary_index": 0, "delta": "**标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_1", "summary_index": 0, "text": "**标题****正文**"}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题****正文**"}}}}},
 		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
 	} {
 		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
@@ -814,8 +815,58 @@ func TestChatEventWriterFormatsReasoningTitleAcrossChunks(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n正文"`) {
-		t.Fatalf("expected reasoning title formatting across chat chunks, got %s", body)
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"**正文**"`) {
+		t.Fatalf("expected append-only reasoning chunks, got %s", body)
+	}
+	if strings.Contains(body, `"reasoning_content":"\n**标题**\n\n**正文**\n"`) {
+		t.Fatalf("expected formatted full buffer not to be replayed as a chat delta, got %s", body)
+	}
+}
+
+func TestChatEventWriterCompletesReasoningSummaryFromItemDone(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, evt := range []upstream.Event{
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_1", "summary_index": 0, "delta": "**标题**"}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题****正文**"}}}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	} {
+		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
+			t.Fatalf("writer.WriteEvent error: %v", err)
+		}
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"**正文**"`) {
+		t.Fatalf("expected item.done to append the missing reasoning suffix, got %s", body)
+	}
+}
+
+func TestChatEventWriterEmitsMissingReasoningSummaryIndexes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, evt := range []upstream.Event{
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_1", "summary_index": 0, "text": "first"}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{
+			map[string]any{"type": "summary_text", "text": "first"},
+			map[string]any{"type": "summary_text", "text": "second"},
+		}}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}}},
+	} {
+		if err := writer.WriteEvent(evt.Event, evt.Data); err != nil {
+			t.Fatalf("writer.WriteEvent error: %v", err)
+		}
+	}
+
+	body := rec.Body.String()
+	if strings.Count(body, `"reasoning_content":"first"`) != 1 || strings.Count(body, `"reasoning_content":"second"`) != 1 {
+		t.Fatalf("expected each summary index exactly once, got %s", body)
 	}
 }
 
@@ -865,10 +916,12 @@ func TestChatEventWriterFlushesBufferedAttemptCompletionArgumentsWithoutDoneArgs
 	assertAttemptCompletionOfficialToolCallChunks(t, body, fullArgs)
 }
 
-func TestChatStreamMapsReasoningSummaryDeltaToReasoningContent(t *testing.T) {
+func TestChatStreamDoesNotReplayReasoningSummaryDonePrefix(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
-			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"alpha\"}\n\n",
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"text\":\"**标题****正文**\"}\n\n",
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
 	})
@@ -896,8 +949,11 @@ func TestChatStreamMapsReasoningSummaryDeltaToReasoningContent(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"alpha"`) {
-		t.Fatalf("expected reasoning summary delta to map into chat reasoning_content, got %s", body)
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"**正文**"`) {
+		t.Fatalf("expected append-only reasoning summary chunks, got %s", body)
+	}
+	if strings.Contains(body, `"reasoning_content":"\n**标题**\n\n**正文**\n"`) {
+		t.Fatalf("expected formatted full buffer not to be replayed by summary.done, got %s", body)
 	}
 }
 

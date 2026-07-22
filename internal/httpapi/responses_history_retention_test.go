@@ -110,6 +110,33 @@ func TestResponsesHistoryStore_roundTrips_compressed_canonical_snapshot(t *testi
 	}
 }
 
+func TestSaveResponsesHistorySnapshotUsesStoreDefensiveClone(t *testing.T) {
+	base := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: "original user message"}},
+	}}
+	assistant := []model.CanonicalMessage{{
+		Role:      "assistant",
+		ToolCalls: []model.CanonicalToolCall{{ID: "call-1", Type: "function", Name: "lookup", Arguments: `{"query":"weather"}`}},
+	}}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	saveResponsesHistorySnapshot(store, "openai", "resp-defensive-clone", base, assistant)
+	base[0].Parts[0].Text = "mutated user message"
+	assistant[0].ToolCalls[0].Name = "mutated"
+
+	loaded := store.Load("openai", "resp-defensive-clone")
+	if len(loaded) != 2 {
+		t.Fatalf("expected user and assistant tool-call messages, got %#v", loaded)
+	}
+	if loaded[0].Parts[0].Text != "original user message" {
+		t.Fatalf("expected stored user message to remain isolated, got %#v", loaded[0])
+	}
+	if loaded[1].ToolCalls[0].Name != "lookup" {
+		t.Fatalf("expected stored tool call to remain isolated, got %#v", loaded[1])
+	}
+}
+
 func TestResponsesHistoryStoreReleasesDuplicatedRawImageURLAfterCompression(t *testing.T) {
 	// Given
 	imageURL := "data:image/png;base64," + strings.Repeat("A", int(responsesHistoryCompressionMinSnapshotBytes))
@@ -538,6 +565,48 @@ func BenchmarkResponsesHistorySnapshotRepresentation(b *testing.B) {
 		for range b.N {
 			benchmarkResponsesHistoryMessages = loadResponsesConversationSnapshot(snapshot)
 		}
+	})
+}
+
+func BenchmarkResponsesHistoryBuildAndSave(b *testing.B) {
+	base := []model.CanonicalMessage{
+		{Role: "developer", Parts: []model.CanonicalContentPart{{Type: "text", Text: "excluded developer prompt"}}},
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: strings.Repeat("representative history input ", 8192)}}},
+		{Role: "assistant", ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-history-benchmark",
+			Type:      "function",
+			Name:      "lookup",
+			Arguments: `{"query":"` + strings.Repeat("history benchmark ", 2048) + `"}`,
+		}}},
+	}
+	assistant := []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: strings.Repeat("representative reasoning ", 4096),
+		Parts:            []model.CanonicalContentPart{{Type: "text", Text: strings.Repeat("representative history output ", 8192)}},
+	}}
+	logicalBytes := estimateCanonicalMessagesBytes(selectResponsesHistoryMessages(base, assistant))
+
+	b.Run("legacy_build_then_save", func(b *testing.B) {
+		store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+		b.ReportAllocs()
+		b.SetBytes(logicalBytes)
+		b.ResetTimer()
+		for range b.N {
+			store.Save("openai", "resp-history-benchmark", buildResponsesHistorySnapshot(base, assistant))
+		}
+		b.StopTimer()
+		benchmarkResponsesHistorySnapshot = store.entries[responsesHistoryKey("openai", "resp-history-benchmark")]
+	})
+	b.Run("select_then_save", func(b *testing.B) {
+		store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+		b.ReportAllocs()
+		b.SetBytes(logicalBytes)
+		b.ResetTimer()
+		for range b.N {
+			saveResponsesHistorySnapshot(store, "openai", "resp-history-benchmark", base, assistant)
+		}
+		b.StopTimer()
+		benchmarkResponsesHistorySnapshot = store.entries[responsesHistoryKey("openai", "resp-history-benchmark")]
 	})
 }
 

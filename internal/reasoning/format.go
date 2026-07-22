@@ -5,53 +5,65 @@ import "strings"
 var reasoningTextKeys = []string{"summary", "thinking", "reasoning_content", "reasoning", "content", "delta", "text"}
 
 func FormatText(text string) string {
-	if text == "" || !strings.Contains(text, "**") {
+	firstStart, firstEnd, secondEnd, ok := exactlyTwoAdjacentBoldSpans(text)
+	if !ok {
 		return text
 	}
+	return text[:firstStart] + "\n" + text[firstStart:firstEnd] + "\n\n" + text[firstEnd:secondEnd] + "\n" + text[secondEnd:]
+}
 
-	var builder strings.Builder
-	lineStart := true
-	for index := 0; index < len(text); {
-		if strings.HasPrefix(text[index:], "**") {
-			closeOffset := strings.Index(text[index+2:], "**")
-			if closeOffset >= 1 {
-				closeIndex := index + 2 + closeOffset
-				endIndex := closeIndex + 2
-				if !lineStart {
-					builder.WriteByte('\n')
-				}
-				builder.WriteString(text[index:endIndex])
-				lineStart = false
-				if endIndex < len(text) && text[endIndex] != '\n' && text[endIndex] != '\r' {
-					next := text[endIndex:]
-					if strings.HasPrefix(next, "**") && strings.Index(next[2:], "**") >= 1 {
-						builder.WriteString("\n\n")
-					} else {
-						builder.WriteByte('\n')
-					}
-					lineStart = true
-				}
-				index = endIndex
-				continue
-			}
-		}
-
-		builder.WriteByte(text[index])
-		lineStart = text[index] == '\n'
-		index++
+func exactlyTwoAdjacentBoldSpans(text string) (firstStart, firstEnd, secondEnd int, ok bool) {
+	if text == "" || !strings.Contains(text, "**") {
+		return 0, 0, 0, false
 	}
-	return builder.String()
+	for index := 0; index < len(text); {
+		nextStart := strings.Index(text[index:], "**")
+		if nextStart < 0 {
+			break
+		}
+		firstStart = index + nextStart
+		firstEnd, ok = completeBoldSpanEnd(text, firstStart)
+		if !ok || !strings.HasPrefix(text[firstEnd:], "**") {
+			index = firstStart + 2
+			continue
+		}
+		secondEnd, ok = completeBoldSpanEnd(text, firstEnd)
+		if !ok || strings.HasPrefix(text[secondEnd:], "**") {
+			index = firstStart + 2
+			continue
+		}
+		if strings.Contains(text[:firstStart], "**") || strings.Contains(text[secondEnd:], "**") {
+			return 0, 0, 0, false
+		}
+		return firstStart, firstEnd, secondEnd, true
+	}
+	return 0, 0, 0, false
+}
+
+func completeBoldSpanEnd(text string, start int) (int, bool) {
+	if !strings.HasPrefix(text[start:], "**") {
+		return 0, false
+	}
+	closeOffset := strings.Index(text[start+2:], "**")
+	if closeOffset < 1 {
+		return 0, false
+	}
+	return start + 2 + closeOffset + 2, true
 }
 
 func FormatDelta(previous, delta string) (formattedDelta, combined string) {
 	if delta == "" {
 		return "", previous
 	}
-	combined = FormatText(previous + delta)
-	if strings.HasPrefix(combined, previous) {
-		return combined[len(previous):], combined
+	candidate := previous + delta
+	normalized := FormatText(candidate)
+	if normalized == candidate {
+		return delta, candidate
 	}
-	return combined, combined
+	if strings.HasPrefix(normalized, previous) {
+		return strings.TrimPrefix(normalized, previous), normalized
+	}
+	return delta, candidate
 }
 
 func FormatBlock(block map[string]any) map[string]any {

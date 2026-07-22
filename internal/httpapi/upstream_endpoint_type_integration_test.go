@@ -206,6 +206,69 @@ func TestResponsesRouteUltraSuffixSendsRealMultiAgentBeta(t *testing.T) {
 	}
 }
 
+func TestResponsesRouteForwardsSummaryOnlyReasoningReplayToAnthropicUpstream(t *testing.T) {
+	var upstreamBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Fatalf("decode anthropic request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_replay","type":"message","role":"assistant","content":[{"type":"text","text":"continued"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "claude",
+		DefaultProReasoningModeSet:  true,
+		DefaultProReasoningMode:     false,
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                        "claude",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"claude-opus-4-8",
+		"input":[
+			{"role":"user","content":"first user"},
+			{"type":"reasoning","id":"rs_chat_reasoning","summary":[{"type":"summary_text","text":"first reasoning"}]},
+			{"role":"user","content":"second user"},
+			{"type":"reasoning","id":"rs_chat_reasoning","summary":[{"type":"summary_text","text":"second reasoning"}]},
+			{"type":"function_call","call_id":"call_1","name":"search","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{}"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected summary-only replay to reach Anthropic upstream, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	messages, _ := upstreamBody["messages"].([]any)
+	if len(messages) == 0 {
+		t.Fatalf("expected Anthropic messages, got %#v", upstreamBody)
+	}
+	encoded, err := json.Marshal(upstreamBody)
+	if err != nil {
+		t.Fatalf("marshal upstream body: %v", err)
+	}
+	if !strings.Contains(string(encoded), "first reasoning") || !strings.Contains(string(encoded), "second reasoning") {
+		t.Fatalf("expected summary reasoning retained in Anthropic request, got %s", encoded)
+	}
+}
+
 func TestResponsesRouteRejectsSemanticFeaturesBeforeNonResponsesUpstream(t *testing.T) {
 	features := []struct {
 		name string
@@ -2543,7 +2606,7 @@ func TestResponsesRouteRestoresPreviousToolUseForAnthropicFollowUp(t *testing.T)
 
 	server := NewServer(config.Config{DefaultProvider: "anthropic", EnableLegacyV1Routes: true, DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: []config.ProviderConfig{{ID: "anthropic", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true}}})
 
-	firstReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	firstReq := httptest.NewRequest(http.MethodPost, "/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstRec := httptest.NewRecorder()
 	server.ServeHTTP(firstRec, firstReq)
@@ -2931,85 +2994,108 @@ func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.
 	}
 }
 
-func TestResponsesRouteRejectsOpaqueThinkingAcrossProviderAndModelScope(t *testing.T) {
-	for _, testCase := range []struct {
-		name           string
-		storedProvider string
-		requestPath    string
-		storedModel    string
-		requestModel   string
-		providers      []config.ProviderConfig
-	}{
-		{
-			name:           "cross provider",
-			storedProvider: "source",
-			requestPath:    "/target/v1/responses",
-			storedModel:    "gpt-5",
-			requestModel:   "gpt-5",
-			providers: []config.ProviderConfig{
-				{ID: "source", Enabled: true, UpstreamBaseURL: "https://source.example/v1", UpstreamAPIKey: "source-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true},
-				{ID: "target", Enabled: true, UpstreamBaseURL: "https://target.example/v1", UpstreamAPIKey: "target-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true},
-			},
-		},
-		{
-			name:           "cross model",
-			storedProvider: "source",
-			requestPath:    "/source/v1/responses",
-			storedModel:    "model-a",
-			requestModel:   "client-b",
-			providers: []config.ProviderConfig{{
-				ID:                   "source",
-				Enabled:              true,
-				UpstreamBaseURL:      "https://source.example/v1",
-				UpstreamAPIKey:       "source-key",
-				UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic,
-				SupportsResponses:    true,
-				ModelMap: []config.ModelMapEntry{
-					config.NewModelMapEntry("client-a", "model-a"),
-					config.NewModelMapEntry("client-b", "model-b"),
-				},
-			}},
-		},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			var upstreamHits atomic.Int32
-			for index := range testCase.providers {
+func TestResponsesRouteProjectsVerifiedOpaqueThinkingAcrossProviderAndModelScope(t *testing.T) {
+	for _, endpointType := range []string{config.UpstreamEndpointTypeResponses, config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		for _, scopeChange := range []string{"provider", "model"} {
+			t.Run(scopeChange+"/"+endpointType, func(t *testing.T) {
+				var upstreamBody string
+				var upstreamHits atomic.Int32
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					upstreamHits.Add(1)
-					http.Error(w, "unexpected upstream request", http.StatusBadGateway)
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Fatalf("read projected upstream request: %v", err)
+					}
+					upstreamBody = string(body)
+					w.Header().Set("Content-Type", "application/json")
+					if endpointType == config.UpstreamEndpointTypeChat {
+						_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"continued"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+						return
+					}
+					if endpointType == config.UpstreamEndpointTypeResponses {
+						_, _ = w.Write([]byte(`{"id":"resp_projected","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"continued"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"id":"msg_projected","type":"message","role":"assistant","content":[{"type":"text","text":"continued"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 				}))
 				defer upstream.Close()
-				testCase.providers[index].UpstreamBaseURL = upstream.URL
-			}
-			server := NewServer(config.Config{DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: testCase.providers})
-			storedProvider, err := server.store.Active().Config.ProviderByID(testCase.storedProvider)
-			if err != nil {
-				t.Fatalf("lookup stored provider: %v", err)
-			}
-			scope := responsesHistoryReplayScope(responsesHistoryReplayProvenance{
-				ProviderID:                testCase.storedProvider,
-				DownstreamEndpoint:        canonicalV1ResponsesPath,
-				UpstreamEndpointType:      config.UpstreamEndpointTypeAnthropic,
-				NormalizedUpstreamBaseURL: storedProvider.UpstreamBaseURL,
-				FinalUpstreamModel:        testCase.storedModel,
-				CredentialFingerprint:     authorizationFingerprint("Bearer " + storedProvider.UpstreamAPIKey),
-				InboundCallerFingerprint:  "anonymous",
+
+				storedProviderID := "source"
+				requestPath := "/target/v1/responses"
+				storedModel := "model-a"
+				requestModel := "model-b"
+				providers := []config.ProviderConfig{
+					{ID: "source", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "source-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsResponses: true},
+					{ID: "target", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "target-key", UpstreamEndpointType: endpointType, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true},
+				}
+				if scopeChange == "model" {
+					requestPath = "/source/v1/responses"
+					providers = []config.ProviderConfig{{
+						ID:                        "source",
+						Enabled:                   true,
+						UpstreamBaseURL:           upstream.URL,
+						UpstreamAPIKey:            "source-key",
+						UpstreamEndpointType:      endpointType,
+						SupportsResponses:         true,
+						SupportsChat:              true,
+						SupportsAnthropicMessages: true,
+						ModelMap: []config.ModelMapEntry{
+							config.NewModelMapEntry("client-a", storedModel),
+							config.NewModelMapEntry("client-b", requestModel),
+						},
+					}}
+					requestModel = "client-b"
+				}
+				server := NewServer(config.Config{DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream, Providers: providers})
+				storedProvider, err := server.store.Active().Config.ProviderByID(storedProviderID)
+				if err != nil {
+					t.Fatalf("lookup stored provider: %v", err)
+				}
+				nativeScope := responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+					ProviderID:                storedProviderID,
+					DownstreamEndpoint:        canonicalV1ResponsesPath,
+					UpstreamEndpointType:      storedProvider.UpstreamEndpointType,
+					NormalizedUpstreamBaseURL: storedProvider.UpstreamBaseURL,
+					FinalUpstreamModel:        storedModel,
+					CredentialFingerprint:     authorizationFingerprint("Bearer " + storedProvider.UpstreamAPIKey),
+					InboundCallerFingerprint:  "anonymous",
+				})
+				native := map[string]any{
+					"type":              "reasoning",
+					"encrypted_content": "enc_server",
+					"summary": []any{
+						map[string]any{"type": "summary_text", "text": "first reasoning"},
+						map[string]any{"type": "summary_text", "text": "second reasoning"},
+					},
+				}
+				server.history.SaveWithPortableScope(storedProviderID, "resp_server", []model.CanonicalMessage{{Role: "assistant", ReasoningBlocks: []map[string]any{native}}}, nativeScope, responsesHistoryPortableScope("anonymous"))
+				public := responsesOpaqueThinkingPublicBlock(native, 0)
+				encoded, err := json.Marshal(public)
+				if err != nil {
+					t.Fatalf("marshal public opaque thinking: %v", err)
+				}
+				req := httptest.NewRequest(http.MethodPost, requestPath, strings.NewReader(`{"model":"`+requestModel+`","input":[{"role":"user","content":"continue"},`+string(encoded)+`]}`))
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				server.ServeHTTP(rec, req)
+
+				if rec.Code != http.StatusOK || upstreamHits.Load() != 1 {
+					t.Fatalf("expected %s/%s portable replay success, status=%d calls=%d body=%s", scopeChange, endpointType, rec.Code, upstreamHits.Load(), rec.Body.String())
+				}
+				if strings.Contains(upstreamBody, `"encrypted_content"`) || strings.Contains(upstreamBody, `"signature"`) {
+					t.Fatalf("expected portable replay to strip native state, got %s", upstreamBody)
+				}
+				if endpointType == config.UpstreamEndpointTypeChat && !strings.Contains(upstreamBody, `"reasoning_content":"first reasoningsecond reasoning"`) {
+					t.Fatalf("expected chat portable reasoning text in order, got %s", upstreamBody)
+				}
+				if endpointType == config.UpstreamEndpointTypeAnthropic && !strings.Contains(upstreamBody, `"thinking":"first reasoningsecond reasoning"`) {
+					t.Fatalf("expected anthropic portable thinking text in order, got %s", upstreamBody)
+				}
+				if endpointType == config.UpstreamEndpointTypeResponses && (!strings.Contains(upstreamBody, "first reasoning") || !strings.Contains(upstreamBody, "second reasoning")) {
+					t.Fatalf("expected responses upstream to receive canonical portable reasoning, got %s", upstreamBody)
+				}
 			})
-			native := map[string]any{"type": "thinking", "thinking": "server-held", "signature": "sig_server"}
-			server.history.Save(testCase.storedProvider, "resp_server", []model.CanonicalMessage{{Role: "assistant", ReasoningBlocks: []map[string]any{native}}}, scope)
-			public := responsesOpaqueThinkingPublicBlock(native, 0)
-			encoded, err := json.Marshal(public)
-			if err != nil {
-				t.Fatalf("marshal public opaque thinking: %v", err)
-			}
-			req := httptest.NewRequest(http.MethodPost, testCase.requestPath, strings.NewReader(`{"model":"`+testCase.requestModel+`","input":[`+string(encoded)+`]}`))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			server.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest || upstreamHits.Load() != 0 {
-				t.Fatalf("expected %s opaque replay rejection before upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, upstreamHits.Load(), rec.Body.String())
-			}
-		})
+		}
 	}
 }
 

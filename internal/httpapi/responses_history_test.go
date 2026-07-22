@@ -33,6 +33,44 @@ func TestResponsesHistoryEvictsOldestWhenLimitExceeded(t *testing.T) {
 	}
 }
 
+func TestResponsesHistoryLoadsPortableSnapshotOnlyForOneCallerOwnedMatch(t *testing.T) {
+	store := newResponsesHistoryStore(8, "")
+	messages := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "portable history"}}}}
+	callerScope := responsesHistoryPortableScope("caller-a")
+
+	store.SaveWithPortableScope("source", "resp_shared", messages, "native-source", callerScope)
+	if got := store.LoadPortable("resp_shared", callerScope); len(got) != 1 || got[0].Parts[0].Text != "portable history" {
+		t.Fatalf("expected caller-owned portable history, got %#v", got)
+	}
+	if got := store.LoadPortable("resp_shared", responsesHistoryPortableScope("caller-b")); got != nil {
+		t.Fatalf("expected another caller to have no portable history, got %#v", got)
+	}
+
+	store.SaveWithPortableScope("other", "resp_shared", messages, "native-other", callerScope)
+	if got := store.LoadPortable("resp_shared", callerScope); got != nil {
+		t.Fatalf("expected ambiguous portable response ID to be rejected, got %#v", got)
+	}
+}
+
+func TestResponsesHistoryRecognizesPortableOpaqueThinkingOnlyForSameCaller(t *testing.T) {
+	store := newResponsesHistoryStore(8, "")
+	callerScope := responsesHistoryPortableScope("caller-a")
+	native := map[string]any{
+		"type":              "reasoning",
+		"encrypted_content": "enc_server",
+		"summary":           []any{map[string]any{"type": "summary_text", "text": "portable reasoning"}},
+	}
+	store.SaveWithPortableScope("source", "resp_opaque", []model.CanonicalMessage{{Role: "assistant", ReasoningBlocks: []map[string]any{native}}}, "native-source", callerScope)
+	public := responsesOpaqueThinkingPublicBlock(native, 0)
+
+	if !store.HasPortableOpaqueThinking(callerScope, public) {
+		t.Fatalf("expected caller-owned opaque reasoning to be recognized")
+	}
+	if store.HasPortableOpaqueThinking(responsesHistoryPortableScope("caller-b"), public) {
+		t.Fatalf("expected another caller's opaque reasoning lookup to fail")
+	}
+}
+
 func TestResponsesHistoryEvictsOldestWhenByteLimitExceeded(t *testing.T) {
 	// Given
 	store := &responsesHistoryStore{
