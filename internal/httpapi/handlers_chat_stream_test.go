@@ -797,7 +797,7 @@ func TestChatEventWriterKeepsLaterToolArgumentDeltaAfterReasoningAndTextInCompat
 	}
 }
 
-func TestChatEventWriterDoesNotReplayReasoningTitleAcrossChunks(t *testing.T) {
+func TestChatEventWriterFormatsReasoningTitleAcrossChunks(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
 	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
@@ -815,11 +815,11 @@ func TestChatEventWriterDoesNotReplayReasoningTitleAcrossChunks(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"**正文**"`) {
-		t.Fatalf("expected append-only reasoning chunks, got %s", body)
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**正文**"`) {
+		t.Fatalf("expected formatted append-only reasoning chunks, got %s", body)
 	}
-	if strings.Contains(body, `"reasoning_content":"\n**标题**\n\n**正文**\n"`) {
-		t.Fatalf("expected formatted full buffer not to be replayed as a chat delta, got %s", body)
+	if strings.Contains(body, `"reasoning_content":"**标题**\n\n**正文**"`) {
+		t.Fatalf("expected completed title buffer not to be replayed as a chat delta, got %s", body)
 	}
 }
 
@@ -840,8 +840,8 @@ func TestChatEventWriterCompletesReasoningSummaryFromItemDone(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"**正文**"`) {
-		t.Fatalf("expected item.done to append the missing reasoning suffix, got %s", body)
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**正文**"`) {
+		t.Fatalf("expected item.done to append the formatted reasoning suffix, got %s", body)
 	}
 }
 
@@ -916,7 +916,7 @@ func TestChatEventWriterFlushesBufferedAttemptCompletionArgumentsWithoutDoneArgs
 	assertAttemptCompletionOfficialToolCallChunks(t, body, fullArgs)
 }
 
-func TestChatStreamDoesNotReplayReasoningSummaryDonePrefix(t *testing.T) {
+func TestChatStreamFormatsReasoningSummaryDoneSuffix(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
 			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
@@ -949,11 +949,11 @@ func TestChatStreamDoesNotReplayReasoningSummaryDonePrefix(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"**正文**"`) {
-		t.Fatalf("expected append-only reasoning summary chunks, got %s", body)
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**正文**"`) {
+		t.Fatalf("expected formatted append-only reasoning summary chunks, got %s", body)
 	}
-	if strings.Contains(body, `"reasoning_content":"\n**标题**\n\n**正文**\n"`) {
-		t.Fatalf("expected formatted full buffer not to be replayed by summary.done, got %s", body)
+	if strings.Contains(body, `"reasoning_content":"**标题**\n\n**正文**"`) {
+		t.Fatalf("expected completed title buffer not to be replayed by summary.done, got %s", body)
 	}
 }
 

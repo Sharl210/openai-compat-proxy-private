@@ -48,11 +48,11 @@ func TestResultFromResponsePayloadSeparatesReasoningBoldTitleFromFollowingConten
 	if err != nil {
 		t.Fatalf("ResultFromResponsePayload returned error: %v", err)
 	}
-	if got := stringValue(result.Reasoning["summary"]); got != "**标题**正文" {
+	if got := stringValue(result.Reasoning["summary"]); got != "**标题**\n正文" {
 		t.Fatalf("expected reasoning summary title break, got %q", got)
 	}
-	if got := stringValue(result.ResponseOutputItems[0]["summary"].([]any)[0].(map[string]any)["text"]); got != "\n**标题**\n\n**后续**\n" {
-		t.Fatalf("expected exact adjacent reasoning pair formatting, got %q", got)
+	if got := stringValue(result.ResponseOutputItems[0]["summary"].([]any)[0].(map[string]any)["text"]); got != "**标题**\n\n**后续**" {
+		t.Fatalf("expected adjacent reasoning titles to be separated, got %q", got)
 	}
 }
 

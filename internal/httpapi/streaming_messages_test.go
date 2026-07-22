@@ -748,7 +748,7 @@ func TestMessagesStreamResetsStopReasonAfterToolUseFollowedByText(t *testing.T) 
 	}
 }
 
-func TestMessagesStreamDoesNotReplayReasoningSummaryDonePrefix(t *testing.T) {
+func TestMessagesStreamFormatsReasoningSummaryDoneSuffix(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
 			"data: {\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
@@ -785,11 +785,11 @@ func TestMessagesStreamDoesNotReplayReasoningSummaryDonePrefix(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"**正文**"`) {
-		t.Fatalf("expected append-only thinking chunks, got %s", body)
+	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"\n\n**正文**"`) {
+		t.Fatalf("expected formatted append-only thinking chunks, got %s", body)
 	}
-	if strings.Contains(body, `"thinking":"\n**标题**\n\n**正文**\n"`) {
-		t.Fatalf("expected formatted full buffer not to be replayed as a thinking delta, got %s", body)
+	if strings.Contains(body, `"thinking":"**标题**\n\n**正文**"`) {
+		t.Fatalf("expected completed title buffer not to be replayed as a thinking delta, got %s", body)
 	}
 }
 
@@ -828,8 +828,8 @@ func TestMessagesStreamCompletesReasoningSummaryFromItemDone(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"**正文**"`) {
-		t.Fatalf("expected item.done to append the missing thinking suffix, got %s", body)
+	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"\n\n**正文**"`) {
+		t.Fatalf("expected item.done to append the formatted thinking suffix, got %s", body)
 	}
 }
 
@@ -868,14 +868,14 @@ func TestMessagesStreamEmitsMissingReasoningSummaryIndexes(t *testing.T) {
 
 	server.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if strings.Count(body, `"thinking":"\n**标题**\n\n**正文**\n"`) != 1 || strings.Count(body, `"thinking":"second"`) != 1 {
+	if strings.Count(body, `"thinking":"**标题**\n\n**正文**"`) != 1 || strings.Count(body, `"thinking":"second"`) != 1 {
 		t.Fatalf("expected each summary index exactly once, got %s", body)
 	}
 }
 
 func TestReasoningContentValueFormatsThinkingText(t *testing.T) {
-	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**正文" {
-		t.Fatalf("expected non-paired thinking span unchanged, got %q", got)
+	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**\n正文" {
+		t.Fatalf("expected thinking title to be separated, got %q", got)
 	}
 }
 
@@ -886,8 +886,8 @@ func TestReasoningSummaryFromItemSeparatesBoldTitleFromFollowingContent(t *testi
 			map[string]any{"type": "summary_text", "text": "**标题****后续**"},
 		},
 	}
-	if got := reasoningSummaryFromItem(item); got != "\n**标题**\n\n**后续**\n" {
-		t.Fatalf("expected exact adjacent reasoning pair formatting, got %q", got)
+	if got := reasoningSummaryFromItem(item); got != "**标题**\n\n**后续**" {
+		t.Fatalf("expected adjacent reasoning titles to be separated, got %q", got)
 	}
 }
 

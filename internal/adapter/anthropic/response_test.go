@@ -79,7 +79,7 @@ func TestBuildResponseFormatsThinkingTitle(t *testing.T) {
 	}, "req_thinking", "claude-sonnet-4-5")
 
 	content, _ := resp["content"].([]map[string]any)
-	if got, _ := content[0]["thinking"].(string); got != "**重点**正文" {
+	if got, _ := content[0]["thinking"].(string); got != "**重点**\n正文" {
 		t.Fatalf("expected thinking title to be separated, got %#v", content[0])
 	}
 }

@@ -99,7 +99,7 @@ func TestBuildResponseFormatsReasoningContentTitle(t *testing.T) {
 
 	choices, _ := resp["choices"].([]map[string]any)
 	message, _ := choices[0]["message"].(map[string]any)
-	if got, _ := message["reasoning_content"].(string); got != "**重点**正文" {
+	if got, _ := message["reasoning_content"].(string); got != "**重点**\n正文" {
 		t.Fatalf("expected reasoning_content title to be separated, got %#v", message)
 	}
 }
