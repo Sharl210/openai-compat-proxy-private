@@ -18,7 +18,7 @@ func (s *responsesHistoryStore) saveToolCallRecoveryIndexLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.toolCallRecoveryIndexPath), 0o755); err != nil {
 		return err
 	}
-	if len(s.toolCalls) == 0 {
+	if len(s.toolCalls) == 0 && len(s.opaqueThinking) == 0 {
 		if err := os.Remove(s.toolCallRecoveryIndexPath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -82,7 +82,29 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 			return err
 		}
 	}
-	if _, err := writer.WriteString(`}}`); err != nil {
+	if _, err := writer.WriteString(`},"opaque_thinking":`); err != nil {
+		return err
+	}
+	opaqueThinking := make(map[string]responsesHistoryOpaqueThinkingEntry, len(s.opaqueThinking))
+	for key, entry := range s.opaqueThinking {
+		if !validResponsesHistoryOpaqueThinkingEntry(key, entry) {
+			continue
+		}
+		blocks := cloneReasoningBlocksForHistory([]map[string]any{entry.Block})
+		if len(blocks) != 1 {
+			continue
+		}
+		entry.Block = blocks[0]
+		opaqueThinking[key] = entry
+	}
+	encodedOpaqueThinking, err := json.Marshal(opaqueThinking)
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(encodedOpaqueThinking); err != nil {
+		return err
+	}
+	if _, err := writer.WriteString(`}`); err != nil {
 		return err
 	}
 	return writer.Flush()
