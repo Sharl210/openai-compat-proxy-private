@@ -637,19 +637,15 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 		projectedBlocks := make([]map[string]any, 0, len(blocks))
 		changed := false
 		for _, block := range blocks {
-			if !hasOpaqueResponsesReasoningState(block) {
-				projectedBlocks = append(projectedBlocks, block)
-				continue
-			}
-			if upstreamEndpointType == config.UpstreamEndpointTypeResponses {
+			if !isResponsesReasoningItem(block) || upstreamEndpointType == config.UpstreamEndpointTypeResponses {
 				projectedBlocks = append(projectedBlocks, block)
 				continue
 			}
 			portableProjection = true
-			changed = true
 			if portableBlock := portableResponsesReasoningBlock(block); len(portableBlock) > 0 {
 				projectedBlocks = append(projectedBlocks, portableBlock)
 			}
+			changed = true
 		}
 		if changed {
 			canon.Messages[messageIndex].ReasoningBlocks = projectedBlocks
@@ -659,7 +655,7 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 
 	filteredItems := make([]map[string]any, 0, len(canon.ResponseInputItems))
 	for _, item := range canon.ResponseInputItems {
-		if !hasOpaqueResponsesReasoningState(item) {
+		if !isResponsesReasoningItem(item) {
 			filteredItems = append(filteredItems, item)
 			continue
 		}
@@ -668,24 +664,20 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 			continue
 		}
 		portableProjection = true
+		if portableItem := portableResponsesReasoningBlock(item); len(portableItem) > 0 {
+			filteredItems = append(filteredItems, portableItem)
+		}
 	}
 	canon.ResponseInputItems = filteredItems
 	return portableProjection
 }
 
-func hasOpaqueResponsesReasoningState(block map[string]any) bool {
-	if stringValue(block["type"]) != "reasoning" {
-		return false
-	}
-	if _, hasEncryptedContent := block["encrypted_content"]; hasEncryptedContent {
-		return true
-	}
-	_, hasSignature := block["signature"]
-	return hasSignature
+func isResponsesReasoningItem(block map[string]any) bool {
+	return stringValue(block["type"]) == "reasoning"
 }
 
 func portableResponsesReasoningBlock(block map[string]any) map[string]any {
-	if portableResponsesReasoningText([]map[string]any{block}) == "" {
+	if hasOpaqueResponsesReasoningState(block) {
 		return nil
 	}
 	portable := map[string]any{"type": "reasoning"}
@@ -695,10 +687,18 @@ func portableResponsesReasoningBlock(block map[string]any) map[string]any {
 	if text := stringValue(block["text"]); text != "" {
 		portable["text"] = text
 	}
-	if summary, ok := block["summary"]; ok {
-		portable["summary"] = cloneJSONValueForResponse(summary)
+	if len(portable) == 1 {
+		return nil
 	}
 	return portable
+}
+
+func hasOpaqueResponsesReasoningState(block map[string]any) bool {
+	if _, hasEncryptedContent := block["encrypted_content"]; hasEncryptedContent {
+		return true
+	}
+	_, hasSignature := block["signature"]
+	return hasSignature
 }
 
 func portableResponsesReasoningText(blocks []map[string]any) string {
@@ -708,42 +708,9 @@ func portableResponsesReasoningText(blocks []map[string]any) string {
 			builder.WriteString(thinking)
 			continue
 		}
-		if text := stringValue(block["text"]); text != "" {
-			builder.WriteString(text)
-			continue
-		}
-		switch summary := block["summary"].(type) {
-		case string:
-			builder.WriteString(summary)
-		case []any:
-			for _, item := range summary {
-				appendPortableResponsesReasoningSummaryText(&builder, item)
-			}
-		case []map[string]any:
-			for _, item := range summary {
-				appendPortableResponsesReasoningSummaryText(&builder, item)
-			}
-		}
+		builder.WriteString(stringValue(block["text"]))
 	}
 	return builder.String()
-}
-
-func appendPortableResponsesReasoningSummaryText(builder *strings.Builder, raw any) {
-	item, _ := raw.(map[string]any)
-	if len(item) == 0 {
-		return
-	}
-	if text := stringValue(item["text"]); text != "" {
-		builder.WriteString(text)
-		return
-	}
-	if text := stringValue(item["summary_text"]); text != "" {
-		builder.WriteString(text)
-		return
-	}
-	if nested, _ := item["summary_text"].(map[string]any); len(nested) > 0 {
-		builder.WriteString(stringValue(nested["text"]))
-	}
 }
 
 func clearResponsesNativeReplayState(canon *model.CanonicalRequest) {

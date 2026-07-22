@@ -206,7 +206,7 @@ func TestResponsesRouteUltraSuffixSendsRealMultiAgentBeta(t *testing.T) {
 	}
 }
 
-func TestResponsesRouteForwardsSummaryOnlyReasoningReplayToAnthropicUpstream(t *testing.T) {
+func TestResponsesRouteDropsSummaryOnlyReasoningReplayForAnthropicUpstream(t *testing.T) {
 	var upstreamBody map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" {
@@ -264,8 +264,11 @@ func TestResponsesRouteForwardsSummaryOnlyReasoningReplayToAnthropicUpstream(t *
 	if err != nil {
 		t.Fatalf("marshal upstream body: %v", err)
 	}
-	if !strings.Contains(string(encoded), "first reasoning") || !strings.Contains(string(encoded), "second reasoning") {
-		t.Fatalf("expected summary reasoning retained in Anthropic request, got %s", encoded)
+	if strings.Contains(string(encoded), "first reasoning") || strings.Contains(string(encoded), "second reasoning") {
+		t.Fatalf("expected incomplete reasoning replay to be removed from Anthropic request, got %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "second user") || !strings.Contains(string(encoded), "tool_use") {
+		t.Fatalf("expected later conversation and tool replay to remain intact, got %s", encoded)
 	}
 }
 
@@ -3087,11 +3090,8 @@ func TestResponsesRouteProjectsVerifiedOpaqueThinkingAcrossProviderAndModelScope
 				} else if strings.Contains(upstreamBody, `"encrypted_content"`) || strings.Contains(upstreamBody, `"signature"`) {
 					t.Fatalf("expected cross-protocol conversion to strip native state, got %s", upstreamBody)
 				}
-				if endpointType == config.UpstreamEndpointTypeChat && !strings.Contains(upstreamBody, `"reasoning_content":"first reasoningsecond reasoning"`) {
-					t.Fatalf("expected chat portable reasoning text in order, got %s", upstreamBody)
-				}
-				if endpointType == config.UpstreamEndpointTypeAnthropic && !strings.Contains(upstreamBody, `"thinking":"first reasoningsecond reasoning"`) {
-					t.Fatalf("expected anthropic portable thinking text in order, got %s", upstreamBody)
+				if endpointType != config.UpstreamEndpointTypeResponses && (strings.Contains(upstreamBody, "first reasoning") || strings.Contains(upstreamBody, "second reasoning")) {
+					t.Fatalf("expected cross-protocol replay to omit unverifiable reasoning history, got %s", upstreamBody)
 				}
 				if endpointType == config.UpstreamEndpointTypeResponses && (!strings.Contains(upstreamBody, "first reasoning") || !strings.Contains(upstreamBody, "second reasoning")) {
 					t.Fatalf("expected responses upstream to receive canonical portable reasoning, got %s", upstreamBody)
@@ -3145,7 +3145,7 @@ func TestResponsesRouteRejectsRawOpaqueReasoningFieldsBeforeNonResponsesUpstream
 	}
 }
 
-func TestResponsesRouteTransformsPersistedReasoningForMappedChatUpstream(t *testing.T) {
+func TestResponsesRouteDropsSummaryOnlyReasoningForMappedChatUpstream(t *testing.T) {
 	var upstreamBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -3190,10 +3190,13 @@ func TestResponsesRouteTransformsPersistedReasoningForMappedChatUpstream(t *test
 	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "deepseek-v4-flash" {
 		t.Fatalf("expected provider-mapped final model in observability header, got %q", got)
 	}
-	for _, want := range []string{`"model":"deepseek-v4-flash"`, `"reasoning_content":"need tool output"`, `"id":"call_1"`, `"name":"lookup"`, `"role":"tool"`, `"tool_call_id":"call_1"`} {
+	for _, want := range []string{`"model":"deepseek-v4-flash"`, `"id":"call_1"`, `"name":"lookup"`, `"role":"tool"`, `"tool_call_id":"call_1"`} {
 		if !strings.Contains(upstreamBody, want) {
 			t.Fatalf("expected mapped chat payload to preserve %s, got %s", want, upstreamBody)
 		}
+	}
+	if strings.Contains(upstreamBody, "need tool output") || strings.Contains(upstreamBody, `"reasoning_content"`) {
+		t.Fatalf("expected mapped chat payload to omit unverifiable reasoning history, got %s", upstreamBody)
 	}
 }
 
