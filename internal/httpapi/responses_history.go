@@ -57,7 +57,6 @@ type responsesHistoryOpaqueThinkingEntry struct {
 	SnapshotKey  string
 	MessageIndex int
 	BlockIndex   int
-	Block        map[string]any `json:"block,omitempty"`
 }
 
 type responsesHistoryReplayProvenance struct {
@@ -84,10 +83,9 @@ const defaultResponsesHistoryToolCallRecoveryIndexMaxBytes int64 = defaultRespon
 const responsesHistoryToolCallRecoveryIndexVersion = 1
 
 type responsesHistoryToolCallRecoveryIndexFile struct {
-	Version        int                                            `json:"version"`
-	Order          []string                                       `json:"order,omitempty"`
-	ToolCalls      map[string]responsesHistoryToolCallEntry       `json:"tool_calls"`
-	OpaqueThinking map[string]responsesHistoryOpaqueThinkingEntry `json:"opaque_thinking,omitempty"`
+	Version   int                                      `json:"version"`
+	Order     []string                                 `json:"order,omitempty"`
+	ToolCalls map[string]responsesHistoryToolCallEntry `json:"tool_calls"`
 }
 
 func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *responsesHistoryStore {
@@ -291,7 +289,6 @@ func (s *responsesHistoryStore) save(providerID, responseID string, messages []m
 		s.retainedBytes += storedBytes
 		s.byResponseID[responseID] = key
 		s.indexToolCallsLocked(providerID, key, storedMessages, scope, &snapshot)
-		s.indexOpaqueThinkingLocked(providerID, key, storedMessages, scope)
 	}
 	s.order = append(s.order, key)
 	for len(s.order) > s.maxSize || (s.maxBytes > 0 && s.retainedBytes > s.maxBytes) {
@@ -351,24 +348,11 @@ func (s *responsesHistoryStore) LoadOpaqueThinking(providerID, scope string, pub
 	if !ok {
 		return nil, false
 	}
-	s.mu.Lock()
-	if err := s.loadToolCallRecoveryIndexLocked(); err != nil {
-		log.Printf("warning: failed to load responses tool-call recovery index %q: %v", s.toolCallRecoveryIndexPath, err)
-	}
+	s.mu.RLock()
 	entry, found := s.opaqueThinking[responsesHistoryScopedToolCallKey(providerID, fingerprint, scope)]
 	snapshot, snapshotFound := s.entries[entry.SnapshotKey]
-	s.mu.Unlock()
-	if !found {
-		return nil, false
-	}
-	if len(entry.Block) > 0 {
-		block := cloneReasoningBlocksForHistory([]map[string]any{entry.Block})
-		if len(block) == 1 && hasOpaqueThinkingState(block[0]) {
-			return block[0], true
-		}
-		return nil, false
-	}
-	if !snapshotFound || entry.MessageIndex < 0 || entry.MessageIndex >= len(snapshot.Messages) {
+	s.mu.RUnlock()
+	if !found || !snapshotFound || entry.MessageIndex < 0 || entry.MessageIndex >= len(snapshot.Messages) {
 		return nil, false
 	}
 	blocks := snapshot.Messages[entry.MessageIndex].ReasoningBlocks
@@ -541,11 +525,7 @@ func (s *responsesHistoryStore) indexOpaqueThinkingLocked(providerID, snapshotKe
 			if !ok {
 				continue
 			}
-			stored := cloneReasoningBlocksForHistory([]map[string]any{block})
-			if len(stored) != 1 {
-				continue
-			}
-			s.opaqueThinking[responsesHistoryScopedToolCallKey(providerID, fingerprint, scope)] = responsesHistoryOpaqueThinkingEntry{SnapshotKey: snapshotKey, MessageIndex: messageIndex, BlockIndex: blockIndex, Block: stored[0]}
+			s.opaqueThinking[responsesHistoryScopedToolCallKey(providerID, fingerprint, scope)] = responsesHistoryOpaqueThinkingEntry{SnapshotKey: snapshotKey, MessageIndex: messageIndex, BlockIndex: blockIndex}
 		}
 	}
 }
@@ -621,9 +601,6 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 	if s.toolCalls == nil {
 		s.toolCalls = map[string]responsesHistoryToolCallEntry{}
 	}
-	if s.opaqueThinking == nil {
-		s.opaqueThinking = map[string]responsesHistoryOpaqueThinkingEntry{}
-	}
 	if s.entries == nil {
 		s.entries = map[string]responsesConversationSnapshot{}
 	}
@@ -640,18 +617,6 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 		}
 		s.toolCalls[key] = stored
 		retainedBytesBySnapshot[stored.SnapshotKey] += estimateResponsesHistoryToolCallEntryBytes(stored)
-	}
-	for key, entry := range file.OpaqueThinking {
-		if !validResponsesHistoryOpaqueThinkingEntry(key, entry) {
-			continue
-		}
-		stored := cloneReasoningBlocksForHistory([]map[string]any{entry.Block})
-		if len(stored) != 1 {
-			continue
-		}
-		entry.Block = stored[0]
-		s.opaqueThinking[key] = entry
-		retainedBytesBySnapshot[entry.SnapshotKey] += estimateResponsesHistoryOpaqueThinkingEntryBytes(entry)
 	}
 	if len(s.order) == 0 {
 		seen := map[string]bool{}
@@ -679,29 +644,13 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 			s.order = s.order[1:]
 			s.deleteKeyLocked(oldest)
 		}
-		if len(s.toolCalls) != len(file.ToolCalls) || len(s.opaqueThinking) != len(file.OpaqueThinking) || len(s.order) != len(file.Order) {
+		if len(s.toolCalls) != len(file.ToolCalls) || len(s.order) != len(file.Order) {
 			if err := s.saveToolCallRecoveryIndexLocked(); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
-}
-
-func validResponsesHistoryOpaqueThinkingEntry(key string, entry responsesHistoryOpaqueThinkingEntry) bool {
-	if key == "" || entry.SnapshotKey == "" || entry.BlockIndex < 0 || !hasOpaqueThinkingState(entry.Block) {
-		return false
-	}
-	fingerprint, ok := responsesOpaqueThinkingPublicFingerprint(responsesOpaqueThinkingPublicBlock(entry.Block, entry.BlockIndex))
-	return ok && strings.HasSuffix(key, "::"+fingerprint)
-}
-
-func estimateResponsesHistoryOpaqueThinkingEntryBytes(entry responsesHistoryOpaqueThinkingEntry) int64 {
-	encoded, err := json.Marshal(entry)
-	if err != nil {
-		return 0
-	}
-	return int64(len(encoded))
 }
 
 func (s *responsesHistoryStore) deleteToolCallsForKeyLocked(snapshotKey string) {
@@ -754,14 +703,11 @@ func recoverToolCallsForMessages(history *responsesHistoryStore, messages []mode
 		if existingToolCallIDs[msg.ToolCallID] {
 			continue
 		}
-		call, reasoningBlocks, ok := history.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		call, _, ok := history.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
 		if !ok {
 			continue
 		}
 		msg.RecoveredToolCall = &call
-		if len(reasoningBlocks) > 0 && len(msg.ReasoningBlocks) == 0 {
-			msg.ReasoningBlocks = reasoningBlocks
-		}
 	}
 	return recovered
 }

@@ -92,7 +92,6 @@ func handleChat() http.HandlerFunc {
 					CredentialFingerprint:     authorizationFingerprint(authorization),
 					InboundCallerFingerprint:  inboundCallerIdentityFromRequest(r),
 				})
-				canon.Messages = recoverAnthropicThinkingForAssistantToolCalls(history, canon.Messages, providerID, historyScope)
 			}
 			applyProviderMaxOutputTokens(&canon, provider)
 			if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {

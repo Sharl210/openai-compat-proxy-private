@@ -86,9 +86,6 @@ func TestChatRoutePersistsTrustedAnthropicThinkingReplayAcrossCompletionPaths(t 
 				t.Fatalf("expected two upstream requests, got %d", requestCount)
 			}
 			for _, expected := range []string{
-				`"type":"thinking"`,
-				`"thinking":"need tool result"`,
-				`"signature":"sig_chat_1"`,
 				`"type":"tool_use"`,
 				`"id":"call_1"`,
 				`"type":"tool_result"`,
@@ -97,6 +94,9 @@ func TestChatRoutePersistsTrustedAnthropicThinkingReplayAcrossCompletionPaths(t 
 				if !strings.Contains(secondBody, expected) {
 					t.Fatalf("expected replayed Anthropic request to contain %s, got %s", expected, secondBody)
 				}
+			}
+			if strings.Contains(secondBody, `"type":"thinking"`) || strings.Contains(secondBody, `"signature":"sig_chat_1"`) {
+				t.Fatalf("expected replayed Chat request to avoid server-held thinking, got %s", secondBody)
 			}
 		})
 	}

@@ -502,21 +502,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
 		canon.IncludeUsage = true
 	}
-	portableReasoningProjection := false
-	if !compact {
-		var valid bool
-		portableReasoningProjection, valid = projectPersistedResponsesReasoning(history, &canon, providerID, historyScope, portableHistoryScope, providerCfg.UpstreamEndpointType)
-		if !valid {
-			errorCode := "invalid_request"
-			errorMessage := "opaque thinking replay must match server-held history"
-			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeChat {
-				errorCode = "unsupported_upstream_feature"
-				errorMessage = "unsupported upstream feature: persisted responses item requires a responses upstream"
-			}
-			errorsx.WriteJSON(w, http.StatusBadRequest, errorCode, errorMessage)
-			return nil, false
-		}
-	}
+	portableReasoningProjection := !compact && projectClientResponsesReasoning(&canon, providerCfg.UpstreamEndpointType)
 	previousHistoryRestored := false
 	portableHistoryRestored := false
 	if !compact && shouldRestorePreviousConversation(canon.Messages) {
@@ -638,9 +624,9 @@ func responsesHistoryDownstreamEndpoint(r *http.Request) string {
 	return r.URL.Path
 }
 
-func projectPersistedResponsesReasoning(history *responsesHistoryStore, canon *model.CanonicalRequest, providerID, nativeScope, portableScope, upstreamEndpointType string) (bool, bool) {
+func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndpointType string) bool {
 	if canon == nil {
-		return false, false
+		return false
 	}
 	portableProjection := false
 	for messageIndex := range canon.Messages {
@@ -655,21 +641,14 @@ func projectPersistedResponsesReasoning(history *responsesHistoryStore, canon *m
 				projectedBlocks = append(projectedBlocks, block)
 				continue
 			}
-			serverBlock, nativeMatch := history.LoadOpaqueThinking(providerID, nativeScope, block)
-			switch {
-			case nativeMatch && upstreamEndpointType == config.UpstreamEndpointTypeAnthropic:
-				projectedBlocks = append(projectedBlocks, serverBlock)
-				changed = true
-			case nativeMatch && upstreamEndpointType == config.UpstreamEndpointTypeResponses:
+			if upstreamEndpointType == config.UpstreamEndpointTypeResponses {
 				projectedBlocks = append(projectedBlocks, block)
-			case nativeMatch || history.HasPortableOpaqueThinking(portableScope, block):
-				portableProjection = true
-				changed = true
-				if portableBlock := portableResponsesReasoningBlock(block); len(portableBlock) > 0 {
-					projectedBlocks = append(projectedBlocks, portableBlock)
-				}
-			default:
-				return false, false
+				continue
+			}
+			portableProjection = true
+			changed = true
+			if portableBlock := portableResponsesReasoningBlock(block); len(portableBlock) > 0 {
+				projectedBlocks = append(projectedBlocks, portableBlock)
 			}
 		}
 		if changed {
@@ -684,20 +663,14 @@ func projectPersistedResponsesReasoning(history *responsesHistoryStore, canon *m
 			filteredItems = append(filteredItems, item)
 			continue
 		}
-		_, nativeMatch := history.LoadOpaqueThinking(providerID, nativeScope, item)
-		if nativeMatch && upstreamEndpointType == config.UpstreamEndpointTypeResponses {
+		if upstreamEndpointType == config.UpstreamEndpointTypeResponses {
 			filteredItems = append(filteredItems, item)
 			continue
 		}
-		if !nativeMatch && !history.HasPortableOpaqueThinking(portableScope, item) {
-			return false, false
-		}
-		if upstreamEndpointType != config.UpstreamEndpointTypeAnthropic || !nativeMatch {
-			portableProjection = true
-		}
+		portableProjection = true
 	}
 	canon.ResponseInputItems = filteredItems
-	return portableProjection, true
+	return portableProjection
 }
 
 func hasOpaqueResponsesReasoningState(block map[string]any) bool {

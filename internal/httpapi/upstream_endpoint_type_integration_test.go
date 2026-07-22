@@ -325,18 +325,14 @@ func TestResponsesRouteRejectsSemanticFeaturesBeforeNonResponsesUpstream(t *test
 
 				server.ServeHTTP(rec, req)
 
-				if rec.Code != http.StatusBadRequest {
-					t.Fatalf("expected preflight 400, got %d body=%s", rec.Code, rec.Body.String())
+				if feature.name == "persisted reasoning item" {
+					if rec.Code != http.StatusOK || upstreamHits != 1 {
+						t.Fatalf("expected client-owned persisted reasoning to reach upstream, status=%d calls=%d body=%s", rec.Code, upstreamHits, rec.Body.String())
+					}
+					return
 				}
-				expectedErrorCode := "unsupported_upstream_feature"
-				if feature.name == "persisted reasoning item" && endpointType == config.UpstreamEndpointTypeAnthropic {
-					expectedErrorCode = "invalid_request"
-				}
-				if !strings.Contains(rec.Body.String(), expectedErrorCode) {
-					t.Fatalf("expected %s error, got %s", expectedErrorCode, rec.Body.String())
-				}
-				if upstreamHits != 0 {
-					t.Fatalf("expected no upstream request, got %d", upstreamHits)
+				if rec.Code != http.StatusBadRequest || upstreamHits != 0 {
+					t.Fatalf("expected unsupported feature preflight rejection, status=%d calls=%d body=%s", rec.Code, upstreamHits, rec.Body.String())
 				}
 			})
 		}
@@ -2721,8 +2717,8 @@ func TestResponsesRouteRecoversAnthropicThinkingByCallIDWithoutPreviousResponseI
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"need tool result"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
-		t.Fatalf("expected recovered anthropic request to replay previous thinking block, got %s", secondBody)
+	if strings.Contains(secondBody, `"type":"thinking"`) || strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected recovered anthropic request to avoid server-held thinking, got %s", secondBody)
 	}
 	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) || !strings.Contains(secondBody, `"name":"read_file"`) {
 		t.Fatalf("expected recovered anthropic request to replay previous tool_use, got %s", secondBody)
@@ -2772,8 +2768,8 @@ func TestResponsesRouteRecoversAnthropicToolUsesByCallIDAfterHistoryStoreRestart
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"need three tool results"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
-		t.Fatalf("expected restarted recovery to replay previous thinking block, got %s", secondBody)
+	if strings.Contains(secondBody, `"type":"thinking"`) || strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected restarted recovery to avoid server-held thinking, got %s", secondBody)
 	}
 	for _, want := range []string{`"id":"call_1"`, `"id":"call_2"`, `"id":"call_3"`} {
 		if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, want) {
@@ -2935,16 +2931,16 @@ func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected server-issued opaque replay to succeed, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if requestCount != 2 || !strings.Contains(secondBody, `"signature":"sig_123"`) {
-		t.Fatalf("expected second upstream request to use server-held native thinking signature, count=%d body=%s", requestCount, secondBody)
+	if requestCount != 2 || strings.Contains(secondBody, `"signature":"sig_123"`) {
+		t.Fatalf("expected second upstream request to project client thinking without a server-held signature, count=%d body=%s", requestCount, secondBody)
 	}
 	nestedBody := `{"model":"gpt-5","input":[{"role":"assistant","content":[` + string(opaqueJSON) + `]},{"role":"user","content":"continue"}]}`
 	nestedReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(nestedBody))
 	nestedReq.Header.Set("Content-Type", "application/json")
 	nestedRec := httptest.NewRecorder()
 	server.ServeHTTP(nestedRec, nestedReq)
-	if nestedRec.Code != http.StatusOK || requestCount != 3 || !strings.Contains(secondBody, `"signature":"sig_123"`) {
-		t.Fatalf("expected nested server-issued opaque replay to use server-held native thinking signature, status=%d calls=%d body=%s", nestedRec.Code, requestCount, secondBody)
+	if nestedRec.Code != http.StatusOK || requestCount != 3 || strings.Contains(secondBody, `"signature":"sig_123"`) {
+		t.Fatalf("expected nested client thinking replay without a server-held signature, status=%d calls=%d body=%s", nestedRec.Code, requestCount, secondBody)
 	}
 	for _, testCase := range []struct {
 		name   string
@@ -2954,6 +2950,7 @@ func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.
 		{name: "tampered", mutate: func(item map[string]any) { item["thinking"] = "tampered" }},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
+			beforeRequests := requestCount
 			item := cloneJSONValueForResponse(opaqueReasoning).(map[string]any)
 			testCase.mutate(item)
 			encoded, err := json.Marshal(item)
@@ -2964,8 +2961,8 @@ func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			server.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest || requestCount != 3 {
-				t.Fatalf("expected %s opaque replay rejection before upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, requestCount, rec.Body.String())
+			if rec.Code != http.StatusOK || requestCount != beforeRequests+1 {
+				t.Fatalf("expected %s client opaque replay to reach upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, requestCount, rec.Body.String())
 			}
 		})
 	}
@@ -2977,6 +2974,7 @@ func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.
 		{name: "nested tampered", mutate: func(item map[string]any) { item["thinking"] = "tampered" }},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
+			beforeRequests := requestCount
 			item := cloneJSONValueForResponse(opaqueReasoning).(map[string]any)
 			testCase.mutate(item)
 			encoded, err := json.Marshal(item)
@@ -2987,8 +2985,8 @@ func TestResponsesRouteRehydratesServerIssuedAnthropicThinkingReplay(t *testing.
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			server.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest || requestCount != 3 {
-				t.Fatalf("expected %s opaque replay rejection before upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, requestCount, rec.Body.String())
+			if rec.Code != http.StatusOK || requestCount != beforeRequests+1 {
+				t.Fatalf("expected %s nested client opaque replay to reach upstream, status=%d calls=%d body=%s", testCase.name, rec.Code, requestCount, rec.Body.String())
 			}
 		})
 	}
@@ -3082,8 +3080,12 @@ func TestResponsesRouteProjectsVerifiedOpaqueThinkingAcrossProviderAndModelScope
 				if rec.Code != http.StatusOK || upstreamHits.Load() != 1 {
 					t.Fatalf("expected %s/%s portable replay success, status=%d calls=%d body=%s", scopeChange, endpointType, rec.Code, upstreamHits.Load(), rec.Body.String())
 				}
-				if strings.Contains(upstreamBody, `"encrypted_content"`) || strings.Contains(upstreamBody, `"signature"`) {
-					t.Fatalf("expected portable replay to strip native state, got %s", upstreamBody)
+				if endpointType == config.UpstreamEndpointTypeResponses {
+					if !strings.Contains(upstreamBody, `"encrypted_content":"enc_server"`) {
+						t.Fatalf("expected responses upstream to preserve client opaque state, got %s", upstreamBody)
+					}
+				} else if strings.Contains(upstreamBody, `"encrypted_content"`) || strings.Contains(upstreamBody, `"signature"`) {
+					t.Fatalf("expected cross-protocol conversion to strip native state, got %s", upstreamBody)
 				}
 				if endpointType == config.UpstreamEndpointTypeChat && !strings.Contains(upstreamBody, `"reasoning_content":"first reasoningsecond reasoning"`) {
 					t.Fatalf("expected chat portable reasoning text in order, got %s", upstreamBody)
@@ -3135,11 +3137,8 @@ func TestResponsesRouteRejectsRawOpaqueReasoningFieldsBeforeNonResponsesUpstream
 				recorder := httptest.NewRecorder()
 				server.ServeHTTP(recorder, request)
 
-				if recorder.Code != http.StatusBadRequest {
-					t.Fatalf("expected raw opaque field to fail before upstream, got %d body=%s", recorder.Code, recorder.Body.String())
-				}
-				if upstreamHits != 0 {
-					t.Fatalf("expected raw opaque field to make no upstream request, got %d", upstreamHits)
+				if recorder.Code != http.StatusOK || upstreamHits != 1 {
+					t.Fatalf("expected client opaque field to reach upstream, status=%d calls=%d body=%s", recorder.Code, upstreamHits, recorder.Body.String())
 				}
 			})
 		}
