@@ -173,10 +173,20 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	}
 }
 
-func TestChatStreamFormatsAdjacentReasoningTitlesAcrossSummaryIndexes(t *testing.T) {
+func TestChatStreamFormatsNativeReasoningSummaryPartsAcrossIndexes(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
-		"event: response.reasoning.delta\n" +
-			"data: {\"summary\":\"**标题**\"}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"text\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**标题**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
 		"event: response.reasoning_summary_text.delta\n" +
 			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"delta\":\"**后续**\"}\n\n",
 		"event: response.output_item.done\n" +

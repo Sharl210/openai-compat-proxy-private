@@ -267,7 +267,7 @@ func (h *responseEventWriterHelper) beginReasoningFormatPhase() string {
 	return h.reasoningFormatItemID
 }
 
-func (h *responseEventWriterHelper) associateReasoningFormatItem(data map[string]any) {
+func (h *responseEventWriterHelper) associateReasoningFormatItem(data map[string]any, allowBootstrap bool) {
 	if h.downstreamType == "responses" {
 		return
 	}
@@ -299,7 +299,11 @@ func (h *responseEventWriterHelper) associateReasoningFormatItem(data map[string
 				}
 			}
 			if formatItemID == "" {
-				return
+				if !allowBootstrap {
+					return
+				}
+				formatItemID = h.beginReasoningFormatPhase()
+				h.reasoningFormatAliasPending = false
 			}
 		}
 		h.reasoningFormatAliases[key] = formatItemID
@@ -1816,7 +1820,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				evt.Data["summary_index"] = summaryIndex
 			}
 		} else if evt.Event == "response.reasoning_summary_text.delta" || evt.Event == "response.reasoning_summary_text.done" {
-			h.associateReasoningFormatItem(evt.Data)
+			h.associateReasoningFormatItem(evt.Data, evt.Event == "response.reasoning_summary_text.delta")
 		}
 	case "response.function_call_arguments.delta":
 		itemID, _ := evt.Data["item_id"].(string)
