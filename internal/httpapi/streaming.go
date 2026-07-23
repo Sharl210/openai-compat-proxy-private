@@ -251,6 +251,13 @@ func reasoningFormatItemID(data map[string]any) string {
 	return stringValue(data["id"])
 }
 
+func reasoningFormatSummaryIndex(data map[string]any, summaryIndex int) int {
+	if stringValue(data[internalReasoningFormatItemIDKey]) != "" {
+		return 0
+	}
+	return summaryIndex
+}
+
 func (h *responseEventWriterHelper) beginReasoningFormatPhase() string {
 	if h.reasoningFormatItemID == "" {
 		h.reasoningFormatPhase++
@@ -278,12 +285,24 @@ func (h *responseEventWriterHelper) associateReasoningFormatItem(data map[string
 	}
 	formatItemID, exists := h.reasoningFormatAliases[key]
 	if !exists {
-		if !h.reasoningFormatAliasPending || h.reasoningFormatItemID == "" || summaryIndex != 0 {
-			return
+		if h.reasoningFormatAliasPending && h.reasoningFormatItemID != "" {
+			formatItemID = h.reasoningFormatItemID
+			h.reasoningFormatAliasPending = false
+		} else {
+			formatItemID = h.reasoningFormatAliases[reasoningSummaryKey{itemID: itemID}]
+			if formatItemID == "" {
+				for aliasKey, candidate := range h.reasoningFormatAliases {
+					if aliasKey.itemID == itemID && candidate != "" {
+						formatItemID = candidate
+						break
+					}
+				}
+			}
+			if formatItemID == "" {
+				return
+			}
 		}
-		formatItemID = h.reasoningFormatItemID
 		h.reasoningFormatAliases[key] = formatItemID
-		h.reasoningFormatAliasPending = false
 	}
 	data[internalReasoningFormatItemIDKey] = formatItemID
 }
@@ -301,6 +320,21 @@ func (h *responseEventWriterHelper) associateReasoningFormatOutputItem(item map[
 		if formatItemID := h.reasoningFormatAliases[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}]; formatItemID != "" {
 			item[internalReasoningFormatItemIDKey] = formatItemID
 			return
+		}
+	}
+}
+
+func (h *responseEventWriterHelper) retireReasoningFormatAliases(item map[string]any) {
+	if h.downstreamType == "responses" || len(h.reasoningFormatAliases) == 0 {
+		return
+	}
+	itemID := stringValue(item["id"])
+	if itemID == "" {
+		return
+	}
+	for key := range h.reasoningFormatAliases {
+		if key.itemID == itemID {
+			delete(h.reasoningFormatAliases, key)
 		}
 	}
 }
@@ -430,6 +464,19 @@ func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reason
 		return nil
 	}
 	itemID := reasoningFormatItemID(item)
+	if stringValue(item[internalReasoningFormatItemIDKey]) != "" {
+		var summary strings.Builder
+		for _, rawPart := range parts {
+			part, _ := rawPart.(map[string]any)
+			if part != nil {
+				summary.WriteString(stringValue(part["text"]))
+			}
+		}
+		if delta := formatStreamingReasoningSummary(states, itemID, 0, summary.String(), true); delta != "" {
+			return []string{delta}
+		}
+		return nil
+	}
 	deltas := make([]string, 0, len(parts))
 	for summaryIndex, rawPart := range parts {
 		part, _ := rawPart.(map[string]any)
@@ -1575,6 +1622,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			}
 			h.markRealReasoningSeen()
 			if evt.Event == "response.output_item.done" && h.downstreamType != "responses" {
+				h.retireReasoningFormatAliases(item)
 				h.resetFormattedReasoning()
 			}
 			break
@@ -2935,6 +2983,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if !ok {
 			summaryIndex = 0
 		}
+		summaryIndex = reasoningFormatSummaryIndex(evt.Data, summaryIndex)
 		delta := formatStreamingReasoningSummary(&state.reasoningSummaries, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done")
 		if delta != "" {
 			state.realThinkingSeen = true
@@ -3647,6 +3696,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		if !ok {
 			summaryIndex = 0
 		}
+		summaryIndex = reasoningFormatSummaryIndex(evt.Data, summaryIndex)
 		delta := formatStreamingReasoningSummary(&state.reasoningSummaries, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done")
 		if delta != "" {
 			state.realReasoningSeen = true

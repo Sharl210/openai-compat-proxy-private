@@ -179,6 +179,96 @@ func TestAnthropicEventWriterFormatsSeparateReasoningPhases(t *testing.T) {
 	)
 }
 
+func TestChatEventWriterAppendsUnemittedSummarySnapshotAcrossIndexes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**标题**"}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 1, "delta": ""}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_native", "type": "reasoning", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "**标题**"},
+				map[string]any{"type": "summary_text", "text": "**后续**"},
+			},
+		}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	} {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**标题**"`,
+		`"reasoning_content":"\n\n**后续**"`,
+	)
+}
+
+func TestChatEventWriterResetsSummaryAliasWhenItemIDIsReused(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第一标题**"}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_reused", "summary_index": 1, "delta": "**第一后续**"}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_reused", "type": "reasoning", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "**第一标题**"},
+				map[string]any{"type": "summary_text", "text": "**第一后续**"},
+			},
+		}}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第二标题**"}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_reused", "summary_index": 1, "delta": ""}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_reused", "type": "reasoning", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "**第二标题**"},
+				map[string]any{"type": "summary_text", "text": "**第二后续**"},
+			},
+		}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	} {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**第一标题**"`,
+		`"reasoning_content":"\n\n**第一后续**"`,
+		`"reasoning_content":"**第二标题**"`,
+		`"reasoning_content":"\n\n**第二后续**"`,
+	)
+}
+
 func assertOrderedStreamFragments(t *testing.T, body string, fragments ...string) {
 	t.Helper()
 	previousIndex := -1
