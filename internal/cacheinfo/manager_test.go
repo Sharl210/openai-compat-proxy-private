@@ -3,6 +3,7 @@ package cacheinfo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -582,6 +583,183 @@ func TestManager_FlushTriggersRollover(t *testing.T) {
 	if stats.Today.TotalTokens != 0 {
 		t.Fatalf("Today.TotalTokens = %d, want 0", stats.Today.TotalTokens)
 	}
+	persisted, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatalf("LoadProviderStats after rollover flush: %v", err)
+	}
+	if persisted == nil || persisted.TodayDate != "2026-03-28" || persisted.Yesterday.TotalTokens != 150 || persisted.Today.TotalTokens != 0 {
+		t.Fatalf("persisted rollover stats = %#v, want durable 2026-03-28 rollover", persisted)
+	}
+}
+
+func TestManagerFlushSkipsUnchangedStatsAndPersistsOnlyDirtyProvider(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai", "anthropic"}, clock)
+	m.flushAll()
+
+	persistedProviders := make([]string, 0)
+	aggregateWrites := 0
+	m.saveProviderStats = func(providersDir, providerID string, stats *ProviderStats) error {
+		persistedProviders = append(persistedProviders, providerID)
+		return SaveProviderStats(providersDir, providerID, stats)
+	}
+	m.writeAggregateTXTFiles = func(providersDir string, enabledStats map[string]*ProviderStats, defaultStats []*ProviderStats, now time.Time, timezone string) error {
+		aggregateWrites++
+		return writeAggregateTXTFiles(providersDir, enabledStats, defaultStats, now, timezone)
+	}
+
+	m.flushAll()
+	if len(persistedProviders) != 0 || aggregateWrites != 0 {
+		t.Fatalf("unchanged flush rewrote providers=%v aggregate_writes=%d", persistedProviders, aggregateWrites)
+	}
+
+	if err := m.RecordFinalUsage("req-openai", "openai", &Usage{InputTokens: 100, TotalTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	m.flushAll()
+	if len(persistedProviders) != 1 || persistedProviders[0] != "openai" {
+		t.Fatalf("persisted providers = %v, want only openai", persistedProviders)
+	}
+	if aggregateWrites != 1 {
+		t.Fatalf("aggregate writes = %d, want 1 after dirty provider update", aggregateWrites)
+	}
+	persisted, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted == nil || persisted.Today.TotalTokens != 100 {
+		t.Fatalf("persisted openai stats = %#v, want total_tokens=100", persisted)
+	}
+}
+
+func TestManagerFlushRefreshesAggregatesForProviderAndDefaultChanges(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai", "anthropic"}, clock)
+
+	enabled := []string{"openai", "anthropic"}
+	m.SetEnabledProvidersSource(func() []string {
+		return append([]string(nil), enabled...)
+	})
+	defaults := []string{"openai"}
+	m.SetDefaultProvidersSource(func() []string {
+		return append([]string(nil), defaults...)
+	})
+	if err := m.RecordFinalUsage("req-openai", "openai", &Usage{InputTokens: 100, TotalTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RecordFinalUsage("req-anthropic", "anthropic", &Usage{InputTokens: 50, TotalTokens: 50}); err != nil {
+		t.Fatal(err)
+	}
+	m.flushAll()
+
+	providerWrites := 0
+	aggregateWrites := 0
+	m.saveProviderStats = func(providersDir, providerID string, stats *ProviderStats) error {
+		providerWrites++
+		return SaveProviderStats(providersDir, providerID, stats)
+	}
+	m.writeAggregateTXTFiles = func(providersDir string, enabledStats map[string]*ProviderStats, defaultStats []*ProviderStats, now time.Time, timezone string) error {
+		aggregateWrites++
+		return writeAggregateTXTFiles(providersDir, enabledStats, defaultStats, now, timezone)
+	}
+
+	defaults = []string{"anthropic"}
+	m.flushAll()
+	if providerWrites != 0 || aggregateWrites != 1 {
+		t.Fatalf("default-provider change wrote providers=%d aggregates=%d, want 0 and 1", providerWrites, aggregateWrites)
+	}
+	defaultData, err := os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "v1默认分组统计.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(defaultData), "输入Tokens：50") || strings.Contains(string(defaultData), "输入Tokens：150") {
+		t.Fatalf("default aggregate did not follow default-provider change:\n%s", defaultData)
+	}
+
+	enabled = []string{"openai"}
+	m.flushAll()
+	if providerWrites != 0 || aggregateWrites != 2 {
+		t.Fatalf("enabled-provider change wrote providers=%d aggregates=%d, want 0 and 2", providerWrites, aggregateWrites)
+	}
+	enabledData, err := os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "已启用提供商总计.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(enabledData), "输入Tokens：100") || strings.Contains(string(enabledData), "输入Tokens：150") {
+		t.Fatalf("enabled aggregate did not follow enabled-provider change:\n%s", enabledData)
+	}
+	defaultData, err = os.ReadFile(expectedAggregateCacheInfoTXTPath(tmp, "v1默认分组统计.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(defaultData), "输入Tokens：50") {
+		t.Fatalf("default aggregate retained disabled default provider:\n%s", defaultData)
+	}
+}
+
+func TestManagerFlushRetriesFailedProviderAndAggregateWrites(t *testing.T) {
+	tmp := t.TempDir()
+	loc := time.FixedZone("CST", 8*3600)
+	clock := newMockClock(loc)
+	m := NewManager(tmp, loc, []string{"openai"}, clock)
+	m.flushAll()
+
+	if err := m.RecordFinalUsage("req-openai", "openai", &Usage{InputTokens: 100, TotalTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+	providerAttempts := 0
+	aggregateAttempts := 0
+	m.saveProviderStats = func(string, string, *ProviderStats) error {
+		providerAttempts++
+		return errors.New("provider write failed")
+	}
+	m.writeAggregateTXTFiles = func(string, map[string]*ProviderStats, []*ProviderStats, time.Time, string) error {
+		aggregateAttempts++
+		return nil
+	}
+	m.flushAll()
+	if providerAttempts != 1 || aggregateAttempts != 0 {
+		t.Fatalf("failed provider flush attempts = providers:%d aggregates:%d, want 1:0", providerAttempts, aggregateAttempts)
+	}
+	if !m.dirtyProviders["openai"] || !m.aggregateDirty {
+		t.Fatalf("failed provider write lost dirty state: providers=%v aggregate_dirty=%t", m.dirtyProviders, m.aggregateDirty)
+	}
+
+	m.saveProviderStats = SaveProviderStats
+	m.writeAggregateTXTFiles = func(providersDir string, enabledStats map[string]*ProviderStats, defaultStats []*ProviderStats, now time.Time, timezone string) error {
+		aggregateAttempts++
+		return errors.New("aggregate write failed")
+	}
+	m.flushAll()
+	if m.dirtyProviders["openai"] || !m.aggregateDirty {
+		t.Fatalf("failed aggregate write dirty state = providers=%v aggregate_dirty=%t, want provider clean and aggregate dirty", m.dirtyProviders, m.aggregateDirty)
+	}
+	if aggregateAttempts != 1 {
+		t.Fatalf("aggregate attempts = %d, want 1 after provider retry", aggregateAttempts)
+	}
+
+	m.writeAggregateTXTFiles = func(providersDir string, enabledStats map[string]*ProviderStats, defaultStats []*ProviderStats, now time.Time, timezone string) error {
+		aggregateAttempts++
+		return writeAggregateTXTFiles(providersDir, enabledStats, defaultStats, now, timezone)
+	}
+	m.flushAll()
+	if m.aggregateDirty {
+		t.Fatal("aggregate remained dirty after successful retry")
+	}
+	if aggregateAttempts != 2 {
+		t.Fatalf("aggregate attempts = %d, want 2 after successful retry", aggregateAttempts)
+	}
+	persisted, err := LoadProviderStats(tmp, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted == nil || persisted.Today.TotalTokens != 100 {
+		t.Fatalf("retried provider stats = %#v, want total_tokens=100", persisted)
+	}
 }
 
 func TestManager_FlushTriggersSevenDayRolloverAcrossDST(t *testing.T) {
@@ -826,7 +1004,7 @@ func TestManager_DefaultProvidersAggregateFollowsSource(t *testing.T) {
 	}
 }
 
-func TestManager_ClearProviderHistoryResetsProviderAndRebuildsAggregates(t *testing.T) {
+func TestManager_ClearProviderHistoryIsImmediatelyDurableAndRebuildsAggregates(t *testing.T) {
 	tmp := t.TempDir()
 	loc := time.FixedZone("CST", 8*3600)
 	clock := newMockClock(loc)

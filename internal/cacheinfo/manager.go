@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -44,6 +45,13 @@ type Manager struct {
 	submittedOrder  []string
 	submittedLimit  int
 	enabledProvider map[string]struct{}
+	dirtyProviders  map[string]bool
+	aggregateDirty  bool
+
+	defaultProviderIDs []string
+
+	saveProviderStats      func(string, string, *ProviderStats) error
+	writeAggregateTXTFiles func(string, map[string]*ProviderStats, []*ProviderStats, time.Time, string) error
 
 	ticker *time.Ticker
 	stopCh chan struct{}
@@ -71,14 +79,18 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 	}
 
 	m := &Manager{
-		providersDir:    providersDir,
-		location:        location,
-		clock:           clock,
-		stats:           make(map[string]*ProviderStats),
-		submitted:       make(map[string]bool),
-		submittedLimit:  defaultSubmittedLimit,
-		enabledProvider: make(map[string]struct{}),
-		stopCh:          make(chan struct{}),
+		providersDir:           providersDir,
+		location:               location,
+		clock:                  clock,
+		stats:                  make(map[string]*ProviderStats),
+		submitted:              make(map[string]bool),
+		submittedLimit:         defaultSubmittedLimit,
+		enabledProvider:        make(map[string]struct{}),
+		dirtyProviders:         make(map[string]bool),
+		aggregateDirty:         true,
+		saveProviderStats:      SaveProviderStats,
+		writeAggregateTXTFiles: writeAggregateTXTFiles,
+		stopCh:                 make(chan struct{}),
 	}
 
 	tzName := location.String()
@@ -118,6 +130,7 @@ func NewManager(providersDir string, location *time.Location, enabledProviders [
 			}
 			syncLegacyFields(m.stats[pid])
 		}
+		m.dirtyProviders[pid] = true
 	}
 
 	return m
@@ -134,6 +147,7 @@ func (m *Manager) SetDefaultProvidersSource(fn func() []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.defaultFn = fn
+	m.syncDefaultProvidersLocked()
 }
 
 func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) error {
@@ -176,6 +190,7 @@ func (m *Manager) RecordFinalUsage(requestID, providerID string, usage *Usage) e
 	stats.HistoryTotal.RequestCount++
 	syncLegacyFields(stats)
 	stats.UpdatedAt = now
+	m.markProviderDirtyLocked(providerID)
 
 	m.submitted[submissionKey] = true
 	m.submittedOrder = append(m.submittedOrder, submissionKey)
@@ -205,8 +220,12 @@ func (m *Manager) pruneSubmittedLocked() {
 	}
 }
 
-func (m *Manager) checkCrossDayAndReset(providerID string) {
+func (m *Manager) checkCrossDayAndReset(providerID string) bool {
 	stats := m.stats[providerID]
+	if stats == nil {
+		return false
+	}
+	before := cloneProviderStats(stats)
 	now := m.clock.Now().In(m.location)
 	todayStr := now.Format("2006-01-02")
 	normalizeRecentDays(stats, todayStr)
@@ -215,13 +234,13 @@ func (m *Manager) checkCrossDayAndReset(providerID string) {
 	if err != nil {
 		stats.RecentDays = []DailyStats{{Date: todayStr}}
 		syncLegacyFields(stats)
-		return
+		return !reflect.DeepEqual(before, stats)
 	}
 
 	nowDate, _ := time.ParseInLocation("2006-01-02", todayStr, m.location)
 
 	if nowDate.Equal(todayDate) {
-		return
+		return !reflect.DeepEqual(before, stats)
 	}
 
 	if nowDate.After(todayDate) {
@@ -231,10 +250,11 @@ func (m *Manager) checkCrossDayAndReset(providerID string) {
 		}
 		trimRecentDays(stats)
 		syncLegacyFields(stats)
-		return
+		return !reflect.DeepEqual(before, stats)
 	}
 
 	log.Printf("[cacheinfo] provider %s 当前日期 %s 早于 today_date %s，继续累计", providerID, todayStr, stats.TodayDate)
+	return !reflect.DeepEqual(before, stats)
 }
 
 func daysBetweenDates(start, end time.Time) int {
@@ -368,6 +388,7 @@ func (m *Manager) ClearProviderHistory(providerID string) error {
 	now := m.clock.Now().In(m.location)
 	resetProviderStats(stats, now, m.location.String())
 	m.removeSubmittedForProviderLocked(providerID)
+	m.markProviderDirtyLocked(providerID)
 	m.persistAllLocked()
 	return nil
 }
@@ -402,21 +423,46 @@ func (m *Manager) flushAll() {
 	m.syncEnabledProvidersLocked()
 
 	for pid := range m.stats {
-		m.checkCrossDayAndReset(pid)
+		if m.checkCrossDayAndReset(pid) {
+			m.markProviderDirtyLocked(pid)
+		}
 	}
 
 	m.persistAllLocked()
 }
 
 func (m *Manager) persistAllLocked() {
-	for pid, stats := range m.stats {
-		if err := SaveProviderStats(m.providersDir, pid, stats); err != nil {
-			log.Printf("[cacheinfo] 写入 provider %s 失败: %v", pid, err)
+	saveProviderStats := m.saveProviderStats
+	if saveProviderStats == nil {
+		saveProviderStats = SaveProviderStats
+	}
+	for pid := range m.dirtyProviders {
+		stats, ok := m.stats[pid]
+		if !ok {
+			delete(m.dirtyProviders, pid)
+			continue
 		}
+		if err := saveProviderStats(m.providersDir, pid, stats); err != nil {
+			log.Printf("[cacheinfo] 写入 provider %s 失败: %v", pid, err)
+			continue
+		}
+		delete(m.dirtyProviders, pid)
 	}
-	if err := writeAggregateTXTFiles(m.providersDir, m.enabledStatsSnapshotLocked(), m.defaultEnabledStatsSnapshotLocked(), m.clock.Now().In(m.location), m.location.String()); err != nil {
+
+	m.syncDefaultProvidersLocked()
+	if len(m.dirtyProviders) > 0 || !m.aggregateDirty {
+		return
+	}
+
+	writeAggregates := m.writeAggregateTXTFiles
+	if writeAggregates == nil {
+		writeAggregates = writeAggregateTXTFiles
+	}
+	if err := writeAggregates(m.providersDir, m.enabledStatsSnapshotLocked(), m.defaultEnabledStatsSnapshotLocked(), m.clock.Now().In(m.location), m.location.String()); err != nil {
 		log.Printf("[cacheinfo] 写入聚合 TXT 失败: %v", err)
+		return
 	}
+	m.aggregateDirty = false
 }
 
 func (m *Manager) enabledStatsSnapshotLocked() map[string]*ProviderStats {
@@ -430,12 +476,8 @@ func (m *Manager) enabledStatsSnapshotLocked() map[string]*ProviderStats {
 }
 
 func (m *Manager) defaultEnabledStatsSnapshotLocked() []*ProviderStats {
-	if m.defaultFn == nil {
-		return nil
-	}
-	providerIDs := m.defaultFn()
-	stats := make([]*ProviderStats, 0, len(providerIDs))
-	for _, providerID := range providerIDs {
+	stats := make([]*ProviderStats, 0, len(m.defaultProviderIDs))
+	for _, providerID := range m.defaultProviderIDs {
 		if _, ok := m.enabledProvider[providerID]; !ok {
 			continue
 		}
@@ -444,6 +486,47 @@ func (m *Manager) defaultEnabledStatsSnapshotLocked() []*ProviderStats {
 		}
 	}
 	return stats
+}
+
+func (m *Manager) markProviderDirtyLocked(providerID string) {
+	m.dirtyProviders[providerID] = true
+	m.aggregateDirty = true
+}
+
+func (m *Manager) syncDefaultProvidersLocked() {
+	var next []string
+	if m.defaultFn != nil {
+		next = append([]string(nil), m.defaultFn()...)
+	}
+	if sameStringSlice(m.defaultProviderIDs, next) {
+		return
+	}
+	m.defaultProviderIDs = next
+	m.aggregateDirty = true
+}
+
+func sameStringSlice(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameProviderSet(left, right map[string]struct{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for providerID := range left {
+		if _, ok := right[providerID]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) syncEnabledProvidersLocked() {
@@ -455,6 +538,7 @@ func (m *Manager) syncEnabledProvidersLocked() {
 
 func (m *Manager) setEnabledProvidersLocked(enabledProviders []string) {
 	next := make(map[string]struct{}, len(enabledProviders))
+	initialized := make([]string, 0)
 	now := m.clock.Now().In(m.location)
 	todayStr := now.Format("2006-01-02")
 	yesterdayStr := now.AddDate(0, 0, -1).Format("2006-01-02")
@@ -475,16 +559,23 @@ func (m *Manager) setEnabledProvidersLocked(enabledProviders []string) {
 		if loaded != nil {
 			normalizeRecentDays(loaded, todayStr)
 			m.stats[pid] = loaded
-			continue
+		} else {
+			m.stats[pid] = &ProviderStats{
+				Timezone:      tzName,
+				TodayDate:     todayStr,
+				YesterdayDate: yesterdayStr,
+				RecentDays:    []DailyStats{{Date: todayStr}},
+				UpdatedAt:     now,
+			}
+			syncLegacyFields(m.stats[pid])
 		}
-		m.stats[pid] = &ProviderStats{
-			Timezone:      tzName,
-			TodayDate:     todayStr,
-			YesterdayDate: yesterdayStr,
-			RecentDays:    []DailyStats{{Date: todayStr}},
-			UpdatedAt:     now,
-		}
-		syncLegacyFields(m.stats[pid])
+		initialized = append(initialized, pid)
+	}
+	if !sameProviderSet(m.enabledProvider, next) {
+		m.aggregateDirty = true
 	}
 	m.enabledProvider = next
+	for _, providerID := range initialized {
+		m.markProviderDirtyLocked(providerID)
+	}
 }
