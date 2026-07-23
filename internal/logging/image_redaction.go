@@ -82,6 +82,9 @@ func isImageDataURL(value string) bool {
 func redactImageDataURLsInString(value string) string {
 	const prefix = "data:image/"
 	const delimiter = ";base64,"
+	if !strings.Contains(value, prefix) {
+		return value
+	}
 
 	var redacted strings.Builder
 	redacted.Grow(len(value))

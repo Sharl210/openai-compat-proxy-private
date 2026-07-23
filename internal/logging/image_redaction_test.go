@@ -54,6 +54,13 @@ func TestRedactImageDataForLogPreservesNonImageBase64(t *testing.T) {
 	}
 }
 
+func TestRedactImageDataForLogPreservesPlainText(t *testing.T) {
+	const body = "plain tool event preview"
+	if got := RedactImageDataForLog([]byte(body)); got != body {
+		t.Fatalf("expected plain text to remain unchanged, got %q", got)
+	}
+}
+
 func TestRedactImageDataForLogReplacesGenericImageDataURL(t *testing.T) {
 	// Given
 	const imageDataSentinel = "R2VuZXJpY0ltYWdlRGF0YVVybEJhc2U2NFNlbnRpbmVs"
