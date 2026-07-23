@@ -957,6 +957,48 @@ func TestChatStreamFormatsReasoningSummaryDoneSuffix(t *testing.T) {
 	}
 }
 
+func TestChatStreamFormatsAdjacentReasoningDeltaTitles(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"**标题**\"}\n\n",
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"**后续**\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**后续**"`) {
+		t.Fatalf("expected append-only adjacent reasoning title deltas, got %s", body)
+	}
+	if strings.Contains(body, `"reasoning_content":"**标题**\n\n**后续**"`) {
+		t.Fatalf("expected prior title not to be replayed in the second reasoning delta, got %s", body)
+	}
+}
+
 func TestChatStreamMergesIncludeUsageIntoTerminalFinishChunk(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +

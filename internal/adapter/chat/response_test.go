@@ -104,6 +104,18 @@ func TestBuildResponseFormatsReasoningContentTitle(t *testing.T) {
 	}
 }
 
+func TestBuildResponseSeparatesAdjacentReasoningTitles(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Reasoning: map[string]any{"reasoning_content": "**标题****后续**"},
+	})
+
+	choices, _ := resp["choices"].([]map[string]any)
+	message, _ := choices[0]["message"].(map[string]any)
+	if got, _ := message["reasoning_content"].(string); got != "**标题**\n\n**后续**" {
+		t.Fatalf("expected adjacent reasoning titles to be separated, got %#v", message)
+	}
+}
+
 func TestBuildResponseTrimsOnlyVisibleTextTrailingCRLF(t *testing.T) {
 	result := aggregate.Result{
 		Text:      "first\r\nsecond \t\r\n",
