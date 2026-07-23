@@ -173,6 +173,51 @@ func TestChatStreamUsesStructuredReasoningPlaceholder(t *testing.T) {
 	}
 }
 
+func TestChatStreamFormatsAdjacentReasoningTitlesAcrossSummaryIndexes(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"delta\":\"**后续**\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题**\"},{\"type\":\"summary_text\",\"text\":\"**后续**\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "test-key",
+			SupportsChat:      true,
+			SupportsResponses: true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	assertOrderedStreamFragments(t, body,
+		`"reasoning_content":"**标题**"`,
+		`"reasoning_content":"\n\n**后续**"`,
+	)
+	if strings.Contains(body, `"reasoning_content":"**后续**"`) {
+		t.Fatalf("expected the second title to retain the continuous-title separator, got %s", body)
+	}
+}
+
 func TestChatStreamFromChatJSONUpstreamInjectsPlaceholderAndText(t *testing.T) {
 	chatResponse := `{
 		"id": "chatcmpl_json",
