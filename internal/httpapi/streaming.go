@@ -2408,15 +2408,16 @@ func logDownstreamToolEvent(requestID, downstreamType, event string, data map[st
 	if item, _ := data["item"].(map[string]any); item != nil {
 		if itemType, _ := item["type"].(string); isResponseToolCallItemType(itemType) {
 			arguments, _ := item["arguments"].(string)
-			logging.Event("downstreamToolEvent", map[string]any{
-				"request_id":        requestID,
-				"downstream_type":   downstreamType,
-				"event":             event,
-				"item_id":           stringValue(item["id"]),
-				"call_id":           stringValue(item["call_id"]),
-				"name":              stringValue(item["name"]),
-				"arguments_len":     len(arguments),
-				"arguments_preview": truncateForLog(arguments, 120),
+			logging.DownstreamToolEvent(logging.DownstreamToolEventAttrs{
+				RequestID:          requestID,
+				DownstreamType:     downstreamType,
+				Event:              event,
+				ItemID:             stringValue(item["id"]),
+				CallID:             stringValue(item["call_id"]),
+				ToolName:           stringValue(item["name"]),
+				ArgumentsLen:       len(arguments),
+				ArgumentsPreview:   truncateForLog(arguments, 120),
+				IncludeCallDetails: true,
 			})
 		}
 		return
@@ -2426,13 +2427,13 @@ func logDownstreamToolEvent(requestID, downstreamType, event string, data map[st
 		if arguments == "" {
 			arguments = stringValue(data["delta"])
 		}
-		logging.Event("downstreamToolEvent", map[string]any{
-			"request_id":        requestID,
-			"downstream_type":   downstreamType,
-			"event":             event,
-			"item_id":           stringValue(data["item_id"]),
-			"arguments_len":     len(arguments),
-			"arguments_preview": truncateForLog(arguments, 120),
+		logging.DownstreamToolEvent(logging.DownstreamToolEventAttrs{
+			RequestID:        requestID,
+			DownstreamType:   downstreamType,
+			Event:            event,
+			ItemID:           stringValue(data["item_id"]),
+			ArgumentsLen:     len(arguments),
+			ArgumentsPreview: truncateForLog(arguments, 120),
 		})
 	}
 }
