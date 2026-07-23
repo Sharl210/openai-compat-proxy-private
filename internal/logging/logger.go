@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,40 @@ type Logger struct {
 	lastCleanupAt time.Time
 	requestFiles  map[string]*os.File
 	mu            sync.Mutex
+}
+
+type DownstreamToolEventAttrs struct {
+	RequestID          string
+	DownstreamType     string
+	Event              string
+	ItemID             string
+	CallID             string
+	ToolName           string
+	ArgumentsLen       int
+	ArgumentsPreview   string
+	IncludeCallDetails bool
+}
+
+type downstreamToolEventRecord struct {
+	Timestamp        string `json:"ts"`
+	Event            string `json:"event"`
+	RequestID        string `json:"request_id"`
+	DownstreamType   string `json:"downstream_type"`
+	ItemID           string `json:"item_id"`
+	ArgumentsLen     int    `json:"arguments_len"`
+	ArgumentsPreview string `json:"arguments_preview"`
+}
+
+type downstreamToolItemEventRecord struct {
+	Timestamp        string `json:"ts"`
+	Event            string `json:"event"`
+	RequestID        string `json:"request_id"`
+	DownstreamType   string `json:"downstream_type"`
+	ItemID           string `json:"item_id"`
+	CallID           string `json:"call_id"`
+	ToolName         string `json:"name"`
+	ArgumentsLen     int    `json:"arguments_len"`
+	ArgumentsPreview string `json:"arguments_preview"`
 }
 
 var (
@@ -82,6 +117,12 @@ func Event(name string, attrs map[string]any) {
 	}
 }
 
+func DownstreamToolEvent(attrs DownstreamToolEventAttrs) {
+	if logger := Default(); logger != nil {
+		logger.DownstreamToolEvent(attrs)
+	}
+}
+
 func CloseRequest(requestID string) {
 	if logger := Default(); logger != nil {
 		logger.CloseRequest(requestID)
@@ -122,6 +163,32 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	_, _ = fmt.Fprintf(l.stdout, "%s %s\n", name, summarize(record))
 
 	l.maybeCleanup(created, requestID)
+}
+
+func (l *Logger) DownstreamToolEvent(attrs DownstreamToolEventAttrs) {
+	if l == nil || attrs.RequestID == "" {
+		return
+	}
+	attrs = redactDownstreamToolEventAttrs(attrs)
+	line, err := marshalDownstreamToolEvent(attrs)
+	if err != nil {
+		return
+	}
+	summary := summarizeDownstreamToolEvent(attrs)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	file, created := l.getFileLocked(attrs.RequestID)
+	if file == nil {
+		return
+	}
+	if _, err := file.Write(append(line, '\n')); err != nil {
+		_ = l.closeRequestLocked(attrs.RequestID)
+	}
+	_, _ = io.WriteString(l.stdout, "downstreamToolEvent "+summary+"\n")
+
+	l.maybeCleanup(created, attrs.RequestID)
 }
 
 func (l *Logger) CloseRequest(requestID string) {
@@ -183,6 +250,67 @@ func (l *Logger) closeRequestLocked(requestID string) error {
 	}
 	delete(l.requestFiles, requestID)
 	return file.Close()
+}
+
+func redactDownstreamToolEventAttrs(attrs DownstreamToolEventAttrs) DownstreamToolEventAttrs {
+	attrs.RequestID = redactImageDataURLsInString(attrs.RequestID)
+	attrs.DownstreamType = redactImageDataURLsInString(attrs.DownstreamType)
+	attrs.Event = redactImageDataURLsInString(attrs.Event)
+	attrs.ItemID = redactImageDataURLsInString(attrs.ItemID)
+	attrs.CallID = redactImageDataURLsInString(attrs.CallID)
+	attrs.ToolName = redactImageDataURLsInString(attrs.ToolName)
+	attrs.ArgumentsPreview = redactImageDataURLsInString(attrs.ArgumentsPreview)
+	return attrs
+}
+
+func marshalDownstreamToolEvent(attrs DownstreamToolEventAttrs) ([]byte, error) {
+	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if attrs.IncludeCallDetails {
+		return json.Marshal(downstreamToolItemEventRecord{
+			Timestamp:        timestamp,
+			Event:            attrs.Event,
+			RequestID:        attrs.RequestID,
+			DownstreamType:   attrs.DownstreamType,
+			ItemID:           attrs.ItemID,
+			CallID:           attrs.CallID,
+			ToolName:         attrs.ToolName,
+			ArgumentsLen:     attrs.ArgumentsLen,
+			ArgumentsPreview: attrs.ArgumentsPreview,
+		})
+	}
+	return json.Marshal(downstreamToolEventRecord{
+		Timestamp:        timestamp,
+		Event:            attrs.Event,
+		RequestID:        attrs.RequestID,
+		DownstreamType:   attrs.DownstreamType,
+		ItemID:           attrs.ItemID,
+		ArgumentsLen:     attrs.ArgumentsLen,
+		ArgumentsPreview: attrs.ArgumentsPreview,
+	})
+}
+
+func summarizeDownstreamToolEvent(attrs DownstreamToolEventAttrs) string {
+	var summary strings.Builder
+	summary.Grow(len(attrs.ArgumentsPreview) + len(attrs.CallID) + len(attrs.DownstreamType) + len(attrs.ItemID) + len(attrs.ToolName) + len(attrs.RequestID) + 96)
+	summary.WriteString("arguments_len=")
+	summary.WriteString(strconv.Itoa(attrs.ArgumentsLen))
+	summary.WriteString(" arguments_preview=")
+	summary.WriteString(attrs.ArgumentsPreview)
+	if attrs.IncludeCallDetails {
+		summary.WriteString(" call_id=")
+		summary.WriteString(attrs.CallID)
+	}
+	summary.WriteString(" downstream_type=")
+	summary.WriteString(attrs.DownstreamType)
+	summary.WriteString(" item_id=")
+	summary.WriteString(attrs.ItemID)
+	if attrs.IncludeCallDetails {
+		summary.WriteString(" name=")
+		summary.WriteString(attrs.ToolName)
+	}
+	summary.WriteString(" request_id=")
+	summary.WriteString(attrs.RequestID)
+	return summary.String()
 }
 
 func (l *Logger) maybeCleanup(created bool, currentRequestID string) {

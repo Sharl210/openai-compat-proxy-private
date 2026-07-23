@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -343,6 +344,96 @@ func TestLoggerRequiresRequestID(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("expected no files when request_id missing, got %d", len(entries))
 	}
+}
+
+func TestDownstreamToolEventMatchesGenericLoggerOutput(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		attrs logging.DownstreamToolEventAttrs
+	}{
+		{
+			name: "arguments delta",
+			attrs: logging.DownstreamToolEventAttrs{
+				RequestID:        "req-tool-delta",
+				DownstreamType:   "responses",
+				Event:            "response.function_call_arguments.delta",
+				ItemID:           "fc_1",
+				ArgumentsLen:     42,
+				ArgumentsPreview: `{"query":"data:image/png;base64,VG9vbEV2ZW50SW1hZ2U="}`,
+			},
+		},
+		{
+			name: "tool item with empty call details",
+			attrs: logging.DownstreamToolEventAttrs{
+				RequestID:          "req-tool-item",
+				DownstreamType:     "chat",
+				Event:              "response.output_item.done",
+				ItemID:             "fc_2",
+				ArgumentsLen:       0,
+				ArgumentsPreview:   "",
+				IncludeCallDetails: true,
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			genericDir := t.TempDir()
+			typedDir := t.TempDir()
+			genericStdout := &bytes.Buffer{}
+			typedStdout := &bytes.Buffer{}
+			genericLogger, genericClose, err := logging.New(config.Config{LogFilePath: genericDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, genericStdout)
+			if err != nil {
+				t.Fatalf("new generic logger: %v", err)
+			}
+			defer genericClose()
+			typedLogger, typedClose, err := logging.New(config.Config{LogFilePath: typedDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, typedStdout)
+			if err != nil {
+				t.Fatalf("new typed logger: %v", err)
+			}
+			defer typedClose()
+
+			genericAttrs := map[string]any{
+				"request_id":        testCase.attrs.RequestID,
+				"downstream_type":   testCase.attrs.DownstreamType,
+				"event":             testCase.attrs.Event,
+				"item_id":           testCase.attrs.ItemID,
+				"arguments_len":     testCase.attrs.ArgumentsLen,
+				"arguments_preview": testCase.attrs.ArgumentsPreview,
+			}
+			if testCase.attrs.IncludeCallDetails {
+				genericAttrs["call_id"] = testCase.attrs.CallID
+				genericAttrs["name"] = testCase.attrs.ToolName
+			}
+			genericLogger.Event("downstreamToolEvent", genericAttrs)
+			typedLogger.DownstreamToolEvent(testCase.attrs)
+
+			genericRecord := readLogRecord(t, genericDir, testCase.attrs.RequestID)
+			typedRecord := readLogRecord(t, typedDir, testCase.attrs.RequestID)
+			delete(genericRecord, "ts")
+			delete(typedRecord, "ts")
+			if !reflect.DeepEqual(genericRecord, typedRecord) {
+				t.Fatalf("typed record differs from generic record\ngeneric: %#v\ntyped: %#v", genericRecord, typedRecord)
+			}
+			if genericStdout.String() != typedStdout.String() {
+				t.Fatalf("typed stdout differs from generic stdout\ngeneric: %q\ntyped: %q", genericStdout.String(), typedStdout.String())
+			}
+			if strings.Contains(typedStdout.String(), "VG9vbEV2ZW50SW1hZ2U=") {
+				t.Fatalf("typed stdout leaked image data: %q", typedStdout.String())
+			}
+		})
+	}
+}
+
+func readLogRecord(t *testing.T, dir, requestID string) map[string]any {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(dir, requestID+".txt"))
+	if err != nil {
+		t.Fatalf("read request log: %v", err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(content), &record); err != nil {
+		t.Fatalf("unmarshal request log: %v", err)
+	}
+	return record
 }
 
 func TestInitDisablesLoggingWhenLogEnableIsFalse(t *testing.T) {
