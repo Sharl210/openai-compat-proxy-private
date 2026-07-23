@@ -61,6 +61,31 @@ func TestAdminUIAppScriptRendersServiceStartedAtCard(t *testing.T) {
 	}
 }
 
+func TestAdminUIAppScriptSeparatesPreflightFromScriptOutcome(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"配置预检（不代表脚本结果）",
+		"脚本任务结果",
+		"实际部署/重启结果以此为准",
+		"function serviceStartedAtLabel(status)",
+		"已验证 PID 文件记录时间",
+		"function formatServiceStartedAt(value)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected app script to contain %q, got %s", want, body)
+		}
+	}
+}
+
 func TestAdminUIAppScriptUsesMetaChipStyleForProjectFileRefreshButton(t *testing.T) {
 	server := newAdminUITestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)

@@ -1484,7 +1484,7 @@ function renderStatusSection() {
   const validation = state.validation || {};
   const dashboardCards = [
     { label: '服务状态', value: status.health_ok ? '健康' : '异常', tone: status.health_ok ? 'ok' : 'warn' },
-    { label: '配置校验', value: validation.restart_ok ? '通过' : '失败', tone: validation.restart_ok ? 'ok' : 'danger' },
+    { label: '配置预检（不代表脚本结果）', value: validation.restart_ok ? '通过' : '失败', tone: validation.restart_ok ? 'ok' : 'danger' },
     { label: '当前任务', value: state.activeJob ? (state.activeJob.label || labelForAction(state.activeJob.action)) : '空闲', tone: state.activeJob ? 'info' : 'info' },
     { label: '日志目录', value: status.log_dir || '未启用', tone: 'info' },
   ];
@@ -1511,11 +1511,11 @@ function renderStatusSection() {
         <div class="status-value">${escapeHtml(status.pid || '暂无')}</div>
       </div>
       <div class="status-card">
-        <div class="status-label">服务启动时间</div>
+        <div class="status-label">${escapeHtml(serviceStartedAtLabel(status))}</div>
         <div class="status-value">${escapeHtml(formatServiceStartedAt(status.started_at))}</div>
       </div>
       <div class="status-card">
-        <div class="status-label">配置预检</div>
+        <div class="status-label">配置预检（不代表脚本结果）</div>
         <div class="status-value">热加载 ${validation.hot_reload_ok ? '通过' : '失败'} / 重启 ${validation.restart_ok ? '通过' : '失败'}</div>
       </div>
     </div>
@@ -1523,8 +1523,8 @@ function renderStatusSection() {
     <div class="job-output material-log-card">
       <div class="job-head">
         <div>
-          <h3 class="section-title">脚本任务</h3>
-          <p class="muted job-meta">${state.activeJob ? escapeHtml(`${state.activeJob.label || labelForAction(state.activeJob.action)} · ${state.activeJob.status}`) : '当前没有正在跟踪的脚本任务'}</p>
+          <h3 class="section-title">脚本任务结果</h3>
+          <p class="muted job-meta">${state.activeJob ? escapeHtml(`${state.activeJob.label || labelForAction(state.activeJob.action)} · ${state.activeJob.status}；实际部署/重启结果以此为准`) : '实际部署/重启结果以此为准；当前没有正在跟踪的脚本任务'}</p>
         </div>
         ${state.activeJob ? `<span class="badge ${state.activeJob.status === 'succeeded' ? 'ok' : state.activeJob.status === 'running' ? 'info' : 'danger'}">${escapeHtml(state.activeJob.status)}</span>` : ''}
       </div>
@@ -2474,6 +2474,16 @@ function formatListenAddrDisplay(value) {
     return trimmed.slice(1);
   }
   return trimmed || '未知';
+}
+
+function serviceStartedAtLabel(status) {
+  if (status?.runtime_source === 'systemd') {
+    return '服务启动时间（systemd）';
+  }
+  if (status?.runtime_source === 'pid_file') {
+    return '已验证 PID 文件记录时间';
+  }
+  return '服务启动时间';
 }
 
 function formatServiceStartedAt(value) {

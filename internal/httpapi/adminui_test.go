@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -251,8 +252,11 @@ func TestAdminUIBootstrapExposesCustomProvidersDirRelativePath(t *testing.T) {
 	}
 }
 
-func TestAdminUIStatusIncludesServiceStartedAtFromPIDFile(t *testing.T) {
+func TestAdminUIStatusRejectsStalePIDFile(t *testing.T) {
 	server := newAdminUITestServer(t)
+	server.admin.serviceState = func(context.Context) (adminServiceState, bool) {
+		return adminServiceState{}, false
+	}
 	cookie, csrf := adminLogin(t, server)
 	pidPath := filepath.Join(server.admin.rootDir(), ".proxy.pid")
 	startedAt := time.Date(2026, time.April, 8, 10, 30, 0, 0, time.UTC)
@@ -277,11 +281,91 @@ func TestAdminUIStatusIncludesServiceStartedAtFromPIDFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected status object, got %#v", data["status"])
 	}
-	if got := status["started_at"]; got != startedAt.Format(time.RFC3339) {
-		t.Fatalf("expected started_at %q, got %#v", startedAt.Format(time.RFC3339), got)
+	if got := status["started_at"]; got != "" {
+		t.Fatalf("expected stale pid file to omit started_at, got %#v", got)
 	}
-	if got := status["pid"]; got != "12345" {
-		t.Fatalf("expected pid 12345, got %#v", got)
+	if got := status["pid"]; got != "" {
+		t.Fatalf("expected stale pid file to omit pid, got %#v", got)
+	}
+	if got := status["runtime_source"]; got != "" {
+		t.Fatalf("expected stale pid file to omit runtime source, got %#v", got)
+	}
+}
+
+func TestAdminUIStatusPrefersAuthoritativeSystemdServiceState(t *testing.T) {
+	server := newAdminUITestServer(t)
+	startedAt := time.Date(2026, time.July, 23, 9, 40, 56, 0, time.UTC)
+	server.admin.serviceState = func(context.Context) (adminServiceState, bool) {
+		return adminServiceState{PID: 4242, StartedAt: startedAt}, true
+	}
+	if err := os.WriteFile(filepath.Join(server.admin.rootDir(), ".proxy.pid"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatalf("write stale pid file: %v", err)
+	}
+	cookie, _ := adminLogin(t, server)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/status", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	status, ok := decodeAdminJSON(t, rec.Body.Bytes())["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected status object, got %s", rec.Body.String())
+	}
+	if got := status["pid"]; got != "4242" {
+		t.Fatalf("expected authoritative systemd pid, got %#v", got)
+	}
+	if got := status["started_at"]; got != startedAt.Format(time.RFC3339) {
+		t.Fatalf("expected authoritative started_at %q, got %#v", startedAt.Format(time.RFC3339), got)
+	}
+	if got := status["runtime_source"]; got != "systemd" {
+		t.Fatalf("expected systemd runtime source, got %#v", got)
+	}
+}
+
+func TestParseAdminSystemdTimestampUSec(t *testing.T) {
+	want := time.Date(2026, time.July, 23, 21, 57, 13, 0, time.FixedZone("CST", 8*60*60)).UTC()
+	got := parseAdminSystemdTimestampUSec("1784815033000000")
+	if !got.Equal(want) {
+		t.Fatalf("parseAdminSystemdTimestampUSec() = %s, want %s", got, want)
+	}
+	if got := parseAdminSystemdTimestampUSec("Thu 2026-07-23 21:57:13 CST"); !got.IsZero() {
+		t.Fatalf("expected display timestamp to be rejected, got %s", got)
+	}
+}
+
+func TestAdminSystemdServiceNameUsesRuntimeUnit(t *testing.T) {
+	t.Setenv("OPENAI_COMPAT_SYSTEMD_UNIT", "custom-proxy.service")
+	if got := adminSystemdServiceName(); got != "custom-proxy.service" {
+		t.Fatalf("expected runtime service name, got %q", got)
+	}
+}
+
+func TestLookupAdminSystemdServiceStateUsesRuntimeUnitAndMicroseconds(t *testing.T) {
+	root := t.TempDir()
+	argsPath := filepath.Join(root, "systemctl.args")
+	systemctl := filepath.Join(root, "systemctl")
+	mustWriteAdminFile(t, systemctl, fmt.Sprintf("#!/usr/bin/env bash\nprintf '%%s\\n' \"$*\" > %q\nprintf 'ActiveState=active\\nMainPID=%%s\\nExecMainStartTimestampUSec=1784815033000000\\nActiveEnterTimestampUSec=1784815000000000\\n' \"$ADMIN_SYSTEMD_TEST_PID\"\n", argsPath))
+	t.Setenv("ADMIN_SYSTEMD_TEST_PID", strconv.Itoa(os.Getpid()))
+	t.Setenv("OPENAI_COMPAT_SYSTEMD_UNIT", "custom-proxy.service")
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	service, ok := lookupAdminSystemdServiceState(context.Background())
+	if !ok {
+		t.Fatal("expected systemd service state")
+	}
+	if service.PID != os.Getpid() {
+		t.Fatalf("expected current process pid, got %d", service.PID)
+	}
+	wantStartedAt := time.Date(2026, time.July, 23, 21, 57, 13, 0, time.FixedZone("CST", 8*60*60)).UTC()
+	if !service.StartedAt.Equal(wantStartedAt) {
+		t.Fatalf("expected started_at %s, got %s", wantStartedAt, service.StartedAt)
+	}
+	if args := mustReadAdminFile(t, argsPath); !strings.Contains(args, "custom-proxy.service") {
+		t.Fatalf("expected custom service name in systemctl call, got %q", args)
 	}
 }
 
@@ -1212,6 +1296,94 @@ func TestAdminUIRunnerScriptWritesLifecycleLogs(t *testing.T) {
 	}
 }
 
+func TestAdminCommandRunnerUsesTransientSystemdUnit(t *testing.T) {
+	root := t.TempDir()
+	systemdLog := filepath.Join(root, "systemd-run.log")
+	systemdRun := filepath.Join(root, "fake-bin", "systemd-run")
+	mustWriteAdminFile(t, systemdRun, "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$ADMIN_SYSTEMD_RUN_LOG\"\nargs=(\"$@\")\nfor ((i = 0; i < ${#args[@]}; i++)); do\n  if [[ \"${args[$i]}\" != --* ]]; then\n    \"${args[@]:$i}\" &\n    exit 0\n  fi\ndone\nexit 64\n")
+	mustWriteAdminFile(t, filepath.Join(root, "scripts", "restart-linux.sh"), "#!/usr/bin/env bash\nprintf 'restart-body\\n'\n")
+	runner := &adminCommandRunner{rootDir: root, systemdRunBin: systemdRun}
+	t.Setenv("ADMIN_SYSTEMD_RUN_LOG", systemdLog)
+
+	job, err := runner.Start("restart", "重启")
+	if err != nil {
+		t.Fatalf("start transient job: %v", err)
+	}
+	if job.Status != adminJobStatusRunning {
+		t.Fatalf("expected running job after launch, got %#v", job)
+	}
+	completed := mustWaitForAdminJob(t, runner, job.ID)
+	if completed.Status != adminJobStatusSucceeded {
+		t.Fatalf("expected transient job to persist success, got %#v", completed)
+	}
+	if !strings.Contains(completed.Output, "restart-body") {
+		t.Fatalf("expected transient job output, got %q", completed.Output)
+	}
+	command := mustReadAdminFile(t, systemdLog)
+	for _, want := range []string{
+		"--collect",
+		"--no-block",
+		"--service-type=exec",
+		"--unit=" + adminTransientJobUnitName(job.ID),
+		"--working-directory=" + root,
+		filepath.Join(root, ".admin-ui", "jobs", job.ID+".runner.sh"),
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("expected transient systemd command to contain %q, got %q", want, command)
+		}
+	}
+}
+
+func TestAdminCommandRunnerFallsBackWithoutTransientSystemd(t *testing.T) {
+	root := t.TempDir()
+	mustWriteAdminFile(t, filepath.Join(root, "scripts", "restart-linux.sh"), "#!/usr/bin/env bash\nprintf 'fallback-body\\n'\n")
+	runner := &adminCommandRunner{
+		rootDir:        root,
+		systemdRunBin:  filepath.Join(root, "missing-systemd-run"),
+		systemdManaged: func() bool { return false },
+	}
+
+	job, err := runner.Start("restart", "重启")
+	if err != nil {
+		t.Fatalf("start direct fallback job: %v", err)
+	}
+	completed := mustWaitForAdminJob(t, runner, job.ID)
+	if completed.Status != adminJobStatusSucceeded {
+		t.Fatalf("expected fallback job to persist success, got %#v", completed)
+	}
+	for _, want := range []string{"isolated systemd runner unavailable; using direct fallback", "fallback-body"} {
+		if !strings.Contains(completed.Output, want) {
+			t.Fatalf("expected fallback output to contain %q, got %q", want, completed.Output)
+		}
+	}
+}
+
+func TestAdminCommandRunnerDoesNotUseDirectFallbackWhenSystemdManaged(t *testing.T) {
+	root := t.TempDir()
+	systemdRun := filepath.Join(root, "fake-bin", "systemd-run")
+	mustWriteAdminFile(t, systemdRun, "#!/usr/bin/env bash\nexit 23\n")
+	mustWriteAdminFile(t, filepath.Join(root, "scripts", "restart-linux.sh"), "#!/usr/bin/env bash\nprintf 'must-not-run\\n'\n")
+	runner := &adminCommandRunner{
+		rootDir:        root,
+		systemdRunBin:  systemdRun,
+		systemdManaged: func() bool { return true },
+	}
+
+	job, err := runner.Start("restart", "重启")
+	if err != nil {
+		t.Fatalf("start managed job: %v", err)
+	}
+	if job.Status != adminJobStatusFailed || job.ExitCode != 1 {
+		t.Fatalf("expected managed launch failure, got %#v", job)
+	}
+	if strings.Contains(job.Output, "must-not-run") || strings.Contains(job.Output, "using direct fallback") {
+		t.Fatalf("managed job must not use direct fallback, got %q", job.Output)
+	}
+	if !strings.Contains(job.Output, "cannot start isolated systemd runner") {
+		t.Fatalf("expected isolated runner failure, got %q", job.Output)
+	}
+}
+
 func TestAdminUICreateRootEnvFromTemplate(t *testing.T) {
 	server := newAdminUITestServer(t)
 	cookie, csrf := adminLogin(t, server)
@@ -1784,7 +1956,44 @@ func newAdminUITestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("new runtime store: %v", err)
 	}
-	return NewServerWithStore(store, nil, nil)
+	server := NewServerWithStore(store, nil, nil)
+	server.admin.serviceState = func(context.Context) (adminServiceState, bool) {
+		return adminServiceState{}, false
+	}
+	return server
+}
+
+func mustWaitForAdminJob(t *testing.T, runner *adminCommandRunner, id string) *adminJob {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, ok := runner.Get(id)
+		if ok && job.Status != adminJobStatusRunning {
+			return job
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("admin job %s did not reach a terminal state", id)
+	return nil
+}
+
+func mustWriteAdminFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func mustReadAdminFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
 }
 
 func adminLogin(t *testing.T, server *Server) (*http.Cookie, string) {

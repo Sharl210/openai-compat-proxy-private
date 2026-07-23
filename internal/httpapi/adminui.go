@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -36,18 +37,20 @@ import (
 )
 
 const (
-	adminSessionCookieName  = "openai_compat_admin_session"
-	adminIndexPath          = "adminui_static/index.html"
-	adminAssetsPrefix       = "/_admin/assets/"
-	adminAPIPrefix          = "/_admin/api/"
-	adminMaxTextFileSize    = 1 << 20
-	adminLogTailSize        = 32 << 10
-	adminSessionTTL         = 12 * time.Hour
-	adminRememberTTL        = 30 * 24 * time.Hour
-	adminIdleJobTimeout     = 10 * time.Minute
-	adminJobStatusRunning   = "running"
-	adminJobStatusFailed    = "failed"
-	adminJobStatusSucceeded = "succeeded"
+	adminSessionCookieName         = "openai_compat_admin_session"
+	adminIndexPath                 = "adminui_static/index.html"
+	adminAssetsPrefix              = "/_admin/assets/"
+	adminAPIPrefix                 = "/_admin/api/"
+	adminMaxTextFileSize           = 1 << 20
+	adminLogTailSize               = 32 << 10
+	adminSessionTTL                = 12 * time.Hour
+	adminRememberTTL               = 30 * 24 * time.Hour
+	adminIdleJobTimeout            = 10 * time.Minute
+	adminJobStatusRunning          = "running"
+	adminJobStatusFailed           = "failed"
+	adminJobStatusSucceeded        = "succeeded"
+	adminDefaultSystemdServiceName = "openai-compat-proxy.service"
+	adminSystemdTimeout            = 2 * time.Second
 )
 
 //go:embed adminui_static/*
@@ -62,9 +65,17 @@ type adminUI struct {
 	cacheInfo    *cacheinfo.Manager
 	assets       fs.FS
 	runner       adminActionRunner
+	serviceState adminServiceStateLookup
 	loginLimiter *adminLoginLimiter
 	client       *http.Client
 }
+
+type adminServiceState struct {
+	PID       int
+	StartedAt time.Time
+}
+
+type adminServiceStateLookup func(context.Context) (adminServiceState, bool)
 
 type adminActionRunner interface {
 	Start(action string, label string) (*adminJob, error)
@@ -136,8 +147,11 @@ type adminValidationResult struct {
 }
 
 type adminCommandRunner struct {
-	rootDir string
-	mu      sync.Mutex
+	rootDir        string
+	systemdRunBin  string
+	bashBin        string
+	systemdManaged func() bool
+	mu             sync.Mutex
 }
 
 func newAdminUI(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *adminUI {
@@ -148,6 +162,7 @@ func newAdminUI(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager) *adminU
 		assets:       assets,
 		loginLimiter: &adminLoginLimiter{stateByIP: map[string]adminLoginState{}},
 		client:       &http.Client{Timeout: 2 * time.Second},
+		serviceState: lookupAdminSystemdServiceState,
 	}
 	ui.runner = &adminCommandRunner{rootDir: ui.rootDir()}
 	return ui
@@ -1483,6 +1498,7 @@ func (a *adminUI) runtimeStatus() map[string]any {
 		"proxy_key_configured": a.proxyKey() != "",
 		"pid":                  "",
 		"started_at":           "",
+		"runtime_source":       "",
 		"log_dir":              "",
 	}
 	if snapshot == nil {
@@ -1491,17 +1507,142 @@ func (a *adminUI) runtimeStatus() map[string]any {
 	status["listen_addr"] = snapshot.Config.ListenAddr
 	status["health_ok"] = a.checkHealth(snapshot.Config.ListenAddr)
 	status["log_dir"] = strings.TrimSpace(snapshot.Config.LogFilePath)
-	pidPath := filepath.Join(a.rootDir(), ".proxy.pid")
-	if info, err := os.Stat(pidPath); err == nil {
-		status["started_at"] = info.ModTime().UTC().Format(time.RFC3339)
+	if a.serviceState != nil {
+		if service, ok := a.serviceState(context.Background()); ok {
+			status["pid"] = strconv.Itoa(service.PID)
+			status["runtime_source"] = "systemd"
+			if !service.StartedAt.IsZero() {
+				status["started_at"] = service.StartedAt.UTC().Format(time.RFC3339)
+			}
+		}
 	}
-	if pidBytes, err := os.ReadFile(pidPath); err == nil {
-		status["pid"] = strings.TrimSpace(string(pidBytes))
+	if status["runtime_source"] == "" {
+		if fallback, ok := readAdminFallbackServiceState(a.rootDir()); ok {
+			status["pid"] = strconv.Itoa(fallback.PID)
+			status["started_at"] = fallback.StartedAt.UTC().Format(time.RFC3339)
+			status["runtime_source"] = "pid_file"
+		}
 	}
 	if current := a.runner.Current(); current != nil {
 		status["job"] = current
 	}
 	return status
+}
+
+func lookupAdminSystemdServiceState(ctx context.Context) (adminServiceState, bool) {
+	systemctl, ok := adminExecutablePath("", "systemctl")
+	if !ok {
+		return adminServiceState{}, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, adminSystemdTimeout)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, systemctl,
+		"show",
+		"--property=ActiveState",
+		"--property=MainPID",
+		"--property=ExecMainStartTimestampUSec",
+		"--property=ActiveEnterTimestampUSec",
+		adminSystemdServiceName(),
+	).Output()
+	if err != nil {
+		return adminServiceState{}, false
+	}
+	properties := parseAdminSystemdProperties(string(output))
+	if properties["ActiveState"] != "active" {
+		return adminServiceState{}, false
+	}
+	pid, err := strconv.Atoi(properties["MainPID"])
+	if err != nil || !adminPIDIsLive(pid) {
+		return adminServiceState{}, false
+	}
+	startedAt := parseAdminSystemdTimestampUSec(properties["ExecMainStartTimestampUSec"])
+	if startedAt.IsZero() {
+		startedAt = parseAdminSystemdTimestampUSec(properties["ActiveEnterTimestampUSec"])
+	}
+	return adminServiceState{PID: pid, StartedAt: startedAt}, true
+}
+
+func parseAdminSystemdProperties(output string) map[string]string {
+	properties := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		properties[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return properties
+}
+
+func adminSystemdServiceName() string {
+	if serviceName := strings.TrimSpace(os.Getenv("OPENAI_COMPAT_SYSTEMD_UNIT")); serviceName != "" {
+		return serviceName
+	}
+	return adminDefaultSystemdServiceName
+}
+
+func parseAdminSystemdTimestampUSec(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "n/a" {
+		return time.Time{}
+	}
+	startedAtUSec, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || startedAtUSec <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, startedAtUSec*int64(time.Microsecond)).UTC()
+}
+
+func readAdminFallbackServiceState(rootDir string) (adminServiceState, bool) {
+	pidPath := filepath.Join(rootDir, ".proxy.pid")
+	pidBytes, err := os.ReadFile(pidPath)
+	if err != nil {
+		return adminServiceState{}, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil || !adminPIDMatchesProxyBinary(rootDir, pid) {
+		return adminServiceState{}, false
+	}
+	info, err := os.Stat(pidPath)
+	if err != nil {
+		return adminServiceState{}, false
+	}
+	return adminServiceState{PID: pid, StartedAt: info.ModTime().UTC()}, true
+}
+
+func adminPIDMatchesProxyBinary(rootDir string, pid int) bool {
+	if !adminPIDIsLive(pid) {
+		return false
+	}
+	executable, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	if err != nil {
+		return false
+	}
+	expected := filepath.Clean(filepath.Join(rootDir, "bin", "openai-compat-proxy"))
+	return filepath.Clean(executable) == expected
+}
+
+func adminPIDIsLive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	if err := process.Signal(syscall.Signal(0)); err != nil && !errors.Is(err, syscall.EPERM) {
+		return false
+	}
+	stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return true
+	}
+	closeParen := strings.LastIndex(string(stat), ")")
+	if closeParen < 0 {
+		return false
+	}
+	fields := strings.Fields(string(stat)[closeParen+1:])
+	return len(fields) > 0 && fields[0] != "Z"
 }
 
 func (a *adminUI) checkHealth(listenAddr string) bool {
@@ -1754,21 +1895,15 @@ func (r *adminCommandRunner) Start(action string, label string) (*adminJob, erro
 	if err := r.writeWrapperScript(job, script); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("bash", r.jobScriptPath(job.ID))
-	cmd.Dir = r.rootDir
-	cmd.Stdin = nil
-	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return nil, err
+	if err := r.launchJobRunner(job); err != nil {
+		r.appendJobLog(job.ID, "[admin-ui] failed to launch job runner: "+err.Error()+"\n")
+		job.Status = adminJobStatusFailed
+		job.ExitCode = 1
+		job.FinishedAt = time.Now().UTC()
+		job.Output = "failed to launch job runner: " + err.Error()
+		_ = r.writeJob(job)
+		return cloneAdminJob(job), nil
 	}
-	defer devNull.Close()
-	cmd.Stdout = devNull
-	cmd.Stderr = devNull
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	_ = cmd.Process.Release()
 	return cloneAdminJob(job), nil
 }
 
@@ -1864,6 +1999,114 @@ func (r *adminCommandRunner) writeWrapperScript(job *adminJob, scriptPath string
 		return err
 	}
 	return nil
+}
+
+func (r *adminCommandRunner) launchJobRunner(job *adminJob) error {
+	bash, ok := adminExecutablePath(r.bashBin, "bash")
+	if !ok {
+		return errors.New("bash executable is unavailable")
+	}
+	managedBySystemd := r.isSystemdManaged()
+	if systemdRun, ok := adminExecutablePath(r.systemdRunBin, "systemd-run"); ok {
+		unit := adminTransientJobUnitName(job.ID)
+		if err := r.launchTransientSystemdRunner(systemdRun, unit, bash, r.jobScriptPath(job.ID)); err == nil {
+			r.appendJobLog(job.ID, fmt.Sprintf("[admin-ui] runner=systemd-transient unit=%s\n", unit))
+			return nil
+		} else if managedBySystemd {
+			return fmt.Errorf("cannot start isolated systemd runner: %w", err)
+		}
+	} else if managedBySystemd {
+		return errors.New("cannot start admin job outside the service cgroup because systemd-run is unavailable")
+	}
+	r.appendJobLog(job.ID, "[admin-ui] isolated systemd runner unavailable; using direct fallback\n")
+	return r.launchDirectRunner(bash, r.jobScriptPath(job.ID))
+}
+
+func (r *adminCommandRunner) isSystemdManaged() bool {
+	if r.systemdManaged != nil {
+		return r.systemdManaged()
+	}
+	if strings.TrimSpace(os.Getenv("OPENAI_COMPAT_SYSTEMD_UNIT")) != "" {
+		return true
+	}
+	service, ok := lookupAdminSystemdServiceState(context.Background())
+	if ok && service.PID == os.Getpid() {
+		return true
+	}
+	cgroup, err := os.ReadFile("/proc/self/cgroup")
+	return err == nil && strings.Contains(string(cgroup), ".service")
+}
+
+func adminExecutablePath(configured, fallback string) (string, bool) {
+	candidates := []string{configured}
+	if strings.TrimSpace(configured) == "" {
+		candidates = []string{fallback, filepath.Join("/usr/bin", fallback), filepath.Join("/bin", fallback)}
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func adminTransientJobUnitName(jobID string) string {
+	return "openai-compat-proxy-admin-" + strings.ReplaceAll(jobID, "_", "-") + ".service"
+}
+
+func (r *adminCommandRunner) launchTransientSystemdRunner(systemdRun, unit, bash, runnerScript string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), adminSystemdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, systemdRun,
+		"--quiet",
+		"--collect",
+		"--no-block",
+		"--service-type=exec",
+		"--unit="+unit,
+		"--working-directory="+r.rootDir,
+		bash,
+		runnerScript,
+	)
+	return runAdminLaunchCommand(cmd, false)
+}
+
+func (r *adminCommandRunner) launchDirectRunner(bash, runnerScript string) error {
+	cmd := exec.Command(bash, runnerScript)
+	cmd.Dir = r.rootDir
+	return runAdminLaunchCommand(cmd, true)
+}
+
+func runAdminLaunchCommand(cmd *exec.Cmd, detached bool) error {
+	cmd.Stdin = nil
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer devNull.Close()
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
+	if !detached {
+		return cmd.Run()
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_ = cmd.Process.Release()
+	return nil
+}
+
+func (r *adminCommandRunner) appendJobLog(jobID, line string) {
+	file, err := os.OpenFile(r.jobLogPath(jobID), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	_, _ = io.WriteString(file, line)
 }
 
 func (r *adminCommandRunner) cleanupExpiredJobsLocked(now time.Time) {
