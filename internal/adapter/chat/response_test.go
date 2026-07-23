@@ -116,6 +116,37 @@ func TestBuildResponseSeparatesAdjacentReasoningTitles(t *testing.T) {
 	}
 }
 
+func TestBuildResponseDerivesReasoningContentFromThinkingBlocks(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		ReasoningBlocks: []map[string]any{{
+			"type":     "thinking",
+			"thinking": "**标题****后续**",
+		}},
+	})
+
+	choices, _ := resp["choices"].([]map[string]any)
+	message, _ := choices[0]["message"].(map[string]any)
+	if got, _ := message["reasoning_content"].(string); got != "**标题**\n\n**后续**" {
+		t.Fatalf("expected thinking blocks to become formatted reasoning_content, got %#v", message)
+	}
+}
+
+func TestBuildResponsePrefersReasoningOverThinkingBlocks(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Reasoning: map[string]any{"reasoning_content": "**主标题****主后续**"},
+		ReasoningBlocks: []map[string]any{{
+			"type":     "thinking",
+			"thinking": "**备用标题****备用后续**",
+		}},
+	})
+
+	choices, _ := resp["choices"].([]map[string]any)
+	message, _ := choices[0]["message"].(map[string]any)
+	if got, _ := message["reasoning_content"].(string); got != "**主标题**\n\n**主后续**" {
+		t.Fatalf("expected direct reasoning to take precedence over thinking blocks, got %#v", message)
+	}
+}
+
 func TestBuildResponseTrimsOnlyVisibleTextTrailingCRLF(t *testing.T) {
 	result := aggregate.Result{
 		Text:      "first\r\nsecond \t\r\n",

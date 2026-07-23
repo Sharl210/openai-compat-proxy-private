@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"strings"
+
 	"openai-compat-proxy/internal/aggregate"
 	reasoningtext "openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/texttail"
@@ -21,7 +23,11 @@ func BuildResponse(result aggregate.Result) map[string]any {
 			message["content"] = nil
 		}
 	}
-	if reasoningContent := reasoningContentValue(result.Reasoning); reasoningContent != "" {
+	reasoningContent := reasoningContentValue(result.Reasoning)
+	if reasoningContent == "" {
+		reasoningContent = reasoningBlocksContentValue(result.ReasoningBlocks)
+	}
+	if reasoningContent != "" {
 		message["reasoning_content"] = reasoningContent
 	}
 
@@ -83,6 +89,20 @@ func reasoningContentValue(reasoning map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func reasoningBlocksContentValue(blocks []map[string]any) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if thinking, _ := block["thinking"].(string); thinking != "" {
+			parts = append(parts, reasoningtext.FormatText(thinking))
+			continue
+		}
+		if text := reasoningContentValue(block); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func chatUsage(usage map[string]any) any {
