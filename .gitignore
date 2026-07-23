@@ -1,5 +1,6 @@
 .env
 .proxy.pid
+.go-runtime/
 bin/
 providers/*.env
 providers/Cache_Info/

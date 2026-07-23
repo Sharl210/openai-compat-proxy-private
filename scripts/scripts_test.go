@@ -187,6 +187,7 @@ func TestDeployInstallsAndEnablesSystemdService(t *testing.T) {
 	for _, want := range []string{
 		"Description=OpenAI Compatibility Proxy",
 		"WorkingDirectory=" + repoDir,
+		"Environment=OPENAI_COMPAT_SYSTEMD_UNIT=%n",
 		"source \"$2\"",
 		"exec \"$4\"",
 		"\"" + filepath.Join(repoDir, ".env") + "\"",
@@ -380,6 +381,89 @@ func TestRuntimeScriptDoesNotReferenceLegacyLogVariables(t *testing.T) {
 			t.Fatalf("expected runtime.sh to stop referencing legacy log variable %q", legacy)
 		}
 	}
+}
+
+func TestDeployBuildsWithoutInheritedGoRuntimeEnvironment(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	goWrapper, goEnvLog := mustWriteGoEnvCapturingWrapper(t, repoDir)
+
+	result := runScriptWithEnv(t, repoDir, "deploy-linux.sh", map[string]string{
+		"DISABLE_SYSTEMD": "1",
+		"HOME":            "",
+		"GOPATH":          "",
+		"GOMODCACHE":      "",
+		"GOCACHE":         "",
+		"PATH":            filepath.Dir(goWrapper) + string(os.PathListSeparator) + os.Getenv("PATH"),
+	})
+	if result.err != nil {
+		t.Fatalf("expected deploy to build with fallback Go environment, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+
+	goRuntimeRoot := filepath.Join(repoDir, ".go-runtime")
+	for _, want := range []string{
+		"HOME=" + filepath.Join(goRuntimeRoot, "home"),
+		"GOPATH=" + filepath.Join(goRuntimeRoot, "gopath"),
+		"GOMODCACHE=" + filepath.Join(goRuntimeRoot, "gopath", "pkg", "mod"),
+		"GOCACHE=" + filepath.Join(goRuntimeRoot, "build-cache"),
+	} {
+		if !strings.Contains(mustReadFile(t, goEnvLog), want) {
+			t.Fatalf("expected Go command environment to contain %q, got %s", want, mustReadFile(t, goEnvLog))
+		}
+	}
+
+	pidText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	pid, err := strconv.Atoi(pidText)
+	if err != nil {
+		t.Fatalf("parse deployed pid: %v text=%q", err, pidText)
+	}
+	stopPID(t, pid)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
+}
+
+func TestDeployPreservesProvidedGoRuntimeEnvironment(t *testing.T) {
+	repoDir := newScriptTestRepo(t)
+	port := mustReservePort(t)
+	providersDir := filepath.Join(repoDir, "providers")
+	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
+	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	goWrapper, goEnvLog := mustWriteGoEnvCapturingWrapper(t, repoDir)
+	providedRoot := filepath.Join(repoDir, "provided-go-runtime")
+	provided := map[string]string{
+		"HOME":       filepath.Join(providedRoot, "home"),
+		"GOPATH":     filepath.Join(providedRoot, "gopath"),
+		"GOMODCACHE": filepath.Join(providedRoot, "modcache"),
+		"GOCACHE":    filepath.Join(providedRoot, "build-cache"),
+	}
+
+	result := runScriptWithEnv(t, repoDir, "deploy-linux.sh", map[string]string{
+		"DISABLE_SYSTEMD": "1",
+		"HOME":            provided["HOME"],
+		"GOPATH":          provided["GOPATH"],
+		"GOMODCACHE":      provided["GOMODCACHE"],
+		"GOCACHE":         provided["GOCACHE"],
+		"PATH":            filepath.Dir(goWrapper) + string(os.PathListSeparator) + os.Getenv("PATH"),
+	})
+	if result.err != nil {
+		t.Fatalf("expected deploy to preserve provided Go environment, err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+	}
+	for key, value := range provided {
+		want := key + "=" + value
+		if !strings.Contains(mustReadFile(t, goEnvLog), want) {
+			t.Fatalf("expected Go command environment to preserve %q, got %s", want, mustReadFile(t, goEnvLog))
+		}
+	}
+
+	pidText := strings.TrimSpace(mustReadFile(t, filepath.Join(repoDir, ".proxy.pid")))
+	pid, err := strconv.Atoi(pidText)
+	if err != nil {
+		t.Fatalf("parse deployed pid: %v text=%q", err, pidText)
+	}
+	stopPID(t, pid)
+	_ = os.Remove(filepath.Join(repoDir, ".proxy.pid"))
 }
 
 func TestDeployFailsWhenThirdPartyOccupiesPort(t *testing.T) {
@@ -747,15 +831,27 @@ func runScriptWithEnv(t *testing.T, repoDir string, scriptName string, env map[s
 	t.Helper()
 	cmd := exec.Command("bash", filepath.Join(repoDir, "scripts", scriptName))
 	cmd.Dir = repoDir
-	cmd.Env = append(os.Environ(), "PATH="+os.Getenv("PATH"))
-	for key, value := range env {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
+	cmd.Env = commandEnv(env)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	return scriptResult{stdout: stdout.String(), stderr: stderr.String(), err: err}
+}
+
+func commandEnv(overrides map[string]string) []string {
+	env := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, overridden := overrides[key]; overridden {
+			continue
+		}
+		env = append(env, entry)
+	}
+	for key, value := range overrides {
+		env = append(env, key+"="+value)
+	}
+	return env
 }
 
 func newScriptTestRepo(t *testing.T) string {
@@ -777,6 +873,19 @@ func mustBuildFakeProxy(t *testing.T, repoDir string) {
 	if err != nil {
 		t.Fatalf("build fake proxy: %v\n%s", err, output)
 	}
+}
+
+func mustWriteGoEnvCapturingWrapper(t *testing.T, repoDir string) (string, string) {
+	t.Helper()
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("find go: %v", err)
+	}
+	logPath := filepath.Join(repoDir, ".go-env.log")
+	wrapperPath := filepath.Join(repoDir, "fake-bin", "go")
+	content := fmt.Sprintf("#!/usr/bin/env bash\nprintf 'HOME=%%s\\nGOPATH=%%s\\nGOMODCACHE=%%s\\nGOCACHE=%%s\\n' \"$HOME\" \"$GOPATH\" \"$GOMODCACHE\" \"$GOCACHE\" >> %q\nexec %q \"$@\"\n", logPath, realGo)
+	mustWriteFile(t, wrapperPath, content)
+	return wrapperPath, logPath
 }
 
 func startFakeProxy(t *testing.T, repoDir string, env map[string]string) *exec.Cmd {

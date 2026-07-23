@@ -11,6 +11,7 @@ BACKUP_BIN_PATH="${BACKUP_BIN_PATH:-$BIN_DIR/openai-compat-proxy.bak}"
 PID_FILE="${PID_FILE:-$ROOT_DIR/.proxy.pid}"
 LOCK_DIR="${LOCK_DIR:-$ROOT_DIR/.proxy.lock}"
 GO_PROFILE_FILE="${GO_PROFILE_FILE:-/etc/profile.d/go.sh}"
+GO_RUNTIME_ROOT="${GO_RUNTIME_ROOT:-$ROOT_DIR/.go-runtime}"
 SYSTEMCTL_BIN_CONFIGURED="${SYSTEMCTL_BIN+x}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
@@ -64,6 +65,30 @@ release_lock() {
 
 command_missing() {
   ! command -v "$1" >/dev/null 2>&1
+}
+
+ensure_go_runtime_environment() {
+  local fallback_dirs=()
+
+  if [[ -z "${HOME:-}" ]]; then
+    export HOME="$GO_RUNTIME_ROOT/home"
+    fallback_dirs+=("$HOME")
+  fi
+  if [[ -z "${GOPATH:-}" ]]; then
+    export GOPATH="$GO_RUNTIME_ROOT/gopath"
+    fallback_dirs+=("$GOPATH")
+  fi
+  if [[ -z "${GOMODCACHE:-}" ]]; then
+    export GOMODCACHE="$GOPATH/pkg/mod"
+    fallback_dirs+=("$GOMODCACHE")
+  fi
+  if [[ -z "${GOCACHE:-}" ]]; then
+    export GOCACHE="$GO_RUNTIME_ROOT/build-cache"
+    fallback_dirs+=("$GOCACHE")
+  fi
+  if [[ ${#fallback_dirs[@]} -gt 0 ]]; then
+    mkdir -p "${fallback_dirs[@]}"
+  fi
 }
 
 systemctl_available() {
@@ -244,6 +269,7 @@ install_go_from_official_tarball() {
 }
 
 ensure_go() {
+  ensure_go_runtime_environment
   [[ -f "$GO_MOD_FILE" ]] || fail "Missing go.mod; cannot determine required Go version."
   local required_minor
   required_minor="$(awk '/^go / {print $2; exit}' "$GO_MOD_FILE")"
@@ -481,6 +507,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$ROOT_DIR
+Environment=OPENAI_COMPAT_SYSTEMD_UNIT=%n
 ExecStart=/usr/bin/env bash -c 'cd "\$1"; set -a; source "\$2"; set +a; export LISTEN_ADDR="\$3"; exec "\$4"' bash "$ROOT_DIR" "$ENV_FILE" "$normalized_listen_addr" "$BIN_PATH"
 Restart=always
 RestartSec=3
