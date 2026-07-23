@@ -23,6 +23,7 @@ type Logger struct {
 	maxRequests   int
 	maxBodySize   int
 	lastCleanupAt time.Time
+	requestFiles  map[string]*os.File
 	mu            sync.Mutex
 }
 
@@ -43,12 +44,13 @@ func New(cfg config.Config, stdout io.Writer) (*Logger, func() error, error) {
 		return nil, nil, err
 	}
 	logger := &Logger{
-		stdout:      stdout,
-		dir:         dir,
-		maxRequests: cfg.LogMaxRequests,
-		maxBodySize: int(cfg.LogMaxBodySizeMB * 1024 * 1024),
+		stdout:       stdout,
+		dir:          dir,
+		maxRequests:  cfg.LogMaxRequests,
+		maxBodySize:  int(cfg.LogMaxBodySizeMB * 1024 * 1024),
+		requestFiles: make(map[string]*os.File),
 	}
-	return logger, func() error { return nil }, nil
+	return logger, logger.Close, nil
 }
 
 func Init(cfg config.Config, stdout io.Writer) (func() error, error) {
@@ -80,6 +82,12 @@ func Event(name string, attrs map[string]any) {
 	}
 }
 
+func CloseRequest(requestID string) {
+	if logger := Default(); logger != nil {
+		logger.CloseRequest(requestID)
+	}
+}
+
 func (l *Logger) Event(name string, attrs map[string]any) {
 	if l == nil {
 		return
@@ -104,21 +112,54 @@ func (l *Logger) Event(name string, attrs map[string]any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	file, created := l.getFile(requestID)
+	file, created := l.getFileLocked(requestID)
 	if file == nil {
 		return
 	}
-	defer file.Close()
-	_, _ = file.Write(append(line, '\n'))
+	if _, err := file.Write(append(line, '\n')); err != nil {
+		_ = l.closeRequestLocked(requestID)
+	}
 	_, _ = fmt.Fprintf(l.stdout, "%s %s\n", name, summarize(record))
 
-	l.maybeCleanup(created)
+	l.maybeCleanup(created, requestID)
 }
 
-func (l *Logger) getFile(requestID string) (*os.File, bool) {
+func (l *Logger) CloseRequest(requestID string) {
+	if l == nil || requestID == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_ = l.closeRequestLocked(requestID)
+}
+
+func (l *Logger) Close() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var closeErr error
+	for requestID := range l.requestFiles {
+		if err := l.closeRequestLocked(requestID); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	return closeErr
+}
+
+func (l *Logger) getFileLocked(requestID string) (*os.File, bool) {
+	if file := l.requestFiles[requestID]; file != nil {
+		return file, false
+	}
 	filePath := filepath.Join(l.dir, requestID+".txt")
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err == nil {
+		if l.requestFiles == nil {
+			l.requestFiles = make(map[string]*os.File)
+		}
+		l.requestFiles[requestID] = file
 		return file, true
 	}
 	if !os.IsExist(err) {
@@ -128,10 +169,23 @@ func (l *Logger) getFile(requestID string) (*os.File, bool) {
 	if err != nil {
 		return nil, false
 	}
+	if l.requestFiles == nil {
+		l.requestFiles = make(map[string]*os.File)
+	}
+	l.requestFiles[requestID] = file
 	return file, false
 }
 
-func (l *Logger) maybeCleanup(created bool) {
+func (l *Logger) closeRequestLocked(requestID string) error {
+	file, ok := l.requestFiles[requestID]
+	if !ok {
+		return nil
+	}
+	delete(l.requestFiles, requestID)
+	return file.Close()
+}
+
+func (l *Logger) maybeCleanup(created bool, currentRequestID string) {
 	if l.maxRequests <= 0 {
 		return
 	}
@@ -139,12 +193,12 @@ func (l *Logger) maybeCleanup(created bool) {
 	if !created && !l.lastCleanupAt.IsZero() && now.Sub(l.lastCleanupAt) < loggerCleanupInterval {
 		return
 	}
-	if err := l.cleanupOldFiles(); err == nil {
+	if err := l.cleanupOldFiles(currentRequestID); err == nil {
 		l.lastCleanupAt = now
 	}
 }
 
-func (l *Logger) cleanupOldFiles() error {
+func (l *Logger) cleanupOldFiles(currentRequestID string) error {
 	if l.maxRequests <= 0 {
 		return nil
 	}
@@ -165,9 +219,34 @@ func (l *Logger) cleanupOldFiles() error {
 		return files[i].ModTime().Before(files[j].ModTime())
 	})
 	if len(files) > l.maxRequests {
-		for _, info := range files[:len(files)-l.maxRequests] {
-			os.Remove(filepath.Join(l.dir, info.Name()))
+		remaining := len(files) - l.maxRequests
+		currentPath := filepath.Clean(filepath.Join(l.dir, currentRequestID+".txt"))
+		for _, info := range files {
+			if remaining == 0 {
+				break
+			}
+			filePath := filepath.Join(l.dir, info.Name())
+			if filepath.Clean(filePath) == currentPath {
+				continue
+			}
+			if err := l.closeOpenFileForPathLocked(filePath, currentRequestID); err != nil {
+				return err
+			}
+			_ = os.Remove(filePath)
+			remaining--
 		}
+	}
+	return nil
+}
+
+func (l *Logger) closeOpenFileForPathLocked(filePath, currentRequestID string) error {
+	targetPath := filepath.Clean(filePath)
+	for requestID, file := range l.requestFiles {
+		if requestID == currentRequestID || filepath.Clean(file.Name()) != targetPath {
+			continue
+		}
+		delete(l.requestFiles, requestID)
+		return file.Close()
 	}
 	return nil
 }

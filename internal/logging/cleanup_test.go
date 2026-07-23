@@ -75,3 +75,39 @@ func TestLoggerDoesNotPruneWhenMaxRequestsIsNonPositive(t *testing.T) {
 		})
 	}
 }
+
+func TestLoggerReopensAfterRetentionPrunesAnActiveRequestFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{
+		LogFilePath:      tmpDir,
+		LogMaxRequests:   1,
+		LogMaxBodySizeMB: 1,
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	defer closeFn()
+
+	const prunedRequestID = "req-pruned-active"
+	prunedAttrs := map[string]any{"request_id": prunedRequestID}
+	logger.Event("before_prune", prunedAttrs)
+	prunedPath := filepath.Join(tmpDir, prunedRequestID+".txt")
+	oldTime := time.Unix(1, 0)
+	if err := os.Chtimes(prunedPath, oldTime, oldTime); err != nil {
+		t.Fatalf("age active request log: %v", err)
+	}
+
+	logger.Event("new_request", map[string]any{"request_id": "req-newer"})
+	if _, err := os.Stat(prunedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected older active request log to be pruned, stat err=%v", err)
+	}
+
+	logger.Event("after_prune", prunedAttrs)
+	content, err := os.ReadFile(prunedPath)
+	if err != nil {
+		t.Fatalf("read recreated request log: %v", err)
+	}
+	if !bytes.Contains(content, []byte(`"event":"after_prune"`)) {
+		t.Fatalf("expected later event to reopen a visible request log, got %s", content)
+	}
+}

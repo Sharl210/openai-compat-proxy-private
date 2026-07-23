@@ -236,6 +236,44 @@ func TestWithRequestIDLogsAPIAccessRequests(t *testing.T) {
 	}
 }
 
+func TestWithRequestIDClosesRequestLogAfterHandlerCompletion(t *testing.T) {
+	logDir := initMiddlewareTestLogger(t)
+	h := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logging.Event("handler_event", map[string]any{"request_id": w.Header().Get("X-Request-Id")})
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	requestID := rec.Header().Get("X-Request-Id")
+	if requestID == "" {
+		t.Fatal("expected request id header")
+	}
+	logPath := filepath.Join(logDir, requestID+".txt")
+	completedPath := filepath.Join(logDir, "completed-request-log.txt")
+	if err := os.Rename(logPath, completedPath); err != nil {
+		t.Fatalf("rename completed request log: %v", err)
+	}
+
+	logging.Event("after_handler_completion", map[string]any{"request_id": requestID})
+
+	newContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read post-completion request log: %v", err)
+	}
+	if !strings.Contains(string(newContent), `"event":"after_handler_completion"`) || strings.Contains(string(newContent), `"event":"handler_event"`) {
+		t.Fatalf("expected middleware completion to close the request handle, got %s", newContent)
+	}
+	completedContent, err := os.ReadFile(completedPath)
+	if err != nil {
+		t.Fatalf("read completed request log: %v", err)
+	}
+	if !strings.Contains(string(completedContent), `"event":"handler_event"`) || !strings.Contains(string(completedContent), `"event":"proxyToClientResponse"`) {
+		t.Fatalf("expected completed request log to retain handler and response events, got %s", completedContent)
+	}
+}
+
 func TestWithRequestIDLogsAliasResponsesPath(t *testing.T) {
 	logDir := initMiddlewareTestLogger(t)
 	h := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

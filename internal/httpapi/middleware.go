@@ -22,6 +22,7 @@ const normalizationVersion = "v1"
 func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestCounter, 1))
+		defer logging.CloseRequest(id)
 		w.Header().Set("X-Request-Id", id)
 		started := time.Now()
 		archiveWriter := archiveWriterForRequest(store, id, r.URL.Path)

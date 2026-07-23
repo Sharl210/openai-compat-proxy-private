@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,108 @@ func TestLoggerWritesTxtFileByRequestID(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("downstream_request_received")) {
 		t.Fatalf("expected stdout summary to mention event, got %s", stdout.String())
+	}
+}
+
+func TestLoggerReusesOpenRequestFileHandle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("renaming an open file is not portable on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	defer closeFn()
+
+	attrs := map[string]any{"request_id": "req-reused-handle"}
+	logger.Event("first_event", attrs)
+	logPath := filepath.Join(tmpDir, "req-reused-handle.txt")
+	renamedPath := filepath.Join(tmpDir, "renamed-request-log.txt")
+	if err := os.Rename(logPath, renamedPath); err != nil {
+		t.Fatalf("rename active request log: %v", err)
+	}
+
+	logger.Event("second_event", attrs)
+
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no reopened path while the request handle remains active, stat err=%v", err)
+	}
+	content, err := os.ReadFile(renamedPath)
+	if err != nil {
+		t.Fatalf("read renamed active request log: %v", err)
+	}
+	if !strings.Contains(string(content), `"event":"first_event"`) || !strings.Contains(string(content), `"event":"second_event"`) {
+		t.Fatalf("expected both events through the same open handle, got %s", content)
+	}
+}
+
+func TestLoggerReopensRequestFileAfterCloseRequest(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	defer closeFn()
+
+	const requestID = "req-reopen-after-close"
+	attrs := map[string]any{"request_id": requestID}
+	logger.Event("before_close", attrs)
+	logger.CloseRequest(requestID)
+
+	logPath := filepath.Join(tmpDir, requestID+".txt")
+	closedPath := filepath.Join(tmpDir, "closed-request-log.txt")
+	if err := os.Rename(logPath, closedPath); err != nil {
+		t.Fatalf("rename closed request log: %v", err)
+	}
+
+	logger.Event("after_close", attrs)
+
+	newContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read reopened request log: %v", err)
+	}
+	if !strings.Contains(string(newContent), `"event":"after_close"`) || strings.Contains(string(newContent), `"event":"before_close"`) {
+		t.Fatalf("expected only the reopened event in the new request log, got %s", newContent)
+	}
+	closedContent, err := os.ReadFile(closedPath)
+	if err != nil {
+		t.Fatalf("read closed request log: %v", err)
+	}
+	if !strings.Contains(string(closedContent), `"event":"before_close"`) || strings.Contains(string(closedContent), `"event":"after_close"`) {
+		t.Fatalf("expected closed request log to remain unchanged, got %s", closedContent)
+	}
+}
+
+func TestLoggerCloseClosesRemainingRequestHandles(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger, closeFn, err := logging.New(config.Config{LogFilePath: tmpDir, LogMaxRequests: 50, LogMaxBodySizeMB: 1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+
+	const requestID = "req-shutdown-close"
+	attrs := map[string]any{"request_id": requestID}
+	logger.Event("before_shutdown", attrs)
+	if err := closeFn(); err != nil {
+		t.Fatalf("close logger: %v", err)
+	}
+
+	logPath := filepath.Join(tmpDir, requestID+".txt")
+	closedPath := filepath.Join(tmpDir, "shutdown-request-log.txt")
+	if err := os.Rename(logPath, closedPath); err != nil {
+		t.Fatalf("rename shutdown request log: %v", err)
+	}
+	logger.Event("after_shutdown", attrs)
+
+	newContent, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read post-shutdown request log: %v", err)
+	}
+	if !strings.Contains(string(newContent), `"event":"after_shutdown"`) || strings.Contains(string(newContent), `"event":"before_shutdown"`) {
+		t.Fatalf("expected a reopened log after logger shutdown, got %s", newContent)
 	}
 }
 
