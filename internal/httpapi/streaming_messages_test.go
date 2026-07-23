@@ -793,6 +793,50 @@ func TestMessagesStreamFormatsReasoningSummaryDoneSuffix(t *testing.T) {
 	}
 }
 
+func TestMessagesStreamFormatsAdjacentReasoningDeltaTitles(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"**标题**\"}\n\n",
+		"event: response.reasoning.delta\n" +
+			"data: {\"summary\":\"**后续**\"}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "anthropic",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "anthropic",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			SupportsAnthropicMessages: true,
+			SupportsResponses:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"stream":true,
+		"max_tokens":64,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"\n\n**后续**"`) {
+		t.Fatalf("expected append-only adjacent thinking title deltas, got %s", body)
+	}
+	if strings.Contains(body, `"thinking":"**标题**\n\n**后续**"`) {
+		t.Fatalf("expected prior title not to be replayed in the second thinking delta, got %s", body)
+	}
+}
+
 func TestMessagesStreamCompletesReasoningSummaryFromItemDone(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.reasoning_summary_text.delta\n" +
