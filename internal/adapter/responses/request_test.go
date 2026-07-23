@@ -1085,6 +1085,9 @@ func TestDecodeRequestReplaysAdjacentToolProductionShape(t *testing.T) {
 	if len(canon.Messages) != 5 {
 		t.Fatalf("expected 5 canonical messages, got %#v", canon.Messages)
 	}
+	if !canon.ResponseInputItemsAreOriginal {
+		t.Fatalf("expected adjacent tool replay to retain raw-first input items, got %#v", canon)
+	}
 	roles := make([]string, 0, len(canon.Messages))
 	for _, msg := range canon.Messages {
 		roles = append(roles, msg.Role)

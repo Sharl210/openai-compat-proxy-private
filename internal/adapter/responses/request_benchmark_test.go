@@ -34,6 +34,19 @@ func BenchmarkDecodeRequestRichDynamicInput(b *testing.B) {
 	}
 }
 
+func BenchmarkDecodeRequestMixedContentSlowPath(b *testing.B) {
+	body := mixedContentResponsesDecodeRequestBody(b)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(body)))
+	b.ResetTimer()
+
+	for range b.N {
+		if _, err := DecodeRequest(bytes.NewReader(body)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func largeResponsesDecodeRequestBody(itemCount, textSize int) []byte {
 	text := strings.Repeat("a", textSize)
 	var builder strings.Builder
@@ -78,6 +91,34 @@ func richResponsesDecodeRequestBody(b *testing.B) []byte {
 		"tools":                []map[string]any{{"type": "function", "name": "lookup", "description": strings.Repeat("description ", 64), "parameters": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}}, "vendor_tool": map[string]any{"keep": true}}},
 		"input":                input,
 		"vendor_top_level":     map[string]any{"keep": true},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	return body
+}
+
+func mixedContentResponsesDecodeRequestBody(b *testing.B) []byte {
+	b.Helper()
+	input := make([]map[string]any, 0, 96)
+	for index := range 96 {
+		input = append(input, map[string]any{
+			"type": "message",
+			"id":   fmt.Sprintf("mixed_%03d", index),
+			"role": "assistant",
+			"content": []map[string]any{
+				{"type": "output_text", "text": strings.Repeat(fmt.Sprintf("answer-%03d ", index), 256), "vendor_text": map[string]any{"keep": true}},
+				{"type": "reasoning", "id": fmt.Sprintf("rs_%03d", index), "summary": []map[string]any{{"type": "summary_text", "text": strings.Repeat("thinking ", 128)}}, "encrypted_content": fmt.Sprintf("enc_%03d", index), "vendor_reasoning": map[string]any{"keep": true}},
+				{"type": "input_image", "image_url": map[string]any{"url": "https://example.test/image.png", "detail": "high", "vendor_image": map[string]any{"keep": true}}},
+				{"type": "input_file", "input_file": map[string]any{"file_id": fmt.Sprintf("file_%03d", index), "vendor_file": []any{"keep", nil}}},
+				{"type": "input_audio", "input_audio": map[string]any{"data": "YWJj", "format": "wav", "vendor_audio": map[string]any{"keep": true}}},
+			},
+			"tool_calls": []map[string]any{{"id": fmt.Sprintf("call_%03d", index), "type": "function", "function": map[string]any{"name": "lookup", "arguments": `{"query":"benchmark"}`}}},
+		})
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": "gpt-5.6",
+		"input": input,
 	})
 	if err != nil {
 		b.Fatal(err)

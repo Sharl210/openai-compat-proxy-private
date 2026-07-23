@@ -38,30 +38,6 @@ type request struct {
 
 type requestInput []json.RawMessage
 
-type message struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content"`
-	ToolCalls  []toolCall      `json:"tool_calls"`
-	ToolCallID string          `json:"tool_call_id"`
-}
-
-type toolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
-
-type contentPart struct {
-	Type       string          `json:"type"`
-	Text       string          `json:"text"`
-	ImageURL   json.RawMessage `json:"image_url"`
-	InputAudio json.RawMessage `json:"input_audio"`
-	InputFile  json.RawMessage `json:"input_file"`
-}
-
 type tool struct {
 	Type        string         `json:"type"`
 	Name        string         `json:"name"`
@@ -389,7 +365,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		if isResponsesLegacyToolCallMessage(rawItemMap) {
 			canon.ResponseInputItemsAreOriginal = false
 		}
-		preserved, msg, ok, syntheticReasoningReplay, err := decodeInputItem(rawItem, rawItemMap)
+		preserved, msg, ok, syntheticReasoningReplay, err := decodeInputItem(rawItemMap)
 		if err != nil {
 			return model.CanonicalRequest{}, err
 		}
@@ -560,7 +536,7 @@ func validateResponsesInputItemGraphItem(rawMap map[string]any, functionCallIDs 
 	return nil
 }
 
-func decodeInputItem(raw json.RawMessage, rawMap map[string]any) (map[string]any, model.CanonicalMessage, bool, bool, error) {
+func decodeInputItem(rawMap map[string]any) (map[string]any, model.CanonicalMessage, bool, bool, error) {
 	itemType, _ := rawMap["type"].(string)
 	if itemType == "reasoning" {
 		if model.IsSyntheticResponsesReasoningPlaceholder(rawMap) {
@@ -609,87 +585,194 @@ func decodeInputItem(raw json.RawMessage, rawMap map[string]any) (map[string]any
 		if msg, ok := decodeTextOnlyMessageInputItem(rawMap); ok {
 			return preserveResponsesInputItem(rawMap), msg, true, false, nil
 		}
-		var msg message
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			return nil, model.CanonicalMessage{}, false, false, err
-		}
-		decodedContent, err := decodeMessageContent(msg.Content)
+		msg, err := decodeResponsesMessageInputItem(rawMap, role)
 		if err != nil {
 			return nil, model.CanonicalMessage{}, false, false, err
 		}
-		var rawContent []map[string]any
-		_ = json.Unmarshal(msg.Content, &rawContent)
-		parts := make([]model.CanonicalContentPart, 0, len(decodedContent))
-		normalizedContent := make([]map[string]any, 0, len(decodedContent))
-		reasoningBlocks := make([]map[string]any, 0, len(decodedContent))
-		for idx, part := range decodedContent {
-			switch part.Type {
-			case "input_text", "output_text", "text":
-				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: part.Text})
-				normalizedType := part.Type
-				if role == "assistant" && normalizedType == "input_text" {
-					normalizedType = "output_text"
-				}
-				if normalizedType == "text" || normalizedType == "" {
-					if role == "assistant" {
-						normalizedType = "output_text"
-					} else {
-						normalizedType = "input_text"
-					}
-				}
-				normalizedContent = append(normalizedContent, map[string]any{"type": normalizedType, "text": part.Text})
-			case "input_image", "image_url":
-				imagePart, normalizedImage, err := decodeResponsesInputImage(part.ImageURL)
-				if err != nil {
-					return nil, model.CanonicalMessage{}, false, false, err
-				}
-				parts = append(parts, imagePart)
-				normalizedContent = append(normalizedContent, map[string]any{"type": "input_image", "image_url": normalizedImage})
-			case "input_file":
-				var rawFile map[string]any
-				if err := json.Unmarshal(part.InputFile, &rawFile); err != nil {
-					return nil, model.CanonicalMessage{}, false, false, err
-				}
-				parts = append(parts, model.CanonicalContentPart{Type: "input_file", Raw: map[string]any{"input_file": rawFile}})
-				normalizedContent = append(normalizedContent, map[string]any{"type": "input_file", "input_file": rawFile})
-			case "input_audio":
-				var rawAudio map[string]any
-				if err := json.Unmarshal(part.InputAudio, &rawAudio); err != nil {
-					return nil, model.CanonicalMessage{}, false, false, err
-				}
-				parts = append(parts, model.CanonicalContentPart{Type: "input_audio", Raw: map[string]any{"input_audio": rawAudio}})
-				normalizedContent = append(normalizedContent, map[string]any{"type": "input_audio", "input_audio": rawAudio})
-			case "reasoning":
-				if idx < len(rawContent) {
-					block := cloneMapAny(rawContent[idx])
-					if model.IsSyntheticResponsesReasoningPlaceholder(block) {
-						continue
-					}
-					if len(block) > 0 {
-						reasoningBlocks = append(reasoningBlocks, block)
-						normalizedContent = append(normalizedContent, cloneMapAny(block))
-					}
-				}
-			default:
-				return nil, model.CanonicalMessage{}, false, false, fmt.Errorf("unsupported content type: %s", part.Type)
-			}
-		}
-
-		var toolCalls []model.CanonicalToolCall
-		for _, tc := range msg.ToolCalls {
-			toolCalls = append(toolCalls, model.CanonicalToolCall{
-				ID:        tc.ID,
-				Type:      tc.Type,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
-			})
-		}
-
 		preserved := preserveResponsesInputItem(rawMap)
 
-		return preserved, model.CanonicalMessage{Role: msg.Role, Parts: parts, ToolCalls: toolCalls, ToolCallID: msg.ToolCallID, ReasoningBlocks: reasoningBlocks}, true, false, nil
+		return preserved, msg, true, false, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, false, nil
+}
+
+func decodeResponsesMessageInputItem(rawMap map[string]any, role string) (model.CanonicalMessage, error) {
+	parts, reasoningBlocks, err := decodeResponsesMessageContent(rawMap)
+	if err != nil {
+		return model.CanonicalMessage{}, err
+	}
+	toolCalls, err := decodeResponsesMessageToolCalls(rawMap)
+	if err != nil {
+		return model.CanonicalMessage{}, err
+	}
+	toolCallID, err := decodeResponsesOptionalString(rawMap, "tool_call_id")
+	if err != nil {
+		return model.CanonicalMessage{}, err
+	}
+	return model.CanonicalMessage{
+		Role:            role,
+		Parts:           parts,
+		ToolCalls:       toolCalls,
+		ToolCallID:      toolCallID,
+		ReasoningBlocks: reasoningBlocks,
+	}, nil
+}
+
+func decodeResponsesMessageContent(rawMap map[string]any) ([]model.CanonicalContentPart, []map[string]any, error) {
+	parts := make([]model.CanonicalContentPart, 0)
+	reasoningBlocks := make([]map[string]any, 0)
+	content, exists := rawMap["content"]
+	if !exists {
+		return parts, reasoningBlocks, nil
+	}
+	switch typed := content.(type) {
+	case nil:
+		return append(parts, model.CanonicalContentPart{Type: "text"}), reasoningBlocks, nil
+	case string:
+		if isUndefinedString(typed) {
+			return parts, reasoningBlocks, nil
+		}
+		return append(parts, model.CanonicalContentPart{Type: "text", Text: typed}), reasoningBlocks, nil
+	case []any:
+		parts = make([]model.CanonicalContentPart, 0, len(typed))
+		reasoningBlocks = make([]map[string]any, 0, len(typed))
+		for _, rawPart := range typed {
+			part, ok := rawPart.(map[string]any)
+			if !ok {
+				return nil, nil, fmt.Errorf("responses message content item must be an object")
+			}
+			partType, err := decodeResponsesOptionalString(part, "type")
+			if err != nil {
+				return nil, nil, err
+			}
+			text, err := decodeResponsesOptionalString(part, "text")
+			if err != nil {
+				return nil, nil, err
+			}
+			switch partType {
+			case "input_text", "output_text", "text":
+				parts = append(parts, model.CanonicalContentPart{Type: "text", Text: text})
+			case "input_image", "image_url":
+				imagePart, err := decodeResponsesInputImageValue(part)
+				if err != nil {
+					return nil, nil, err
+				}
+				parts = append(parts, imagePart)
+			case "input_file", "input_audio":
+				field := partType
+				value, err := decodeResponsesNestedObject(part, field)
+				if err != nil {
+					return nil, nil, err
+				}
+				parts = append(parts, model.CanonicalContentPart{Type: partType, Raw: map[string]any{field: value}})
+			case "reasoning":
+				block := cloneMapAny(part)
+				if model.IsSyntheticResponsesReasoningPlaceholder(block) {
+					continue
+				}
+				if len(block) > 0 {
+					reasoningBlocks = append(reasoningBlocks, block)
+				}
+			default:
+				return nil, nil, fmt.Errorf("unsupported content type: %s", partType)
+			}
+		}
+		return parts, reasoningBlocks, nil
+	default:
+		return nil, nil, fmt.Errorf("responses message content must be a string or array")
+	}
+}
+
+func decodeResponsesMessageToolCalls(rawMap map[string]any) ([]model.CanonicalToolCall, error) {
+	rawCalls, exists := rawMap["tool_calls"]
+	if !exists || rawCalls == nil {
+		return nil, nil
+	}
+	calls, ok := rawCalls.([]any)
+	if !ok {
+		return nil, fmt.Errorf("responses message tool_calls must be an array")
+	}
+	var decoded []model.CanonicalToolCall
+	for _, rawCall := range calls {
+		if rawCall == nil {
+			decoded = append(decoded, model.CanonicalToolCall{})
+			continue
+		}
+		call, ok := rawCall.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("responses message tool call must be an object")
+		}
+		id, err := decodeResponsesOptionalString(call, "id")
+		if err != nil {
+			return nil, err
+		}
+		callType, err := decodeResponsesOptionalString(call, "type")
+		if err != nil {
+			return nil, err
+		}
+		name, arguments := "", ""
+		if rawFunction, exists := call["function"]; exists && rawFunction != nil {
+			function, ok := rawFunction.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("responses message tool call function must be an object")
+			}
+			name, err = decodeResponsesOptionalString(function, "name")
+			if err != nil {
+				return nil, err
+			}
+			arguments, err = decodeResponsesOptionalString(function, "arguments")
+			if err != nil {
+				return nil, err
+			}
+		}
+		decoded = append(decoded, model.CanonicalToolCall{ID: id, Type: callType, Name: name, Arguments: arguments})
+	}
+	return decoded, nil
+}
+
+func decodeResponsesOptionalString(rawMap map[string]any, key string) (string, error) {
+	value, exists := rawMap[key]
+	if !exists || value == nil {
+		return "", nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("responses %s must be a string", key)
+	}
+	return text, nil
+}
+
+func decodeResponsesNestedObject(rawMap map[string]any, key string) (map[string]any, error) {
+	value, exists := rawMap[key]
+	if !exists {
+		return nil, fmt.Errorf("responses %s is required", key)
+	}
+	if value == nil {
+		return nil, nil
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("responses %s must be an object", key)
+	}
+	return cloneMapAny(object), nil
+}
+
+func decodeResponsesInputImageValue(rawMap map[string]any) (model.CanonicalContentPart, error) {
+	value, exists := rawMap["image_url"]
+	if !exists {
+		return model.CanonicalContentPart{}, fmt.Errorf("responses image_url is required")
+	}
+	switch typed := value.(type) {
+	case nil:
+		return model.CanonicalContentPart{Type: "input_image"}, nil
+	case string:
+		return model.CanonicalContentPart{Type: "input_image", ImageURL: typed}, nil
+	case map[string]any:
+		url, _ := typed["url"].(string)
+		return model.CanonicalContentPart{Type: "input_image", ImageURL: url, Raw: map[string]any{"image_url": cloneMapAny(typed)}}, nil
+	default:
+		return model.CanonicalContentPart{}, fmt.Errorf("responses image_url must be a string or object")
+	}
 }
 
 func decodeTextOnlyMessageInputItem(rawMap map[string]any) (model.CanonicalMessage, bool) {
@@ -753,24 +836,29 @@ func textOnlyContentPartText(part map[string]any) (string, bool) {
 }
 
 func preserveResponsesInputItem(rawMap map[string]any) map[string]any {
-	preserved := cloneMapAny(rawMap)
 	content, ok := rawMap["content"].([]any)
 	if !ok {
-		return preserved
+		return rawMap
 	}
-	filtered := make([]any, 0, len(content))
-	removedSyntheticReasoning := false
-	for _, part := range content {
+	var filtered []any
+	for index, part := range content {
 		block, _ := part.(map[string]any)
 		if model.IsSyntheticResponsesReasoningPlaceholder(block) {
-			removedSyntheticReasoning = true
+			if filtered == nil {
+				filtered = make([]any, 0, len(content))
+				filtered = append(filtered, content[:index]...)
+			}
 			continue
 		}
-		filtered = append(filtered, part)
+		if filtered != nil {
+			filtered = append(filtered, part)
+		}
 	}
-	if removedSyntheticReasoning {
-		preserved["content"] = filtered
+	if filtered == nil {
+		return rawMap
 	}
+	preserved := cloneMapAny(rawMap)
+	preserved["content"] = filtered
 	return preserved
 }
 
@@ -971,37 +1059,6 @@ func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error
 		}
 		return []model.CanonicalContentPart{{Type: "text", Text: string(encoded), Raw: map[string]any{"tool_output_structured": typed}}}, nil
 	}
-}
-
-func decodeMessageContent(raw json.RawMessage) ([]contentPart, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var single string
-	if err := json.Unmarshal(raw, &single); err == nil {
-		if isUndefinedString(single) {
-			return nil, nil
-		}
-		return []contentPart{{Type: "input_text", Text: single}}, nil
-	}
-	var parts []contentPart
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, err
-	}
-	return parts, nil
-}
-
-func decodeResponsesInputImage(raw json.RawMessage) (model.CanonicalContentPart, any, error) {
-	var asString string
-	if err := json.Unmarshal(raw, &asString); err == nil {
-		return model.CanonicalContentPart{Type: "input_image", ImageURL: asString}, asString, nil
-	}
-	var asMap map[string]any
-	if err := json.Unmarshal(raw, &asMap); err != nil {
-		return model.CanonicalContentPart{}, nil, err
-	}
-	url, _ := asMap["url"].(string)
-	return model.CanonicalContentPart{Type: "input_image", ImageURL: url, Raw: map[string]any{"image_url": cloneMapAny(asMap)}}, cloneMapAny(asMap), nil
 }
 
 func (ri *requestInput) UnmarshalJSON(data []byte) error {

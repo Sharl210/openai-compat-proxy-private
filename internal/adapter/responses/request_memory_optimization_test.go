@@ -207,6 +207,131 @@ func TestDecodeRequestMemoryOptimizationFixturePreservesTypedMultimodalSemantics
 	}
 }
 
+func TestDecodeRequestMixedMessageContentPreservesSlowPathSemantics(t *testing.T) {
+	requestBody := []byte(`{
+		"model":"gpt-5.6",
+		"previous_response_id":"resp_mixed",
+		"vendor_top_level":{"keep":true},
+		"input":[{
+			"type":"message",
+			"id":"msg_mixed",
+			"role":"assistant",
+			"content":[
+				{"type":"output_text","text":"answer","vendor_text":{"keep":true}},
+				{"type":"reasoning","id":"rs_real","summary":[{"type":"summary_text","text":"thinking"}],"encrypted_content":"enc_real","vendor_reasoning":{"keep":true}},
+				{"type":"input_image","image_url":{"url":"https://example.test/image.png","detail":"high","vendor_image":{"keep":true}}},
+				{"type":"input_file","input_file":{"file_id":"file_123","vendor_file":["keep",null]}},
+				{"type":"input_audio","input_audio":{"data":"YWJj","format":"wav","vendor_audio":{"keep":true}}}
+			],
+			"tool_calls":[{"id":"call_123","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"weather\"}"}}],
+			"vendor_message":{"keep":true}
+		}]
+	}`)
+	var original map[string]any
+	if err := json.Unmarshal(requestBody, &original); err != nil {
+		t.Fatalf("unmarshal original request body: %v", err)
+	}
+
+	canon, err := DecodeRequest(bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.ResponseInputItemsAreOriginal {
+		t.Fatalf("expected assistant tool-call message to use canonical construction, got %#v", canon)
+	}
+	wantInput, _ := original["input"].([]any)
+	gotInput := make([]any, 0, len(canon.ResponseInputItems))
+	for _, item := range canon.ResponseInputItems {
+		if preserved, isTopLevelEcho := item[preservedResponsesTopLevelFieldsKey].(map[string]any); isTopLevelEcho {
+			if preserved["previous_response_id"] != "resp_mixed" {
+				t.Fatalf("expected previous_response_id top-level echo preserved, got %#v", preserved)
+			}
+			continue
+		}
+		gotInput = append(gotInput, item)
+	}
+	if !reflect.DeepEqual(gotInput, wantInput) {
+		t.Fatalf("expected mixed raw input to remain lossless, got %#v want %#v", gotInput, wantInput)
+	}
+	if len(canon.Messages) != 1 {
+		t.Fatalf("expected one canonical assistant message, got %#v", canon.Messages)
+	}
+	message := canon.Messages[0]
+	if message.Role != "assistant" || len(message.Parts) != 4 || len(message.ReasoningBlocks) != 1 || len(message.ToolCalls) != 1 {
+		t.Fatalf("expected typed mixed message content, got %#v", message)
+	}
+	if message.Parts[0].Type != "text" || message.Parts[0].Text != "answer" {
+		t.Fatalf("expected assistant output text preserved, got %#v", message.Parts[0])
+	}
+	if message.ToolCalls[0].ID != "call_123" || message.ToolCalls[0].Name != "lookup" || message.ToolCalls[0].Arguments != `{"query":"weather"}` {
+		t.Fatalf("expected function call preserved, got %#v", message.ToolCalls)
+	}
+	reasoning := message.ReasoningBlocks[0]
+	if reasoning["encrypted_content"] != "enc_real" || reasoning["vendor_reasoning"].(map[string]any)["keep"] != true {
+		t.Fatalf("expected opaque reasoning fields preserved, got %#v", reasoning)
+	}
+	image, _ := message.Parts[1].Raw["image_url"].(map[string]any)
+	file, _ := message.Parts[2].Raw["input_file"].(map[string]any)
+	audio, _ := message.Parts[3].Raw["input_audio"].(map[string]any)
+	if image["detail"] != "high" || image["vendor_image"].(map[string]any)["keep"] != true || file["file_id"] != "file_123" || !reflect.DeepEqual(file["vendor_file"], []any{"keep", nil}) || audio["format"] != "wav" || audio["vendor_audio"].(map[string]any)["keep"] != true {
+		t.Fatalf("expected image, file, and audio fields preserved, got image=%#v file=%#v audio=%#v", image, file, audio)
+	}
+}
+
+func TestDecodeRequestSlowPathSeparatesPreservedAndCanonicalOwnership(t *testing.T) {
+	requestBody := []byte(`{
+		"model":"gpt-5.6",
+		"input":[{
+			"type":"message",
+			"role":"assistant",
+			"content":[
+				{"type":"output_text","text":"answer"},
+				{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}],"encrypted_content":"enc_real"},
+				{"type":"input_image","image_url":{"url":"https://example.test/image.png","detail":"high"}}
+			],
+			"tool_calls":[{"id":"call_123","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"weather\"}"}}]
+		}]
+	}`)
+
+	canon, err := DecodeRequest(bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.ResponseInputItems) != 1 || len(canon.Messages) != 1 {
+		t.Fatalf("expected one preserved and one canonical message, got %#v", canon)
+	}
+
+	preserved := canon.ResponseInputItems[0]
+	content := preserved["content"].([]any)
+	content[0].(map[string]any)["text"] = "mutated-preserved"
+	content[1].(map[string]any)["encrypted_content"] = "mutated-preserved"
+	content[2].(map[string]any)["image_url"].(map[string]any)["detail"] = "low"
+	preserved["tool_calls"].([]any)[0].(map[string]any)["function"].(map[string]any)["arguments"] = `{"query":"mutated"}`
+
+	message := canon.Messages[0]
+	if message.Parts[0].Text != "answer" || message.ReasoningBlocks[0]["encrypted_content"] != "enc_real" || message.Parts[1].Raw["image_url"].(map[string]any)["detail"] != "high" || message.ToolCalls[0].Arguments != `{"query":"weather"}` {
+		t.Fatalf("expected preserved-input mutation not to affect canonical data, got %#v", message)
+	}
+
+	message.ReasoningBlocks[0]["encrypted_content"] = "mutated-canonical"
+	message.Parts[1].Raw["image_url"].(map[string]any)["detail"] = "canonical-low"
+	if content[1].(map[string]any)["encrypted_content"] != "mutated-preserved" || content[2].(map[string]any)["image_url"].(map[string]any)["detail"] != "low" {
+		t.Fatalf("expected canonical mutation not to affect preserved input, got %#v", preserved)
+	}
+}
+
+func TestDecodeRequestSlowPathRejectsMalformedFields(t *testing.T) {
+	for _, requestBody := range []string{
+		`{"model":"gpt-5.6","input":[{"role":"user","content":[{"type":"input_text","text":true}],"tool_calls":[]}]}`,
+		`{"model":"gpt-5.6","input":[{"role":"user","content":[{"type":"input_file","input_file":"not-an-object"}],"tool_calls":[]}]}`,
+		`{"model":"gpt-5.6","input":[{"role":"assistant","content":"answer","tool_calls":[{"id":7}]}]}`,
+	} {
+		if _, err := DecodeRequest(bytes.NewReader([]byte(requestBody))); err == nil {
+			t.Fatalf("expected malformed slow-path field to fail: %s", requestBody)
+		}
+	}
+}
+
 func TestDecodeRequestTextOnlyMessageFastPathPreservesDynamicFields(t *testing.T) {
 	requestBody := []byte(`{
 		"model":"gpt-5.6",
