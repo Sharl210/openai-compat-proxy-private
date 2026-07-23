@@ -238,6 +238,623 @@ func TestResponsesHistoryStore_preserves_dynamic_types_while_compressing_text(t 
 	}
 }
 
+func TestResponsesHistoryStoreRoundTripsCompressedDynamicRawWithoutRetainingCallerData(t *testing.T) {
+	// Given
+	payload := strings.Repeat("dynamic raw payload ", 8192)
+	raw := map[string]any{
+		"input_audio": map[string]any{
+			"data":   payload,
+			"format": "wav",
+			"chunks": []any{map[string]any{"payload": payload, "sequence": json.Number("7")}},
+		},
+		"object_blocks": []map[string]any{{"payload": payload}},
+		"opaque":        json.RawMessage(`{"kind":"vendor"}`),
+		"bytes":         []byte("binary payload"),
+	}
+	messages := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: []model.CanonicalContentPart{{Type: "input_audio", Raw: raw}},
+	}}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	// When
+	store.Save("openai", "resp-dynamic-raw", messages)
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-dynamic-raw")]
+
+	// Then
+	var compressedRawFields int
+	for _, field := range snapshot.CompressedFields {
+		if field.Kind == responsesHistoryCompressedPartRawString {
+			compressedRawFields++
+		}
+	}
+	if compressedRawFields < 3 {
+		t.Fatalf("expected nested dynamic raw strings to be compressed, got %d fields", compressedRawFields)
+	}
+	storedAudio, _ := snapshot.Messages[0].Parts[0].Raw["input_audio"].(map[string]any)
+	if storedAudio["data"] != "" {
+		t.Fatalf("expected compressed raw payload to be released, got %d bytes", len(stringValue(storedAudio["data"])))
+	}
+	storedChunks, _ := storedAudio["chunks"].([]any)
+	storedChunk, _ := storedChunks[0].(map[string]any)
+	if storedChunk["payload"] != "" {
+		t.Fatalf("expected nested compressed raw payload to be released, got %d bytes", len(stringValue(storedChunk["payload"])))
+	}
+	storedBlocks, _ := snapshot.Messages[0].Parts[0].Raw["object_blocks"].([]map[string]any)
+	if storedBlocks[0]["payload"] != "" {
+		t.Fatalf("expected typed map slice payload to be released, got %d bytes", len(stringValue(storedBlocks[0]["payload"])))
+	}
+
+	originalAudio, _ := raw["input_audio"].(map[string]any)
+	if originalAudio["data"] != payload {
+		t.Fatalf("expected caller raw data to remain unchanged, got %#v", originalAudio)
+	}
+	originalAudio["data"] = "caller mutation"
+	originalChunks, _ := originalAudio["chunks"].([]any)
+	originalChunk, _ := originalChunks[0].(map[string]any)
+	originalChunk["payload"] = "caller mutation"
+
+	loaded := store.Load("openai", "resp-dynamic-raw")
+	if len(loaded) != 1 || len(loaded[0].Parts) != 1 {
+		t.Fatalf("expected dynamic raw snapshot to load, got %#v", loaded)
+	}
+	loadedRaw := loaded[0].Parts[0].Raw
+	loadedAudio, _ := loadedRaw["input_audio"].(map[string]any)
+	if loadedAudio["data"] != payload {
+		t.Fatalf("expected restored raw payload, got %d bytes", len(stringValue(loadedAudio["data"])))
+	}
+	loadedChunks, _ := loadedAudio["chunks"].([]any)
+	loadedChunk, _ := loadedChunks[0].(map[string]any)
+	if loadedChunk["payload"] != payload || loadedChunk["sequence"] != json.Number("7") {
+		t.Fatalf("expected nested dynamic values to round-trip, got %#v", loadedChunk)
+	}
+	loadedBlocks, _ := loadedRaw["object_blocks"].([]map[string]any)
+	if len(loadedBlocks) != 1 || loadedBlocks[0]["payload"] != payload {
+		t.Fatalf("expected typed map slice payload to round-trip, got %#v", loadedBlocks)
+	}
+	if got, ok := loadedRaw["opaque"].(json.RawMessage); !ok || string(got) != `{"kind":"vendor"}` {
+		t.Fatalf("expected json.RawMessage type to round-trip, got %#v", loadedRaw["opaque"])
+	}
+	if got, ok := loadedRaw["bytes"].([]byte); !ok || string(got) != "binary payload" {
+		t.Fatalf("expected []byte type to round-trip, got %#v", loadedRaw["bytes"])
+	}
+	loadedAudio["data"] = "load mutation"
+	if reloaded := store.Load("openai", "resp-dynamic-raw"); reloaded[0].Parts[0].Raw["input_audio"].(map[string]any)["data"] != payload {
+		t.Fatalf("expected loaded raw mutation not to affect the stored snapshot, got %#v", reloaded)
+	}
+}
+
+func TestResponsesHistoryStoreSharesCompressedReasoningWithToolRecovery(t *testing.T) {
+	// Given
+	payload := strings.Repeat("opaque reasoning state ", 8192)
+	reasoning := map[string]any{
+		"id":                "rs_upstream",
+		"type":              "reasoning",
+		"encrypted_content": payload,
+		"summary":           []any{map[string]any{"type": "summary_text", "text": payload}},
+	}
+	messages := []model.CanonicalMessage{{
+		Role:            "assistant",
+		ReasoningBlocks: []map[string]any{reasoning},
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-reasoning-share",
+			Type:      "function",
+			Name:      "lookup",
+			Arguments: `{"query":"weather"}`,
+		}},
+	}}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	// When
+	store.Save("openai", "resp-reasoning-share", messages)
+
+	// Then
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-reasoning-share")]
+	var compressedReasoningFields int
+	for _, field := range snapshot.CompressedFields {
+		if field.Kind == responsesHistoryCompressedReasoningBlockString {
+			compressedReasoningFields++
+		}
+	}
+	if compressedReasoningFields < 2 {
+		t.Fatalf("expected reasoning state fields to be compressed, got %d", compressedReasoningFields)
+	}
+	storedReasoning := snapshot.Messages[0].ReasoningBlocks[0]
+	if storedReasoning["encrypted_content"] != "" {
+		t.Fatalf("expected compressed reasoning state to release raw payload, got %d bytes", len(stringValue(storedReasoning["encrypted_content"])))
+	}
+	entry, found := store.toolCalls[responsesHistoryToolCallKey("openai", "call-reasoning-share")]
+	if !found || !entry.ReasoningBlocksFromSnapshot || len(entry.ReasoningBlocks) != 0 {
+		t.Fatalf("expected tool recovery to reference the compressed snapshot, got %#v", entry)
+	}
+
+	call, blocks, ok := store.LoadToolCall("openai", "call-reasoning-share")
+	if !ok || call.Arguments != `{"query":"weather"}` || !reflect.DeepEqual(blocks, []map[string]any{reasoning}) {
+		t.Fatalf("expected tool recovery reasoning to round-trip, got ok=%t call=%#v blocks=%#v", ok, call, blocks)
+	}
+
+	blocks[0]["encrypted_content"] = "caller mutation"
+	_, reloadedBlocks, ok := store.LoadToolCall("openai", "call-reasoning-share")
+	if !ok || reloadedBlocks[0]["encrypted_content"] != payload {
+		t.Fatalf("expected tool recovery load to remain isolated, got ok=%t blocks=%#v", ok, reloadedBlocks)
+	}
+}
+
+func TestResponsesHistoryStoreLoadsToolMetadataWithoutHydratingUnrelatedCompressedFields(t *testing.T) {
+	// Given
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	store.Save("openai", "resp-tool-metadata", []model.CanonicalMessage{{
+		Role:  "assistant",
+		Parts: []model.CanonicalContentPart{{Type: "text", Text: strings.Repeat("unrelated snapshot payload ", 8192)}},
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:             "call-metadata-only",
+			ResponseItemID: "fc_metadata_only",
+			Type:           "function",
+			Name:           "lookup",
+			Arguments:      `{"query":"weather"}`,
+		}},
+	}})
+	key := responsesHistoryKey("openai", "resp-tool-metadata")
+	snapshot := store.entries[key]
+	corrupted := false
+	for index := range snapshot.CompressedFields {
+		if snapshot.CompressedFields[index].Kind != responsesHistoryCompressedPartText {
+			continue
+		}
+		snapshot.CompressedFields[index].Data = []byte("corrupt")
+		corrupted = true
+		break
+	}
+	if !corrupted {
+		t.Fatal("expected unrelated text field to be compressed")
+	}
+	store.entries[key] = snapshot
+
+	// When
+	call, reasoningBlocks, ok := store.LoadToolCall("openai", "call-metadata-only")
+
+	// Then
+	if !ok || call.ID != "call-metadata-only" || call.Arguments != `{"query":"weather"}` || len(reasoningBlocks) != 0 {
+		t.Fatalf("expected tool metadata to remain recoverable without hydrating unrelated fields, got ok=%t call=%#v reasoning=%#v", ok, call, reasoningBlocks)
+	}
+	recovered := recoverToolCallsForMessages(store, []model.CanonicalMessage{{Role: "tool", ToolCallID: "call-metadata-only"}}, "openai")
+	if recovered[0].RecoveredToolCall == nil || recovered[0].RecoveredToolCall.ID != "call-metadata-only" {
+		t.Fatalf("expected tool recovery to avoid unrelated snapshot hydration, got %#v", recovered)
+	}
+	references := recoverResponseItemReferencesForMessages(store, []model.CanonicalMessage{{Role: "tool", ToolCallID: "call-metadata-only"}}, "openai")
+	if references["call-metadata-only"] != "fc_metadata_only" {
+		t.Fatalf("expected response-item reference recovery to avoid unrelated snapshot hydration, got %#v", references)
+	}
+}
+
+func TestResponsesHistoryStoreFallbackSharesCompressedReasoningAcrossToolCalls(t *testing.T) {
+	// Given
+	payload := strings.Repeat("fallback reasoning payload ", 4096)
+	reasoning := map[string]any{"id": "rs-fallback", "type": "reasoning", "encrypted_content": payload}
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	store.maxBytes = 240 << 10
+	messages := []model.CanonicalMessage{{
+		Role:            "assistant",
+		Parts:           []model.CanonicalContentPart{{Type: "text", Text: strings.Repeat("snapshot payload ", 8192)}},
+		ReasoningBlocks: []map[string]any{reasoning},
+		ToolCalls: []model.CanonicalToolCall{
+			{ID: "call-fallback-1", Type: "function", Name: "lookup", Arguments: `{}`},
+			{ID: "call-fallback-2", Type: "function", Name: "lookup", Arguments: `{}`},
+		},
+	}}
+
+	// When
+	store.Save("openai", "resp-fallback", messages)
+
+	// Then
+	key := responsesHistoryKey("openai", "resp-fallback")
+	snapshot := store.entries[key]
+	if len(snapshot.Messages) != 0 {
+		t.Fatalf("expected oversized history to use tool-recovery fallback, got %#v", snapshot)
+	}
+	first, firstFound := store.toolCalls[responsesHistoryToolCallKey("openai", "call-fallback-1")]
+	second, secondFound := store.toolCalls[responsesHistoryToolCallKey("openai", "call-fallback-2")]
+	if !firstFound || !secondFound || first.SharedReasoningSnapshot == nil || first.SharedReasoningSnapshot != second.SharedReasoningSnapshot || len(first.ReasoningBlocks) != 0 || len(first.SharedReasoningSnapshot.CompressedFields) == 0 {
+		t.Fatalf("expected fallback tool entries to share compressed reasoning, got first=%#v second=%#v", first, second)
+	}
+	persistedData, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read persisted fallback recovery index: %v", err)
+	}
+	var persisted responsesHistoryToolCallRecoveryIndexFile
+	if err := json.Unmarshal(persistedData, &persisted); err != nil {
+		t.Fatalf("decode persisted fallback recovery index: %v", err)
+	}
+	if len(persisted.ReasoningSnapshots) != 1 {
+		t.Fatalf("expected one shared persisted reasoning snapshot, got %d", len(persisted.ReasoningSnapshots))
+	}
+	firstPersisted := persisted.ToolCalls[responsesHistoryToolCallKey("openai", "call-fallback-1")]
+	secondPersisted := persisted.ToolCalls[responsesHistoryToolCallKey("openai", "call-fallback-2")]
+	if firstPersisted.ReasoningSnapshotKey == "" || firstPersisted.ReasoningSnapshotKey != secondPersisted.ReasoningSnapshotKey || len(firstPersisted.ReasoningBlocks) != 0 || len(secondPersisted.ReasoningBlocks) != 0 {
+		t.Fatalf("expected persisted tool entries to reference one reasoning snapshot, got first=%#v second=%#v", firstPersisted, secondPersisted)
+	}
+	persistedSnapshot := persisted.ReasoningSnapshots[firstPersisted.ReasoningSnapshotKey]
+	if len(persistedSnapshot.CompressedFields) == 0 || persistedSnapshot.Blocks[0]["encrypted_content"] != "" {
+		t.Fatalf("expected persisted reasoning snapshot to stay compressed, got %#v", persistedSnapshot)
+	}
+	for _, callID := range []string{"call-fallback-1", "call-fallback-2"} {
+		_, blocks, ok := store.LoadToolCall("openai", callID)
+		if !ok || !reflect.DeepEqual(blocks, []map[string]any{reasoning}) {
+			t.Fatalf("expected fallback tool reasoning to round-trip for %s, got ok=%t blocks=%#v", callID, ok, blocks)
+		}
+	}
+
+	reloaded := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	if _, _, ok := reloaded.LoadToolCall("openai", "call-fallback-1"); !ok {
+		t.Fatal("expected persisted fallback tool call to load before checking shared state")
+	}
+	reloadedFirst := reloaded.toolCalls[responsesHistoryToolCallKey("openai", "call-fallback-1")]
+	reloadedSecond := reloaded.toolCalls[responsesHistoryToolCallKey("openai", "call-fallback-2")]
+	if reloadedFirst.SharedReasoningSnapshot == nil || reloadedFirst.SharedReasoningSnapshot != reloadedSecond.SharedReasoningSnapshot || len(reloadedFirst.ReasoningBlocks) != 0 || len(reloadedSecond.ReasoningBlocks) != 0 {
+		t.Fatalf("expected reload to retain one shared compressed reasoning snapshot, got first=%#v second=%#v", reloadedFirst, reloadedSecond)
+	}
+	for _, callID := range []string{"call-fallback-1", "call-fallback-2"} {
+		_, blocks, ok := reloaded.LoadToolCall("openai", callID)
+		if !ok || !reflect.DeepEqual(blocks, []map[string]any{reasoning}) {
+			t.Fatalf("expected persisted fallback tool reasoning to round-trip for %s, got ok=%t blocks=%#v", callID, ok, blocks)
+		}
+	}
+}
+
+func TestResponsesHistoryRecoveryIndexMigratesLegacyReasoningToSharedCompressedSnapshot(t *testing.T) {
+	// Given
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	reasoning := map[string]any{"id": "rs-legacy", "type": "reasoning", "encrypted_content": strings.Repeat("legacy reasoning payload ", 4096)}
+	snapshotKey := responsesHistoryKey("openai", "resp-legacy")
+	legacy := responsesHistoryToolCallRecoveryIndexFile{
+		Version: 1,
+		Order:   []string{snapshotKey},
+		ToolCalls: map[string]responsesHistoryToolCallEntry{
+			responsesHistoryToolCallKey("openai", "call-legacy-1"): {SnapshotKey: snapshotKey, Call: model.CanonicalToolCall{ID: "call-legacy-1", Type: "function", Name: "lookup", Arguments: `{}`}, ReasoningBlocks: []map[string]any{reasoning}},
+			responsesHistoryToolCallKey("openai", "call-legacy-2"): {SnapshotKey: snapshotKey, Call: model.CanonicalToolCall{ID: "call-legacy-2", Type: "function", Name: "lookup", Arguments: `{}`}, ReasoningBlocks: []map[string]any{reasoning}},
+		},
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy recovery index: %v", err)
+	}
+	if err := os.WriteFile(indexPath, data, 0o600); err != nil {
+		t.Fatalf("write legacy recovery index: %v", err)
+	}
+
+	// When
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	_, blocks, ok := store.LoadToolCall("openai", "call-legacy-1")
+
+	// Then
+	if !ok || !reflect.DeepEqual(blocks, []map[string]any{reasoning}) {
+		t.Fatalf("expected legacy reasoning to remain recoverable, got ok=%t blocks=%#v", ok, blocks)
+	}
+	first := store.toolCalls[responsesHistoryToolCallKey("openai", "call-legacy-1")]
+	second := store.toolCalls[responsesHistoryToolCallKey("openai", "call-legacy-2")]
+	if first.SharedReasoningSnapshot == nil || first.SharedReasoningSnapshot != second.SharedReasoningSnapshot || len(first.ReasoningBlocks) != 0 || len(second.ReasoningBlocks) != 0 {
+		t.Fatalf("expected legacy reasoning to migrate into one shared compressed snapshot, got first=%#v second=%#v", first, second)
+	}
+	store.mu.Lock()
+	err = store.saveToolCallRecoveryIndexLocked()
+	store.mu.Unlock()
+	if err != nil {
+		t.Fatalf("rewrite legacy recovery index: %v", err)
+	}
+	data, err = os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read rewritten recovery index: %v", err)
+	}
+	var rewritten responsesHistoryToolCallRecoveryIndexFile
+	if err := json.Unmarshal(data, &rewritten); err != nil {
+		t.Fatalf("decode rewritten recovery index: %v", err)
+	}
+	if len(rewritten.ReasoningSnapshots) != 1 || len(rewritten.ToolCalls[responsesHistoryToolCallKey("openai", "call-legacy-1")].ReasoningBlocks) != 0 {
+		t.Fatalf("expected rewritten legacy index to keep one compressed snapshot, got %#v", rewritten)
+	}
+}
+
+func TestCloneResponsesHistoryDynamicValuePreservesNonNilEmptySlices(t *testing.T) {
+	// Given
+	messages := []model.CanonicalMessage{
+		{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "input_file",
+				Raw: map[string]any{
+					"strings": []string{},
+					"raw":     json.RawMessage{},
+					"bytes":   []byte{},
+				},
+			}},
+		},
+		{Role: "assistant", Parts: []model.CanonicalContentPart{}, ToolCalls: []model.CanonicalToolCall{}, ReasoningBlocks: []map[string]any{}},
+	}
+
+	// When
+	cloned := cloneCanonicalMessages(messages)
+
+	// Then
+	if cloned[1].Parts == nil || cloned[1].ToolCalls == nil || cloned[1].ReasoningBlocks == nil {
+		t.Fatalf("expected non-nil empty top-level slices to remain non-nil, got %#v", cloned[1])
+	}
+	raw := cloned[0].Parts[0].Raw
+	if values, ok := raw["strings"].([]string); !ok || values == nil || len(values) != 0 {
+		t.Fatalf("expected non-nil empty []string, got %#v", raw["strings"])
+	}
+	if value, ok := raw["raw"].(json.RawMessage); !ok || value == nil || len(value) != 0 {
+		t.Fatalf("expected non-nil empty json.RawMessage, got %#v", raw["raw"])
+	}
+	if value, ok := raw["bytes"].([]byte); !ok || value == nil || len(value) != 0 {
+		t.Fatalf("expected non-nil empty []byte, got %#v", raw["bytes"])
+	}
+}
+
+func TestResponsesHistoryStorePersistsMaterializedCompressedReasoningForToolRecovery(t *testing.T) {
+	// Given
+	payload := strings.Repeat("persisted opaque reasoning ", 8192)
+	reasoning := map[string]any{"id": "rs_upstream", "type": "reasoning", "encrypted_content": payload}
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	store.Save("openai", "resp-persisted-reasoning", []model.CanonicalMessage{{
+		Role:            "assistant",
+		ReasoningBlocks: []map[string]any{reasoning},
+		ToolCalls: []model.CanonicalToolCall{{
+			ID:        "call-persisted-reasoning",
+			Type:      "function",
+			Name:      "lookup",
+			Arguments: `{"query":"weather"}`,
+		}},
+	}})
+
+	// When
+	stored := store.toolCalls[responsesHistoryToolCallKey("openai", "call-persisted-reasoning")]
+	if !stored.ReasoningBlocksFromSnapshot {
+		t.Fatalf("expected in-memory tool entry to reference its full snapshot, got %#v", stored)
+	}
+	inMemorySnapshot, snapshotOK := newResponsesHistoryReasoningSnapshotFromConversationSnapshot(store.entries[responsesHistoryKey("openai", "resp-persisted-reasoning")], 0)
+	if !snapshotOK || inMemorySnapshot == nil || len(inMemorySnapshot.CompressedFields) == 0 {
+		t.Fatalf("expected in-memory full snapshot reasoning to remain serializable, got snapshot=%#v ok=%t", inMemorySnapshot, snapshotOK)
+	}
+	persistedData, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read persisted reasoning recovery index: %v", err)
+	}
+	var persisted responsesHistoryToolCallRecoveryIndexFile
+	if err := json.Unmarshal(persistedData, &persisted); err != nil {
+		t.Fatalf("decode persisted reasoning recovery index: %v", err)
+	}
+	persistedEntry := persisted.ToolCalls[responsesHistoryToolCallKey("openai", "call-persisted-reasoning")]
+	if len(persisted.ReasoningSnapshots) != 1 || persistedEntry.ReasoningSnapshotKey == "" || len(persistedEntry.ReasoningBlocks) != 0 {
+		t.Fatalf("expected persisted reasoning reference and one compressed snapshot, got entry=%#v snapshots=%#v", persistedEntry, persisted.ReasoningSnapshots)
+	}
+	reloaded := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	call, blocks, ok := reloaded.LoadToolCall("openai", "call-persisted-reasoning")
+
+	// Then
+	if !ok || call.Arguments != `{"query":"weather"}` || !reflect.DeepEqual(blocks, []map[string]any{reasoning}) {
+		t.Fatalf("expected persisted tool recovery reasoning to round-trip, got ok=%t call=%#v blocks=%#v", ok, call, blocks)
+	}
+}
+
+func TestResponsesHistoryStoreSharesPersistedReasoningSnapshotForNormalToolCalls(t *testing.T) {
+	// Given
+	payload := strings.Repeat("persisted shared normal reasoning ", 8192)
+	reasoning := map[string]any{"id": "rs-persisted-shared", "type": "reasoning", "encrypted_content": payload}
+	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	store.Save("openai", "resp-persisted-shared", []model.CanonicalMessage{{
+		Role:            "assistant",
+		ReasoningBlocks: []map[string]any{reasoning},
+		ToolCalls: []model.CanonicalToolCall{
+			{ID: "call-persisted-shared-1", Type: "function", Name: "lookup", Arguments: `{}`},
+			{ID: "call-persisted-shared-2", Type: "function", Name: "lookup", Arguments: `{}`},
+		},
+	}})
+
+	// When
+	persistedData, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read persisted shared reasoning recovery index: %v", err)
+	}
+	var persisted responsesHistoryToolCallRecoveryIndexFile
+	if err := json.Unmarshal(persistedData, &persisted); err != nil {
+		t.Fatalf("decode persisted shared reasoning recovery index: %v", err)
+	}
+	first := persisted.ToolCalls[responsesHistoryToolCallKey("openai", "call-persisted-shared-1")]
+	second := persisted.ToolCalls[responsesHistoryToolCallKey("openai", "call-persisted-shared-2")]
+
+	// Then
+	if len(persisted.ReasoningSnapshots) != 1 || first.ReasoningSnapshotKey == "" || first.ReasoningSnapshotKey != second.ReasoningSnapshotKey {
+		t.Fatalf("expected normal tool calls to share one persisted reasoning snapshot, got first=%#v second=%#v snapshots=%#v", first, second, persisted.ReasoningSnapshots)
+	}
+	reloaded := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
+	for _, callID := range []string{"call-persisted-shared-1", "call-persisted-shared-2"} {
+		_, blocks, ok := reloaded.LoadToolCall("openai", callID)
+		if !ok || !reflect.DeepEqual(blocks, []map[string]any{reasoning}) {
+			t.Fatalf("expected persisted shared reasoning to round-trip for %s, got ok=%t blocks=%#v", callID, ok, blocks)
+		}
+	}
+}
+
+func TestResponsesHistoryReasoningSnapshotFromConversationSnapshotPreservesCompressedBlocks(t *testing.T) {
+	// Given
+	payload := strings.Repeat("normal snapshot reasoning ", 8192)
+	reasoning := map[string]any{"id": "rs-normal", "type": "reasoning", "encrypted_content": payload}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	store.Save("openai", "resp-normal-snapshot", []model.CanonicalMessage{{
+		Role:            "assistant",
+		ReasoningBlocks: []map[string]any{reasoning},
+		ToolCalls:       []model.CanonicalToolCall{{ID: "call-normal-snapshot", Type: "function", Name: "lookup", Arguments: `{}`}},
+	}})
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-normal-snapshot")]
+
+	// When
+	reasoningSnapshot, ok := newResponsesHistoryReasoningSnapshotFromConversationSnapshot(snapshot, 0)
+	loaded, loadedOK := loadResponsesHistoryReasoningSnapshot(reasoningSnapshot)
+
+	// Then
+	if !ok || reasoningSnapshot == nil || len(reasoningSnapshot.CompressedFields) == 0 || !loadedOK || !reflect.DeepEqual(loaded, []map[string]any{reasoning}) {
+		t.Fatalf("expected normal snapshot reasoning to remain compressed and recoverable, got snapshot=%#v loaded=%#v ok=%t loaded_ok=%t", reasoningSnapshot, loaded, ok, loadedOK)
+	}
+}
+
+func TestResponsesHistoryStoreLoadsCompressedOpaqueThinking(t *testing.T) {
+	// Given
+	payload := strings.Repeat("opaque thinking state ", 8192)
+	reasoning := map[string]any{"id": "rs_upstream", "type": "reasoning", "encrypted_content": payload}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	store.Save("openai", "resp-opaque-compressed", []model.CanonicalMessage{{Role: "assistant", ReasoningBlocks: []map[string]any{reasoning}}}, "opaque-scope")
+	store.mu.Lock()
+	store.indexOpaqueThinkingLocked("openai", responsesHistoryKey("openai", "resp-opaque-compressed"), []model.CanonicalMessage{{Role: "assistant", ReasoningBlocks: []map[string]any{reasoning}}}, "opaque-scope")
+	store.mu.Unlock()
+	public := responsesOpaqueThinkingPublicBlock(reasoning, 0)
+
+	// When
+	loaded, ok := store.LoadOpaqueThinking("openai", "opaque-scope", public)
+
+	// Then
+	if !ok || !reflect.DeepEqual(loaded, reasoning) {
+		t.Fatalf("expected compressed opaque thinking to round-trip, got ok=%t block=%#v", ok, loaded)
+	}
+}
+
+func TestResponsesHistoryStoreRejectsCorruptedCompressedDynamicRaw(t *testing.T) {
+	// Given
+	payload := strings.Repeat("dynamic raw payload ", 8192)
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	store.Save("openai", "resp-corrupt-dynamic-raw", []model.CanonicalMessage{{
+		Role: "user",
+		Parts: []model.CanonicalContentPart{{
+			Type: "input_audio",
+			Raw:  map[string]any{"input_audio": map[string]any{"data": payload}},
+		}},
+	}})
+	key := responsesHistoryKey("openai", "resp-corrupt-dynamic-raw")
+	snapshot := store.entries[key]
+	corrupted := false
+	for index := range snapshot.CompressedFields {
+		if snapshot.CompressedFields[index].Kind != responsesHistoryCompressedPartRawString {
+			continue
+		}
+		snapshot.CompressedFields[index].Data = []byte("corrupt")
+		corrupted = true
+		break
+	}
+	if !corrupted {
+		t.Fatal("expected a dynamic raw compressed field to corrupt")
+	}
+	store.entries[key] = snapshot
+
+	// When
+	loaded := store.Load("openai", "resp-corrupt-dynamic-raw")
+
+	// Then
+	if loaded != nil {
+		t.Fatalf("expected corrupted dynamic raw compression metadata to fail closed, got %#v", loaded)
+	}
+}
+
+func TestResponsesHistoryStoreReleasesLargeDynamicRawPayloadAfterCompression(t *testing.T) {
+	// Given
+	const (
+		historyEntries      = 32
+		messagePayloadBytes = 1 << 20
+	)
+	logicalPayloadBytes := int64(historyEntries * messagePayloadBytes)
+	runtime.GC()
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
+
+	// When
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	for index := range historyEntries {
+		payload := fmt.Sprintf("%08d%s", index, strings.Repeat("x", messagePayloadBytes-8))
+		store.Save("openai", fmt.Sprintf("resp-dynamic-%03d", index), []model.CanonicalMessage{{
+			Role: "user",
+			Parts: []model.CanonicalContentPart{{
+				Type: "input_audio",
+				Raw:  map[string]any{"input_audio": map[string]any{"data": payload, "format": "wav"}},
+			}},
+		}})
+	}
+	runtime.GC()
+	var postOperationRooted runtime.MemStats
+	runtime.ReadMemStats(&postOperationRooted)
+	runtime.KeepAlive(store)
+
+	store = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	runtime.GC()
+	var postRootReplacement runtime.MemStats
+	runtime.ReadMemStats(&postRootReplacement)
+	runtime.KeepAlive(store)
+
+	// Then
+	rootedHeapBytes := int64(postOperationRooted.HeapAlloc) - int64(baseline.HeapAlloc)
+	rootReleaseBytes := int64(postOperationRooted.HeapAlloc) - int64(postRootReplacement.HeapAlloc)
+	t.Logf("dynamic raw lifecycle bytes: logical_payload=%d rooted_after_gc=%d root_release=%d", logicalPayloadBytes, rootedHeapBytes, rootReleaseBytes)
+
+	attributionFloor := logicalPayloadBytes * 3 / 4
+	if rootedHeapBytes > attributionFloor || rootReleaseBytes > attributionFloor {
+		t.Fatalf("compressed dynamic raw payload remained rooted by history: rooted=%d root_release=%d logical=%d", rootedHeapBytes, rootReleaseBytes, logicalPayloadBytes)
+	}
+}
+
+func TestResponsesHistoryStoreReleasesLargeReasoningStateSharedWithToolRecovery(t *testing.T) {
+	// Given
+	const (
+		historyEntries      = 16
+		messagePayloadBytes = 1 << 20
+	)
+	logicalPayloadBytes := int64(historyEntries * messagePayloadBytes)
+	runtime.GC()
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
+
+	// When
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	for index := range historyEntries {
+		payload := fmt.Sprintf("%08d%s", index, strings.Repeat("r", messagePayloadBytes-8))
+		callID := fmt.Sprintf("call-reasoning-%03d", index)
+		store.Save("openai", fmt.Sprintf("resp-reasoning-%03d", index), []model.CanonicalMessage{{
+			Role: "assistant",
+			ReasoningBlocks: []map[string]any{{
+				"id":                fmt.Sprintf("rs-%03d", index),
+				"type":              "reasoning",
+				"encrypted_content": payload,
+			}},
+			ToolCalls: []model.CanonicalToolCall{{ID: callID, Type: "function", Name: "lookup", Arguments: `{}`}},
+		}})
+	}
+	lastCall, lastReasoning, loaded := store.LoadToolCall("openai", "call-reasoning-015")
+	if !loaded || lastCall.ID != "call-reasoning-015" || len(lastReasoning) != 1 || len(stringValue(lastReasoning[0]["encrypted_content"])) != messagePayloadBytes {
+		t.Fatalf("expected compressed reasoning tool recovery to round-trip, got loaded=%t call=%#v blocks=%#v", loaded, lastCall, lastReasoning)
+	}
+	lastReasoning = nil
+	lastCall = model.CanonicalToolCall{}
+	runtime.GC()
+	var postOperationRooted runtime.MemStats
+	runtime.ReadMemStats(&postOperationRooted)
+	runtime.KeepAlive(store)
+
+	store = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	runtime.GC()
+	var postRootReplacement runtime.MemStats
+	runtime.ReadMemStats(&postRootReplacement)
+	runtime.KeepAlive(store)
+
+	// Then
+	rootedHeapBytes := int64(postOperationRooted.HeapAlloc) - int64(baseline.HeapAlloc)
+	rootReleaseBytes := int64(postOperationRooted.HeapAlloc) - int64(postRootReplacement.HeapAlloc)
+	t.Logf("reasoning lifecycle bytes: logical_payload=%d rooted_after_gc=%d root_release=%d", logicalPayloadBytes, rootedHeapBytes, rootReleaseBytes)
+
+	attributionFloor := logicalPayloadBytes * 3 / 4
+	if rootedHeapBytes > attributionFloor || rootReleaseBytes > attributionFloor {
+		t.Fatalf("compressed reasoning state remained rooted by history or tool recovery: rooted=%d root_release=%d logical=%d", rootedHeapBytes, rootReleaseBytes, logicalPayloadBytes)
+	}
+}
+
 func TestResponsesHistoryStore_preserves_compressed_tool_arguments_in_recovery_index(t *testing.T) {
 	// Given
 	arguments := `{"payload":"` + strings.Repeat("x", int(responsesHistoryCompressionMinSnapshotBytes)) + `"}`

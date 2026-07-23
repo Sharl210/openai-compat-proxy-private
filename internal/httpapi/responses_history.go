@@ -45,12 +45,16 @@ type responsesConversationSnapshot struct {
 }
 
 type responsesHistoryToolCallEntry struct {
-	SnapshotKey           string
-	Call                  model.CanonicalToolCall
-	ReasoningBlocks       []map[string]any
-	ToolCallSequenceHash  string `json:"tool_call_sequence_hash,omitempty"`
-	ArgumentsCompressed   []byte `json:"arguments_compressed,omitempty"`
-	ArgumentsOriginalSize int    `json:"arguments_original_size,omitempty"`
+	SnapshotKey                   string
+	Call                          model.CanonicalToolCall
+	ReasoningBlocks               []map[string]any
+	ToolCallSequenceHash          string                             `json:"tool_call_sequence_hash,omitempty"`
+	ArgumentsCompressed           []byte                             `json:"arguments_compressed,omitempty"`
+	ArgumentsOriginalSize         int                                `json:"arguments_original_size,omitempty"`
+	ReasoningBlocksFromSnapshot   bool                               `json:"-"`
+	SnapshotReasoningMessageIndex int                                `json:"-"`
+	ReasoningSnapshotKey          string                             `json:"reasoning_snapshot_key,omitempty"`
+	SharedReasoningSnapshot       *responsesHistoryReasoningSnapshot `json:"-"`
 }
 
 type responsesHistoryOpaqueThinkingEntry struct {
@@ -83,9 +87,10 @@ const defaultResponsesHistoryToolCallRecoveryIndexMaxBytes int64 = defaultRespon
 const responsesHistoryToolCallRecoveryIndexVersion = 1
 
 type responsesHistoryToolCallRecoveryIndexFile struct {
-	Version   int                                      `json:"version"`
-	Order     []string                                 `json:"order,omitempty"`
-	ToolCalls map[string]responsesHistoryToolCallEntry `json:"tool_calls"`
+	Version            int                                          `json:"version"`
+	Order              []string                                     `json:"order,omitempty"`
+	ToolCalls          map[string]responsesHistoryToolCallEntry     `json:"tool_calls"`
+	ReasoningSnapshots map[string]responsesHistoryReasoningSnapshot `json:"reasoning_snapshots,omitempty"`
 }
 
 func newResponsesHistoryStore(maxSize int, toolCallRecoveryIndexPath string) *responsesHistoryStore {
@@ -204,7 +209,7 @@ func firstString(values ...string) string {
 }
 
 func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.CanonicalMessage {
-	if len(messages) == 0 {
+	if messages == nil {
 		return nil
 	}
 	cloned := make([]model.CanonicalMessage, 0, len(messages))
@@ -218,16 +223,29 @@ func cloneCanonicalMessages(messages []model.CanonicalMessage) []model.Canonical
 			recovered := *msg.RecoveredToolCall
 			clone.RecoveredToolCall = &recovered
 		}
-		if len(msg.Parts) > 0 {
-			clone.Parts = append([]model.CanonicalContentPart(nil), msg.Parts...)
+		if msg.Parts != nil {
+			clone.Parts = cloneCanonicalContentPartsForHistory(msg.Parts)
 		}
-		if len(msg.ToolCalls) > 0 {
-			clone.ToolCalls = append([]model.CanonicalToolCall(nil), msg.ToolCalls...)
+		if msg.ToolCalls != nil {
+			clone.ToolCalls = make([]model.CanonicalToolCall, len(msg.ToolCalls))
+			copy(clone.ToolCalls, msg.ToolCalls)
 		}
-		if len(msg.ReasoningBlocks) > 0 {
+		if msg.ReasoningBlocks != nil {
 			clone.ReasoningBlocks = cloneReasoningBlocksForHistory(msg.ReasoningBlocks)
 		}
 		cloned = append(cloned, clone)
+	}
+	return cloned
+}
+
+func cloneCanonicalContentPartsForHistory(parts []model.CanonicalContentPart) []model.CanonicalContentPart {
+	if parts == nil {
+		return nil
+	}
+	cloned := make([]model.CanonicalContentPart, len(parts))
+	for index, part := range parts {
+		cloned[index] = part
+		cloned[index].Raw = cloneResponsesHistoryDynamicMap(part.Raw)
 	}
 	return cloned
 }
@@ -352,10 +370,13 @@ func (s *responsesHistoryStore) LoadOpaqueThinking(providerID, scope string, pub
 	entry, found := s.opaqueThinking[responsesHistoryScopedToolCallKey(providerID, fingerprint, scope)]
 	snapshot, snapshotFound := s.entries[entry.SnapshotKey]
 	s.mu.RUnlock()
-	if !found || !snapshotFound || entry.MessageIndex < 0 || entry.MessageIndex >= len(snapshot.Messages) {
+	if !found || !snapshotFound {
 		return nil, false
 	}
-	blocks := snapshot.Messages[entry.MessageIndex].ReasoningBlocks
+	blocks, restored := loadResponsesHistoryReasoningBlocksFromSnapshot(snapshot, entry.MessageIndex)
+	if !restored {
+		return nil, false
+	}
 	if entry.BlockIndex < 0 || entry.BlockIndex >= len(blocks) {
 		return nil, false
 	}
@@ -384,8 +405,12 @@ func (s *responsesHistoryStore) HasPortableOpaqueThinking(portableScope string, 
 	s.mu.RUnlock()
 	matchCount := 0
 	for _, snapshot := range snapshots {
-		for _, message := range loadResponsesConversationSnapshot(snapshot) {
-			for blockIndex, block := range message.ReasoningBlocks {
+		for messageIndex := range snapshot.Messages {
+			blocks, ok := loadResponsesHistoryReasoningBlocksFromSnapshot(snapshot, messageIndex)
+			if !ok {
+				continue
+			}
+			for blockIndex, block := range blocks {
 				if !hasOpaqueThinkingState(block) {
 					continue
 				}
@@ -408,7 +433,27 @@ func (s *responsesHistoryStore) LoadToolCall(providerID, callID string, scopes .
 	if !ok {
 		return model.CanonicalToolCall{}, nil, false
 	}
-	return entry.Call, cloneReasoningBlocksForHistory(entry.ReasoningBlocks), true
+	reasoningBlocks, ok := s.loadToolCallReasoningBlocks(entry)
+	if !ok {
+		return model.CanonicalToolCall{}, nil, false
+	}
+	return entry.Call, reasoningBlocks, true
+}
+
+func (s *responsesHistoryStore) loadToolCallReasoningBlocks(entry responsesHistoryToolCallEntry) ([]map[string]any, bool) {
+	if entry.SharedReasoningSnapshot != nil {
+		return loadResponsesHistoryReasoningSnapshot(entry.SharedReasoningSnapshot)
+	}
+	if !entry.ReasoningBlocksFromSnapshot {
+		return cloneReasoningBlocksForHistory(entry.ReasoningBlocks), true
+	}
+	s.mu.RLock()
+	snapshot, found := s.entries[entry.SnapshotKey]
+	s.mu.RUnlock()
+	if !found {
+		return nil, false
+	}
+	return loadResponsesHistoryReasoningBlocksFromSnapshot(snapshot, entry.SnapshotReasoningMessageIndex)
 }
 
 func (s *responsesHistoryStore) loadToolCallEntry(providerID, callID string, scopes ...string) (responsesHistoryToolCallEntry, bool) {
@@ -489,10 +534,27 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 	if providerID == "" || snapshotKey == "" || len(messages) == 0 {
 		return
 	}
+	fallbackReasoningSnapshots := make(map[int]*responsesHistoryReasoningSnapshot)
 	for messageIndex, msg := range messages {
+		var fallbackReasoning *responsesHistoryReasoningSnapshot
+		if snapshot == nil && len(msg.ReasoningBlocks) > 0 {
+			fallbackReasoning = fallbackReasoningSnapshots[messageIndex]
+			if fallbackReasoning == nil {
+				fallbackReasoning = newResponsesHistoryReasoningSnapshot(msg.ReasoningBlocks)
+				fallbackReasoningSnapshots[messageIndex] = fallbackReasoning
+			}
+		}
 		if msg.RecoveredToolCall != nil && msg.RecoveredToolCall.ID != "" && msg.RecoveredToolCall.Name != "" {
 			call := *msg.RecoveredToolCall
-			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks)}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call}
+			if snapshot != nil {
+				stored.ReasoningBlocksFromSnapshot = true
+				stored.SnapshotReasoningMessageIndex = messageIndex
+			} else if fallbackReasoning != nil {
+				stored.SharedReasoningSnapshot = fallbackReasoning
+			} else {
+				stored.ReasoningBlocks = cloneReasoningBlocksForHistory(msg.ReasoningBlocks)
+			}
 			data, originalSize, ok := responsesHistoryCompressedFieldData(snapshot, messageIndex, 0, responsesHistoryCompressedRecoveredToolArguments)
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
@@ -501,7 +563,15 @@ func (s *responsesHistoryStore) indexToolCallsLocked(providerID, snapshotKey str
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
-			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ReasoningBlocks: cloneReasoningBlocksForHistory(msg.ReasoningBlocks), ToolCallSequenceHash: sequenceHash}
+			stored := responsesHistoryToolCallEntry{SnapshotKey: snapshotKey, Call: call, ToolCallSequenceHash: sequenceHash}
+			if snapshot != nil {
+				stored.ReasoningBlocksFromSnapshot = true
+				stored.SnapshotReasoningMessageIndex = messageIndex
+			} else if fallbackReasoning != nil {
+				stored.SharedReasoningSnapshot = fallbackReasoning
+			} else {
+				stored.ReasoningBlocks = cloneReasoningBlocksForHistory(msg.ReasoningBlocks)
+			}
 			data, originalSize, ok := responsesHistoryCompressedFieldData(snapshot, messageIndex, toolIndex, responsesHistoryCompressedToolArguments)
 			s.toolCalls[responsesHistoryScopedToolCallKey(providerID, call.ID, scope)] = compressResponsesHistoryToolCallEntryWithSnapshotField(stored, data, originalSize, ok)
 		}
@@ -605,18 +675,52 @@ func (s *responsesHistoryStore) loadToolCallRecoveryIndexLocked() error {
 		s.entries = map[string]responsesConversationSnapshot{}
 	}
 	retainedBytesBySnapshot := map[string]int64{}
+	reasoningSnapshots := map[string]*responsesHistoryReasoningSnapshot{}
+	for snapshotKey, persisted := range file.ReasoningSnapshots {
+		if snapshotKey == "" || len(persisted.Blocks) == 0 {
+			continue
+		}
+		reasoningSnapshots[snapshotKey] = cloneResponsesHistoryReasoningSnapshot(persisted)
+	}
+	legacyReasoningSnapshots := map[string]*responsesHistoryReasoningSnapshot{}
+	retainedReasoningSnapshots := map[string]struct{}{}
 	for key, entry := range file.ToolCalls {
 		if key == "" || entry.SnapshotKey == "" || entry.Call.ID == "" || entry.Call.Name == "" {
 			continue
 		}
-		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocksForHistory(entry.ReasoningBlocks), ToolCallSequenceHash: entry.ToolCallSequenceHash, ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize}
+		stored := responsesHistoryToolCallEntry{SnapshotKey: entry.SnapshotKey, Call: entry.Call, ReasoningBlocks: cloneReasoningBlocksForHistory(entry.ReasoningBlocks), ToolCallSequenceHash: entry.ToolCallSequenceHash, ArgumentsCompressed: append([]byte(nil), entry.ArgumentsCompressed...), ArgumentsOriginalSize: entry.ArgumentsOriginalSize, ReasoningSnapshotKey: entry.ReasoningSnapshotKey}
+		if stored.ReasoningSnapshotKey != "" {
+			stored.SharedReasoningSnapshot = reasoningSnapshots[stored.ReasoningSnapshotKey]
+		}
+		if stored.SharedReasoningSnapshot == nil && len(stored.ReasoningBlocks) > 0 {
+			legacyKey := responsesHistoryLegacyReasoningSnapshotKey(stored.ReasoningBlocks)
+			if legacyKey != "" {
+				stored.ReasoningSnapshotKey = legacyKey
+				stored.SharedReasoningSnapshot = legacyReasoningSnapshots[legacyKey]
+				if stored.SharedReasoningSnapshot == nil {
+					stored.SharedReasoningSnapshot = newResponsesHistoryReasoningSnapshot(stored.ReasoningBlocks)
+					legacyReasoningSnapshots[legacyKey] = stored.SharedReasoningSnapshot
+				}
+				stored.ReasoningBlocks = nil
+			}
+		}
+		if stored.SharedReasoningSnapshot != nil {
+			stored.ReasoningBlocks = nil
+		}
 		var valid bool
 		stored, valid = normalizeResponsesHistoryToolCallEntry(stored)
 		if !valid {
 			continue
 		}
 		s.toolCalls[key] = stored
-		retainedBytesBySnapshot[stored.SnapshotKey] += estimateResponsesHistoryToolCallEntryBytes(stored)
+		retainedBytesBySnapshot[stored.SnapshotKey] += estimateResponsesHistoryToolCallMetadataBytes(stored)
+		if stored.SharedReasoningSnapshot != nil && stored.ReasoningSnapshotKey != "" {
+			reasoningKey := stored.SnapshotKey + "\x00" + stored.ReasoningSnapshotKey
+			if _, seen := retainedReasoningSnapshots[reasoningKey]; !seen {
+				retainedReasoningSnapshots[reasoningKey] = struct{}{}
+				retainedBytesBySnapshot[stored.SnapshotKey] += estimateResponsesHistoryReasoningSnapshotBytes(stored.SharedReasoningSnapshot)
+			}
+		}
 	}
 	if len(s.order) == 0 {
 		seen := map[string]bool{}
@@ -703,10 +807,11 @@ func recoverToolCallsForMessages(history *responsesHistoryStore, messages []mode
 		if existingToolCallIDs[msg.ToolCallID] {
 			continue
 		}
-		call, _, ok := history.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
+		entry, ok := history.loadToolCallEntry(providerID, msg.ToolCallID, firstString(scopes...))
 		if !ok {
 			continue
 		}
+		call := entry.Call
 		msg.RecoveredToolCall = &call
 	}
 	return recovered
@@ -745,11 +850,15 @@ func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStor
 			}
 			seenToolCallIDs[candidate.ID] = struct{}{}
 			storedEntry, ok := history.loadToolCallEntry(providerID, candidate.ID, scope)
-			if !ok || storedEntry.ToolCallSequenceHash != sequenceHash || len(storedEntry.ReasoningBlocks) == 0 || !assistantToolCallsMatchForAnthropicThinkingReplay(candidate, storedEntry.Call) {
+			if !ok || storedEntry.ToolCallSequenceHash != sequenceHash || !assistantToolCallsMatchForAnthropicThinkingReplay(candidate, storedEntry.Call) {
 				matched = false
 				break
 			}
-			blocks := storedEntry.ReasoningBlocks
+			blocks, blocksOK := history.loadToolCallReasoningBlocks(storedEntry)
+			if !blocksOK || len(blocks) == 0 {
+				matched = false
+				break
+			}
 			if serverBlocks == nil {
 				serverBlocks = blocks
 				continue
@@ -849,11 +958,11 @@ func recoverResponseItemReferencesForMessages(history *responsesHistoryStore, me
 		if msg.Role != "tool" || msg.ToolCallID == "" {
 			continue
 		}
-		call, _, ok := history.LoadToolCall(providerID, msg.ToolCallID, firstString(scopes...))
-		if !ok || strings.TrimSpace(call.ResponseItemID) == "" {
+		entry, ok := history.loadToolCallEntry(providerID, msg.ToolCallID, firstString(scopes...))
+		if !ok || strings.TrimSpace(entry.Call.ResponseItemID) == "" {
 			continue
 		}
-		references[msg.ToolCallID] = strings.TrimSpace(call.ResponseItemID)
+		references[msg.ToolCallID] = strings.TrimSpace(entry.Call.ResponseItemID)
 	}
 	if len(references) == 0 {
 		return nil
@@ -985,7 +1094,7 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 }
 
 func cloneReasoningBlocksForHistory(blocks []map[string]any) []map[string]any {
-	if len(blocks) == 0 {
+	if blocks == nil {
 		return nil
 	}
 	cloned := make([]map[string]any, 0, len(blocks))
@@ -996,14 +1105,10 @@ func cloneReasoningBlocksForHistory(blocks []map[string]any) []map[string]any {
 		if isSyntheticReasoningBlock(block) && !isRealResponsesReasoningState(block) {
 			continue
 		}
-		copied := make(map[string]any, len(block))
-		for key, value := range block {
-			copied[key] = value
-		}
-		cloned = append(cloned, copied)
+		cloned = append(cloned, cloneResponsesHistoryDynamicMap(block))
 	}
 	if len(cloned) == 0 {
-		return nil
+		return make([]map[string]any, 0)
 	}
 	return cloned
 }

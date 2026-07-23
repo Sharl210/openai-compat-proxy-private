@@ -45,14 +45,20 @@ func estimateToolRecoveryBytes(messages []model.CanonicalMessage) int64 {
 	var total int64
 	for _, message := range messages {
 		reasoningBytes := estimateDynamicValueBytes(message.ReasoningBlocks)
+		hasRecoverableToolCall := false
 		if message.RecoveredToolCall != nil && message.RecoveredToolCall.ID != "" && message.RecoveredToolCall.Name != "" {
-			total += estimateCanonicalToolCallBytes(*message.RecoveredToolCall) + reasoningBytes
+			total += estimateCanonicalToolCallBytes(*message.RecoveredToolCall)
+			hasRecoverableToolCall = true
 		}
 		for _, call := range message.ToolCalls {
 			if call.ID == "" || call.Name == "" {
 				continue
 			}
-			total += estimateCanonicalToolCallBytes(call) + reasoningBytes
+			total += estimateCanonicalToolCallBytes(call)
+			hasRecoverableToolCall = true
+		}
+		if hasRecoverableToolCall {
+			total += reasoningBytes
 		}
 	}
 	return total
@@ -63,7 +69,11 @@ func estimateResponsesHistoryToolCallEntryBytes(entry responsesHistoryToolCallEn
 	if entry.ArgumentsOriginalSize > len(entry.Call.Arguments) {
 		callBytes += int64(entry.ArgumentsOriginalSize - len(entry.Call.Arguments))
 	}
-	return callBytes + int64(len(entry.ToolCallSequenceHash)) + estimateDynamicValueBytes(entry.ReasoningBlocks)
+	reasoningBytes := estimateDynamicValueBytes(entry.ReasoningBlocks)
+	if entry.SharedReasoningSnapshot != nil {
+		reasoningBytes = estimateResponsesHistoryReasoningSnapshotBytes(entry.SharedReasoningSnapshot)
+	}
+	return callBytes + int64(len(entry.ToolCallSequenceHash)) + reasoningBytes
 }
 
 func estimateDynamicValueBytes(value any) int64 {

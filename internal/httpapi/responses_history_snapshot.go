@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"compress/flate"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -21,15 +22,36 @@ const (
 	responsesHistoryCompressedPartImageURL
 	responsesHistoryCompressedToolArguments
 	responsesHistoryCompressedRecoveredToolArguments
+	responsesHistoryCompressedPartRawString
+	responsesHistoryCompressedReasoningBlockString
 )
 
+type responsesHistoryDynamicPathStepKind uint8
+
+const (
+	responsesHistoryDynamicPathMapKey responsesHistoryDynamicPathStepKind = iota + 1
+	responsesHistoryDynamicPathSliceIndex
+)
+
+type responsesHistoryDynamicPathStep struct {
+	Kind  responsesHistoryDynamicPathStepKind `json:"kind"`
+	Key   string                              `json:"key,omitempty"`
+	Index int                                 `json:"index,omitempty"`
+}
+
 type responsesHistoryCompressedField struct {
-	MessageIndex       int
-	ItemIndex          int
-	Kind               responsesHistoryCompressedFieldKind
-	OriginalSize       int
-	Data               []byte
-	RestoreRawImageURL bool
+	MessageIndex       int                                 `json:"message_index,omitempty"`
+	ItemIndex          int                                 `json:"item_index"`
+	Kind               responsesHistoryCompressedFieldKind `json:"kind"`
+	OriginalSize       int                                 `json:"original_size"`
+	Data               []byte                              `json:"data"`
+	RestoreRawImageURL bool                                `json:"restore_raw_image_url,omitempty"`
+	DynamicPath        []responsesHistoryDynamicPathStep   `json:"dynamic_path,omitempty"`
+}
+
+type responsesHistoryReasoningSnapshot struct {
+	Blocks           []map[string]any                  `json:"blocks,omitempty"`
+	CompressedFields []responsesHistoryCompressedField `json:"compressed_fields,omitempty"`
 }
 
 var responsesHistoryFlateWriterPool sync.Pool
@@ -48,6 +70,9 @@ func compressResponsesHistoryFields(messages []model.CanonicalMessage) []respons
 	for messageIndex := range messages {
 		message := &messages[messageIndex]
 		fields = compressResponsesHistoryField(fields, &message.ReasoningContent, responsesHistoryCompressedField{MessageIndex: messageIndex, Kind: responsesHistoryCompressedReasoning})
+		for blockIndex := range message.ReasoningBlocks {
+			fields = compressResponsesHistoryDynamicStrings(fields, message.ReasoningBlocks[blockIndex], responsesHistoryCompressedField{MessageIndex: messageIndex, ItemIndex: blockIndex, Kind: responsesHistoryCompressedReasoningBlockString})
+		}
 		for partIndex := range message.Parts {
 			part := &message.Parts[partIndex]
 			fields = compressResponsesHistoryField(fields, &part.Text, responsesHistoryCompressedField{MessageIndex: messageIndex, ItemIndex: partIndex, Kind: responsesHistoryCompressedPartText})
@@ -57,6 +82,7 @@ func compressResponsesHistoryFields(messages []model.CanonicalMessage) []respons
 			if len(fields) > fieldCount && compactResponsesHistoryRawImageURL(part, imageURL) {
 				fields[len(fields)-1].RestoreRawImageURL = true
 			}
+			fields = compressResponsesHistoryDynamicStrings(fields, part.Raw, responsesHistoryCompressedField{MessageIndex: messageIndex, ItemIndex: partIndex, Kind: responsesHistoryCompressedPartRawString})
 		}
 		for toolIndex := range message.ToolCalls {
 			toolCall := &message.ToolCalls[toolIndex]
@@ -67,6 +93,40 @@ func compressResponsesHistoryFields(messages []model.CanonicalMessage) []respons
 		}
 	}
 	return fields
+}
+
+func newResponsesHistoryReasoningSnapshot(blocks []map[string]any) *responsesHistoryReasoningSnapshot {
+	cloned := cloneReasoningBlocksForHistory(blocks)
+	if len(cloned) == 0 {
+		return nil
+	}
+	snapshot := &responsesHistoryReasoningSnapshot{Blocks: cloned}
+	for blockIndex := range snapshot.Blocks {
+		snapshot.CompressedFields = compressResponsesHistoryDynamicStrings(snapshot.CompressedFields, snapshot.Blocks[blockIndex], responsesHistoryCompressedField{ItemIndex: blockIndex, Kind: responsesHistoryCompressedReasoningBlockString})
+	}
+	return snapshot
+}
+
+func newResponsesHistoryReasoningSnapshotFromConversationSnapshot(snapshot responsesConversationSnapshot, messageIndex int) (*responsesHistoryReasoningSnapshot, bool) {
+	if messageIndex < 0 || messageIndex >= len(snapshot.Messages) {
+		return nil, false
+	}
+	blocks := cloneReasoningBlocksForHistory(snapshot.Messages[messageIndex].ReasoningBlocks)
+	if len(blocks) == 0 {
+		return nil, true
+	}
+	compressedFields := make([]responsesHistoryCompressedField, 0)
+	for _, field := range snapshot.CompressedFields {
+		if field.Kind != responsesHistoryCompressedReasoningBlockString || field.MessageIndex != messageIndex {
+			continue
+		}
+		copied := field
+		copied.MessageIndex = 0
+		copied.Data = append([]byte(nil), field.Data...)
+		copied.DynamicPath = append([]responsesHistoryDynamicPathStep(nil), field.DynamicPath...)
+		compressedFields = append(compressedFields, copied)
+	}
+	return &responsesHistoryReasoningSnapshot{Blocks: blocks, CompressedFields: compressedFields}, true
 }
 
 func compressResponsesHistoryField(fields []responsesHistoryCompressedField, value *string, field responsesHistoryCompressedField) []responsesHistoryCompressedField {
@@ -81,6 +141,70 @@ func compressResponsesHistoryField(fields []responsesHistoryCompressedField, val
 	field.Data = compressed
 	*value = ""
 	return append(fields, field)
+}
+
+func compressResponsesHistoryDynamicStrings(fields []responsesHistoryCompressedField, value any, field responsesHistoryCompressedField) []responsesHistoryCompressedField {
+	return compressResponsesHistoryDynamicStringsAtPath(fields, value, field, nil)
+}
+
+func compressResponsesHistoryDynamicStringsAtPath(fields []responsesHistoryCompressedField, value any, field responsesHistoryCompressedField, path []responsesHistoryDynamicPathStep) []responsesHistoryCompressedField {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, nested := range typed {
+			nextPath := appendResponsesHistoryDynamicPathStep(path, responsesHistoryDynamicPathStep{Kind: responsesHistoryDynamicPathMapKey, Key: key})
+			if text, ok := nested.(string); ok {
+				if len(text) < responsesHistoryCompressionMinFieldBytes {
+					continue
+				}
+				compressed, compressedOK := compressResponsesHistoryString(text)
+				if !compressedOK {
+					continue
+				}
+				compressedField := field
+				compressedField.OriginalSize = len(text)
+				compressedField.Data = compressed
+				compressedField.DynamicPath = nextPath
+				typed[key] = ""
+				fields = append(fields, compressedField)
+				continue
+			}
+			fields = compressResponsesHistoryDynamicStringsAtPath(fields, nested, field, nextPath)
+		}
+	case []any:
+		for index, nested := range typed {
+			nextPath := appendResponsesHistoryDynamicPathStep(path, responsesHistoryDynamicPathStep{Kind: responsesHistoryDynamicPathSliceIndex, Index: index})
+			if text, ok := nested.(string); ok {
+				if len(text) < responsesHistoryCompressionMinFieldBytes {
+					continue
+				}
+				compressed, compressedOK := compressResponsesHistoryString(text)
+				if !compressedOK {
+					continue
+				}
+				compressedField := field
+				compressedField.OriginalSize = len(text)
+				compressedField.Data = compressed
+				compressedField.DynamicPath = nextPath
+				typed[index] = ""
+				fields = append(fields, compressedField)
+				continue
+			}
+			fields = compressResponsesHistoryDynamicStringsAtPath(fields, nested, field, nextPath)
+		}
+	case []map[string]any:
+		for index := range typed {
+			nextPath := appendResponsesHistoryDynamicPathStep(path, responsesHistoryDynamicPathStep{Kind: responsesHistoryDynamicPathSliceIndex, Index: index})
+			fields = compressResponsesHistoryDynamicStringsAtPath(fields, typed[index], field, nextPath)
+		}
+	}
+	return fields
+}
+
+func appendResponsesHistoryDynamicPathStep(path []responsesHistoryDynamicPathStep, step responsesHistoryDynamicPathStep) []responsesHistoryDynamicPathStep {
+	next := make([]responsesHistoryDynamicPathStep, len(path)+1)
+	copy(next, path)
+	next[len(path)] = step
+	return next
 }
 
 func compactResponsesHistoryRawImageURL(part *model.CanonicalContentPart, imageURL string) bool {
@@ -220,6 +344,37 @@ func loadResponsesConversationSnapshot(snapshot responsesConversationSnapshot) [
 	return messages
 }
 
+func loadResponsesHistoryReasoningBlocksFromSnapshot(snapshot responsesConversationSnapshot, messageIndex int) ([]map[string]any, bool) {
+	if messageIndex < 0 || messageIndex >= len(snapshot.Messages) {
+		return nil, false
+	}
+	blocks := cloneReasoningBlocksForHistory(snapshot.Messages[messageIndex].ReasoningBlocks)
+	for _, field := range snapshot.CompressedFields {
+		if field.Kind != responsesHistoryCompressedReasoningBlockString || field.MessageIndex != messageIndex {
+			continue
+		}
+		value, ok := decompressResponsesHistoryString(field.Data, field.OriginalSize)
+		if !ok || !restoreResponsesHistoryReasoningBlockString(blocks, field, value) {
+			return nil, false
+		}
+	}
+	return blocks, true
+}
+
+func loadResponsesHistoryReasoningSnapshot(snapshot *responsesHistoryReasoningSnapshot) ([]map[string]any, bool) {
+	if snapshot == nil {
+		return nil, true
+	}
+	blocks := cloneReasoningBlocksForHistory(snapshot.Blocks)
+	for _, field := range snapshot.CompressedFields {
+		value, ok := decompressResponsesHistoryString(field.Data, field.OriginalSize)
+		if !ok || !restoreResponsesHistoryReasoningBlockString(blocks, field, value) {
+			return nil, false
+		}
+	}
+	return blocks, true
+}
+
 func decompressResponsesHistoryString(data []byte, originalSize int) (string, bool) {
 	if !validResponsesHistoryCompressedData(data, originalSize) {
 		return "", false
@@ -285,10 +440,144 @@ func restoreResponsesHistoryField(messages []model.CanonicalMessage, field respo
 			return false
 		}
 		message.RecoveredToolCall.Arguments = value
+	case responsesHistoryCompressedPartRawString:
+		if field.ItemIndex < 0 || field.ItemIndex >= len(message.Parts) {
+			return false
+		}
+		if !restoreResponsesHistoryDynamicString(message.Parts[field.ItemIndex].Raw, field.DynamicPath, value) {
+			return false
+		}
+	case responsesHistoryCompressedReasoningBlockString:
+		if !restoreResponsesHistoryReasoningBlockString(message.ReasoningBlocks, field, value) {
+			return false
+		}
 	default:
 		return false
 	}
 	return true
+}
+
+func restoreResponsesHistoryReasoningBlockString(blocks []map[string]any, field responsesHistoryCompressedField, value string) bool {
+	if field.ItemIndex < 0 || field.ItemIndex >= len(blocks) {
+		return false
+	}
+	return restoreResponsesHistoryDynamicString(blocks[field.ItemIndex], field.DynamicPath, value)
+}
+
+func restoreResponsesHistoryDynamicString(root any, path []responsesHistoryDynamicPathStep, value string) bool {
+	if len(path) == 0 {
+		return false
+	}
+	current := root
+	for index, step := range path {
+		isLast := index == len(path)-1
+		switch step.Kind {
+		case responsesHistoryDynamicPathMapKey:
+			object, ok := current.(map[string]any)
+			if !ok {
+				return false
+			}
+			if isLast {
+				object[step.Key] = value
+				return true
+			}
+			next, exists := object[step.Key]
+			if !exists {
+				return false
+			}
+			current = next
+		case responsesHistoryDynamicPathSliceIndex:
+			switch items := current.(type) {
+			case []any:
+				if step.Index < 0 || step.Index >= len(items) {
+					return false
+				}
+				if isLast {
+					items[step.Index] = value
+					return true
+				}
+				current = items[step.Index]
+			case []map[string]any:
+				if step.Index < 0 || step.Index >= len(items) || isLast {
+					return false
+				}
+				current = items[step.Index]
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func cloneResponsesHistoryDynamicMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		cloned[key] = cloneResponsesHistoryDynamicValue(value)
+	}
+	return cloned
+}
+
+func cloneResponsesHistoryDynamicValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneResponsesHistoryDynamicMap(typed)
+	case []any:
+		if typed == nil {
+			return nil
+		}
+		cloned := make([]any, len(typed))
+		for index, nested := range typed {
+			cloned[index] = cloneResponsesHistoryDynamicValue(nested)
+		}
+		return cloned
+	case []map[string]any:
+		if typed == nil {
+			return nil
+		}
+		cloned := make([]map[string]any, len(typed))
+		for index, nested := range typed {
+			cloned[index] = cloneResponsesHistoryDynamicMap(nested)
+		}
+		return cloned
+	case map[string]string:
+		if typed == nil {
+			return nil
+		}
+		cloned := make(map[string]string, len(typed))
+		for key, nested := range typed {
+			cloned[key] = nested
+		}
+		return cloned
+	case []string:
+		if typed == nil {
+			return nil
+		}
+		cloned := make([]string, len(typed))
+		copy(cloned, typed)
+		return cloned
+	case json.RawMessage:
+		if typed == nil {
+			return nil
+		}
+		cloned := make(json.RawMessage, len(typed))
+		copy(cloned, typed)
+		return cloned
+	case []byte:
+		if typed == nil {
+			return nil
+		}
+		cloned := make([]byte, len(typed))
+		copy(cloned, typed)
+		return cloned
+	default:
+		return value
+	}
 }
 
 func responsesHistoryFlateWriter() (*flate.Writer, error) {
