@@ -638,6 +638,42 @@ func TestResponsesHistoryReturnsReasoningBlocksWithToolCall(t *testing.T) {
 	}
 }
 
+func TestRecoverToolCallsForMessagesRestoresOnlyTrustedAnthropicThinking(t *testing.T) {
+	store := newResponsesHistoryStore(2, "")
+	store.Save("anthropic", "resp_1", []model.CanonicalMessage{{
+		Role: "assistant",
+		ReasoningBlocks: []map[string]any{
+			{"type": "thinking", "thinking": "need tool result", "signature": "sig_1"},
+			{"type": "redacted_thinking", "data": "redacted", "signature": "sig_2"},
+			{"type": "reasoning", "id": "rs_proxy", "encrypted_content": "enc_real"},
+			{"type": "reasoning", "id": "rs_proxy", "summary": []any{}},
+		},
+		ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "read_file", Arguments: `{"filePath":"/tmp/a"}`}},
+	}}, "scope-a")
+
+	_, storedBlocks, ok := store.LoadToolCall("anthropic", "call_1", "scope-a")
+	if !ok || len(storedBlocks) != 3 {
+		t.Fatalf("expected persisted real rs_proxy state to remain distinct from synthetic state, got ok=%t blocks=%#v", ok, storedBlocks)
+	}
+	recovered := recoverToolCallsForMessages(store, []model.CanonicalMessage{{
+		Role:       "tool",
+		ToolCallID: "call_1",
+		Parts:      []model.CanonicalContentPart{{Type: "text", Text: "file contents"}},
+	}}, "anthropic", "scope-a")
+	if recovered[0].RecoveredToolCall == nil || recovered[0].RecoveredToolCall.Name != "read_file" {
+		t.Fatalf("expected recovered tool call, got %#v", recovered[0])
+	}
+	if len(recovered[0].ReasoningBlocks) != 2 {
+		t.Fatalf("expected only trusted Anthropic thinking blocks, got %#v", recovered[0].ReasoningBlocks)
+	}
+	if got := recovered[0].ReasoningBlocks[0]; got["type"] != "thinking" || got["thinking"] != "need tool result" || got["signature"] != "sig_1" {
+		t.Fatalf("expected original thinking block and signature, got %#v", got)
+	}
+	if got := recovered[0].ReasoningBlocks[1]; got["type"] != "redacted_thinking" || got["data"] != "redacted" || got["signature"] != "sig_2" {
+		t.Fatalf("expected original redacted thinking block and signature, got %#v", got)
+	}
+}
+
 func TestResponsesHistoryReloadsPersistentToolCallRecoveryIndex(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
 	store := &responsesHistoryStore{entries: map[string]responsesConversationSnapshot{}, byResponseID: map[string]string{}, toolCalls: map[string]responsesHistoryToolCallEntry{}, maxSize: 2, toolCallRecoveryIndexPath: indexPath}

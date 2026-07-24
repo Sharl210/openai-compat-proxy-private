@@ -2720,8 +2720,8 @@ func TestResponsesRouteRecoversAnthropicThinkingByCallIDWithoutPreviousResponseI
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if strings.Contains(secondBody, `"type":"thinking"`) || strings.Contains(secondBody, `"signature":"sig_1"`) {
-		t.Fatalf("expected recovered anthropic request to avoid server-held thinking, got %s", secondBody)
+	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"need tool result"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected recovered anthropic request to restore trusted thinking and signature, got %s", secondBody)
 	}
 	if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, `"id":"call_1"`) || !strings.Contains(secondBody, `"name":"read_file"`) {
 		t.Fatalf("expected recovered anthropic request to replay previous tool_use, got %s", secondBody)
@@ -2771,8 +2771,8 @@ func TestResponsesRouteRecoversAnthropicToolUsesByCallIDAfterHistoryStoreRestart
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("expected second status 200, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if strings.Contains(secondBody, `"type":"thinking"`) || strings.Contains(secondBody, `"signature":"sig_1"`) {
-		t.Fatalf("expected restarted recovery to avoid server-held thinking, got %s", secondBody)
+	if !strings.Contains(secondBody, `"type":"thinking"`) || !strings.Contains(secondBody, `"thinking":"need three tool results"`) || !strings.Contains(secondBody, `"signature":"sig_1"`) {
+		t.Fatalf("expected restarted recovery to restore persisted thinking and signature, got %s", secondBody)
 	}
 	for _, want := range []string{`"id":"call_1"`, `"id":"call_2"`, `"id":"call_3"`} {
 		if !strings.Contains(secondBody, `"type":"tool_use"`) || !strings.Contains(secondBody, want) {

@@ -794,6 +794,10 @@ func shouldRestorePreviousConversation(messages []model.CanonicalMessage) bool {
 }
 
 func recoverToolCallsForMessages(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) []model.CanonicalMessage {
+	return recoverToolCallsForMessagesWithThinking(history, messages, providerID, true, scopes...)
+}
+
+func recoverToolCallsForMessagesWithThinking(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, restoreThinking bool, scopes ...string) []model.CanonicalMessage {
 	if len(messages) == 0 || providerID == "" || history == nil {
 		return messages
 	}
@@ -813,8 +817,28 @@ func recoverToolCallsForMessages(history *responsesHistoryStore, messages []mode
 		}
 		call := entry.Call
 		msg.RecoveredToolCall = &call
+		if reasoningBlocks, blocksOK := history.loadToolCallReasoningBlocks(entry); restoreThinking && blocksOK {
+			msg.ReasoningBlocks = trustedAnthropicThinkingBlocks(reasoningBlocks)
+		}
 	}
 	return recovered
+}
+
+func trustedAnthropicThinkingBlocks(blocks []map[string]any) []map[string]any {
+	trusted := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if isSyntheticReasoningBlock(block) {
+			continue
+		}
+		switch stringValue(block["type"]) {
+		case "thinking", "redacted_thinking":
+			trusted = append(trusted, cloneResponsesHistoryDynamicMap(block))
+		}
+	}
+	if len(trusted) == 0 {
+		return nil
+	}
+	return trusted
 }
 
 func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) []model.CanonicalMessage {
@@ -855,6 +879,7 @@ func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStor
 				break
 			}
 			blocks, blocksOK := history.loadToolCallReasoningBlocks(storedEntry)
+			blocks = trustedAnthropicThinkingBlocks(blocks)
 			if !blocksOK || len(blocks) == 0 {
 				matched = false
 				break
@@ -873,6 +898,38 @@ func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStor
 		}
 	}
 	return recovered
+}
+
+func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) []model.CanonicalMessage {
+	if len(messages) == 0 {
+		return messages
+	}
+	stripped := append([]model.CanonicalMessage(nil), messages...)
+	for index := range stripped {
+		blocks := stripped[index].ReasoningBlocks
+		if len(blocks) == 0 {
+			continue
+		}
+		retained := make([]map[string]any, 0, len(blocks))
+		removed := false
+		for _, block := range blocks {
+			blockType := stringValue(block["type"])
+			switch {
+			case blockType == "thinking", blockType == "redacted_thinking":
+				removed = true
+			case blockType == "reasoning" && hasOpaqueResponsesReasoningState(block):
+				removed = true
+			default:
+				retained = append(retained, block)
+			}
+		}
+		if !removed {
+			continue
+		}
+		stripped[index].ReasoningBlocks = retained
+		stripped[index].ReasoningContent = ""
+	}
+	return stripped
 }
 
 func assistantToolCallSequenceHash(toolCalls []model.CanonicalToolCall) string {
