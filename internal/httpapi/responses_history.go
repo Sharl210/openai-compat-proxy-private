@@ -36,12 +36,13 @@ type responsesHistoryStore struct {
 }
 
 type responsesConversationSnapshot struct {
-	Messages         []model.CanonicalMessage
-	CompressedFields []responsesHistoryCompressedField
-	Bytes            int64
-	ResponseID       string
-	Scope            string
-	PortableScope    string
+	Messages                 []model.CanonicalMessage
+	CompressedFields         []responsesHistoryCompressedField
+	StructuredOutputTextRefs []responsesHistoryStructuredOutputTextRef
+	Bytes                    int64
+	ResponseID               string
+	Scope                    string
+	PortableScope            string
 }
 
 type responsesHistoryToolCallEntry struct {

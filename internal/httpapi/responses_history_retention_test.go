@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"openai-compat-proxy/internal/adapter/responses"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -135,6 +136,542 @@ func TestSaveResponsesHistorySnapshotUsesStoreDefensiveClone(t *testing.T) {
 	}
 	if loaded[1].ToolCalls[0].Name != "lookup" {
 		t.Fatalf("expected stored tool call to remain isolated, got %#v", loaded[1])
+	}
+}
+
+type responsesHistoryOwnershipFixture struct {
+	providerID         string
+	responseID         string
+	scope              string
+	portableScope      string
+	callID             string
+	previousResponseID string
+	reasoningID        string
+	arguments          string
+	marker             string
+	payloadBytes       int
+}
+
+func TestResponsesHistoryStoreOwnershipMatrixForDecodedStructuredFunctionCallOutput(t *testing.T) {
+	type ownershipCase struct {
+		name              string
+		maxSize           int
+		mutate            func(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture)
+		wantEntry         bool
+		wantToolCall      bool
+		wantPayload       bool
+		wantToolRecovery  bool
+		wantRecoveredCall bool
+		wantSnapshotRefs  int
+		wantOldRemoved    bool
+	}
+
+	cases := []ownershipCase{
+		{
+			name:             "entries_only",
+			maxSize:          defaultResponsesHistoryMaxSize,
+			mutate:           removeResponsesHistoryOwnershipToolCalls,
+			wantEntry:        true,
+			wantToolCall:     false,
+			wantPayload:      true,
+			wantSnapshotRefs: 0,
+		},
+		{
+			name:              "tool_calls_only",
+			maxSize:           defaultResponsesHistoryMaxSize,
+			mutate:            removeResponsesHistoryOwnershipEntry,
+			wantEntry:         false,
+			wantToolCall:      true,
+			wantPayload:       false,
+			wantRecoveredCall: true,
+			wantSnapshotRefs:  1,
+		},
+		{
+			name:              "full_store",
+			maxSize:           defaultResponsesHistoryMaxSize,
+			wantEntry:         true,
+			wantToolCall:      true,
+			wantPayload:       true,
+			wantToolRecovery:  true,
+			wantRecoveredCall: true,
+			wantSnapshotRefs:  1,
+		},
+		{
+			name:    "evicted_root",
+			maxSize: 2,
+			mutate: func(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture) {
+				t.Helper()
+				for _, suffix := range []string{"evicted_filler_one", "evicted_filler_two"} {
+					filler, messages := decodeResponsesHistoryOwnershipFixture(t, suffix, 1024)
+					saveResponsesHistorySnapshot(store, filler.providerID, filler.responseID, messages, nil, fixture.scope, fixture.portableScope)
+				}
+			},
+			wantEntry:        false,
+			wantToolCall:     false,
+			wantPayload:      false,
+			wantSnapshotRefs: 0,
+			wantOldRemoved:   true,
+		},
+		{
+			name:             "cleared_root",
+			maxSize:          defaultResponsesHistoryMaxSize,
+			mutate:           removeResponsesHistoryOwnershipSnapshotAndToolCalls,
+			wantEntry:        false,
+			wantToolCall:     false,
+			wantPayload:      false,
+			wantSnapshotRefs: 0,
+			wantOldRemoved:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, fixture, previous := newResponsesHistoryOwnershipStore(t, tc.name, tc.maxSize, 64<<10)
+			assertResponsesHistoryOwnershipSemanticRecovery(t, store, fixture)
+			assertResponsesHistoryOwnershipPreviousResponseReplay(t, store, fixture, previous)
+			if tc.mutate != nil {
+				tc.mutate(t, store, fixture)
+			}
+			collectResponsesHistoryOwnershipGarbage(store)
+
+			key := responsesHistoryKey(fixture.providerID, fixture.responseID)
+			callKey := responsesHistoryScopedToolCallKey(fixture.providerID, fixture.callID, fixture.scope)
+			entryPresent, toolCallPresent, snapshot := responsesHistoryOwnershipRoots(store, key, callKey)
+			if entryPresent != tc.wantEntry || toolCallPresent != tc.wantToolCall {
+				t.Fatalf("unexpected ownership roots: entries=%t tool_calls=%t, want entries=%t tool_calls=%t", entryPresent, toolCallPresent, tc.wantEntry, tc.wantToolCall)
+			}
+			payloadPresent := entryPresent && responsesHistorySnapshotContainsOwnershipPayload(snapshot, fixture)
+			if payloadPresent != tc.wantPayload {
+				t.Fatalf("unexpected structured output ownership: entry_present=%t payload_present=%t want_payload=%t", entryPresent, payloadPresent, tc.wantPayload)
+			}
+			if entryPresent && len(snapshot.StructuredOutputTextRefs) != 1 {
+				t.Fatalf("expected ownership snapshot to record one structured-output dedupe reference, got %#v", snapshot.StructuredOutputTextRefs)
+			}
+			toolCallRefs, opaqueThinkingRefs := responsesHistoryOwnershipSnapshotReferences(store, key)
+			if toolCallRefs != tc.wantSnapshotRefs || opaqueThinkingRefs != 0 {
+				t.Fatalf("unexpected snapshot references after GC: tool_calls=%d opaque_thinking=%d, want tool_calls=%d opaque_thinking=0", toolCallRefs, opaqueThinkingRefs, tc.wantSnapshotRefs)
+			}
+			if toolCallPresent {
+				assertResponsesHistoryToolCallDoesNotRetainOwnershipPayload(t, store, callKey, fixture)
+			}
+			if tc.wantEntry {
+				loaded := store.LoadScoped(fixture.providerID, fixture.responseID, fixture.scope)
+				assertResponsesHistoryOwnershipStructuredOutput(t, responsesHistoryOwnershipCanonicalOutput(t, loaded, fixture.callID), fixture)
+				assertResponsesHistoryOwnershipPreviousResponseReplay(t, store, fixture, previous)
+			}
+			if tc.wantToolRecovery {
+				assertResponsesHistoryOwnershipSemanticRecovery(t, store, fixture)
+			} else {
+				assertResponsesHistoryOwnershipIncompleteToolRecovery(t, store, fixture, tc.wantRecoveredCall)
+			}
+			if tc.wantOldRemoved {
+				if loaded := store.LoadScoped(fixture.providerID, fixture.responseID, fixture.scope); loaded != nil {
+					t.Fatalf("expected removed root not to load, got %#v", loaded)
+				}
+				if _, _, ok := store.LoadToolCall(fixture.providerID, fixture.callID, fixture.scope); ok {
+					t.Fatal("expected removed root not to recover the original tool call")
+				}
+			}
+		})
+	}
+}
+
+func TestResponsesHistoryStoreOwnershipMatrixPreservesDefaultEntryAndByteEviction(t *testing.T) {
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	if store.maxSize != defaultResponsesHistoryMaxSize || store.maxBytes != defaultResponsesHistoryMaxBytes {
+		t.Fatalf("unexpected default history bounds: entries=%d bytes=%d", store.maxSize, store.maxBytes)
+	}
+
+	var first responsesHistoryOwnershipFixture
+	var last responsesHistoryOwnershipFixture
+	for index := 0; index <= defaultResponsesHistoryMaxSize; index++ {
+		fixture, messages := decodeResponsesHistoryOwnershipFixture(t, fmt.Sprintf("default_eviction_%03d", index), 1024)
+		saveResponsesHistorySnapshot(store, fixture.providerID, fixture.responseID, messages, nil, fixture.scope, fixture.portableScope)
+		messages = nil
+		if index == 0 {
+			first = fixture
+		}
+		last = fixture
+	}
+	collectResponsesHistoryOwnershipGarbage(store)
+
+	if len(store.entries) != defaultResponsesHistoryMaxSize || len(store.order) != defaultResponsesHistoryMaxSize {
+		t.Fatalf("expected %d retained snapshots after entry eviction, got entries=%d order=%d", defaultResponsesHistoryMaxSize, len(store.entries), len(store.order))
+	}
+	if store.retainedBytes <= 0 || store.retainedBytes > defaultResponsesHistoryMaxBytes {
+		t.Fatalf("expected retained bytes within the 256 MiB budget, got %d", store.retainedBytes)
+	}
+	if loaded := store.LoadScoped(first.providerID, first.responseID, first.scope); loaded != nil {
+		t.Fatalf("expected oldest snapshot to be evicted, got %#v", loaded)
+	}
+	if _, _, ok := store.LoadToolCall(first.providerID, first.callID, first.scope); ok {
+		t.Fatal("expected oldest tool recovery entry to be evicted")
+	}
+	assertResponsesHistoryOwnershipSemanticRecovery(t, store, last)
+}
+
+func TestResponsesHistoryStoreOwnershipMatrixEvictsDecodedStructuredOutputAtByteBudget(t *testing.T) {
+	first, firstMessages := decodeResponsesHistoryOwnershipFixture(t, "byte_budget_first", 8<<10)
+	second, secondMessages := decodeResponsesHistoryOwnershipFixture(t, "byte_budget_second", 8<<10)
+	firstBytes := estimateCanonicalMessagesBytes(firstMessages) + estimateToolRecoveryBytes(firstMessages)
+	secondBytes := estimateCanonicalMessagesBytes(secondMessages) + estimateToolRecoveryBytes(secondMessages)
+	if firstBytes <= 0 || secondBytes <= 0 {
+		t.Fatalf("expected decoded snapshots to consume logical bytes, got first=%d second=%d", firstBytes, secondBytes)
+	}
+
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	if store.maxBytes != defaultResponsesHistoryMaxBytes {
+		t.Fatalf("expected default 256 MiB budget, got %d", store.maxBytes)
+	}
+	store.maxBytes = firstBytes + secondBytes - 1
+	saveResponsesHistorySnapshot(store, first.providerID, first.responseID, firstMessages, nil, first.scope, first.portableScope)
+	saveResponsesHistorySnapshot(store, second.providerID, second.responseID, secondMessages, nil, second.scope, second.portableScope)
+	collectResponsesHistoryOwnershipGarbage(store)
+
+	if loaded := store.LoadScoped(first.providerID, first.responseID, first.scope); loaded != nil {
+		t.Fatalf("expected oldest decoded snapshot to be evicted by byte budget, got %#v", loaded)
+	}
+	if _, _, ok := store.LoadToolCall(first.providerID, first.callID, first.scope); ok {
+		t.Fatal("expected oldest decoded tool recovery entry to be evicted by byte budget")
+	}
+	if store.retainedBytes != secondBytes || store.retainedBytes > store.maxBytes {
+		t.Fatalf("expected only the second decoded snapshot within the byte budget, retained=%d expected=%d budget=%d", store.retainedBytes, secondBytes, store.maxBytes)
+	}
+	assertResponsesHistoryOwnershipSemanticRecovery(t, store, second)
+}
+
+func newResponsesHistoryOwnershipStore(t *testing.T, suffix string, maxSize int, payloadBytes int) (*responsesHistoryStore, responsesHistoryOwnershipFixture, responsesHistoryOwnershipFixture) {
+	t.Helper()
+	fixture, messages := decodeResponsesHistoryOwnershipFixture(t, suffix, payloadBytes)
+	previous, previousMessages := decodeResponsesHistoryOwnershipFixture(t, suffix+"_previous", 1024)
+	previous.responseID = fixture.previousResponseID
+	store := newResponsesHistoryStore(maxSize, "")
+	saveResponsesHistorySnapshot(store, fixture.providerID, previous.responseID, previousMessages, nil, fixture.scope, fixture.portableScope)
+	saveResponsesHistorySnapshot(store, fixture.providerID, fixture.responseID, messages, nil, fixture.scope, fixture.portableScope)
+	return store, fixture, previous
+}
+
+func decodeResponsesHistoryOwnershipFixture(t *testing.T, suffix string, payloadBytes int) (responsesHistoryOwnershipFixture, []model.CanonicalMessage) {
+	t.Helper()
+	fixture := responsesHistoryOwnershipFixture{
+		providerID:         "openai",
+		responseID:         "resp-ownership-" + suffix,
+		scope:              "scope-ownership-" + suffix,
+		portableScope:      "portable-ownership-" + suffix,
+		callID:             "call-ownership-" + suffix,
+		previousResponseID: "resp-previous-" + suffix,
+		reasoningID:        "rs-ownership-" + suffix,
+		arguments:          `{"resource":"ownership"}`,
+		marker:             "ownership-matrix-" + suffix + "-",
+		payloadBytes:       payloadBytes,
+	}
+	payload := responsesHistoryOwnershipPayload(fixture.marker, fixture.payloadBytes)
+	request := map[string]any{
+		"model":                "gpt-5",
+		"stream":               true,
+		"previous_response_id": fixture.previousResponseID,
+		"input": []any{
+			map[string]any{
+				"type":              "reasoning",
+				"id":                fixture.reasoningID,
+				"encrypted_content": "opaque reasoning state",
+				"summary":           []any{map[string]any{"type": "summary_text", "text": "preserve reasoning"}},
+			},
+			map[string]any{
+				"type":      "function_call",
+				"id":        "fc-ownership-" + suffix,
+				"call_id":   fixture.callID,
+				"name":      "inspect_ownership",
+				"arguments": fixture.arguments,
+			},
+			map[string]any{
+				"type":    "function_call_output",
+				"call_id": fixture.callID,
+				"output": map[string]any{
+					"payload": payload,
+					"object": map[string]any{
+						"array":   []any{"value", 9, true, nil},
+						"boolean": true,
+						"null":    nil,
+						"number":  42,
+					},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal ownership request: %v", err)
+	}
+	canonical, err := responses.DecodeRequest(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode ownership request: %v", err)
+	}
+	if !canonical.Stream {
+		t.Fatal("expected decoded streaming request to preserve stream=true")
+	}
+	requestedPreviousResponseID := fixture.previousResponseID
+	if got := previousResponseIDFromItems(canonical.ResponseInputItems); got != requestedPreviousResponseID {
+		t.Fatalf("expected previous_response_id %q, got %q", requestedPreviousResponseID, got)
+	} else {
+		fixture.previousResponseID = got
+	}
+	assertResponsesHistoryOwnershipStructuredOutput(t, responsesHistoryOwnershipInputOutput(t, canonical.ResponseInputItems, fixture.callID), fixture)
+
+	messages := prepareCanonicalMessages(canonical.Messages)
+	assertResponsesHistoryOwnershipStructuredOutput(t, responsesHistoryOwnershipCanonicalOutput(t, messages, fixture.callID), fixture)
+	return fixture, messages
+}
+
+func responsesHistoryOwnershipPayload(marker string, size int) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+	var builder strings.Builder
+	builder.Grow(size)
+	builder.WriteString(marker)
+	state := uint64(0x9e3779b97f4a7c15)
+	for builder.Len() < size {
+		state = state*6364136223846793005 + 1442695040888963407
+		builder.WriteByte(alphabet[(state>>32)%uint64(len(alphabet))])
+	}
+	return builder.String()
+}
+
+func assertResponsesHistoryOwnershipSemanticRecovery(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture) {
+	t.Helper()
+	loaded := store.LoadScoped(fixture.providerID, fixture.responseID, fixture.scope)
+	if loaded == nil {
+		t.Fatal("expected scoped history snapshot to load")
+	}
+	assertResponsesHistoryOwnershipStructuredOutput(t, responsesHistoryOwnershipCanonicalOutput(t, loaded, fixture.callID), fixture)
+	if got := store.LoadScoped(fixture.providerID, fixture.responseID, fixture.scope+"-other"); got != nil {
+		t.Fatalf("expected different replay scope to remain isolated, got %#v", got)
+	}
+	portable := store.LoadPortable(fixture.responseID, fixture.portableScope)
+	if portable == nil {
+		t.Fatal("expected portable history snapshot to load")
+	}
+	if got := store.LoadPortable(fixture.responseID, fixture.portableScope+"-other"); got != nil {
+		t.Fatalf("expected different portable scope to remain isolated, got %#v", got)
+	}
+
+	call, reasoningBlocks, ok := store.LoadToolCall(fixture.providerID, fixture.callID, fixture.scope)
+	if !ok || call.ID != fixture.callID || call.Name != "inspect_ownership" || call.Arguments != fixture.arguments {
+		t.Fatalf("expected tool recovery to preserve call metadata, got ok=%t call=%#v", ok, call)
+	}
+	if len(reasoningBlocks) != 1 || reasoningBlocks[0]["id"] != fixture.reasoningID || reasoningBlocks[0]["encrypted_content"] != "opaque reasoning state" {
+		t.Fatalf("expected tool recovery to preserve reasoning, got %#v", reasoningBlocks)
+	}
+	if _, _, ok := store.LoadToolCall(fixture.providerID, fixture.callID, fixture.scope+"-other"); ok {
+		t.Fatal("expected different tool recovery scope to remain isolated")
+	}
+	recovered := recoverToolCallsForMessages(store, []model.CanonicalMessage{{Role: "tool", ToolCallID: fixture.callID}}, fixture.providerID, fixture.scope)
+	if len(recovered) != 1 || recovered[0].RecoveredToolCall == nil || recovered[0].RecoveredToolCall.ID != fixture.callID || recovered[0].RecoveredToolCall.Arguments != fixture.arguments {
+		t.Fatalf("expected recovered tool call to remain intact, got %#v", recovered)
+	}
+}
+
+func assertResponsesHistoryOwnershipPreviousResponseReplay(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture, previous responsesHistoryOwnershipFixture) {
+	t.Helper()
+	if fixture.previousResponseID != previous.responseID {
+		t.Fatalf("expected decoded previous_response_id %q to select prior snapshot %q", fixture.previousResponseID, previous.responseID)
+	}
+	loaded := store.LoadScoped(fixture.providerID, fixture.previousResponseID, fixture.scope)
+	if loaded == nil {
+		t.Fatalf("expected decoded previous_response_id %q to resolve scoped history", fixture.previousResponseID)
+	}
+	assertResponsesHistoryOwnershipStructuredOutput(t, responsesHistoryOwnershipCanonicalOutput(t, loaded, previous.callID), previous)
+}
+
+func assertResponsesHistoryOwnershipIncompleteToolRecovery(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture, wantRecoveredCall bool) {
+	t.Helper()
+	if _, _, ok := store.LoadToolCall(fixture.providerID, fixture.callID, fixture.scope); ok {
+		t.Fatal("expected current root state not to provide complete tool and reasoning recovery")
+	}
+	recovered := recoverToolCallsForMessages(store, []model.CanonicalMessage{{Role: "tool", ToolCallID: fixture.callID}}, fixture.providerID, fixture.scope)
+	if len(recovered) != 1 {
+		t.Fatalf("expected one recovery candidate, got %#v", recovered)
+	}
+	if !wantRecoveredCall {
+		if recovered[0].RecoveredToolCall != nil {
+			t.Fatalf("expected current root state not to synthesize a recovered tool call, got %#v", recovered)
+		}
+		return
+	}
+	if recovered[0].RecoveredToolCall == nil || recovered[0].RecoveredToolCall.ID != fixture.callID || recovered[0].RecoveredToolCall.Arguments != fixture.arguments {
+		t.Fatalf("expected toolCalls-only root to retain tool metadata without complete reasoning recovery, got %#v", recovered)
+	}
+}
+
+func responsesHistoryOwnershipInputOutput(t *testing.T, items []map[string]any, callID string) any {
+	t.Helper()
+	for _, item := range items {
+		if item["type"] != "function_call_output" || item["call_id"] != callID {
+			continue
+		}
+		return item["output"]
+	}
+	t.Fatalf("expected preserved function_call_output input item for %q", callID)
+	return nil
+}
+
+func responsesHistoryOwnershipCanonicalOutput(t *testing.T, messages []model.CanonicalMessage, callID string) any {
+	t.Helper()
+	for _, message := range messages {
+		if message.Role != "tool" || message.ToolCallID != callID {
+			continue
+		}
+		for _, part := range message.Parts {
+			if raw := part.Raw; raw != nil {
+				if output, ok := raw["tool_output_structured"]; ok {
+					return output
+				}
+			}
+		}
+	}
+	t.Fatalf("expected canonical tool output for %q", callID)
+	return nil
+}
+
+func assertResponsesHistoryOwnershipStructuredOutput(t *testing.T, raw any, fixture responsesHistoryOwnershipFixture) {
+	t.Helper()
+	output, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured output map, got %#v", raw)
+	}
+	payload, ok := output["payload"].(string)
+	if !ok || len(payload) != fixture.payloadBytes || !strings.Contains(payload, fixture.marker) {
+		t.Fatalf("expected %d-byte structured payload with marker %q, got %d bytes", fixture.payloadBytes, fixture.marker, len(payload))
+	}
+	object, ok := output["object"].(map[string]any)
+	if !ok || object["boolean"] != true || object["null"] != nil {
+		t.Fatalf("expected boolean and null values to round-trip, got %#v", object)
+	}
+	if number, ok := object["number"].(float64); !ok || number != 42 {
+		t.Fatalf("expected decoded number to remain float64(42), got %#v", object["number"])
+	}
+	array, ok := object["array"].([]any)
+	if !ok || len(array) != 4 || array[0] != "value" || array[2] != true || array[3] != nil {
+		t.Fatalf("expected structured array to round-trip, got %#v", object["array"])
+	}
+	if number, ok := array[1].(float64); !ok || number != 9 {
+		t.Fatalf("expected array number to remain float64(9), got %#v", array[1])
+	}
+}
+
+func removeResponsesHistoryOwnershipToolCalls(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture) {
+	t.Helper()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.deleteToolCallsForKeyLocked(responsesHistoryKey(fixture.providerID, fixture.responseID))
+}
+
+func removeResponsesHistoryOwnershipEntry(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture) {
+	t.Helper()
+	key := responsesHistoryKey(fixture.providerID, fixture.responseID)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	snapshot, ok := store.entries[key]
+	if !ok {
+		t.Fatalf("expected ownership snapshot %q", key)
+	}
+	delete(store.entries, key)
+	if store.byResponseID[fixture.responseID] == key {
+		delete(store.byResponseID, fixture.responseID)
+	}
+	store.removeKeyLocked(key)
+	store.deleteOpaqueThinkingForKeyLocked(key)
+	store.retainedBytes -= snapshot.Bytes
+	if store.retainedBytes < 0 {
+		store.retainedBytes = 0
+	}
+}
+
+func removeResponsesHistoryOwnershipSnapshotAndToolCalls(t *testing.T, store *responsesHistoryStore, fixture responsesHistoryOwnershipFixture) {
+	t.Helper()
+	key := responsesHistoryKey(fixture.providerID, fixture.responseID)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.removeKeyLocked(key)
+	store.deleteKeyLocked(key)
+}
+
+func collectResponsesHistoryOwnershipGarbage(store *responsesHistoryStore) {
+	for range 3 {
+		runtime.GC()
+	}
+	runtime.KeepAlive(store)
+}
+
+func responsesHistoryOwnershipRoots(store *responsesHistoryStore, key string, callKey string) (bool, bool, responsesConversationSnapshot) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	snapshot, entryPresent := store.entries[key]
+	_, toolCallPresent := store.toolCalls[callKey]
+	return entryPresent, toolCallPresent, snapshot
+}
+
+func responsesHistoryOwnershipSnapshotReferences(store *responsesHistoryStore, snapshotKey string) (int, int) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	toolCallRefs := 0
+	for _, entry := range store.toolCalls {
+		if entry.SnapshotKey == snapshotKey {
+			toolCallRefs++
+		}
+	}
+	opaqueThinkingRefs := 0
+	for _, entry := range store.opaqueThinking {
+		if entry.SnapshotKey == snapshotKey {
+			opaqueThinkingRefs++
+		}
+	}
+	return toolCallRefs, opaqueThinkingRefs
+}
+
+func responsesHistorySnapshotContainsOwnershipPayload(snapshot responsesConversationSnapshot, fixture responsesHistoryOwnershipFixture) bool {
+	for _, message := range snapshot.Messages {
+		if message.Role != "tool" || message.ToolCallID != fixture.callID {
+			continue
+		}
+		for _, part := range message.Parts {
+			if strings.Contains(part.Text, fixture.marker) {
+				return true
+			}
+			if raw := part.Raw; raw != nil {
+				if output, ok := raw["tool_output_structured"].(map[string]any); ok {
+					if payload, _ := output["payload"].(string); strings.Contains(payload, fixture.marker) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	for _, field := range snapshot.CompressedFields {
+		payload, ok := decompressResponsesHistoryString(field.Data, field.OriginalSize)
+		if ok && strings.Contains(payload, fixture.marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertResponsesHistoryToolCallDoesNotRetainOwnershipPayload(t *testing.T, store *responsesHistoryStore, callKey string, fixture responsesHistoryOwnershipFixture) {
+	t.Helper()
+	store.mu.RLock()
+	entry, ok := store.toolCalls[callKey]
+	store.mu.RUnlock()
+	if !ok {
+		t.Fatalf("expected tool-call root %q", callKey)
+	}
+	if !entry.ReasoningBlocksFromSnapshot || len(entry.ReasoningBlocks) != 0 || entry.SharedReasoningSnapshot != nil {
+		t.Fatalf("expected tool-call entry to reference, not duplicate, the snapshot reasoning, got %#v", entry)
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal tool-call root: %v", err)
+	}
+	if bytes.Contains(data, []byte(fixture.marker)) {
+		t.Fatalf("tool-call root unexpectedly retained structured output marker %q", fixture.marker)
 	}
 }
 

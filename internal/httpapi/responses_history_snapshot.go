@@ -3,11 +3,13 @@ package httpapi
 import (
 	"bytes"
 	"compress/flate"
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"strings"
 	"sync"
 
+	"openai-compat-proxy/internal/adapter/responses"
 	"openai-compat-proxy/internal/model"
 )
 
@@ -49,6 +51,17 @@ type responsesHistoryCompressedField struct {
 	DynamicPath        []responsesHistoryDynamicPathStep   `json:"dynamic_path,omitempty"`
 }
 
+const responsesHistoryStructuredOutputRawKey = "tool_output_structured"
+
+type responsesHistoryStructuredOutputTextRef struct {
+	MessageIndex int
+	PartIndex    int
+	RawKey       string
+	RendererID   string
+	TextBytes    int
+	TextSHA256   [sha256.Size]byte
+}
+
 type responsesHistoryReasoningSnapshot struct {
 	Blocks           []map[string]any                  `json:"blocks,omitempty"`
 	CompressedFields []responsesHistoryCompressedField `json:"compressed_fields,omitempty"`
@@ -77,10 +90,90 @@ var responsesHistoryFlateWriterPool sync.Pool
 func newResponsesConversationSnapshot(messages []model.CanonicalMessage, logicalBytes int64) (responsesConversationSnapshot, []model.CanonicalMessage) {
 	cloned := cloneCanonicalMessages(messages)
 	snapshot := responsesConversationSnapshot{Messages: cloned, Bytes: logicalBytes}
+	snapshot.StructuredOutputTextRefs = dedupeResponsesHistoryStructuredOutputText(cloned)
 	if logicalBytes >= responsesHistoryCompressionMinSnapshotBytes {
 		snapshot.CompressedFields = compressResponsesHistoryFields(cloned)
 	}
 	return snapshot, messages
+}
+
+func dedupeResponsesHistoryStructuredOutputText(messages []model.CanonicalMessage) []responsesHistoryStructuredOutputTextRef {
+	var refs []responsesHistoryStructuredOutputTextRef
+	for messageIndex := range messages {
+		message := &messages[messageIndex]
+		if message.Role != "tool" || message.ToolCallID == "" {
+			continue
+		}
+		for partIndex := range message.Parts {
+			part := &message.Parts[partIndex]
+			if part.Type != "text" || part.Text == "" || part.Raw == nil {
+				continue
+			}
+			structuredOutput, exists := part.Raw[responsesHistoryStructuredOutputRawKey]
+			if !exists || !isStableResponsesHistoryStructuredOutputRaw(structuredOutput) {
+				continue
+			}
+			rendered, err := responses.RenderStructuredFunctionCallOutput(structuredOutput)
+			if err != nil || rendered != part.Text {
+				continue
+			}
+			refs = append(refs, responsesHistoryStructuredOutputTextRef{
+				MessageIndex: messageIndex,
+				PartIndex:    partIndex,
+				RawKey:       responsesHistoryStructuredOutputRawKey,
+				RendererID:   responses.StructuredFunctionCallOutputRendererID,
+				TextBytes:    len(part.Text),
+				TextSHA256:   sha256.Sum256([]byte(part.Text)),
+			})
+			part.Text = ""
+		}
+	}
+	return refs
+}
+
+// isStableResponsesHistoryStructuredOutputRaw admits only the concrete JSON
+// tree forms cloned by the history snapshot. In particular, custom marshalers
+// are never rendered while deciding whether Text can be reconstructed from Raw.
+func isStableResponsesHistoryStructuredOutputRaw(value any) bool {
+	switch typed := value.(type) {
+	case nil, bool, string,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr,
+		float32, float64,
+		json.Number:
+		return true
+	case json.RawMessage:
+		return typed == nil || json.Valid(typed)
+	case []byte:
+		return true
+	case map[string]any:
+		for _, nested := range typed {
+			if !isStableResponsesHistoryStructuredOutputRaw(nested) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, nested := range typed {
+			if !isStableResponsesHistoryStructuredOutputRaw(nested) {
+				return false
+			}
+		}
+		return true
+	case []map[string]any:
+		for _, nested := range typed {
+			if !isStableResponsesHistoryStructuredOutputRaw(nested) {
+				return false
+			}
+		}
+		return true
+	case map[string]string, []string:
+		return true
+	case json.Marshaler:
+		return false
+	default:
+		return false
+	}
 }
 
 func compressResponsesHistoryFields(messages []model.CanonicalMessage) []responsesHistoryCompressedField {
@@ -380,7 +473,42 @@ func loadResponsesConversationSnapshot(snapshot responsesConversationSnapshot) [
 			return nil
 		}
 	}
+	if !restoreResponsesHistoryStructuredOutputText(messages, snapshot.StructuredOutputTextRefs) {
+		return nil
+	}
 	return messages
+}
+
+func restoreResponsesHistoryStructuredOutputText(messages []model.CanonicalMessage, refs []responsesHistoryStructuredOutputTextRef) bool {
+	restored := make(map[[2]int]struct{}, len(refs))
+	for _, ref := range refs {
+		if ref.MessageIndex < 0 || ref.MessageIndex >= len(messages) || ref.RawKey != responsesHistoryStructuredOutputRawKey || ref.RendererID != responses.StructuredFunctionCallOutputRendererID || ref.TextBytes <= 0 || int64(ref.TextBytes) > defaultResponsesHistoryMaxBytes {
+			return false
+		}
+		message := &messages[ref.MessageIndex]
+		if message.Role != "tool" || message.ToolCallID == "" || ref.PartIndex < 0 || ref.PartIndex >= len(message.Parts) {
+			return false
+		}
+		target := [2]int{ref.MessageIndex, ref.PartIndex}
+		if _, exists := restored[target]; exists {
+			return false
+		}
+		restored[target] = struct{}{}
+		part := &message.Parts[ref.PartIndex]
+		if part.Type != "text" || part.Text != "" || part.Raw == nil {
+			return false
+		}
+		structuredOutput, exists := part.Raw[ref.RawKey]
+		if !exists || !isStableResponsesHistoryStructuredOutputRaw(structuredOutput) {
+			return false
+		}
+		rendered, err := responses.RenderStructuredFunctionCallOutput(structuredOutput)
+		if err != nil || len(rendered) != ref.TextBytes || sha256.Sum256([]byte(rendered)) != ref.TextSHA256 {
+			return false
+		}
+		part.Text = rendered
+	}
+	return true
 }
 
 func loadResponsesHistoryReasoningBlocksFromSnapshot(snapshot responsesConversationSnapshot, messageIndex int) ([]map[string]any, bool) {
