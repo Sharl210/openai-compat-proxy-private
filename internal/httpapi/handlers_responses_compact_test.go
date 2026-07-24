@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/model"
 )
 
 func TestResponsesCompactRejectsStream(t *testing.T) {
@@ -270,6 +272,223 @@ func TestResponsesCompactBypassesProxyContextLimit(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("expected compact route to still call upstream despite proxy context limit")
+	}
+}
+
+func TestResponsesCompactPreservesNativeContinuationForResponsesUpstream(t *testing.T) {
+	var upstreamRequest map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses/compact" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+			t.Fatalf("decode upstream compact request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_compact","object":"response","status":"completed","compact_text":"hello"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeResponses)
+	cfg.Providers[0].SupportsModels = false
+	cfg.Providers[0].ManualModels = []string{"gpt-5"}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{
+		"model":"gpt-5",
+		"previous_response_id":"resp_previous",
+		"input":[{"type":"compaction","id":"cmp_1","encrypted_content":"enc_compact"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got, _ := upstreamRequest["previous_response_id"].(string); got != "resp_previous" {
+		t.Fatalf("expected Responses upstream compact request to retain previous_response_id, got %#v", upstreamRequest)
+	}
+	input, _ := upstreamRequest["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("expected native compaction item to remain in Responses upstream compact request, got %#v", upstreamRequest)
+	}
+	compaction, _ := input[0].(map[string]any)
+	if compaction["type"] != "compaction" || compaction["encrypted_content"] != "enc_compact" {
+		t.Fatalf("expected native compaction state to pass through unchanged, got %#v", compaction)
+	}
+}
+
+func TestResponsesCompactFallbackRestoresPortableHistoryAndConsumesContinuationState(t *testing.T) {
+	for _, endpointType := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		t.Run(endpointType, func(t *testing.T) {
+			requestCount := 0
+			var targetBody string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestCount++
+				body, _ := io.ReadAll(r.Body)
+				if requestCount == 1 {
+					if r.URL.Path != "/messages" {
+						http.NotFound(w, r)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"msg_source","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"source native thinking","signature":"sig_source"},{"type":"text","text":"source answer"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+					return
+				}
+				targetBody = string(body)
+				w.Header().Set("Content-Type", "application/json")
+				if endpointType == config.UpstreamEndpointTypeChat {
+					if r.URL.Path != "/chat/completions" {
+						http.NotFound(w, r)
+						return
+					}
+					_, _ = w.Write([]byte(`{"id":"chatcmpl_compact","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"compact summary"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`))
+					return
+				}
+				if r.URL.Path != "/messages" {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = w.Write([]byte(`{"id":"msg_compact","type":"message","role":"assistant","content":[{"type":"text","text":"compact summary"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":5}}`))
+			}))
+			defer upstream.Close()
+
+			target := config.ProviderConfig{
+				ID:                        "target",
+				Enabled:                   true,
+				UpstreamBaseURL:           upstream.URL,
+				UpstreamAPIKey:            "test-key",
+				UpstreamEndpointType:      endpointType,
+				SupportsModels:            false,
+				SupportsResponses:         true,
+				SupportsChat:              true,
+				SupportsAnthropicMessages: true,
+				ManualModels:              []string{"target-model"},
+			}
+			server := NewServer(config.Config{
+				DefaultProvider:             "source",
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{
+					{ID: "source", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key", UpstreamEndpointType: config.UpstreamEndpointTypeAnthropic, SupportsModels: false, SupportsResponses: true, SupportsChat: true, SupportsAnthropicMessages: true, ManualModels: []string{"source-model"}},
+					target,
+				},
+			})
+
+			firstReq := httptest.NewRequest(http.MethodPost, "/source/v1/responses", strings.NewReader(`{"model":"source-model","input":"source normal history"}`))
+			firstReq.Header.Set("Content-Type", "application/json")
+			firstRec := httptest.NewRecorder()
+			server.ServeHTTP(firstRec, firstReq)
+			if firstRec.Code != http.StatusOK {
+				t.Fatalf("expected source history response 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+			}
+
+			compactReq := httptest.NewRequest(http.MethodPost, "/target/v1/responses/compact", strings.NewReader(`{
+				"model":"target-model",
+				"previous_response_id":"msg_source",
+				"input":[
+					{"role":"user","content":"continue after compact"},
+					{"type":"compaction","id":"cmp_1","encrypted_content":"enc_compact","summary":[{"type":"summary_text","text":"compacted"}]}
+				]
+			}`))
+			compactReq.Header.Set("Content-Type", "application/json")
+			compactRec := httptest.NewRecorder()
+			server.ServeHTTP(compactRec, compactReq)
+
+			if compactRec.Code != http.StatusOK {
+				t.Fatalf("expected compact fallback 200, got %d body=%s", compactRec.Code, compactRec.Body.String())
+			}
+			if requestCount != 2 {
+				t.Fatalf("expected normal history plus one compact fallback upstream call, got %d", requestCount)
+			}
+			assertResponsesCompactContainsText(t, compactRec, "compact summary")
+			if !strings.Contains(targetBody, "source normal history") {
+				t.Fatalf("expected compact fallback to restore portable normal Responses history, got %s", targetBody)
+			}
+			for _, forbidden := range []string{`"previous_response_id"`, `"type":"compaction"`, `"encrypted_content":"enc_compact"`, `"signature":"sig_source"`, "source native thinking"} {
+				if strings.Contains(targetBody, forbidden) {
+					t.Fatalf("expected cross-scope compact fallback to consume native continuation state %q, got %s", forbidden, targetBody)
+				}
+			}
+		})
+	}
+}
+
+func TestResponsesCompactFallbackRejectsUnresolvedContinuationWithoutUpstreamCall(t *testing.T) {
+	for _, endpointType := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		t.Run(endpointType, func(t *testing.T) {
+			called := false
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"unexpected"}`))
+			}))
+			defer upstream.Close()
+
+			cfg := testResponsesConfigWithEndpoint(upstream.URL, endpointType)
+			cfg.Providers[0].SupportsModels = false
+			cfg.Providers[0].ManualModels = []string{"gpt-5"}
+			server := NewServer(cfg)
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{
+				"model":"gpt-5",
+				"previous_response_id":"resp_missing",
+				"input":[{"role":"user","content":"continue"},{"type":"compaction","id":"cmp_1","encrypted_content":"enc_compact"}]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			assertErrorResponse(t, rec, http.StatusBadRequest, "unsupported_upstream_feature", "unsupported upstream feature: persisted responses item requires a responses upstream")
+			if called {
+				t.Fatal("expected unresolved compact continuation to be rejected before any upstream call")
+			}
+		})
+	}
+}
+
+func TestResponsesCompactFallbackKeepsOtherPersistedItemsRejected(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"unexpected"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testResponsesConfigWithEndpoint(upstream.URL, config.UpstreamEndpointTypeChat)
+	cfg.Providers[0].SupportsModels = false
+	cfg.Providers[0].ManualModels = []string{"gpt-5"}
+	server := NewServer(cfg)
+	server.history.SaveWithPortableScope("openai", "resp_known", []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "restored history"}}}}, "normal-responses-scope", responsesHistoryPortableScope("anonymous"))
+
+	for _, testCase := range []struct {
+		name string
+		item string
+	}{
+		{name: "item reference", item: `{"type":"item_reference","id":"item_1"}`},
+		{name: "program", item: `{"type":"program","id":"program_1"}`},
+		{name: "program output", item: `{"type":"program_output","id":"program_output_1"}`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			called = false
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{
+				"model":"gpt-5",
+				"previous_response_id":"resp_known",
+				"input":[{"role":"user","content":"continue"},{"type":"compaction","id":"cmp_1","encrypted_content":"enc_compact"},`+testCase.item+`]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			assertErrorResponse(t, rec, http.StatusBadRequest, "unsupported_upstream_feature", "unsupported upstream feature: persisted responses item requires a responses upstream")
+			if called {
+				t.Fatalf("expected %s to remain rejected before any upstream call", testCase.name)
+			}
+		})
 	}
 }
 

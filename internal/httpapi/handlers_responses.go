@@ -499,18 +499,19 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		InboundCallerFingerprint:  inboundCallerFingerprint,
 	})
 	portableHistoryScope := responsesHistoryPortableScope(inboundCallerFingerprint)
-	if !compact && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses {
+	nonResponsesUpstream := providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses
+	if !compact && nonResponsesUpstream {
 		canon.IncludeUsage = true
 	}
 	portableReasoningProjection := !compact && projectClientResponsesReasoning(&canon, providerCfg.UpstreamEndpointType)
 	previousHistoryRestored := false
 	portableHistoryRestored := false
-	if !compact && shouldRestorePreviousConversation(canon.Messages) {
+	if nonResponsesUpstream && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
 			currentMessages := prepareCanonicalMessages(canon.Messages)
 			previousHistory := history.LoadScoped(providerID, previousResponseID, historyScope)
 			switch {
-			case len(previousHistory) > 0 && providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeResponses:
+			case len(previousHistory) > 0:
 				canon.Messages = append(previousHistory, currentMessages...)
 				previousHistoryRestored = true
 			case len(previousHistory) == 0:
@@ -530,12 +531,21 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	if !previousHistoryRestored {
 		canon.Messages = prepareCanonicalMessages(canon.Messages)
 	}
-	if portableReasoningProjection || portableHistoryRestored {
+	if portableHistoryRestored {
+		canon.Messages = stripCrossScopeNativeAnthropicThinking(canon.Messages)
+	}
+	compactHistoryRestored := compact && nonResponsesUpstream && previousHistoryRestored
+	if compactHistoryRestored {
+		portableReasoningProjection = projectClientResponsesReasoning(&canon, providerCfg.UpstreamEndpointType)
+	}
+	if compactHistoryRestored {
+		consumeRestoredResponsesCompactionContinuation(&canon)
+	} else if portableReasoningProjection || portableHistoryRestored {
 		clearResponsesNativeReplayState(&canon)
 	}
 	applyProviderSystemPrompt(&canon, provider)
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic && !previousHistoryRestored {
-		canon.Messages = recoverToolCallsForMessages(history, canon.Messages, providerID, historyScope)
+		canon.Messages = recoverToolCallsForMessagesWithThinking(history, canon.Messages, providerID, !portableReasoningProjection, historyScope)
 	}
 	if !compact && providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeResponses && providerCfg.MasqueradeTarget == config.MasqueradeTargetOpenCode {
 		if previousResponseIDFromItems(canon.ResponseInputItems) != "" {
@@ -724,6 +734,24 @@ func clearResponsesNativeReplayState(canon *model.CanonicalRequest) {
 		preserved, _ := item["__openai_compat_responses_top_level"].(map[string]any)
 		delete(preserved, "previous_response_id")
 	}
+}
+
+func consumeRestoredResponsesCompactionContinuation(canon *model.CanonicalRequest) {
+	if canon == nil {
+		return
+	}
+	clearResponsesNativeReplayState(canon)
+	if len(canon.ResponseInputItems) == 0 {
+		return
+	}
+	items := make([]map[string]any, 0, len(canon.ResponseInputItems))
+	for _, item := range canon.ResponseInputItems {
+		if stringValue(item["type"]) == "compaction" {
+			continue
+		}
+		items = append(items, item)
+	}
+	canon.ResponseInputItems = items
 }
 
 func logNonStreamResponsesOutput(requestID string, normalized map[string]any) {
