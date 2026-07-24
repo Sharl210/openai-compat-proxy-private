@@ -87,10 +87,31 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 	}
 	sort.Strings(keys)
 	persistedSnapshots := make(map[string]responsesHistoryReasoningSnapshot)
+	persistedSnapshotViews := make(map[string]responsesHistoryReasoningSnapshotPersistenceView)
 	entrySnapshotKeys := make(map[string]string)
 	pointerKeys := make(map[*responsesHistoryReasoningSnapshot]string)
-	normalSnapshotPointers := make(map[string]*responsesHistoryReasoningSnapshot)
+	normalSnapshotKeys := make(map[string]string)
 	nextSnapshotKey := 0
+	newSnapshotKey := func(preferredKey string) string {
+		key := strings.TrimSpace(preferredKey)
+		if key != "" {
+			if _, exists := persistedSnapshots[key]; !exists {
+				if _, exists := persistedSnapshotViews[key]; !exists {
+					return key
+				}
+			}
+		}
+		for {
+			nextSnapshotKey++
+			key = "reasoning-" + strconv.Itoa(nextSnapshotKey)
+			if _, exists := persistedSnapshots[key]; exists {
+				continue
+			}
+			if _, exists := persistedSnapshotViews[key]; !exists {
+				return key
+			}
+		}
+	}
 	registerSnapshot := func(snapshot *responsesHistoryReasoningSnapshot, preferredKey string) string {
 		if snapshot == nil {
 			return ""
@@ -98,19 +119,27 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 		if key, exists := pointerKeys[snapshot]; exists {
 			return key
 		}
-		key := strings.TrimSpace(preferredKey)
-		if _, exists := persistedSnapshots[key]; key == "" || exists {
-			for {
-				nextSnapshotKey++
-				key = "reasoning-" + strconv.Itoa(nextSnapshotKey)
-				if _, exists := persistedSnapshots[key]; !exists {
-					break
-				}
-			}
-		}
+		key := newSnapshotKey(preferredKey)
 		pointerKeys[snapshot] = key
 		persistedSnapshots[key] = *snapshot
 		return key
+	}
+	registerNormalSnapshot := func(snapshot responsesConversationSnapshot, messageIndex int, logicalKey, preferredKey string) (string, bool) {
+		if key, exists := normalSnapshotKeys[logicalKey]; exists {
+			return key, true
+		}
+		view, found := newResponsesHistoryReasoningSnapshotPersistenceView(snapshot, messageIndex)
+		if !found {
+			return "", false
+		}
+		if len(view.Blocks) == 0 {
+			normalSnapshotKeys[logicalKey] = ""
+			return "", true
+		}
+		key := newSnapshotKey(preferredKey)
+		normalSnapshotKeys[logicalKey] = key
+		persistedSnapshotViews[key] = view
+		return key, true
 	}
 
 	for _, key := range keys {
@@ -121,18 +150,18 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 			snapshot = entry.SharedReasoningSnapshot
 		} else if entry.ReasoningBlocksFromSnapshot {
 			logicalKey := entry.SnapshotKey + "\x00" + strconv.Itoa(entry.SnapshotReasoningMessageIndex)
-			snapshot = normalSnapshotPointers[logicalKey]
-			if snapshot == nil {
-				storedSnapshot, found := s.entries[entry.SnapshotKey]
-				if !found {
-					return errors.New("invalid responses tool-call reasoning snapshot reference")
-				}
-				snapshot, found = newResponsesHistoryReasoningSnapshotFromConversationSnapshot(storedSnapshot, entry.SnapshotReasoningMessageIndex)
-				if !found {
-					return errors.New("invalid responses tool-call reasoning snapshot reference")
-				}
-				normalSnapshotPointers[logicalKey] = snapshot
+			storedSnapshot, found := s.entries[entry.SnapshotKey]
+			if !found {
+				return errors.New("invalid responses tool-call reasoning snapshot reference")
 			}
+			snapshotKey, found := registerNormalSnapshot(storedSnapshot, entry.SnapshotReasoningMessageIndex, logicalKey, preferredKey)
+			if !found {
+				return errors.New("invalid responses tool-call reasoning snapshot reference")
+			}
+			if snapshotKey != "" {
+				entrySnapshotKeys[key] = snapshotKey
+			}
+			continue
 		} else if len(entry.ReasoningBlocks) > 0 {
 			snapshot = newResponsesHistoryReasoningSnapshot(entry.ReasoningBlocks)
 		}
@@ -197,12 +226,15 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 	if err := writer.WriteByte('}'); err != nil {
 		return err
 	}
-	if len(persistedSnapshots) > 0 {
+	if len(persistedSnapshots)+len(persistedSnapshotViews) > 0 {
 		if _, err := writer.WriteString(`,"reasoning_snapshots":{`); err != nil {
 			return err
 		}
-		snapshotKeys := make([]string, 0, len(persistedSnapshots))
+		snapshotKeys := make([]string, 0, len(persistedSnapshots)+len(persistedSnapshotViews))
 		for key := range persistedSnapshots {
+			snapshotKeys = append(snapshotKeys, key)
+		}
+		for key := range persistedSnapshotViews {
 			snapshotKeys = append(snapshotKeys, key)
 		}
 		sort.Strings(snapshotKeys)
@@ -222,7 +254,18 @@ func (s *responsesHistoryStore) writeToolCallRecoveryIndex(output io.Writer) err
 			if err := writer.WriteByte(':'); err != nil {
 				return err
 			}
-			encodedSnapshot, err := json.Marshal(persistedSnapshots[key])
+			snapshot, exists := persistedSnapshots[key]
+			if !exists {
+				encodedSnapshot, err := json.Marshal(persistedSnapshotViews[key])
+				if err != nil {
+					return err
+				}
+				if _, err := writer.Write(encodedSnapshot); err != nil {
+					return err
+				}
+				continue
+			}
+			encodedSnapshot, err := json.Marshal(snapshot)
 			if err != nil {
 				return err
 			}

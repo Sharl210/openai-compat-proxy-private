@@ -54,6 +54,24 @@ type responsesHistoryReasoningSnapshot struct {
 	CompressedFields []responsesHistoryCompressedField `json:"compressed_fields,omitempty"`
 }
 
+// responsesHistoryReasoningSnapshotPersistenceView 将单条消息的推理状态序列化为
+// 只读视图，不复制快照中的压缩 payload。
+type responsesHistoryReasoningSnapshotPersistenceView struct {
+	Blocks           []map[string]any                                 `json:"blocks,omitempty"`
+	CompressedFields []responsesHistoryCompressedFieldPersistenceView `json:"compressed_fields,omitempty"`
+}
+
+// responsesHistoryCompressedFieldPersistenceView 故意省略 MessageIndex：持久化
+// reasoning snapshot 相对于其唯一推理消息，保持既有物化写入的磁盘 schema。
+type responsesHistoryCompressedFieldPersistenceView struct {
+	ItemIndex          int                                 `json:"item_index"`
+	Kind               responsesHistoryCompressedFieldKind `json:"kind"`
+	OriginalSize       int                                 `json:"original_size"`
+	Data               []byte                              `json:"data"`
+	RestoreRawImageURL bool                                `json:"restore_raw_image_url,omitempty"`
+	DynamicPath        []responsesHistoryDynamicPathStep   `json:"dynamic_path,omitempty"`
+}
+
 var responsesHistoryFlateWriterPool sync.Pool
 
 func newResponsesConversationSnapshot(messages []model.CanonicalMessage, logicalBytes int64) (responsesConversationSnapshot, []model.CanonicalMessage) {
@@ -127,6 +145,27 @@ func newResponsesHistoryReasoningSnapshotFromConversationSnapshot(snapshot respo
 		compressedFields = append(compressedFields, copied)
 	}
 	return &responsesHistoryReasoningSnapshot{Blocks: blocks, CompressedFields: compressedFields}, true
+}
+
+func newResponsesHistoryReasoningSnapshotPersistenceView(snapshot responsesConversationSnapshot, messageIndex int) (responsesHistoryReasoningSnapshotPersistenceView, bool) {
+	if messageIndex < 0 || messageIndex >= len(snapshot.Messages) {
+		return responsesHistoryReasoningSnapshotPersistenceView{}, false
+	}
+	view := responsesHistoryReasoningSnapshotPersistenceView{Blocks: snapshot.Messages[messageIndex].ReasoningBlocks}
+	for _, field := range snapshot.CompressedFields {
+		if field.Kind != responsesHistoryCompressedReasoningBlockString || field.MessageIndex != messageIndex {
+			continue
+		}
+		view.CompressedFields = append(view.CompressedFields, responsesHistoryCompressedFieldPersistenceView{
+			ItemIndex:          field.ItemIndex,
+			Kind:               field.Kind,
+			OriginalSize:       field.OriginalSize,
+			Data:               field.Data,
+			RestoreRawImageURL: field.RestoreRawImageURL,
+			DynamicPath:        field.DynamicPath,
+		})
+	}
+	return view, true
 }
 
 func compressResponsesHistoryField(fields []responsesHistoryCompressedField, value *string, field responsesHistoryCompressedField) []responsesHistoryCompressedField {

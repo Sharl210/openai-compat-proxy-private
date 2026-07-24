@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -641,23 +642,69 @@ func TestResponsesHistoryStorePersistsMaterializedCompressedReasoningForToolReco
 func TestResponsesHistoryStoreSharesPersistedReasoningSnapshotForNormalToolCalls(t *testing.T) {
 	// Given
 	payload := strings.Repeat("persisted shared normal reasoning ", 8192)
-	reasoning := map[string]any{"id": "rs-persisted-shared", "type": "reasoning", "encrypted_content": payload}
+	summary := strings.Repeat("persisted shared reasoning summary ", 4096)
+	reasoning := map[string]any{"id": "rs-persisted-shared", "type": "reasoning", "encrypted_content": payload, "summary": []any{map[string]any{"type": "summary_text", "text": summary}}}
 	indexPath := filepath.Join(t.TempDir(), "tool_call_recovery_index.json")
 	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, indexPath)
-	store.Save("openai", "resp-persisted-shared", []model.CanonicalMessage{{
-		Role:            "assistant",
-		ReasoningBlocks: []map[string]any{reasoning},
-		ToolCalls: []model.CanonicalToolCall{
-			{ID: "call-persisted-shared-1", Type: "function", Name: "lookup", Arguments: `{}`},
-			{ID: "call-persisted-shared-2", Type: "function", Name: "lookup", Arguments: `{}`},
+	store.Save("openai", "resp-persisted-shared", []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "input_text", Text: "preserve the normal snapshot message index"}}},
+		{
+			Role:            "assistant",
+			ReasoningBlocks: []map[string]any{reasoning},
+			ToolCalls: []model.CanonicalToolCall{
+				{ID: "call-persisted-shared-1", Type: "function", Name: "lookup", Arguments: `{}`},
+				{ID: "call-persisted-shared-2", Type: "function", Name: "lookup", Arguments: `{}`},
+			},
 		},
-	}})
+	})
 
 	// When
-	persistedData, err := os.ReadFile(indexPath)
-	if err != nil {
-		t.Fatalf("read persisted shared reasoning recovery index: %v", err)
+	snapshotKey := responsesHistoryKey("openai", "resp-persisted-shared")
+	snapshot := store.entries[snapshotKey]
+	before := snapshot
+	before.Messages = cloneCanonicalMessages(snapshot.Messages)
+	before.CompressedFields = cloneResponsesHistoryCompressedFields(snapshot.CompressedFields)
+	view, viewOK := newResponsesHistoryReasoningSnapshotPersistenceView(snapshot, 1)
+	materialized, materializedOK := newResponsesHistoryReasoningSnapshotFromConversationSnapshot(snapshot, 1)
+	if !viewOK || !materializedOK || materialized == nil || len(view.CompressedFields) == 0 {
+		t.Fatalf("expected normal snapshot reasoning persistence inputs, got view=%#v materialized=%#v", view, materialized)
 	}
+	viewData, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal read-only reasoning view: %v", err)
+	}
+	materializedData, err := json.Marshal(materialized)
+	if err != nil {
+		t.Fatalf("marshal materialized reasoning snapshot: %v", err)
+	}
+	if !bytes.Equal(viewData, materializedData) {
+		t.Fatalf("expected read-only reasoning view to preserve persisted schema, got view=%s materialized=%s", viewData, materializedData)
+	}
+	var sourceField *responsesHistoryCompressedField
+	for index := range snapshot.CompressedFields {
+		field := &snapshot.CompressedFields[index]
+		if field.Kind == responsesHistoryCompressedReasoningBlockString && field.MessageIndex == 1 && len(field.Data) > 0 && len(field.DynamicPath) > 0 {
+			sourceField = field
+			break
+		}
+	}
+	if sourceField == nil || len(view.CompressedFields[0].Data) == 0 || len(view.CompressedFields[0].DynamicPath) == 0 || &view.CompressedFields[0].Data[0] != &sourceField.Data[0] || &view.CompressedFields[0].DynamicPath[0] != &sourceField.DynamicPath[0] {
+		t.Fatalf("expected persistence view to share compressed data and dynamic path without copies, got source=%#v view=%#v", sourceField, view.CompressedFields)
+	}
+	var persistedBuffer bytes.Buffer
+	store.mu.Lock()
+	err = store.writeToolCallRecoveryIndex(&persistedBuffer)
+	store.mu.Unlock()
+	if err != nil {
+		t.Fatalf("write persisted shared reasoning recovery index: %v", err)
+	}
+	if !reflect.DeepEqual(store.entries[snapshotKey], before) {
+		t.Fatalf("expected persistence to leave the normal snapshot unchanged, got before=%#v after=%#v", before, store.entries[snapshotKey])
+	}
+	if err := os.WriteFile(indexPath, persistedBuffer.Bytes(), 0o600); err != nil {
+		t.Fatalf("write persisted shared reasoning recovery index: %v", err)
+	}
+	persistedData := persistedBuffer.Bytes()
 	var persisted responsesHistoryToolCallRecoveryIndexFile
 	if err := json.Unmarshal(persistedData, &persisted); err != nil {
 		t.Fatalf("decode persisted shared reasoning recovery index: %v", err)
