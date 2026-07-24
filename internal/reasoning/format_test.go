@@ -13,6 +13,7 @@ func TestFormatTextSeparatesBoldTitleFromFollowingContent(t *testing.T) {
 		{name: "title without body", input: "**标题**", want: "**标题**"},
 		{name: "adjacent bold titles", input: "**一****二**后续", want: "**一**\n\n**二**\n后续"},
 		{name: "adjacent bold titles without body", input: "**一****二**", want: "**一**\n\n**二**"},
+		{name: "continuous thinking titles", input: "**ssss****sssss****sdad**", want: "**ssss**\n\n**sssss**\n\n**sdad**"},
 		{name: "incomplete adjacent marker", input: "**标题****", want: "**标题**\n**"},
 		{name: "existing newline", input: "**标题**\n正文", want: "**标题**\n正文"},
 		{name: "existing newline before title", input: "正文\n**标题**\n后续", want: "正文\n**标题**\n后续"},
@@ -56,6 +57,92 @@ func TestFormatBlockFormatsAllReasoningText(t *testing.T) {
 	}
 }
 
+func TestFormatBlockPreservesSignedReasoningText(t *testing.T) {
+	block := map[string]any{
+		"thinking":  "**ssss****sssss****sdad**",
+		"summary":   "**标题**正文",
+		"signature": "sig_123",
+	}
+
+	formatted := FormatBlock(block)
+	if got, _ := formatted["thinking"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected signed thinking preserved, got %q", got)
+	}
+	if got, _ := formatted["summary"].(string); got != "**标题**正文" {
+		t.Fatalf("expected signed summary preserved, got %q", got)
+	}
+	if got, _ := block["thinking"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected source block unchanged, got %q", got)
+	}
+}
+
+func TestFormatBlockFormatsTypedSummaryParts(t *testing.T) {
+	block := map[string]any{
+		"summary": []map[string]any{
+			{
+				"type": "summary_text",
+				"text": "**ssss****sssss****sdad**",
+			},
+			nil,
+		},
+	}
+
+	formatted := FormatBlock(block)
+	parts, ok := formatted["summary"].([]map[string]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("expected typed summary parts, got %#v", formatted["summary"])
+	}
+	if got, _ := parts[0]["text"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
+		t.Fatalf("expected continuous thinking titles to be separated, got %#v", parts[0])
+	}
+	if got, _ := block["summary"].([]map[string]any)[0]["text"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected source block unchanged, got %q", got)
+	}
+	if parts[1] != nil {
+		t.Fatalf("expected nil typed summary part preserved, got %#v", parts[1])
+	}
+}
+
+func TestFormatBlockPreservesNilSummarySlices(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary any
+		assert  func(t *testing.T, value any)
+	}{
+		{
+			name:    "untyped",
+			summary: []any(nil),
+			assert: func(t *testing.T, value any) {
+				t.Helper()
+				parts, ok := value.([]any)
+				if !ok || parts != nil {
+					t.Fatalf("expected nil []any summary, got %#v", value)
+				}
+			},
+		},
+		{
+			name:    "typed",
+			summary: []map[string]any(nil),
+			assert: func(t *testing.T, value any) {
+				t.Helper()
+				parts, ok := value.([]map[string]any)
+				if !ok || parts != nil {
+					t.Fatalf("expected nil []map[string]any summary, got %#v", value)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			block := map[string]any{"summary": test.summary}
+			formatted := FormatBlock(block)
+			test.assert(t, formatted["summary"])
+			test.assert(t, block["summary"])
+		})
+	}
+}
+
 func TestFormatDeltaCarriesBoldTitleAcrossChunks(t *testing.T) {
 	first, combined := FormatDelta("", "**标题**")
 	if first != "**标题**" || combined != "**标题**" {
@@ -80,5 +167,17 @@ func TestFormatDeltaSeparatesAdjacentBoldTitlesAcrossChunks(t *testing.T) {
 	second, combined := FormatDelta(combined, "**后续**")
 	if second != "\n\n**后续**" || combined != "**标题**\n\n**后续**" {
 		t.Fatalf("expected adjacent titles separated across chunks, got second=%q combined=%q", second, combined)
+	}
+}
+
+func TestFormatDeltaSeparatesContinuousThinkingTitlesAcrossChunks(t *testing.T) {
+	first, combined := FormatDelta("", "**ssss**")
+	if first != "**ssss**" || combined != "**ssss**" {
+		t.Fatalf("expected first thinking title unchanged, got first=%q combined=%q", first, combined)
+	}
+
+	second, combined := FormatDelta(combined, "**sssss****sdad**")
+	if second != "\n\n**sssss**\n\n**sdad**" || combined != "**ssss**\n\n**sssss**\n\n**sdad**" {
+		t.Fatalf("expected continuous thinking titles separated across chunks, got second=%q combined=%q", second, combined)
 	}
 }

@@ -106,12 +106,12 @@ func TestBuildResponseFormatsReasoningContentTitle(t *testing.T) {
 
 func TestBuildResponseSeparatesAdjacentReasoningTitles(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
-		Reasoning: map[string]any{"reasoning_content": "**标题****后续**"},
+		Reasoning: map[string]any{"reasoning_content": "**ssss****sssss****sdad**"},
 	})
 
 	choices, _ := resp["choices"].([]map[string]any)
 	message, _ := choices[0]["message"].(map[string]any)
-	if got, _ := message["reasoning_content"].(string); got != "**标题**\n\n**后续**" {
+	if got, _ := message["reasoning_content"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
 		t.Fatalf("expected adjacent reasoning titles to be separated, got %#v", message)
 	}
 }
@@ -120,13 +120,13 @@ func TestBuildResponseDerivesReasoningContentFromThinkingBlocks(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
 		ReasoningBlocks: []map[string]any{{
 			"type":     "thinking",
-			"thinking": "**标题****后续**",
+			"thinking": "**ssss****sssss****sdad**",
 		}},
 	})
 
 	choices, _ := resp["choices"].([]map[string]any)
 	message, _ := choices[0]["message"].(map[string]any)
-	if got, _ := message["reasoning_content"].(string); got != "**标题**\n\n**后续**" {
+	if got, _ := message["reasoning_content"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
 		t.Fatalf("expected thinking blocks to become formatted reasoning_content, got %#v", message)
 	}
 }

@@ -65,17 +65,37 @@ func FormatBlock(block map[string]any) map[string]any {
 	for key, value := range block {
 		formatted[key] = value
 	}
+	if signature, ok := formatted["signature"].(string); ok && signature != "" {
+		return formatted
+	}
 	for _, key := range reasoningTextKeys {
 		if text, ok := formatted[key].(string); ok {
 			formatted[key] = FormatText(text)
 		}
 	}
-	if parts, ok := formatted["summary"].([]any); ok {
+	if parts, ok := formatted["summary"].([]any); ok && parts != nil {
 		formattedParts := make([]any, len(parts))
 		for index, rawPart := range parts {
 			part, ok := rawPart.(map[string]any)
 			if !ok {
 				formattedParts[index] = rawPart
+				continue
+			}
+			formattedPart := make(map[string]any, len(part))
+			for key, value := range part {
+				formattedPart[key] = value
+			}
+			if text, ok := formattedPart["text"].(string); ok {
+				formattedPart["text"] = FormatText(text)
+			}
+			formattedParts[index] = formattedPart
+		}
+		formatted["summary"] = formattedParts
+	}
+	if parts, ok := formatted["summary"].([]map[string]any); ok && parts != nil {
+		formattedParts := make([]map[string]any, len(parts))
+		for index, part := range parts {
+			if part == nil {
 				continue
 			}
 			formattedPart := make(map[string]any, len(part))
