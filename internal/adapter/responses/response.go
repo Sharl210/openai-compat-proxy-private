@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"openai-compat-proxy/internal/aggregate"
+	reasoningtext "openai-compat-proxy/internal/reasoning"
 	"openai-compat-proxy/internal/syntaxrepair"
 	"openai-compat-proxy/internal/texttail"
 )
@@ -80,7 +81,7 @@ func responsesReasoningOutputItems(blocks []map[string]any) []map[string]any {
 		if len(block) == 0 {
 			continue
 		}
-		item := cloneMap(block)
+		item := reasoningtext.FormatBlock(block)
 		if stringValue(item["type"]) == "thinking" {
 			item["type"] = "reasoning"
 		}
@@ -127,7 +128,7 @@ func outwardReasoning(reasoning map[string]any) map[string]any {
 	if len(reasoning) == 0 {
 		return nil
 	}
-	cloned := cloneMap(reasoning)
+	cloned := reasoningtext.FormatBlock(reasoning)
 	delete(cloned, aggregate.InternalReasoningSourceKey)
 	if stringValue(cloned["summary"]) == "" {
 		for _, key := range []string{"reasoning_content", "content", "delta", "text"} {
@@ -282,12 +283,16 @@ func cloneOutputItems(input []map[string]any) []map[string]any {
 		for k, v := range item {
 			copy[k] = v
 		}
-		if itemType, _ := copy["type"].(string); itemType == "message" {
+		itemType, _ := copy["type"].(string)
+		if itemType == "reasoning" || itemType == "thinking" {
+			copy = reasoningtext.FormatBlock(copy)
+		}
+		if itemType == "message" {
 			if content, exists := copy["content"]; exists {
 				copy["content"] = cloneResponseOutputItemContent(content)
 			}
 		}
-		if itemType, _ := copy["type"].(string); itemType == "function_call" {
+		if itemType == "function_call" {
 			if _, exists := copy["parameters"]; !exists {
 				if parsed := parseToolParameters(stringValue(copy["arguments"])); len(parsed) > 0 {
 					copy["parameters"] = parsed

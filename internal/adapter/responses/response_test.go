@@ -209,6 +209,79 @@ func TestBuildResponseEmitsReasoningOutputItemBeforeFunctionCall(t *testing.T) {
 	}
 }
 
+func TestBuildResponsePreservesSignedRawReasoningBlocks(t *testing.T) {
+	blocks := []map[string]any{{
+		"type":      "thinking",
+		"thinking":  "**ssss****sssss****sdad**",
+		"signature": "sig_123",
+	}}
+	resp := BuildResponse(aggregate.Result{ReasoningBlocks: blocks})
+
+	output := resp["output"].([]map[string]any)
+	var reasoning map[string]any
+	for _, item := range output {
+		if item["type"] == "reasoning" {
+			reasoning = item
+			break
+		}
+	}
+	if reasoning == nil {
+		t.Fatalf("expected reasoning output item, got %#v", output)
+	}
+	if got, _ := reasoning["thinking"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected signed thinking preserved, got %#v", reasoning)
+	}
+	if got, _ := reasoning["encrypted_content"].(string); got != "sig_123" {
+		t.Fatalf("expected signature to remain opaque encrypted content, got %#v", reasoning)
+	}
+	if got, _ := blocks[0]["thinking"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected source reasoning block unchanged, got %q", got)
+	}
+}
+
+func TestBuildResponseFormatsUnsignedRawReasoningBlocks(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{ReasoningBlocks: []map[string]any{{
+		"type":     "thinking",
+		"thinking": "**ssss****sssss****sdad**",
+	}}})
+
+	output := resp["output"].([]map[string]any)
+	var reasoning map[string]any
+	for _, item := range output {
+		if item["type"] == "reasoning" {
+			reasoning = item
+			break
+		}
+	}
+	if reasoning == nil {
+		t.Fatalf("expected reasoning output item, got %#v", output)
+	}
+	if got, _ := reasoning["thinking"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
+		t.Fatalf("expected unsigned thinking titles to be separated, got %#v", reasoning)
+	}
+}
+
+func TestBuildResponseFormatsRawReasoningAndPreservedReasoningItems(t *testing.T) {
+	raw := "**ssss****sssss****sdad**"
+	resp := BuildResponse(aggregate.Result{
+		Reasoning: map[string]any{"thinking": raw},
+		ResponseOutputItems: []map[string]any{{
+			"id":      "rs_123",
+			"type":    "reasoning",
+			"summary": raw,
+		}},
+	})
+
+	reasoning, _ := resp["reasoning"].(map[string]any)
+	if got, _ := reasoning["thinking"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
+		t.Fatalf("expected top-level reasoning titles to be separated, got %#v", reasoning)
+	}
+	output := resp["output"].([]map[string]any)
+	if got, _ := output[0]["summary"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
+		t.Fatalf("expected preserved reasoning item titles to be separated, got %#v", output[0])
+	}
+}
+
 func TestBuildResponsePrependsReasoningBeforePreservedFunctionCall(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
 		ResponseID: "resp_123",
