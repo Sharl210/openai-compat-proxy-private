@@ -1053,11 +1053,14 @@ func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error
 	case string:
 		return []model.CanonicalContentPart{{Type: "text", Text: typed}}, nil
 	default:
-		encoded, err := json.Marshal(typed)
-		if err != nil {
+		var encoded strings.Builder
+		encoder := json.NewEncoder(&encoded)
+		encoder.SetEscapeHTML(true)
+		if err := encoder.Encode(typed); err != nil {
 			return nil, err
 		}
-		return []model.CanonicalContentPart{{Type: "text", Text: string(encoded), Raw: map[string]any{"tool_output_structured": typed}}}, nil
+		text := encoded.String()
+		return []model.CanonicalContentPart{{Type: "text", Text: text[:len(text)-1], Raw: map[string]any{"tool_output_structured": typed}}}, nil
 	}
 }
 

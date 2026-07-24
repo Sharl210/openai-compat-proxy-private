@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"openai-compat-proxy/internal/model"
 )
+
+var benchmarkFunctionCallOutputPartsSink []model.CanonicalContentPart
 
 func BenchmarkDecodeRequestLargeInput(b *testing.B) {
 	body := largeResponsesDecodeRequestBody(160, 8<<10)
@@ -44,6 +48,32 @@ func BenchmarkDecodeRequestMixedContentSlowPath(b *testing.B) {
 		if _, err := DecodeRequest(bytes.NewReader(body)); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkDecodeFunctionCallOutputPartsStructured(b *testing.B) {
+	output := map[string]any{
+		"ok":      true,
+		"payload": strings.Repeat("result ", 128<<10),
+		"metadata": map[string]any{
+			"source": "benchmark",
+			"nested": []any{"keep", float64(7), nil},
+		},
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(encoded)))
+	b.ResetTimer()
+
+	for range b.N {
+		parts, err := decodeFunctionCallOutputParts(output)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkFunctionCallOutputPartsSink = parts
 	}
 }
 

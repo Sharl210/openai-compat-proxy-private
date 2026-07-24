@@ -3,12 +3,23 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"math"
 	"os"
 	"reflect"
 	"testing"
 
 	"openai-compat-proxy/internal/model"
 )
+
+type structuredOutputMarshalerForTest struct {
+	payload []byte
+	err     error
+}
+
+func (value structuredOutputMarshalerForTest) MarshalJSON() ([]byte, error) {
+	return value.payload, value.err
+}
 
 func TestDecodeRequestMemoryOptimizationFixturePreservesDynamicFields(t *testing.T) {
 	original, canon := decodeMemoryOptimizationFixture(t)
@@ -317,6 +328,131 @@ func TestDecodeRequestSlowPathSeparatesPreservedAndCanonicalOwnership(t *testing
 	message.Parts[1].Raw["image_url"].(map[string]any)["detail"] = "canonical-low"
 	if content[1].(map[string]any)["encrypted_content"] != "mutated-preserved" || content[2].(map[string]any)["image_url"].(map[string]any)["detail"] != "low" {
 		t.Fatalf("expected canonical mutation not to affect preserved input, got %#v", preserved)
+	}
+}
+
+func TestDecodeFunctionCallOutputPartsStructuredMatchesJSONMarshal(t *testing.T) {
+	output := map[string]any{
+		"escaped": "<script>&\u2028\n",
+		"nested": []any{
+			map[string]any{"ok": true, "count": float64(7)},
+			nil,
+		},
+	}
+	want, err := json.Marshal(output)
+	if err != nil {
+		t.Fatalf("marshal expected output: %v", err)
+	}
+
+	parts, err := decodeFunctionCallOutputParts(output)
+	if err != nil {
+		t.Fatalf("decode structured function output: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "text" {
+		t.Fatalf("expected one text part, got %#v", parts)
+	}
+	if parts[0].Text != string(want) {
+		t.Fatalf("expected JSON Marshal-compatible tool text %q, got %q", string(want), parts[0].Text)
+	}
+	if !reflect.DeepEqual(parts[0].Raw["tool_output_structured"], output) {
+		t.Fatalf("expected structured tool output retained, got %#v", parts[0].Raw)
+	}
+}
+
+func TestDecodeFunctionCallOutputPartsStructuredPreservesMarshalError(t *testing.T) {
+	_, wantErr := json.Marshal(math.Inf(1))
+	if wantErr == nil {
+		t.Fatal("expected JSON Marshal to reject infinity")
+	}
+
+	_, gotErr := decodeFunctionCallOutputParts(math.Inf(1))
+	if gotErr == nil || gotErr.Error() != wantErr.Error() {
+		t.Fatalf("expected JSON Marshal-compatible error %v, got %v", wantErr, gotErr)
+	}
+}
+
+func TestDecodeFunctionCallOutputPartsStructuredMatchesJSONMarshalParity(t *testing.T) {
+	successCases := []struct {
+		name  string
+		input any
+	}{
+		{
+			name: "escaped text",
+			input: map[string]any{
+				"text": "<>&\n\u2028\u2029",
+			},
+		},
+		{
+			name:  "valid raw message",
+			input: json.RawMessage(`{"text":"<>&\u2028\u2029"}`),
+		},
+		{
+			name: "custom marshaler",
+			input: structuredOutputMarshalerForTest{
+				payload: []byte(`{"text":"<>&\u2028\u2029"}`),
+			},
+		},
+	}
+
+	for _, testCase := range successCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			want, err := json.Marshal(testCase.input)
+			if err != nil {
+				t.Fatalf("marshal expected output: %v", err)
+			}
+
+			parts, err := decodeFunctionCallOutputParts(testCase.input)
+			if err != nil {
+				t.Fatalf("decode structured function output: %v", err)
+			}
+			if len(parts) != 1 || parts[0].Type != "text" {
+				t.Fatalf("expected one text part, got %#v", parts)
+			}
+			if parts[0].Text != string(want) {
+				t.Fatalf("expected JSON Marshal-compatible tool text %q, got %q", string(want), parts[0].Text)
+			}
+			if !reflect.DeepEqual(parts[0].Raw["tool_output_structured"], testCase.input) {
+				t.Fatalf("expected structured tool output retained, got %#v", parts[0].Raw)
+			}
+		})
+	}
+}
+
+func TestDecodeFunctionCallOutputPartsStructuredPreservesMarshalErrors(t *testing.T) {
+	errorCases := []struct {
+		name  string
+		input any
+	}{
+		{name: "nan", input: math.NaN()},
+		{name: "positive infinity", input: math.Inf(1)},
+		{name: "channel", input: make(chan int)},
+		{name: "invalid raw message", input: json.RawMessage(`{`)},
+		{
+			name: "custom marshaler error",
+			input: structuredOutputMarshalerForTest{
+				err: errors.New("custom marshaler failed"),
+			},
+		},
+	}
+
+	for _, testCase := range errorCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, wantErr := json.Marshal(testCase.input)
+			if wantErr == nil {
+				t.Fatal("expected JSON Marshal to fail")
+			}
+
+			parts, gotErr := decodeFunctionCallOutputParts(testCase.input)
+			if gotErr == nil {
+				t.Fatal("expected structured function output decoding to fail")
+			}
+			if parts != nil {
+				t.Fatalf("expected no content parts on marshal failure, got %#v", parts)
+			}
+			if reflect.TypeOf(gotErr) != reflect.TypeOf(wantErr) || gotErr.Error() != wantErr.Error() {
+				t.Fatalf("expected JSON Marshal-compatible error %T %q, got %T %q", wantErr, wantErr, gotErr, gotErr)
+			}
+		})
 	}
 }
 
