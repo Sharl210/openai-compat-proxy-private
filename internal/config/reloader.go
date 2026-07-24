@@ -111,6 +111,25 @@ func (s *RuntimeStore) Active() *RuntimeSnapshot {
 	return s.active.Load()
 }
 
+// RefreshIfSourceChanged reloads the active runtime snapshot only when one of
+// its tracked configuration sources has changed. It returns whether a refresh
+// was attempted.
+func (s *RuntimeStore) RefreshIfSourceChanged() (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+	s.mu.Lock()
+	snapshot, refreshed, err := s.refreshLocked(true)
+	s.mu.Unlock()
+	if err != nil {
+		return refreshed, err
+	}
+	if refreshed {
+		s.notifyRefreshListeners(snapshot)
+	}
+	return refreshed, nil
+}
+
 func (s *RuntimeStore) AddRefreshListener(listener func(*RuntimeSnapshot)) {
 	if s == nil || listener == nil {
 		return
@@ -125,22 +144,39 @@ func (s *RuntimeStore) Refresh() error {
 		return nil
 	}
 	s.mu.Lock()
+	snapshot, refreshed, err := s.refreshLocked(false)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if refreshed {
+		s.notifyRefreshListeners(snapshot)
+	}
+	return nil
+}
+
+func (s *RuntimeStore) refreshLocked(onlyIfSourceChanged bool) (*RuntimeSnapshot, bool, error) {
 	current := s.active.Load()
 	if current == nil {
 		snapshot, err := BuildRuntimeSnapshot(s.rootEnvPath)
 		if err != nil {
-			s.mu.Unlock()
-			return err
+			return nil, false, err
 		}
 		s.active.Store(snapshot)
-		s.mu.Unlock()
-		s.notifyRefreshListeners(snapshot)
-		return nil
+		return snapshot, true, nil
+	}
+	if onlyIfSourceChanged {
+		changed, err := runtimeSourceStateChanged(current)
+		if err != nil {
+			return nil, false, err
+		}
+		if !changed {
+			return current, false, nil
+		}
 	}
 	snapshot, err := BuildRuntimeSnapshotForRefresh(s.rootEnvPath, current.Config)
 	if err != nil {
-		s.mu.Unlock()
-		return err
+		return nil, true, err
 	}
 	hotChanged := !snapshot.Config.hotReloadableRootEquals(current.Config)
 	if !hotChanged {
@@ -148,9 +184,7 @@ func (s *RuntimeStore) Refresh() error {
 		snapshot.RootEnvVersion = current.RootEnvVersion
 	}
 	s.active.Store(snapshot)
-	s.mu.Unlock()
-	s.notifyRefreshListeners(snapshot)
-	return nil
+	return snapshot, true, nil
 }
 
 func (s *RuntimeStore) notifyRefreshListeners(snapshot *RuntimeSnapshot) {
@@ -205,7 +239,7 @@ func (s *RuntimeStore) StartPolling(ctx context.Context, interval time.Duration)
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = s.Refresh()
+				_, _ = s.RefreshIfSourceChanged()
 			}
 		}
 	}()
@@ -265,14 +299,12 @@ func (s *RuntimeStore) StartWatching(ctx context.Context, debounce time.Duration
 				}
 				debounceTimer, debounceC = resetDebounceTimer(debounceTimer, debounce, debounceC)
 			case <-debounceC:
-				_ = s.Refresh()
+				_, _ = s.RefreshIfSourceChanged()
 				watchDirs, _, providersDir, promptPaths, _ = s.ensureWatchDirs(watcher, tracked)
 				debounceTimer = nil
 				debounceC = nil
 			case <-resyncTicker.C:
-				current := s.Active()
-				changed, err := runtimeSourceStateChanged(current)
-				if err != nil || changed {
+				if _, err := s.RefreshIfSourceChanged(); err != nil {
 					_ = s.Refresh()
 				}
 				watchDirs, _, providersDir, promptPaths, _ = s.ensureWatchDirs(watcher, tracked)

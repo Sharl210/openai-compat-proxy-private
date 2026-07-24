@@ -87,6 +87,72 @@ func TestAdminUIStatusOmitsRuntimeMemory(t *testing.T) {
 	}
 }
 
+func TestAdminUIStatusSkipsUnchangedRuntimeRefresh(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, _ := adminLogin(t, server)
+	initial := server.store.Active()
+	refreshes := 0
+	server.store.AddRefreshListener(func(*config.RuntimeSnapshot) {
+		refreshes++
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/status", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := server.store.Active(); got != initial {
+		t.Fatal("expected status polling to retain the active runtime snapshot")
+	}
+	if refreshes != 0 {
+		t.Fatalf("expected status polling to skip unchanged refresh, got %d listener calls", refreshes)
+	}
+}
+
+func TestAdminUIStatusReportsRefreshedActiveRootVersion(t *testing.T) {
+	server := newAdminUITestServer(t)
+	cookie, _ := adminLogin(t, server)
+	initialVersion := server.store.Active().RootEnvVersion
+	rootEnvPath := server.store.Active().RootEnvPath
+	contents, err := os.ReadFile(rootEnvPath)
+	if err != nil {
+		t.Fatalf("read root env: %v", err)
+	}
+	updated := strings.Replace(string(contents), "PROXY_API_KEY=root-secret", "PROXY_API_KEY=updated-root-secret", 1)
+	if updated == string(contents) {
+		t.Fatal("expected test root env to contain proxy key")
+	}
+	if err := os.WriteFile(rootEnvPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write root env: %v", err)
+	}
+	updatedTime := time.Date(2027, 7, 24, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(rootEnvPath, updatedTime, updatedTime); err != nil {
+		t.Fatalf("set root env modification time: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/_admin/api/status", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := server.store.Active().RootEnvVersion; got == initialVersion {
+		t.Fatalf("expected refreshed root version to differ from %q", initialVersion)
+	}
+	validation, ok := decodeAdminJSON(t, rec.Body.Bytes())["validation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected validation object, got %s", rec.Body.String())
+	}
+	if got := validation["active_root_version"]; got != server.store.Active().RootEnvVersion {
+		t.Fatalf("expected response active root version %q, got %#v", server.store.Active().RootEnvVersion, got)
+	}
+}
+
 func TestAdminUIMemoryDiagnosticsRequiresSession(t *testing.T) {
 	// Given
 	server := newAdminUITestServer(t)

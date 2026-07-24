@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -67,6 +68,169 @@ func TestBuildRuntimeSnapshotFormatsVersionsWithConfiguredTimezone(t *testing.T)
 	}
 	if rootVersion := snapshot.RootEnvVersion; rootVersion == rootMTime.UTC().Format(versionTimeLayout) {
 		t.Fatalf("expected timezone-aware root version to differ from UTC formatting, got %q", rootVersion)
+	}
+}
+
+func TestRuntimeStoreRefreshIfSourceChangedSkipsUnchangedSources(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://before.example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 7, 24, 10, 1, 0, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	initial := store.Active()
+	refreshes := 0
+	store.AddRefreshListener(func(*RuntimeSnapshot) {
+		refreshes++
+	})
+
+	changed, err := store.RefreshIfSourceChanged()
+	if err != nil {
+		t.Fatalf("RefreshIfSourceChanged returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("expected unchanged sources to skip refresh")
+	}
+	if got := store.Active(); got != initial {
+		t.Fatal("expected unchanged sources to retain the active snapshot pointer")
+	}
+	if refreshes != 0 {
+		t.Fatalf("expected no refresh listeners for unchanged sources, got %d", refreshes)
+	}
+
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://after.example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 7, 24, 10, 2, 0, 0, time.UTC))
+	changed, err = store.RefreshIfSourceChanged()
+	if err != nil {
+		t.Fatalf("RefreshIfSourceChanged after source change returned error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed sources to refresh")
+	}
+	if got := store.Active().Config.Providers[0].UpstreamBaseURL; got != "https://after.example.test" {
+		t.Fatalf("expected refreshed provider base URL, got %q", got)
+	}
+	if refreshes != 1 {
+		t.Fatalf("expected one refresh listener notification, got %d", refreshes)
+	}
+}
+
+func TestRuntimeStoreRefreshIfSourceChangedSerializesConcurrentRefreshes(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", time.Date(2026, 7, 24, 11, 0, 0, 0, time.UTC))
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://before.example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 7, 24, 11, 1, 0, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://after.example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 7, 24, 11, 2, 0, 0, time.UTC))
+
+	var listenerMu sync.Mutex
+	refreshes := 0
+	store.AddRefreshListener(func(*RuntimeSnapshot) {
+		listenerMu.Lock()
+		refreshes++
+		listenerMu.Unlock()
+	})
+
+	type result struct {
+		changed bool
+		err     error
+	}
+	results := make(chan result, 2)
+	var waitGroup sync.WaitGroup
+	for range 2 {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			changed, err := store.RefreshIfSourceChanged()
+			results <- result{changed: changed, err: err}
+		}()
+	}
+	waitGroup.Wait()
+	close(results)
+
+	changedCount := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("RefreshIfSourceChanged returned error: %v", result.err)
+		}
+		if result.changed {
+			changedCount++
+		}
+	}
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+	if changedCount != 1 {
+		t.Fatalf("expected exactly one concurrent refresh, got %d", changedCount)
+	}
+	if refreshes != 1 {
+		t.Fatalf("expected exactly one listener notification, got %d", refreshes)
+	}
+}
+
+func TestRuntimeStoreRefreshIfSourceChangedAcknowledgesStartupOnlyRootChanges(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	initialRootMTime := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:21021\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", initialRootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nUPSTREAM_API_KEY=test-key\nSUPPORTS_RESPONSES=true\n", time.Date(2026, 7, 24, 12, 1, 0, 0, time.UTC))
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore returned error: %v", err)
+	}
+	refreshes := 0
+	store.AddRefreshListener(func(*RuntimeSnapshot) {
+		refreshes++
+	})
+
+	writeConfigFileWithMTime(t, rootEnvPath, "LISTEN_ADDR=:29999\nPROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\n", time.Date(2026, 7, 24, 12, 2, 0, 0, time.UTC))
+	changed, err := store.RefreshIfSourceChanged()
+	if err != nil {
+		t.Fatalf("RefreshIfSourceChanged after startup-only change returned error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected startup-only source change to refresh once")
+	}
+	if got := store.Active().Config.ListenAddr; got != ":21021" {
+		t.Fatalf("expected startup-only listen address to remain active value, got %q", got)
+	}
+	if got := store.Active().RootEnvVersion; got != formatVersionTime(initialRootMTime) {
+		t.Fatalf("expected startup-only root version to remain %q, got %q", formatVersionTime(initialRootMTime), got)
+	}
+
+	changed, err = store.RefreshIfSourceChanged()
+	if err != nil {
+		t.Fatalf("second RefreshIfSourceChanged returned error: %v", err)
+	}
+	if changed {
+		t.Fatal("expected startup-only source change to be acknowledged after one refresh")
+	}
+	if refreshes != 1 {
+		t.Fatalf("expected one listener notification, got %d", refreshes)
 	}
 }
 

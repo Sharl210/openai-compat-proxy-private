@@ -1473,13 +1473,18 @@ func (a *adminUI) isTextFile(path string) (bool, error) {
 
 func (a *adminUI) evaluateValidation() adminValidationResult {
 	result := adminValidationResult{}
+	changed, refreshErr := a.store.RefreshIfSourceChanged()
 	if snapshot := a.store.Active(); snapshot != nil {
 		result.ActiveRootVersion = snapshot.RootEnvVersion
 	}
-	if err := a.store.Refresh(); err != nil {
-		result.HotReloadError = err.Error()
+	if refreshErr != nil {
+		result.HotReloadError = refreshErr.Error()
 	} else {
 		result.HotReloadOK = true
+	}
+	if refreshErr == nil && !changed {
+		result.RestartOK = true
+		return result
 	}
 	if _, err := config.BuildRuntimeSnapshot(a.rootEnvPath()); err != nil {
 		result.RestartError = err.Error()
