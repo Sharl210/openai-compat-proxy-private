@@ -1046,6 +1046,19 @@ func reasoningSummaryTextFromItem(item any) string {
 	return ""
 }
 
+const StructuredFunctionCallOutputRendererID = "json_encoder_escape_html_v1"
+
+func RenderStructuredFunctionCallOutput(raw any) (string, error) {
+	var encoded strings.Builder
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(true)
+	if err := encoder.Encode(raw); err != nil {
+		return "", err
+	}
+	text := encoded.String()
+	return text[:len(text)-1], nil
+}
+
 func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error) {
 	switch typed := raw.(type) {
 	case nil:
@@ -1053,14 +1066,11 @@ func decodeFunctionCallOutputParts(raw any) ([]model.CanonicalContentPart, error
 	case string:
 		return []model.CanonicalContentPart{{Type: "text", Text: typed}}, nil
 	default:
-		var encoded strings.Builder
-		encoder := json.NewEncoder(&encoded)
-		encoder.SetEscapeHTML(true)
-		if err := encoder.Encode(typed); err != nil {
+		text, err := RenderStructuredFunctionCallOutput(typed)
+		if err != nil {
 			return nil, err
 		}
-		text := encoded.String()
-		return []model.CanonicalContentPart{{Type: "text", Text: text[:len(text)-1], Raw: map[string]any{"tool_output_structured": typed}}}, nil
+		return []model.CanonicalContentPart{{Type: "text", Text: text, Raw: map[string]any{"tool_output_structured": typed}}}, nil
 	}
 }
 
