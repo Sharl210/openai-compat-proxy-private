@@ -161,11 +161,7 @@ func cloneReasoningBlocks(blocks []map[string]any) []map[string]any {
 		if len(block) == 0 {
 			continue
 		}
-		copied := make(map[string]any, len(block))
-		for k, v := range block {
-			copied[k] = v
-		}
-		cloned = append(cloned, copied)
+		cloned = append(cloned, reasoningtext.FormatBlock(block))
 	}
 	if len(cloned) == 0 {
 		return nil

@@ -115,6 +115,44 @@ func TestBuildResponsePrefersOriginalReasoningBlocks(t *testing.T) {
 	}
 }
 
+func TestBuildResponsePreservesSignedThinkingBlockTitles(t *testing.T) {
+	blocks := []map[string]any{{
+		"type":      "thinking",
+		"thinking":  "**ssss****sssss****sdad**",
+		"signature": "sig_123",
+	}}
+	resp := BuildResponse(aggregate.Result{ReasoningBlocks: blocks}, "req_789", "claude-sonnet-4-5")
+
+	content, _ := resp["content"].([]map[string]any)
+	if len(content) != 1 {
+		t.Fatalf("expected preserved thinking block, got %#v", resp)
+	}
+	if got, _ := content[0]["thinking"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected signed thinking preserved, got %#v", content[0])
+	}
+	if got, _ := content[0]["signature"].(string); got != "sig_123" {
+		t.Fatalf("expected signature preserved, got %#v", content[0])
+	}
+	if got, _ := blocks[0]["thinking"].(string); got != "**ssss****sssss****sdad**" {
+		t.Fatalf("expected source reasoning block unchanged, got %q", got)
+	}
+}
+
+func TestBuildResponseFormatsUnsignedThinkingBlockTitles(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{ReasoningBlocks: []map[string]any{{
+		"type":     "thinking",
+		"thinking": "**ssss****sssss****sdad**",
+	}}}, "req_789", "claude-sonnet-4-5")
+
+	content, _ := resp["content"].([]map[string]any)
+	if len(content) != 1 {
+		t.Fatalf("expected thinking block, got %#v", resp)
+	}
+	if got, _ := content[0]["thinking"].(string); got != "**ssss**\n\n**sssss**\n\n**sdad**" {
+		t.Fatalf("expected unsigned thinking titles to be separated, got %#v", content[0])
+	}
+}
+
 func TestBuildResponsePreservesExplicitStopReason(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{FinishReason: "max_tokens"}, "req_456", "claude-sonnet-4-5")
 	if got, _ := resp["stop_reason"].(string); got != "max_tokens" {
