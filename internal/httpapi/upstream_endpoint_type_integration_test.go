@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	responsesadapter "openai-compat-proxy/internal/adapter/responses"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/testutil"
@@ -3298,6 +3299,217 @@ func TestResponsesRouteTransformsPlaintextPersistedHistoryForMappedNonResponsesU
 			}
 			if strings.Contains(upstreamBody, `"signature":`) {
 				t.Fatalf("expected plaintext thinking replay not to invent a signature, got %s", upstreamBody)
+			}
+		})
+	}
+}
+
+func TestResponsesRouteReplaysDedupedStructuredOutputSnapshotForNonResponsesUpstreams(t *testing.T) {
+	for _, testCase := range []struct {
+		name               string
+		endpointType       string
+		usePortableHistory bool
+	}{
+		{name: "responses native previous response baseline", endpointType: config.UpstreamEndpointTypeResponses},
+		{name: "chat scoped history", endpointType: config.UpstreamEndpointTypeChat},
+		{name: "anthropic portable history", endpointType: config.UpstreamEndpointTypeAnthropic, usePortableHistory: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			const (
+				providerID = "history"
+				responseID = "resp_history_structured"
+				modelName  = "gpt-5"
+			)
+
+			var gotPath string
+			var upstreamBody string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read upstream body: %v", err)
+				}
+				upstreamBody = string(body)
+				w.Header().Set("Content-Type", "application/json")
+				if testCase.endpointType == config.UpstreamEndpointTypeResponses {
+					_, _ = w.Write([]byte(`{"id":"resp_continued","object":"response","output":[{"id":"msg_continued","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`))
+					return
+				}
+				if testCase.endpointType == config.UpstreamEndpointTypeChat {
+					_, _ = w.Write([]byte(`{"object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"id":"msg_history","type":"message","role":"assistant","model":"gpt-5","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`))
+			}))
+			defer upstream.Close()
+
+			server := NewServer(config.Config{
+				DefaultProvider:             providerID,
+				DefaultProReasoningModeSet:  true,
+				DefaultProReasoningMode:     false,
+				EnableLegacyV1Routes:        true,
+				DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+				Providers: []config.ProviderConfig{{
+					ID:                        providerID,
+					Enabled:                   true,
+					UpstreamBaseURL:           upstream.URL,
+					UpstreamAPIKey:            "test-key",
+					UpstreamEndpointType:      testCase.endpointType,
+					SupportsResponses:         true,
+					SupportsChat:              true,
+					SupportsAnthropicMessages: true,
+				}},
+			})
+
+			raw := map[string]any{
+				"payload": strings.Repeat("compressible structured output ", 4096),
+				"number":  json.Number("9007199254740993"),
+				"raw":     json.RawMessage(`{"nested":true}`),
+				"bytes":   []byte("raw-bytes"),
+			}
+			structuredText, err := responsesadapter.RenderStructuredFunctionCallOutput(raw)
+			if err != nil {
+				t.Fatalf("render structured history output: %v", err)
+			}
+			historyMessages := []model.CanonicalMessage{
+				{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "historical user text"}}},
+				{
+					Role: "assistant",
+					ToolCalls: []model.CanonicalToolCall{
+						{ID: "call_structured", Type: "function", Name: "structured_lookup", Arguments: `{"query":"history"}`},
+						{ID: "call_current", Type: "function", Name: "current_lookup", Arguments: `{}`},
+					},
+				},
+				{
+					Role:       "tool",
+					ToolCallID: "call_structured",
+					Parts: []model.CanonicalContentPart{{
+						Type: "text",
+						Text: structuredText,
+						Raw:  map[string]any{responsesHistoryStructuredOutputRawKey: raw},
+					}},
+				},
+			}
+			historyScope := responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+				ProviderID:                providerID,
+				DownstreamEndpoint:        canonicalV1ResponsesPath,
+				UpstreamEndpointType:      testCase.endpointType,
+				NormalizedUpstreamBaseURL: upstream.URL,
+				FinalUpstreamModel:        modelName,
+				CredentialFingerprint:     authorizationFingerprint("Bearer test-key"),
+				InboundCallerFingerprint:  "anonymous",
+			})
+			portableScope := responsesHistoryPortableScope("anonymous")
+			storedScope := historyScope
+			if testCase.usePortableHistory {
+				storedScope = "other-scope"
+			}
+			server.history.SaveWithPortableScope(providerID, responseID, historyMessages, storedScope, portableScope)
+
+			snapshot := server.history.entries[responsesHistoryKey(providerID, responseID)]
+			if len(snapshot.StructuredOutputTextRefs) != 1 || snapshot.Messages[2].Parts[0].Text != "" {
+				t.Fatalf("expected stored snapshot to remove only the duplicate Text, got %#v", snapshot)
+			}
+			foundCompressedRaw := false
+			for _, field := range snapshot.CompressedFields {
+				if field.Kind == responsesHistoryCompressedPartRawString {
+					foundCompressedRaw = true
+					break
+				}
+			}
+			if !foundCompressedRaw {
+				t.Fatalf("expected structured Raw to use the existing snapshot compression path, got %#v", snapshot.CompressedFields)
+			}
+
+			var loaded []model.CanonicalMessage
+			if testCase.usePortableHistory {
+				loaded = server.history.LoadPortable(responseID, portableScope)
+			} else {
+				loaded = server.history.LoadScoped(providerID, responseID, historyScope)
+			}
+			if len(loaded) != len(historyMessages) || loaded[2].Parts[0].Text != structuredText {
+				t.Fatalf("expected deduped snapshot to restore structured Text before replay, got %#v", loaded)
+			}
+			restoredRaw, ok := loaded[2].Parts[0].Raw[responsesHistoryStructuredOutputRawKey].(map[string]any)
+			if !ok {
+				t.Fatalf("expected restored structured Raw, got %#v", loaded[2].Parts[0].Raw)
+			}
+			if got, ok := restoredRaw["number"].(json.Number); !ok || got != json.Number("9007199254740993") {
+				t.Fatalf("expected json.Number to survive history replay, got %#v", restoredRaw["number"])
+			}
+			if got, ok := restoredRaw["raw"].(json.RawMessage); !ok || string(got) != `{"nested":true}` {
+				t.Fatalf("expected json.RawMessage to survive history replay, got %#v", restoredRaw["raw"])
+			}
+			if got, ok := restoredRaw["bytes"].([]byte); !ok || string(got) != "raw-bytes" {
+				t.Fatalf("expected []byte to survive history replay, got %#v", restoredRaw["bytes"])
+			}
+
+			replay := func() string {
+				req := httptest.NewRequest(http.MethodPost, canonicalV1ResponsesPath, strings.NewReader(`{"model":"`+modelName+`","previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_current","output":"current result"}]}`))
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				server.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected history replay status 200, got %d body=%s", rec.Code, rec.Body.String())
+				}
+				return upstreamBody
+			}
+			dedupedUpstreamBody := replay()
+
+			legacySnapshot := responsesConversationSnapshot{
+				Messages:      cloneCanonicalMessages(historyMessages),
+				Bytes:         snapshot.Bytes,
+				ResponseID:    responseID,
+				Scope:         storedScope,
+				PortableScope: portableScope,
+			}
+			server.history.mu.Lock()
+			server.history.entries[responsesHistoryKey(providerID, responseID)] = legacySnapshot
+			server.history.mu.Unlock()
+			legacyUpstreamBody := replay()
+			if dedupedUpstreamBody != legacyUpstreamBody {
+				t.Fatalf("expected deduped snapshot replay body to match legacy history exactly:\ndeduped=%s\nlegacy=%s", dedupedUpstreamBody, legacyUpstreamBody)
+			}
+			upstreamBody = dedupedUpstreamBody
+
+			switch testCase.endpointType {
+			case config.UpstreamEndpointTypeResponses:
+				if gotPath != "/responses" {
+					t.Fatalf("expected responses upstream path, got %q", gotPath)
+				}
+				for _, want := range []string{`"previous_response_id":"` + responseID + `"`, `"type":"function_call_output"`, `"call_id":"call_current"`, "current result"} {
+					if !strings.Contains(upstreamBody, want) {
+						t.Fatalf("expected native responses continuation body to contain %q, got %s", want, upstreamBody)
+					}
+				}
+				if strings.Contains(upstreamBody, "historical user text") {
+					t.Fatalf("native Responses continuation must not rebuild local history, got %s", upstreamBody)
+				}
+			case config.UpstreamEndpointTypeChat:
+				if gotPath != "/chat/completions" {
+					t.Fatalf("expected chat upstream path, got %q", gotPath)
+				}
+				for _, want := range []string{"historical user text", `"id":"call_structured"`, `"name":"structured_lookup"`, `"tool_call_id":"call_current"`, "current result"} {
+					if !strings.Contains(upstreamBody, want) {
+						t.Fatalf("expected chat replay body to contain %q, got %s", want, upstreamBody)
+					}
+				}
+			default:
+				if gotPath != "/messages" {
+					t.Fatalf("expected anthropic upstream path, got %q", gotPath)
+				}
+				for _, want := range []string{"historical user text", `"type":"tool_use"`, `"id":"call_structured"`, `"name":"structured_lookup"`, `"type":"tool_result"`, `"tool_use_id":"call_current"`, "current result"} {
+					if !strings.Contains(upstreamBody, want) {
+						t.Fatalf("expected anthropic replay body to contain %q, got %s", want, upstreamBody)
+					}
+				}
+			}
+			if testCase.endpointType != config.UpstreamEndpointTypeResponses {
+				for _, want := range []string{"9007199254740993", "cmF3LWJ5dGVz", "nested"} {
+					if !strings.Contains(upstreamBody, want) {
+						t.Fatalf("expected restored structured output in wire body to contain %q, got %s", want, upstreamBody)
+					}
+				}
 			}
 		})
 	}
