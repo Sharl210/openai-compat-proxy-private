@@ -183,20 +183,39 @@ func TestWithRequestIDSkipsDefaultArchiveDirWithoutRootEnvPath(t *testing.T) {
 	}
 }
 
-func TestWithRequestIDSkipsWebAccessLogging(t *testing.T) {
+func TestWithRequestIDSkipsWebUIArchiveAndStructuredLogs(t *testing.T) {
+	archiveDir := t.TempDir()
 	logDir := initMiddlewareTestLogger(t)
-	h := withRequestID(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	store := config.NewStaticRuntimeStore(config.Config{LogEnable: true, DebugArchiveRootDir: archiveDir})
+	h := withRequestID(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
 
-	if rec.Header().Get("X-Request-Id") == "" {
-		t.Fatal("expected request id header")
+	for _, target := range []string{
+		"/",
+		"/_admin",
+		"/_admin/api/status",
+		"/_admin/assets/app.js",
+		"/favicon.ico",
+		"/robots.txt",
+	} {
+		t.Run(target, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			requestID := rec.Header().Get("X-Request-Id")
+			if requestID == "" {
+				t.Fatal("expected request id header")
+			}
+			if _, err := os.Stat(filepath.Join(archiveDir, requestID)); !os.IsNotExist(err) {
+				t.Fatalf("expected no archive directory for web UI request %q, got err=%v", target, err)
+			}
+		})
 	}
+
 	if files := middlewareLogFiles(t, logDir); len(files) != 0 {
-		t.Fatalf("expected no log files for web access requests, got %v", files)
+		t.Fatalf("expected no structured log files for web UI requests, got %v", files)
 	}
 }
 
