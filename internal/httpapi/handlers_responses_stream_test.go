@@ -81,7 +81,7 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 		body        string
 		headers     map[string]string
 		fragments   []string
-		unwantedRaw string
+		unwantedRaw []string
 	}{
 		{
 			name: "responses",
@@ -91,8 +91,12 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 				`"delta":"**标题**"`,
 				`"delta":"\n"`,
 				`"delta":"**后续**"`,
+				`"delta":"\n"`,
+				`"delta":"**第三标题**"`,
+				`"delta":"\n"`,
+				`"delta":"**第四标题**"`,
 			},
-			unwantedRaw: `"delta":"**标题****后续**"`,
+			unwantedRaw: []string{`"delta":"**标题****后续**"`},
 		},
 		{
 			name: "chat",
@@ -101,8 +105,14 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 			fragments: []string{
 				`"reasoning_content":"**标题**"`,
 				`"reasoning_content":"\n\n**后续**"`,
+				`"reasoning_content":"\n\n**第三标题**"`,
+				`"reasoning_content":"\n"`,
+				`"reasoning_content":"**第四标题**"`,
 			},
-			unwantedRaw: `"reasoning_content":"**标题****后续**"`,
+			unwantedRaw: []string{
+				`"reasoning_content":"**标题****后续**"`,
+				`"reasoning_content":"\n\n**第四标题**"`,
+			},
 		},
 		{
 			name: "anthropic",
@@ -114,8 +124,14 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 			fragments: []string{
 				`"thinking":"**标题**"`,
 				`"thinking":"\n\n**后续**"`,
+				`"thinking":"\n\n**第三标题**"`,
+				`"thinking":"\n"`,
+				`"thinking":"**第四标题**"`,
 			},
-			unwantedRaw: `"thinking":"**标题****后续**"`,
+			unwantedRaw: []string{
+				`"thinking":"**标题****后续**"`,
+				`"thinking":"\n\n**第四标题**"`,
+			},
 		},
 	}
 
@@ -135,8 +151,10 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 			}
 			body := rec.Body.String()
 			assertOrderedStreamFragments(t, body, testCase.fragments...)
-			if strings.Contains(body, testCase.unwantedRaw) {
-				t.Fatalf("expected separated title boundaries, got %s", body)
+			for _, unwantedRaw := range testCase.unwantedRaw {
+				if strings.Contains(body, unwantedRaw) {
+					t.Fatalf("expected separated title boundaries, got %s", body)
+				}
 			}
 			if testCase.name == "responses" {
 				assertResponsesReasoningSummaryTerminalSnapshots(t, body)
@@ -224,8 +242,28 @@ func nativeReasoningSummaryTitleEvents() []string {
 			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"text\":\"**后续**\"}\n\n",
 		"event: response.reasoning_summary_part.done\n" +
 			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"**后续**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":2,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":2,\"delta\":\"**第三标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":2,\"text\":\"**第三标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":2,\"part\":{\"type\":\"summary_text\",\"text\":\"**第三标题**\"}}\n\n",
 		"event: response.output_item.done\n" +
-			"data: {\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题**\"},{\"type\":\"summary_text\",\"text\":\"**后续**\"}]}}\n\n",
+			"data: {\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题**\"},{\"type\":\"summary_text\",\"text\":\"**后续**\"},{\"type\":\"summary_text\",\"text\":\"**第三标题**\"}]}}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_next\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_next\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_next\",\"summary_index\":0,\"delta\":\"**第四标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_next\",\"summary_index\":0,\"text\":\"**第四标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_next\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**第四标题**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_next\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**第四标题**\"}]}}\n\n",
 		"event: response.completed\n" +
 			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
 	}
@@ -233,45 +271,54 @@ func nativeReasoningSummaryTitleEvents() []string {
 
 func assertResponsesReasoningSummaryTerminalSnapshots(t *testing.T, body string) {
 	t.Helper()
-	expected := []string{"**标题**\n", "**后续**\n"}
-	for summaryIndex, want := range expected {
-		textDone := responseSSEEventData(t, body, "response.reasoning_summary_text.done", func(data map[string]any) bool {
-			index, ok := intValue(data["summary_index"])
-			return stringValue(data["item_id"]) == "rs_native" && ok && index == summaryIndex
-		})
-		if got := stringValue(textDone["text"]); got != want {
-			t.Fatalf("summary text done[%d]=%q, want %q", summaryIndex, got, want)
-		}
-
-		partDone := responseSSEEventData(t, body, "response.reasoning_summary_part.done", func(data map[string]any) bool {
-			index, ok := intValue(data["summary_index"])
-			return stringValue(data["item_id"]) == "rs_native" && ok && index == summaryIndex
-		})
-		part, _ := partDone["part"].(map[string]any)
-		if got := stringValue(part["text"]); got != want {
-			t.Fatalf("summary part done[%d]=%q, want %q", summaryIndex, got, want)
-		}
-	}
-
-	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
-		item, _ := data["item"].(map[string]any)
-		return responseToolItemStateID(item) == "rs_native"
-	})
-	item, _ := itemDone["item"].(map[string]any)
-	assertReasoningSummaryTexts(t, item, expected)
-
 	completed := responseSSEEventData(t, body, "response.completed", func(map[string]any) bool { return true })
 	response, _ := completed["response"].(map[string]any)
 	output, _ := response["output"].([]any)
-	for _, rawItem := range output {
-		item, _ := rawItem.(map[string]any)
-		if responseToolItemStateID(item) != "rs_native" {
-			continue
-		}
-		assertReasoningSummaryTexts(t, item, expected)
-		return
+	expectedByItem := map[string][]string{
+		"rs_native": {"**标题**\n", "**后续**\n", "**第三标题**\n"},
+		"rs_next":   {"**第四标题**\n"},
 	}
-	t.Fatalf("completed response omitted rs_native reasoning item: %s", body)
+	for itemID, expected := range expectedByItem {
+		for summaryIndex, want := range expected {
+			textDone := responseSSEEventData(t, body, "response.reasoning_summary_text.done", func(data map[string]any) bool {
+				index, ok := intValue(data["summary_index"])
+				return stringValue(data["item_id"]) == itemID && ok && index == summaryIndex
+			})
+			if got := stringValue(textDone["text"]); got != want {
+				t.Fatalf("%s summary text done[%d]=%q, want %q", itemID, summaryIndex, got, want)
+			}
+
+			partDone := responseSSEEventData(t, body, "response.reasoning_summary_part.done", func(data map[string]any) bool {
+				index, ok := intValue(data["summary_index"])
+				return stringValue(data["item_id"]) == itemID && ok && index == summaryIndex
+			})
+			part, _ := partDone["part"].(map[string]any)
+			if got := stringValue(part["text"]); got != want {
+				t.Fatalf("%s summary part done[%d]=%q, want %q", itemID, summaryIndex, got, want)
+			}
+		}
+
+		itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+			item, _ := data["item"].(map[string]any)
+			return responseToolItemStateID(item) == itemID
+		})
+		item, _ := itemDone["item"].(map[string]any)
+		assertReasoningSummaryTexts(t, item, expected)
+
+		found := false
+		for _, rawItem := range output {
+			item, _ := rawItem.(map[string]any)
+			if responseToolItemStateID(item) != itemID {
+				continue
+			}
+			assertReasoningSummaryTexts(t, item, expected)
+			found = true
+			break
+		}
+		if !found {
+			t.Fatalf("completed response omitted %s reasoning item: %s", itemID, body)
+		}
+	}
 }
 
 func assertReasoningSummaryTexts(t *testing.T, item map[string]any, want []string) {
