@@ -393,6 +393,15 @@ func (state *reasoningTextState) finish() string {
 	return formattedDelta
 }
 
+func (state *reasoningTextState) finishAtBoundary() string {
+	if state == nil || state.preserving {
+		return ""
+	}
+	formattedDelta := state.formatter.FinishAtBoundary()
+	state.formatted.WriteString(formattedDelta)
+	return formattedDelta
+}
+
 func (state *reasoningTextState) formatSnapshot(snapshot string, preserve bool) (string, bool) {
 	if state == nil || snapshot == "" {
 		return snapshot, state == nil
@@ -431,7 +440,7 @@ func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	delta, handled := state.formatSnapshot(snapshot, preserve)
 	if handled {
-		delta += state.finish()
+		delta += state.finishAtBoundary()
 	}
 	return delta, state.formatted.String(), handled
 }
@@ -1797,7 +1806,46 @@ func (h *responseEventWriterHelper) markReasoningSummaryTextDone(itemID string, 
 	done[summaryIndex] = true
 }
 
-func (h *responseEventWriterHelper) mergeStoredReasoningSummary(itemID string, item map[string]any) {
+func (h *responseEventWriterHelper) mergeStoredReasoningSummary(itemID string, item map[string]any, hasStreamedParts bool) {
+	if hasStreamedParts && reasoningPayloadIsOpaque(item) {
+		return
+	}
+	parts := h.reasoningSummaryParts[itemID]
+	if len(parts) == 0 {
+		return
+	}
+	if hasStreamedParts {
+		switch summary := item["summary"].(type) {
+		case []any:
+			if len(summary) > 0 {
+				for summaryIndex, builder := range parts {
+					if builder == nil || builder.Len() == 0 || summaryIndex >= len(summary) {
+						continue
+					}
+					part, _ := summary[summaryIndex].(map[string]any)
+					if part == nil || stringValue(part["type"]) != "summary_text" {
+						continue
+					}
+					part["text"] = builder.String()
+				}
+				return
+			}
+		case []map[string]any:
+			if len(summary) > 0 {
+				for summaryIndex, builder := range parts {
+					if builder == nil || builder.Len() == 0 || summaryIndex >= len(summary) {
+						continue
+					}
+					part := summary[summaryIndex]
+					if part == nil || stringValue(part["type"]) != "summary_text" {
+						continue
+					}
+					part["text"] = builder.String()
+				}
+				return
+			}
+		}
+	}
 	if reasoningSummaryFromItem(item) != "" {
 		return
 	}
@@ -1887,6 +1935,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 				_, hadReasoningItem := h.outputIndexForItem(itemID)
 				outputIndex := h.ensureReasoningLifecycleStarted(itemID, upstreamOutputIndex, item)
+				hasStreamedParts := len(h.reasoningSummaryParts[itemID]) > 0
 				summary := reasoningSummaryFromItem(item)
 				if summary == "" {
 					h.flushReasoningFormatItemStates(itemID)
@@ -1895,7 +1944,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, 0)
 					h.closeReasoningSummaryPartWithText(itemID, outputIndex, 0, summary)
 				}
-				h.mergeStoredReasoningSummary(itemID, item)
+				h.mergeStoredReasoningSummary(itemID, item, hasStreamedParts)
 				if outputIndex, ok := h.outputIndexForItem(itemID); ok {
 					evt.Data["output_index"] = outputIndex
 				}
@@ -2077,7 +2126,16 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					}
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, summaryIndex)
 					text := rawReasoningText
-					if _, formattedSnapshot, handled := h.formatReasoningContentSnapshot(itemID, summaryIndex, text, preserveReasoningPayload); handled {
+					if formattedDelta, formattedSnapshot, handled := h.formatReasoningContentSnapshot(itemID, summaryIndex, text, preserveReasoningPayload); handled {
+						if formattedDelta != "" {
+							h.addEvent("response.reasoning_summary_text.delta", map[string]any{
+								"item_id":                            itemID,
+								"output_index":                       outputIndex,
+								"summary_index":                      summaryIndex,
+								"delta":                              formattedDelta,
+								aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+							})
+						}
 						text = formattedSnapshot
 					}
 					if text != "" {
@@ -2095,7 +2153,16 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, summaryIndex)
 					if part, _ := evt.Data["part"].(map[string]any); part != nil {
 						text := reasoningContentRawValue(part)
-						if _, formattedSnapshot, handled := h.formatReasoningContentSnapshot(itemID, summaryIndex, text, preserveReasoningPayload || reasoningPayloadIsOpaque(part)); handled {
+						if formattedDelta, formattedSnapshot, handled := h.formatReasoningContentSnapshot(itemID, summaryIndex, text, preserveReasoningPayload || reasoningPayloadIsOpaque(part)); handled {
+							if formattedDelta != "" {
+								h.addEvent("response.reasoning_summary_text.delta", map[string]any{
+									"item_id":                            itemID,
+									"output_index":                       outputIndex,
+									"summary_index":                      summaryIndex,
+									"delta":                              formattedDelta,
+									aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+								})
+							}
 							text = formattedSnapshot
 						}
 						if text != "" {

@@ -291,6 +291,14 @@ func TestReasoningTitleStateFlushesDeferredHeadingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestResponsesEventWriterSeparatesStandaloneSummaryTitleAtPartBoundary(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, standaloneSummaryTitleEvents()...)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**标题**"`,
+		`"delta":"\n"`,
+	)
+}
+
 func TestResponsesEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, deferredReasoningHeadingEvents()...)
 	assertOrderedStreamFragments(t, body,
@@ -558,6 +566,18 @@ func emptyReasoningItemDoneEvents() []upstream.Event {
 	return []upstream.Event{
 		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty", "summary_index": 0, "delta": "**未闭合标题"}},
 		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_empty", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	}
+}
+
+func standaloneSummaryTitleEvents() []upstream.Event {
+	return []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_title", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_title", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_title", "summary_index": 0, "delta": "**标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_title", "summary_index": 0, "text": "**标题**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_title", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题**"}}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_title", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题**"}}}}},
 		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	}
 }

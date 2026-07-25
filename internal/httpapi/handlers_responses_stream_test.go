@@ -56,6 +56,269 @@ func TestResponsesStreamIncludesTypedChunks(t *testing.T) {
 	}
 }
 
+func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, nativeReasoningSummaryTitleEvents())
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+			SupportsChat:              true,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	testCases := []struct {
+		name        string
+		path        string
+		body        string
+		headers     map[string]string
+		fragments   []string
+		unwantedRaw string
+	}{
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: `{"model":"gpt-5","stream":true,"input":"hello"}`,
+			fragments: []string{
+				`"delta":"**标题**"`,
+				`"delta":"\n"`,
+				`"delta":"**后续**"`,
+			},
+			unwantedRaw: `"delta":"**标题****后续**"`,
+		},
+		{
+			name: "chat",
+			path: "/v1/chat/completions",
+			body: `{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`,
+			fragments: []string{
+				`"reasoning_content":"**标题**"`,
+				`"reasoning_content":"\n\n**后续**"`,
+			},
+			unwantedRaw: `"reasoning_content":"**标题****后续**"`,
+		},
+		{
+			name: "anthropic",
+			path: "/v1/messages",
+			body: `{"model":"gpt-5","stream":true,"max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			headers: map[string]string{
+				"anthropic-version": "2023-06-01",
+			},
+			fragments: []string{
+				`"thinking":"**标题**"`,
+				`"thinking":"\n\n**后续**"`,
+			},
+			unwantedRaw: `"thinking":"**标题****后续**"`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
+			req.Header.Set("Content-Type", "application/json")
+			for name, value := range testCase.headers {
+				req.Header.Set(name, value)
+			}
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			assertOrderedStreamFragments(t, body, testCase.fragments...)
+			if strings.Contains(body, testCase.unwantedRaw) {
+				t.Fatalf("expected separated title boundaries, got %s", body)
+			}
+			if testCase.name == "responses" {
+				assertResponsesReasoningSummaryTerminalSnapshots(t, body)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamPreservesOpaqueTerminalReasoningSummary(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_opaque\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_opaque\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_opaque\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_opaque\",\"summary_index\":0,\"text\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_opaque\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**标题**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_opaque\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题**\"}],\"encrypted_content\":\"opaque-summary\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`, `"delta":"\n"`)
+
+	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+		item, _ := data["item"].(map[string]any)
+		return responseToolItemStateID(item) == "rs_opaque"
+	})
+	item, _ := itemDone["item"].(map[string]any)
+	if !reasoningPayloadIsOpaque(item) {
+		t.Fatalf("expected opaque reasoning item, got %#v", item)
+	}
+	assertReasoningSummaryTexts(t, item, []string{"**标题**"})
+
+	completed := responseSSEEventData(t, body, "response.completed", func(map[string]any) bool { return true })
+	response, _ := completed["response"].(map[string]any)
+	output, _ := response["output"].([]any)
+	for _, rawItem := range output {
+		item, _ := rawItem.(map[string]any)
+		if responseToolItemStateID(item) != "rs_opaque" {
+			continue
+		}
+		if !reasoningPayloadIsOpaque(item) {
+			t.Fatalf("expected opaque completed reasoning item, got %#v", item)
+		}
+		assertReasoningSummaryTexts(t, item, []string{"**标题**"})
+		return
+	}
+	t.Fatalf("completed response omitted rs_opaque reasoning item: %s", body)
+}
+
+func nativeReasoningSummaryTitleEvents() []string {
+	return []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"delta\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"text\":\"**标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**标题**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"delta\":\"**后续**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"text\":\"**后续**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_native\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"**后续**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_native\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题**\"},{\"type\":\"summary_text\",\"text\":\"**后续**\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	}
+}
+
+func assertResponsesReasoningSummaryTerminalSnapshots(t *testing.T, body string) {
+	t.Helper()
+	expected := []string{"**标题**\n", "**后续**\n"}
+	for summaryIndex, want := range expected {
+		textDone := responseSSEEventData(t, body, "response.reasoning_summary_text.done", func(data map[string]any) bool {
+			index, ok := intValue(data["summary_index"])
+			return stringValue(data["item_id"]) == "rs_native" && ok && index == summaryIndex
+		})
+		if got := stringValue(textDone["text"]); got != want {
+			t.Fatalf("summary text done[%d]=%q, want %q", summaryIndex, got, want)
+		}
+
+		partDone := responseSSEEventData(t, body, "response.reasoning_summary_part.done", func(data map[string]any) bool {
+			index, ok := intValue(data["summary_index"])
+			return stringValue(data["item_id"]) == "rs_native" && ok && index == summaryIndex
+		})
+		part, _ := partDone["part"].(map[string]any)
+		if got := stringValue(part["text"]); got != want {
+			t.Fatalf("summary part done[%d]=%q, want %q", summaryIndex, got, want)
+		}
+	}
+
+	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+		item, _ := data["item"].(map[string]any)
+		return responseToolItemStateID(item) == "rs_native"
+	})
+	item, _ := itemDone["item"].(map[string]any)
+	assertReasoningSummaryTexts(t, item, expected)
+
+	completed := responseSSEEventData(t, body, "response.completed", func(map[string]any) bool { return true })
+	response, _ := completed["response"].(map[string]any)
+	output, _ := response["output"].([]any)
+	for _, rawItem := range output {
+		item, _ := rawItem.(map[string]any)
+		if responseToolItemStateID(item) != "rs_native" {
+			continue
+		}
+		assertReasoningSummaryTexts(t, item, expected)
+		return
+	}
+	t.Fatalf("completed response omitted rs_native reasoning item: %s", body)
+}
+
+func assertReasoningSummaryTexts(t *testing.T, item map[string]any, want []string) {
+	t.Helper()
+	parts := reasoningSummaryTextPartsFromItem(item)
+	if len(parts) != len(want) {
+		t.Fatalf("summary part count=%d, want %d in %#v", len(parts), len(want), item)
+	}
+	for index, part := range parts {
+		if part.index != index || part.text != want[index] {
+			t.Fatalf("summary[%d]=%q, want %q in %#v", index, part.text, want[index], item)
+		}
+	}
+}
+
+func responseSSEEventData(t *testing.T, body, event string, matches func(map[string]any) bool) map[string]any {
+	t.Helper()
+	marker := "event: " + event + "\n"
+	for remaining := body; remaining != ""; {
+		start := strings.Index(remaining, marker)
+		if start < 0 {
+			break
+		}
+		remaining = remaining[start+len(marker):]
+		end := strings.Index(remaining, "\n\n")
+		if end < 0 {
+			break
+		}
+		block := remaining[:end]
+		remaining = remaining[end+2:]
+		for _, line := range strings.Split(block, "\n") {
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var data map[string]any
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &data); err != nil {
+				t.Fatalf("decode %s event: %v", event, err)
+			}
+			if matches(data) {
+				return data
+			}
+		}
+	}
+	t.Fatalf("missing %s event in %s", event, body)
+	return nil
+}
+
 func TestResponsesStreamCompletedSnapshotCarriesFinalTextForResponsesClients(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +
