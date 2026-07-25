@@ -722,7 +722,7 @@ func finishStreamingReasoningSummaryItemStates(states *map[reasoningSummaryKey]*
 		if state == nil {
 			continue
 		}
-		if delta := state.reasoningText.finish(); delta != "" {
+		if delta := state.reasoningText.finishAtBoundary(); delta != "" {
 			deltas = append(deltas, delta)
 		}
 	}

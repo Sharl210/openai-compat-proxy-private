@@ -532,6 +532,17 @@ func TestFinishStreamingReasoningSummaryStatesPreservesArrivalOrderAfterClear(t 
 	}
 }
 
+func TestFinishStreamingReasoningSummaryItemStatesAddsTitleBoundary(t *testing.T) {
+	states := map[reasoningSummaryKey]*reasoningSummaryState{}
+	nextOrder := 0
+	if got := formatStreamingReasoningSummary(&states, &nextOrder, "rs_title", 0, "**标题**", false, false); got != "**标题**" {
+		t.Fatalf("title delta=%q, want complete title", got)
+	}
+	if got := finishStreamingReasoningSummaryItemStates(&states, "rs_title"); len(got) != 1 || got[0] != "\n" {
+		t.Fatalf("item boundary=%#v, want []string{\"\\n\"}", got)
+	}
+}
+
 func TestFormatStreamingReasoningItemSummarySupportsTypedOpaqueParts(t *testing.T) {
 	states := map[reasoningSummaryKey]*reasoningSummaryState{}
 	nextOrder := 0
@@ -708,15 +719,12 @@ func TestChatEventWriterResetsSummaryAliasWhenItemIDIsReused(t *testing.T) {
 
 func assertOrderedStreamFragments(t *testing.T, body string, fragments ...string) {
 	t.Helper()
-	previousIndex := -1
+	searchStart := 0
 	for _, fragment := range fragments {
-		index := strings.Index(body, fragment)
-		if index < 0 {
+		relativeIndex := strings.Index(body[searchStart:], fragment)
+		if relativeIndex < 0 {
 			t.Fatalf("missing stream fragment %q in %s", fragment, body)
 		}
-		if index <= previousIndex {
-			t.Fatalf("stream fragments are out of order at %q in %s", fragment, body)
-		}
-		previousIndex = index
+		searchStart += relativeIndex + len(fragment)
 	}
 }
