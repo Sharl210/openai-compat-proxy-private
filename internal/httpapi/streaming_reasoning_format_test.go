@@ -181,6 +181,421 @@ func TestAnthropicEventWriterFormatsSeparateReasoningPhases(t *testing.T) {
 	)
 }
 
+func TestChatEventWriterSeparatesAlternatingReasoningHeadingDeltas(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range alternatingReasoningHeadingEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	assertAlternatingReasoningHeadingDeltas(t, rec.Body.String(), "reasoning_content")
+}
+
+func TestAnthropicEventWriterSeparatesAlternatingReasoningHeadingDeltas(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range alternatingReasoningHeadingEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	assertAlternatingReasoningHeadingDeltas(t, rec.Body.String(), "thinking")
+}
+
+func TestResponsesEventWriterSeparatesAlternatingReasoningHeadingDeltas(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, alternatingReasoningHeadingEvents()...)
+
+	assertAlternatingReasoningHeadingDeltas(t, body, "delta")
+}
+
+func TestReasoningTitleStatesDoNotCrossItemsOrRewriteOpaqueContent(t *testing.T) {
+	helper := &responseEventWriterHelper{}
+	if got := helper.formatReasoningContentDelta("rs_one", 0, "**第一标题**", false); got != "**第一标题**" {
+		t.Fatalf("first stream delta=%q, want heading unchanged", got)
+	}
+	if got := helper.formatReasoningContentDelta("rs_two", 0, "**第二标题**", false); got != "**第二标题**" {
+		t.Fatalf("separate stream delta=%q, want heading unchanged", got)
+	}
+	if got := helper.formatReasoningContentDelta("rs_one", 0, "**第一后续**", false); got != "\n\n**第一后续**" {
+		t.Fatalf("same stream adjacent heading=%q, want separated heading", got)
+	}
+
+	state := &reasoningTextState{}
+	if got := state.formatDelta("**签名标题**", true); got != "**签名标题**" {
+		t.Fatalf("opaque delta=%q, want unchanged", got)
+	}
+	if got := state.formatDelta("**签名后续**", true); got != "**签名后续**" {
+		t.Fatalf("opaque adjacent delta=%q, want unchanged", got)
+	}
+}
+
+func TestReasoningTitleStateDefersCrossDeltaHeadingUntilClosed(t *testing.T) {
+	state := &reasoningTextState{}
+	if got := state.formatDelta("**第一标题**", false); got != "**第一标题**" {
+		t.Fatalf("first title=%q, want first title unchanged", got)
+	}
+	if got := state.formatDelta("**第二标题", false); got != "" {
+		t.Fatalf("unclosed adjacent title=%q, want deferred output", got)
+	}
+	if got := state.formatDelta("**", false); got != "\n\n**第二标题**" {
+		t.Fatalf("closed adjacent title=%q, want separated second title", got)
+	}
+	if got := state.formatted.String(); got != "**第一标题**\n\n**第二标题**" {
+		t.Fatalf("formatted stream=%q, want separated titles", got)
+	}
+}
+
+func TestReasoningTitleStateFlushesDeferredHeadingFromSnapshot(t *testing.T) {
+	state := &reasoningTextState{}
+	if got := state.formatDelta("**第一标题**", false); got != "**第一标题**" {
+		t.Fatalf("first title=%q, want first title unchanged", got)
+	}
+	if got := state.formatDelta("**第二标题", false); got != "" {
+		t.Fatalf("unclosed adjacent title=%q, want deferred output", got)
+	}
+	if got, handled := state.formatSnapshot("**第一标题****第二标题**", false); !handled || got != "\n\n**第二标题**" {
+		t.Fatalf("snapshot delta=%q handled=%t, want separated snapshot suffix", got, handled)
+	}
+	if got := state.finish(); got != "" {
+		t.Fatalf("finish=%q, want no duplicate output", got)
+	}
+}
+
+func TestResponsesEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, deferredReasoningHeadingEvents()...)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n**未闭合标题"`,
+		`"status":"completed"`,
+	)
+}
+
+func TestChatEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	for _, event := range deferredReasoningHeadingEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**第一标题**"`,
+		`"reasoning_content":"\n**未闭合标题"`,
+		`"finish_reason":"stop"`,
+	)
+}
+
+func TestAnthropicEventWriterFlushesDeferredReasoningTitleBeforeSignature(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	for _, event := range deferredReasoningHeadingEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"thinking":"**第一标题**"`,
+		`"thinking":"\n**未闭合标题"`,
+		`"type":"signature_delta"`,
+	)
+}
+
+func TestResponsesEventWriterSeparatesCrossDeltaReasoningTitles(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, splitAdjacentReasoningHeadingEvents()...)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+}
+
+func TestChatEventWriterSeparatesCrossDeltaReasoningTitles(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	for _, event := range splitAdjacentReasoningHeadingEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**第一标题**"`,
+		`"reasoning_content":"\n\n**第二标题**"`,
+	)
+}
+
+func TestAnthropicEventWriterSeparatesCrossDeltaReasoningTitles(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	for _, event := range splitAdjacentReasoningHeadingEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"thinking":"**第一标题**"`,
+		`"thinking":"\n\n**第二标题**"`,
+	)
+}
+
+func TestResponsesEventWriterFlushesDeferredReasoningTitleBeforeText(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第一标题**"}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**未闭合标题"}},
+		upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "正文"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n**未闭合标题"`,
+		`"delta":"正文"`,
+	)
+}
+
+func TestResponsesEventWriterPreservesOpaqueReasoningSnapshot(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{
+			"item": map[string]any{
+				"id":                "rs_encrypted",
+				"type":              "reasoning",
+				"encrypted_content": "enc_payload",
+				"summary": []any{map[string]any{
+					"type": "summary_text",
+					"text": "**第一标题****第二标题**",
+				}},
+			},
+		}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	if !strings.Contains(body, `"text":"**第一标题****第二标题**"`) {
+		t.Fatalf("expected encrypted reasoning snapshot bytes unchanged, got %s", body)
+	}
+	if strings.Contains(body, `"text":"**第一标题**\n\n**第二标题**"`) {
+		t.Fatalf("encrypted reasoning snapshot was reformatted, got %s", body)
+	}
+}
+
+func TestResponsesEventWriterFlushesReasoningStatesByOutputOrder(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_z", "output_index": 0, "summary_index": 0, "delta": "**第一未闭合"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_a", "output_index": 1, "summary_index": 0, "delta": "**第二未闭合"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一未闭合"`,
+		`"delta":"**第二未闭合"`,
+	)
+}
+
+func TestResponsesEventWriterFlushesDeferredReasoningTitleFromEmptyItemDone(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty", "summary_index": 0, "delta": "**未闭合标题"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_empty", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	if !strings.Contains(body, `"delta":"**未闭合标题"`) {
+		t.Fatalf("expected empty item.done to flush deferred title, got %s", body)
+	}
+}
+
+func TestChatEventWriterFlushesDeferredReasoningTitleFromEmptyItemDone(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolIDAliases: map[string]string{}, toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	for _, event := range emptyReasoningItemDoneEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"reasoning_content":"**未闭合标题"`) {
+		t.Fatalf("expected empty item.done to flush deferred title, got %s", rec.Body.String())
+	}
+}
+
+func TestAnthropicEventWriterFlushesDeferredReasoningTitleFromEmptyItemDone(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{pendingToolArgs: map[string]string{}, toolMeta: map[string]map[string]string{}, emittedToolItems: map[string]bool{}}
+	helper := &responseEventWriterHelper{downstreamType: "anthropic", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	for _, event := range emptyReasoningItemDoneEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"thinking":"**未闭合标题"`) {
+		t.Fatalf("expected empty item.done to flush deferred title, got %s", rec.Body.String())
+	}
+}
+
+func TestFinishStreamingReasoningSummaryStatesPreservesArrivalOrderAfterClear(t *testing.T) {
+	states := map[reasoningSummaryKey]*reasoningSummaryState{}
+	nextOrder := 0
+	if got := formatStreamingReasoningSummary(&states, &nextOrder, "rs_first", 0, "**已清理", false, false); got != "" {
+		t.Fatalf("first pending title=%q, want deferred output", got)
+	}
+	if got := formatStreamingReasoningSummary(&states, &nextOrder, "rs_z", 0, "**第一未闭合", false, false); got != "" {
+		t.Fatalf("first pending title=%q, want deferred output", got)
+	}
+	clearStreamingReasoningSummaryStates(&states, "rs_first")
+	if got := formatStreamingReasoningSummary(&states, &nextOrder, "rs_a", 0, "**第二未闭合", false, false); got != "" {
+		t.Fatalf("second pending title=%q, want deferred output", got)
+	}
+	if got := finishStreamingReasoningSummaryStates(&states); len(got) != 2 || got[0] != "**第一未闭合" || got[1] != "**第二未闭合" {
+		t.Fatalf("finished summary order=%#v, want arrival order", got)
+	}
+}
+
+func TestFormatStreamingReasoningItemSummarySupportsTypedOpaqueParts(t *testing.T) {
+	states := map[reasoningSummaryKey]*reasoningSummaryState{}
+	nextOrder := 0
+	item := map[string]any{
+		"id": "rs_typed",
+		"summary": []map[string]any{{
+			"type": "summary_text",
+			"text": "**第一标题****第二标题**",
+		}},
+	}
+	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, item); len(got) != 1 || got[0] != "**第一标题**\n\n**第二标题**" {
+		t.Fatalf("typed summary=%#v, want formatted title sequence", got)
+	}
+
+	states = map[reasoningSummaryKey]*reasoningSummaryState{}
+	nextOrder = 0
+	item["encrypted_content"] = "enc_payload"
+	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, item); len(got) != 1 || got[0] != "**第一标题****第二标题**" {
+		t.Fatalf("typed opaque summary=%#v, want original bytes", got)
+	}
+}
+
+func deferredReasoningHeadingEvents() []upstream.Event {
+	return []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第一标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**未闭合标题"}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	}
+}
+
+func emptyReasoningItemDoneEvents() []upstream.Event {
+	return []upstream.Event{
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty", "summary_index": 0, "delta": "**未闭合标题"}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_empty", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	}
+}
+
+func splitAdjacentReasoningHeadingEvents() []upstream.Event {
+	return []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第一标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第二标题"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**"}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	}
+}
+
+func alternatingReasoningHeadingEvents() []upstream.Event {
+	return []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第一标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "\n\n**第二标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第三标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "\n\n**第四标题**"}},
+		{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第五标题**"}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	}
+}
+
+func assertAlternatingReasoningHeadingDeltas(t *testing.T, body, field string) {
+	t.Helper()
+	assertOrderedStreamFragments(t, body,
+		`"`+field+`":"**第一标题**"`,
+		`"`+field+`":"\n\n**第二标题**"`,
+		`"`+field+`":"\n\n**第三标题**"`,
+		`"`+field+`":"\n\n**第四标题**"`,
+		`"`+field+`":"\n\n**第五标题**"`,
+	)
+	if strings.Contains(body, `"`+field+`":"**第一标题**\n\n**第二标题**"`) {
+		t.Fatalf("reasoning snapshot replayed an already emitted title sequence: %s", body)
+	}
+}
+
 func TestChatEventWriterAppendsUnemittedSummarySnapshotAcrossIndexes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{

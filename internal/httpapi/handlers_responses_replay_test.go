@@ -35,11 +35,12 @@ func TestResponsesStreamReplaysAdjacentToolProductionShapeAndEmitsBody(t *testin
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:                "openai",
-			Enabled:           true,
-			UpstreamBaseURL:   upstream.URL,
-			UpstreamAPIKey:    "test-key",
-			SupportsResponses: true,
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
 		}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
