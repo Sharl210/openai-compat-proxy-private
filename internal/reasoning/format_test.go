@@ -240,6 +240,24 @@ func TestStreamFormatterFlushesIncompleteAdjacentHeading(t *testing.T) {
 	}
 }
 
+func TestStreamFormatterFinishesCompleteHeadingAtBoundary(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("**标题**"); got != "**标题**" {
+		t.Fatalf("title=%q, want complete title", got)
+	}
+	if got := formatter.Finish(); got != "" {
+		t.Fatalf("ordinary finish=%q, want no trailing newline", got)
+	}
+
+	formatter.Reset()
+	if got := formatter.Push("**标题**"); got != "**标题**" {
+		t.Fatalf("boundary title=%q, want complete title", got)
+	}
+	if got := formatter.FinishAtBoundary(); got != "\n" {
+		t.Fatalf("boundary finish=%q, want title separator", got)
+	}
+}
+
 func TestStreamFormatterAdvancesUnclosedHeadingScanCursor(t *testing.T) {
 	var formatter StreamFormatter
 	if got := formatter.Push("**a"); got != "" {
