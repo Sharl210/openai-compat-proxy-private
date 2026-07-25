@@ -38,6 +38,7 @@ type responsesHistoryStore struct {
 type responsesConversationSnapshot struct {
 	Messages                 []model.CanonicalMessage
 	CompressedFields         []responsesHistoryCompressedField
+	PackedText               *responsesHistoryPackedTextBundle
 	StructuredOutputTextRefs []responsesHistoryStructuredOutputTextRef
 	Bytes                    int64
 	ResponseID               string

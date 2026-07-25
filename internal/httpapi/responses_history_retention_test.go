@@ -112,6 +112,178 @@ func TestResponsesHistoryStore_roundTrips_compressed_canonical_snapshot(t *testi
 	}
 }
 
+func TestResponsesHistoryStore_roundTrips_packed_subthreshold_text(t *testing.T) {
+	const partCount = 128
+	messages := []model.CanonicalMessage{
+		{
+			Role:  "user",
+			Parts: make([]model.CanonicalContentPart, 0, partCount),
+		},
+		{
+			Role:             "assistant",
+			ReasoningContent: strings.Repeat("aggregate subthreshold reasoning ", 256),
+		},
+	}
+	for index := range partCount {
+		messages[0].Parts = append(messages[0].Parts, model.CanonicalContentPart{
+			Type: "text",
+			Text: fmt.Sprintf("%04d-%s", index, strings.Repeat("aggregate subthreshold history text ", 256)),
+		})
+	}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+
+	store.Save("openai", "resp-packed-subthreshold", messages)
+
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-packed-subthreshold")]
+	if snapshot.PackedText == nil {
+		t.Fatal("expected aggregate subthreshold text to be packed")
+	}
+	if snapshot.Messages[0].Parts[0].Text != "" {
+		t.Fatalf("expected packed source text to be cleared, got %q", snapshot.Messages[0].Parts[0].Text)
+	}
+	if snapshot.Messages[1].ReasoningContent != "" {
+		t.Fatalf("expected packed reasoning to be cleared, got %q", snapshot.Messages[1].ReasoningContent)
+	}
+	if got := store.Load("openai", "resp-packed-subthreshold"); !reflect.DeepEqual(got, cloneCanonicalMessages(messages)) {
+		t.Fatalf("packed subthreshold snapshot changed canonical messages:\nwant=%#v\ngot=%#v", messages, got)
+	}
+}
+
+func TestResponsesHistoryStoreRejectsMalformedPackedText(t *testing.T) {
+	parts := make([]model.CanonicalContentPart, 0, 4)
+	for index := range 4 {
+		parts = append(parts, model.CanonicalContentPart{
+			Type: "text",
+			Text: fmt.Sprintf("packed-field-%d-%s", index, strings.Repeat("packed field payload ", 700)),
+		})
+	}
+	messages := []model.CanonicalMessage{
+		{
+			Role:  "user",
+			Parts: parts,
+		},
+		{
+			Role:             "assistant",
+			ReasoningContent: strings.Repeat("packed reasoning field ", 512),
+		},
+	}
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	store.Save("openai", "resp-malformed-packed", messages)
+	key := responsesHistoryKey("openai", "resp-malformed-packed")
+	base := store.entries[key]
+	if base.PackedText == nil || len(base.PackedText.Fields) < 2 {
+		t.Fatalf("expected packed text fixture, got %#v", base.PackedText)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*responsesConversationSnapshot)
+	}{
+		{
+			name: "missing field",
+			mutate: func(snapshot *responsesConversationSnapshot) {
+				snapshot.PackedText.Fields = snapshot.PackedText.Fields[:len(snapshot.PackedText.Fields)-1]
+			},
+		},
+		{
+			name: "duplicate target",
+			mutate: func(snapshot *responsesConversationSnapshot) {
+				snapshot.PackedText.Fields[1].MessageIndex = snapshot.PackedText.Fields[0].MessageIndex
+				snapshot.PackedText.Fields[1].PartIndex = snapshot.PackedText.Fields[0].PartIndex
+				snapshot.PackedText.Fields[1].Kind = snapshot.PackedText.Fields[0].Kind
+			},
+		},
+		{
+			name: "noncontiguous range",
+			mutate: func(snapshot *responsesConversationSnapshot) {
+				snapshot.PackedText.Fields[1].Offset++
+			},
+		},
+		{
+			name: "invalid reasoning part index",
+			mutate: func(snapshot *responsesConversationSnapshot) {
+				for index := range snapshot.PackedText.Fields {
+					if snapshot.PackedText.Fields[index].Kind == responsesHistoryPackedReasoningContent {
+						snapshot.PackedText.Fields[index].PartIndex = 1
+						return
+					}
+				}
+				t.Fatal("expected packed reasoning field")
+			},
+		},
+		{
+			name: "logical budget exceeded",
+			mutate: func(snapshot *responsesConversationSnapshot) {
+				snapshot.Bytes = int64(snapshot.PackedText.OriginalSize - 1)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := base
+			snapshot.PackedText = cloneResponsesHistoryPackedTextBundle(base.PackedText)
+			tc.mutate(&snapshot)
+			store.entries[key] = snapshot
+			if got := store.Load("openai", "resp-malformed-packed"); got != nil {
+				t.Fatalf("expected malformed packed text to fail closed, got %#v", got)
+			}
+		})
+	}
+	store.entries[key] = base
+}
+
+func cloneResponsesHistoryPackedTextBundle(packed *responsesHistoryPackedTextBundle) *responsesHistoryPackedTextBundle {
+	if packed == nil {
+		return nil
+	}
+	cloned := *packed
+	cloned.Data = append([]byte(nil), packed.Data...)
+	cloned.Fields = append([]responsesHistoryPackedTextField(nil), packed.Fields...)
+	return &cloned
+}
+
+func TestResponsesHistoryStore_releases_packed_subthreshold_text_after_operation(t *testing.T) {
+	const (
+		partCount       = 4096
+		partPayloadSize = 8 << 10
+	)
+	logicalPayloadBytes := int64(partCount * partPayloadSize)
+	runtime.GC()
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
+
+	store := newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
+	savePackedSubthresholdHistoryFixture(store, "resp-packed-lifecycle", partCount, partPayloadSize)
+	runtime.GC()
+	var rooted runtime.MemStats
+	runtime.ReadMemStats(&rooted)
+	runtime.KeepAlive(store)
+
+	snapshot := store.entries[responsesHistoryKey("openai", "resp-packed-lifecycle")]
+	if snapshot.PackedText == nil {
+		t.Fatal("expected aggregate subthreshold payload to be packed")
+	}
+	rootedHeapBytes := int64(rooted.HeapAlloc) - int64(baseline.HeapAlloc)
+	t.Logf("packed subthreshold lifecycle bytes: logical_payload=%d rooted_after_gc=%d", logicalPayloadBytes, rootedHeapBytes)
+	if rootedHeapBytes >= logicalPayloadBytes/4 {
+		t.Fatalf("packed subthreshold payload retained too much heap: rooted=%d logical=%d", rootedHeapBytes, logicalPayloadBytes)
+	}
+}
+
+//go:noinline
+func savePackedSubthresholdHistoryFixture(store *responsesHistoryStore, responseID string, partCount int, partPayloadSize int) {
+	messages := []model.CanonicalMessage{{
+		Role:  "user",
+		Parts: make([]model.CanonicalContentPart, 0, partCount),
+	}}
+	for index := range partCount {
+		messages[0].Parts = append(messages[0].Parts, model.CanonicalContentPart{
+			Type: "text",
+			Text: fmt.Sprintf("%08d%s", index, strings.Repeat("x", partPayloadSize-8)),
+		})
+	}
+	store.Save("openai", responseID, messages)
+}
+
 func TestSaveResponsesHistorySnapshotUsesStoreDefensiveClone(t *testing.T) {
 	base := []model.CanonicalMessage{{
 		Role:  "user",

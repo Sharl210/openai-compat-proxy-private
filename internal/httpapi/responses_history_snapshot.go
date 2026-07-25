@@ -15,6 +15,7 @@ import (
 
 const responsesHistoryCompressionMinSnapshotBytes int64 = 64 << 10
 const responsesHistoryCompressionMinFieldBytes = 16 << 10
+const responsesHistoryPackedTextMinBytes = 64 << 10
 
 type responsesHistoryCompressedFieldKind uint8
 
@@ -49,6 +50,27 @@ type responsesHistoryCompressedField struct {
 	Data               []byte                              `json:"data"`
 	RestoreRawImageURL bool                                `json:"restore_raw_image_url,omitempty"`
 	DynamicPath        []responsesHistoryDynamicPathStep   `json:"dynamic_path,omitempty"`
+}
+
+type responsesHistoryPackedTextFieldKind uint8
+
+const (
+	responsesHistoryPackedReasoningContent responsesHistoryPackedTextFieldKind = iota + 1
+	responsesHistoryPackedPartText
+)
+
+type responsesHistoryPackedTextField struct {
+	MessageIndex int
+	PartIndex    int
+	Kind         responsesHistoryPackedTextFieldKind
+	Offset       int
+	Length       int
+}
+
+type responsesHistoryPackedTextBundle struct {
+	OriginalSize int
+	Data         []byte
+	Fields       []responsesHistoryPackedTextField
 }
 
 const responsesHistoryStructuredOutputRawKey = "tool_output_structured"
@@ -93,8 +115,54 @@ func newResponsesConversationSnapshot(messages []model.CanonicalMessage, logical
 	snapshot.StructuredOutputTextRefs = dedupeResponsesHistoryStructuredOutputText(cloned)
 	if logicalBytes >= responsesHistoryCompressionMinSnapshotBytes {
 		snapshot.CompressedFields = compressResponsesHistoryFields(cloned)
+		snapshot.PackedText = packResponsesHistoryTextFields(cloned)
 	}
 	return snapshot, messages
+}
+
+func packResponsesHistoryTextFields(messages []model.CanonicalMessage) *responsesHistoryPackedTextBundle {
+	var packed strings.Builder
+	fields := make([]responsesHistoryPackedTextField, 0)
+	appendText := func(messageIndex int, partIndex int, kind responsesHistoryPackedTextFieldKind, value string) {
+		if value == "" {
+			return
+		}
+		fields = append(fields, responsesHistoryPackedTextField{
+			MessageIndex: messageIndex,
+			PartIndex:    partIndex,
+			Kind:         kind,
+			Offset:       packed.Len(),
+			Length:       len(value),
+		})
+		packed.WriteString(value)
+	}
+	for messageIndex := range messages {
+		message := &messages[messageIndex]
+		appendText(messageIndex, 0, responsesHistoryPackedReasoningContent, message.ReasoningContent)
+		for partIndex := range message.Parts {
+			appendText(messageIndex, partIndex, responsesHistoryPackedPartText, message.Parts[partIndex].Text)
+		}
+	}
+	if packed.Len() < responsesHistoryPackedTextMinBytes || len(fields) == 0 {
+		return nil
+	}
+	compressed, ok := compressResponsesHistoryString(packed.String())
+	if !ok {
+		return nil
+	}
+	for _, field := range fields {
+		switch field.Kind {
+		case responsesHistoryPackedReasoningContent:
+			messages[field.MessageIndex].ReasoningContent = ""
+		case responsesHistoryPackedPartText:
+			messages[field.MessageIndex].Parts[field.PartIndex].Text = ""
+		}
+	}
+	return &responsesHistoryPackedTextBundle{
+		OriginalSize: packed.Len(),
+		Data:         compressed,
+		Fields:       fields,
+	}
 }
 
 func dedupeResponsesHistoryStructuredOutputText(messages []model.CanonicalMessage) []responsesHistoryStructuredOutputTextRef {
@@ -473,10 +541,60 @@ func loadResponsesConversationSnapshot(snapshot responsesConversationSnapshot) [
 			return nil
 		}
 	}
+	if !restoreResponsesHistoryPackedText(messages, snapshot.PackedText, snapshot.Bytes) {
+		return nil
+	}
 	if !restoreResponsesHistoryStructuredOutputText(messages, snapshot.StructuredOutputTextRefs) {
 		return nil
 	}
 	return messages
+}
+
+func restoreResponsesHistoryPackedText(messages []model.CanonicalMessage, packed *responsesHistoryPackedTextBundle, snapshotBytes int64) bool {
+	if packed == nil {
+		return true
+	}
+	if packed.OriginalSize <= 0 || len(packed.Data) == 0 || len(packed.Fields) == 0 || int64(packed.OriginalSize) > snapshotBytes {
+		return false
+	}
+	value, ok := decompressResponsesHistoryString(packed.Data, packed.OriginalSize)
+	if !ok {
+		return false
+	}
+	type packedTarget struct {
+		messageIndex int
+		partIndex    int
+		kind         responsesHistoryPackedTextFieldKind
+	}
+	restoredTargets := make(map[packedTarget]struct{}, len(packed.Fields))
+	expectedOffset := 0
+	for _, field := range packed.Fields {
+		if field.MessageIndex < 0 || field.MessageIndex >= len(messages) || field.Offset != expectedOffset || field.Length <= 0 || field.Offset > len(value)-field.Length {
+			return false
+		}
+		expectedOffset = field.Offset + field.Length
+		text := value[field.Offset : field.Offset+field.Length]
+		target := packedTarget{messageIndex: field.MessageIndex, partIndex: field.PartIndex, kind: field.Kind}
+		if _, exists := restoredTargets[target]; exists {
+			return false
+		}
+		restoredTargets[target] = struct{}{}
+		switch field.Kind {
+		case responsesHistoryPackedReasoningContent:
+			if field.PartIndex != 0 || messages[field.MessageIndex].ReasoningContent != "" {
+				return false
+			}
+			messages[field.MessageIndex].ReasoningContent = text
+		case responsesHistoryPackedPartText:
+			if field.PartIndex < 0 || field.PartIndex >= len(messages[field.MessageIndex].Parts) || messages[field.MessageIndex].Parts[field.PartIndex].Text != "" {
+				return false
+			}
+			messages[field.MessageIndex].Parts[field.PartIndex].Text = text
+		default:
+			return false
+		}
+	}
+	return expectedOffset == len(value)
 }
 
 func restoreResponsesHistoryStructuredOutputText(messages []model.CanonicalMessage, refs []responsesHistoryStructuredOutputTextRef) bool {
