@@ -902,6 +902,46 @@ func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStor
 	return recovered
 }
 
+func restoreChatReasoningContentForAssistantToolCalls(messages []model.CanonicalMessage, history []model.CanonicalMessage) []model.CanonicalMessage {
+	if len(messages) == 0 || len(history) == 0 {
+		return messages
+	}
+	restored := append([]model.CanonicalMessage(nil), messages...)
+	for messageIndex := range restored {
+		message := &restored[messageIndex]
+		if message.Role != "assistant" || len(message.ToolCalls) == 0 {
+			continue
+		}
+		sequenceHash := assistantToolCallSequenceHash(message.ToolCalls)
+		if sequenceHash == "" {
+			continue
+		}
+		var matchedReasoning string
+		matchCount := 0
+		for _, stored := range history {
+			if stored.Role != "assistant" || len(stored.ToolCalls) != len(message.ToolCalls) || assistantToolCallSequenceHash(stored.ToolCalls) != sequenceHash || strings.TrimSpace(stored.ReasoningContent) == "" {
+				continue
+			}
+			matched := true
+			for toolIndex := range message.ToolCalls {
+				if !assistantToolCallsMatchForAnthropicThinkingReplay(message.ToolCalls[toolIndex], stored.ToolCalls[toolIndex]) {
+					matched = false
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			matchedReasoning = stored.ReasoningContent
+			matchCount++
+		}
+		if matchCount == 1 {
+			message.ReasoningContent = matchedReasoning
+		}
+	}
+	return restored
+}
+
 func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) []model.CanonicalMessage {
 	if len(messages) == 0 {
 		return messages

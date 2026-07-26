@@ -512,6 +512,9 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 			previousHistory := history.LoadScoped(providerID, previousResponseID, historyScope)
 			switch {
 			case len(previousHistory) > 0:
+				if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeChat {
+					currentMessages = restoreChatReasoningContentForAssistantToolCalls(currentMessages, previousHistory)
+				}
 				canon.Messages = append(previousHistory, currentMessages...)
 				previousHistoryRestored = true
 			case len(previousHistory) == 0:

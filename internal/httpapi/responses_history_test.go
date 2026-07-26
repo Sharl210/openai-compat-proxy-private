@@ -52,6 +52,44 @@ func TestResponsesHistoryLoadsPortableSnapshotOnlyForOneCallerOwnedMatch(t *test
 	}
 }
 
+func TestRestoreChatReasoningContentForAssistantToolCallsUsesUniqueMatchingHistory(t *testing.T) {
+	current := []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: "visible summary",
+		ToolCalls:        []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup", Arguments: `{"city":"Hangzhou"}`}},
+	}}
+	history := []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: "original provider reasoning",
+		ToolCalls:        []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup", Arguments: `{"city":"Hangzhou"}`}},
+	}}
+
+	restored := restoreChatReasoningContentForAssistantToolCalls(current, history)
+	if got := restored[0].ReasoningContent; got != "original provider reasoning" {
+		t.Fatalf("expected original provider reasoning, got %q", got)
+	}
+}
+
+func TestRestoreChatReasoningContentForAssistantToolCallsRejectsNonUniqueOrMismatchedHistory(t *testing.T) {
+	current := []model.CanonicalMessage{{
+		Role:             "assistant",
+		ReasoningContent: "visible summary",
+		ToolCalls:        []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup", Arguments: `{}`}},
+	}}
+	for _, history := range [][]model.CanonicalMessage{
+		{{Role: "assistant", ReasoningContent: "wrong", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "other", Arguments: `{}`}}}},
+		{
+			{Role: "assistant", ReasoningContent: "first", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup", Arguments: `{}`}}},
+			{Role: "assistant", ReasoningContent: "second", ToolCalls: []model.CanonicalToolCall{{ID: "call_1", Type: "function", Name: "lookup", Arguments: `{}`}}},
+		},
+	} {
+		restored := restoreChatReasoningContentForAssistantToolCalls(current, history)
+		if got := restored[0].ReasoningContent; got != "visible summary" {
+			t.Fatalf("expected visible summary retained for unsafe replay, got %q", got)
+		}
+	}
+}
+
 func TestResponsesHistoryRecognizesPortableOpaqueThinkingOnlyForSameCaller(t *testing.T) {
 	store := newResponsesHistoryStore(8, "")
 	callerScope := responsesHistoryPortableScope("caller-a")
