@@ -73,14 +73,14 @@ func TestBuildResponseIncludesThinkingBlockBeforeText(t *testing.T) {
 	}
 }
 
-func TestBuildResponseFormatsThinkingTitle(t *testing.T) {
+func TestBuildResponsePreservesThinkingTitleFollowedByText(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
 		Reasoning: map[string]any{"thinking": "**重点**正文"},
 	}, "req_thinking", "claude-sonnet-4-5")
 
 	content, _ := resp["content"].([]map[string]any)
-	if got, _ := content[0]["thinking"].(string); got != "**重点**\n正文" {
-		t.Fatalf("expected thinking title to be separated, got %#v", content[0])
+	if got, _ := content[0]["thinking"].(string); got != "**重点**正文" {
+		t.Fatalf("expected thinking title followed by text to be preserved, got %#v", content[0])
 	}
 }
 

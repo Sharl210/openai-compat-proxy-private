@@ -291,19 +291,16 @@ func TestReasoningTitleStateFlushesDeferredHeadingFromSnapshot(t *testing.T) {
 	}
 }
 
-func TestResponsesEventWriterSeparatesStandaloneSummaryTitleAtPartBoundary(t *testing.T) {
+func TestResponsesEventWriterPreservesStandaloneSummaryTitleAtPartBoundary(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, standaloneSummaryTitleEvents()...)
-	assertOrderedStreamFragments(t, body,
-		`"delta":"**标题**"`,
-		`"delta":"\n"`,
-	)
+	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`)
 }
 
 func TestResponsesEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, deferredReasoningHeadingEvents()...)
 	assertOrderedStreamFragments(t, body,
 		`"delta":"**第一标题**"`,
-		`"delta":"\n**未闭合标题"`,
+		`"delta":"**未闭合标题"`,
 		`"status":"completed"`,
 	)
 }
@@ -332,7 +329,7 @@ func TestChatEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
 	}
 	assertOrderedStreamFragments(t, rec.Body.String(),
 		`"reasoning_content":"**第一标题**"`,
-		`"reasoning_content":"\n**未闭合标题"`,
+		`"reasoning_content":"**未闭合标题"`,
 		`"finish_reason":"stop"`,
 	)
 }
@@ -358,7 +355,7 @@ func TestAnthropicEventWriterFlushesDeferredReasoningTitleBeforeSignature(t *tes
 	}
 	assertOrderedStreamFragments(t, rec.Body.String(),
 		`"thinking":"**第一标题**"`,
-		`"thinking":"\n**未闭合标题"`,
+		`"thinking":"**未闭合标题"`,
 		`"type":"signature_delta"`,
 	)
 }
@@ -433,7 +430,7 @@ func TestResponsesEventWriterFlushesDeferredReasoningTitleBeforeText(t *testing.
 	)
 	assertOrderedStreamFragments(t, body,
 		`"delta":"**第一标题**"`,
-		`"delta":"\n**未闭合标题"`,
+		`"delta":"**未闭合标题"`,
 		`"delta":"正文"`,
 	)
 }
@@ -532,14 +529,14 @@ func TestFinishStreamingReasoningSummaryStatesPreservesArrivalOrderAfterClear(t 
 	}
 }
 
-func TestFinishStreamingReasoningSummaryItemStatesAddsTitleBoundary(t *testing.T) {
+func TestFinishStreamingReasoningSummaryItemStatesPreservesStandaloneTitle(t *testing.T) {
 	states := map[reasoningSummaryKey]*reasoningSummaryState{}
 	nextOrder := 0
 	if got := formatStreamingReasoningSummary(&states, &nextOrder, "rs_title", 0, "**标题**", false, false); got != "**标题**" {
 		t.Fatalf("title delta=%q, want complete title", got)
 	}
-	if got := finishStreamingReasoningSummaryItemStates(&states, "rs_title"); len(got) != 1 || got[0] != "\n" {
-		t.Fatalf("item boundary=%#v, want []string{\"\\n\"}", got)
+	if got := finishStreamingReasoningSummaryItemStates(&states, "rs_title"); len(got) != 0 {
+		t.Fatalf("item boundary=%#v, want no added delimiter", got)
 	}
 }
 

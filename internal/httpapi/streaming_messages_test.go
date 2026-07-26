@@ -974,9 +974,9 @@ func TestMessagesStreamEmitsMissingReasoningSummaryIndexes(t *testing.T) {
 	}
 }
 
-func TestReasoningContentValueFormatsThinkingText(t *testing.T) {
-	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**\n正文" {
-		t.Fatalf("expected thinking title to be separated, got %q", got)
+func TestReasoningContentValuePreservesThinkingTitleFollowedByText(t *testing.T) {
+	if got := reasoningContentValue(map[string]any{"reasoning_content": "**重点**正文"}); got != "**重点**正文" {
+		t.Fatalf("expected thinking title followed by text to be preserved, got %q", got)
 	}
 }
 

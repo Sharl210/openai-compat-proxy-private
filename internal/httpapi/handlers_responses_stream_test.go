@@ -89,14 +89,10 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 			body: `{"model":"gpt-5","stream":true,"input":"hello"}`,
 			fragments: []string{
 				`"delta":"**标题**"`,
-				`"delta":"\n"`,
 				`"delta":"**后续**"`,
-				`"delta":"\n"`,
 				`"delta":"**第三标题**"`,
-				`"delta":"\n"`,
 				`"delta":"**第四标题**"`,
 			},
-			unwantedRaw: []string{`"delta":"**标题****后续**"`},
 		},
 		{
 			name: "chat",
@@ -106,7 +102,6 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 				`"reasoning_content":"**标题**"`,
 				`"reasoning_content":"\n\n**后续**"`,
 				`"reasoning_content":"\n\n**第三标题**"`,
-				`"reasoning_content":"\n"`,
 				`"reasoning_content":"**第四标题**"`,
 			},
 			unwantedRaw: []string{
@@ -125,7 +120,6 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 				`"thinking":"**标题**"`,
 				`"thinking":"\n\n**后续**"`,
 				`"thinking":"\n\n**第三标题**"`,
-				`"thinking":"\n"`,
 				`"thinking":"**第四标题**"`,
 			},
 			unwantedRaw: []string{
@@ -193,7 +187,7 @@ func TestResponsesStreamPreservesOpaqueTerminalReasoningSummary(t *testing.T) {
 		t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`, `"delta":"\n"`)
+	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`)
 
 	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
 		item, _ := data["item"].(map[string]any)
@@ -275,8 +269,8 @@ func assertResponsesReasoningSummaryTerminalSnapshots(t *testing.T, body string)
 	response, _ := completed["response"].(map[string]any)
 	output, _ := response["output"].([]any)
 	expectedByItem := map[string][]string{
-		"rs_native": {"**标题**\n", "**后续**\n", "**第三标题**\n"},
-		"rs_next":   {"**第四标题**\n"},
+		"rs_native": {"**标题**", "**后续**", "**第三标题**"},
+		"rs_next":   {"**第四标题**"},
 	}
 	for itemID, expected := range expectedByItem {
 		for summaryIndex, want := range expected {
@@ -1485,7 +1479,7 @@ func TestResponsesStreamSynthesizesNativeReasoningLifecycleBeforeSummaryDelta(t 
 	}
 }
 
-func TestResponsesStreamFormatsReasoningItemTitle(t *testing.T) {
+func TestResponsesStreamPreservesReasoningItemTitleFollowedByText(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"output_index": 0, "item": map[string]any{
 			"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题**正文"}},
@@ -1493,8 +1487,8 @@ func TestResponsesStreamFormatsReasoningItemTitle(t *testing.T) {
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{"id": "resp_native", "status": "completed"}}},
 	)
 
-	if !strings.Contains(body, `"text":"**标题**\n正文","type":"summary_text"`) {
-		t.Fatalf("expected reasoning item title to be separated, got %s", body)
+	if !strings.Contains(body, `"text":"**标题**正文","type":"summary_text"`) {
+		t.Fatalf("expected reasoning item title followed by text to be preserved, got %s", body)
 	}
 }
 

@@ -11,17 +11,17 @@ func TestFormatTextSeparatesBoldTitleFromFollowingContent(t *testing.T) {
 		input string
 		want  string
 	}{
-		{name: "plain content", input: "**标题**正文", want: "**标题**\n正文"},
-		{name: "title after content", input: "正文**标题**后续", want: "正文\n**标题**\n后续"},
+		{name: "plain content", input: "**标题**正文", want: "**标题**正文"},
+		{name: "title after content", input: "正文**标题**后续", want: "正文**标题**后续"},
 		{name: "title without body", input: "**标题**", want: "**标题**"},
-		{name: "adjacent bold titles", input: "**一****二**后续", want: "**一**\n\n**二**\n后续"},
+		{name: "adjacent bold titles", input: "**一****二**后续", want: "**一**\n\n**二**后续"},
 		{name: "adjacent bold titles without body", input: "**一****二**", want: "**一**\n\n**二**"},
 		{name: "continuous thinking titles", input: "**ssss****sssss****sdad**", want: "**ssss**\n\n**sssss**\n\n**sdad**"},
-		{name: "incomplete adjacent marker", input: "**标题****", want: "**标题**\n**"},
+		{name: "incomplete adjacent marker", input: "**标题****", want: "**标题****"},
 		{name: "existing newline", input: "**标题**\n正文", want: "**标题**\n正文"},
 		{name: "existing newline before title", input: "正文\n**标题**\n后续", want: "正文\n**标题**\n后续"},
-		{name: "inline bold title", input: "正文 **重点** 继续", want: "正文 \n**重点**\n 继续"},
-		{name: "multiple complete pairs", input: "**一**和**二**正文", want: "**一**\n和\n**二**\n正文"},
+		{name: "inline bold title", input: "正文 **重点** 继续", want: "正文 **重点** 继续"},
+		{name: "multiple complete pairs", input: "**一**和**二**正文", want: "**一**和**二**正文"},
 		{name: "unclosed pair", input: "正文 **未闭合", want: "正文 **未闭合"},
 		{name: "standalone markers", input: "正文 ** 符号", want: "正文 ** 符号"},
 	}
@@ -35,10 +35,10 @@ func TestFormatTextSeparatesBoldTitleFromFollowingContent(t *testing.T) {
 	}
 }
 
-func TestFormatTextTreatsAllBoldSpansAsTitles(t *testing.T) {
+func TestFormatTextPreservesNonAdjacentBoldSpans(t *testing.T) {
 	input := "思考 **重点** 继续"
-	if got := FormatText(input); got != "思考 \n**重点**\n 继续" {
-		t.Fatalf("expected bold thinking title to occupy its own line, got %q", got)
+	if got := FormatText(input); got != input {
+		t.Fatalf("expected non-adjacent bold span unchanged, got %q", got)
 	}
 }
 
@@ -49,13 +49,13 @@ func TestFormatBlockFormatsAllReasoningText(t *testing.T) {
 		"reasoning_content": "**过程**后续",
 	}
 	formatted := FormatBlock(block)
-	if got := formatted["thinking"]; got != "**重点**\n正文" {
+	if got := formatted["thinking"]; got != "**重点**正文" {
 		t.Fatalf("expected thinking title to be separated, got %#v", got)
 	}
-	if got := formatted["summary"]; got != "**标题**\n正文" {
+	if got := formatted["summary"]; got != "**标题**正文" {
 		t.Fatalf("expected summary title to be separated, got %#v", got)
 	}
-	if got := formatted["reasoning_content"]; got != "**过程**\n后续" {
+	if got := formatted["reasoning_content"]; got != "**过程**后续" {
 		t.Fatalf("expected reasoning_content title to be separated, got %#v", got)
 	}
 }
@@ -179,10 +179,10 @@ func TestFormatDeltaCarriesBoldTitleAcrossChunks(t *testing.T) {
 	}
 
 	second, combined := FormatDelta(combined, "正文")
-	if second != "\n正文" {
-		t.Fatalf("expected newline before following chunk, got %q", second)
+	if second != "正文" {
+		t.Fatalf("expected ordinary text unchanged, got %q", second)
 	}
-	if combined != "**标题**\n正文" {
+	if combined != "**标题**正文" {
 		t.Fatalf("expected combined reasoning text, got %q", combined)
 	}
 }
@@ -235,8 +235,8 @@ func TestStreamFormatterFlushesIncompleteAdjacentHeading(t *testing.T) {
 	if got := formatter.Push("**未闭合"); got != "" {
 		t.Fatalf("unclosed adjacent title=%q, want deferred output", got)
 	}
-	if got := formatter.Finish(); got != "\n**未闭合" {
-		t.Fatalf("finish=%q, want literal incomplete title after one newline", got)
+	if got := formatter.Finish(); got != "**未闭合" {
+		t.Fatalf("finish=%q, want literal incomplete title unchanged", got)
 	}
 }
 
@@ -253,8 +253,8 @@ func TestStreamFormatterFinishesCompleteHeadingAtBoundary(t *testing.T) {
 	if got := formatter.Push("**标题**"); got != "**标题**" {
 		t.Fatalf("boundary title=%q, want complete title", got)
 	}
-	if got := formatter.FinishAtBoundary(); got != "\n" {
-		t.Fatalf("boundary finish=%q, want title separator", got)
+	if got := formatter.FinishAtBoundary(); got != "" {
+		t.Fatalf("boundary finish=%q, want no lone-title separator", got)
 	}
 }
 

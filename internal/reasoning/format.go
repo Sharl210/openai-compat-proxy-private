@@ -44,9 +44,7 @@ func (formatter *StreamFormatter) Finish() string {
 	return formatter.drain(true)
 }
 
-// FinishAtBoundary flushes a streaming segment as an independent text boundary.
-// A complete bold title at the end of a summary part needs a trailing newline so
-// the following part cannot be rendered as the same inline title sequence.
+// FinishAtBoundary flushes a streaming segment without changing a lone title.
 func (formatter *StreamFormatter) FinishAtBoundary() string {
 	if formatter == nil {
 		return ""
@@ -55,9 +53,7 @@ func (formatter *StreamFormatter) FinishAtBoundary() string {
 	if !formatter.afterHeading {
 		return output
 	}
-	formatter.afterHeading = false
-	formatter.lineStart = true
-	return output + "\n"
+	return output
 }
 
 func (formatter *StreamFormatter) ensureInitialized() {
@@ -93,8 +89,6 @@ func (formatter *StreamFormatter) drain(final bool) string {
 					break
 				}
 			}
-			output.WriteByte('\n')
-			formatter.lineStart = true
 			formatter.afterHeading = false
 			continue
 		}
@@ -104,9 +98,6 @@ func (formatter *StreamFormatter) drain(final bool) string {
 		}
 		if startsWithBoldSpan(pending) {
 			if endIndex := formatter.completeBoldSpanEnd(pending); endIndex > 0 {
-				if !formatter.lineStart {
-					output.WriteByte('\n')
-				}
 				_, _ = output.Write(pending[:endIndex])
 				formatter.lineStart = false
 				formatter.afterHeading = true
