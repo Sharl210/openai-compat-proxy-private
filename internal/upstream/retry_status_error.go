@@ -104,9 +104,23 @@ func shouldRetryRequestFailure(err error) bool {
 	}
 	var httpErr *HTTPStatusError
 	if errors.As(err, &httpErr) {
-		return httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500
+		if httpErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		if httpErr.StatusCode < 500 {
+			return false
+		}
+		return !isPermanentUpstreamAccessFailure(httpErr.Body)
 	}
 	return true
+}
+
+func isPermanentUpstreamAccessFailure(body string) bool {
+	normalized := strings.ToLower(body)
+	return strings.Contains(normalized, "access forbidden") ||
+		strings.Contains(normalized, "access denied") ||
+		strings.Contains(normalized, "unauthorized") ||
+		strings.Contains(normalized, "invalid api key")
 }
 
 func annotateRetryExhaustion(err error, retryCount int, retryDelay time.Duration) error {

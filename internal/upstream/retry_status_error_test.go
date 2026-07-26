@@ -80,3 +80,26 @@ func TestClientResponseMarksMixedHTTPRetryEvidenceWhenRetriesExhaust(t *testing.
 		t.Fatalf("expected mixed retries not to match final status error, got %#v", httpErr.RetryEvidence)
 	}
 }
+
+func TestClientResponseDoesNotRetryPermanentAccessFailure(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"message":"Upstream access forbidden, please contact administrator","type":"upstream_error"}}`))
+	}))
+	defer server.Close()
+	client := NewClient(server.URL, config.Config{UpstreamRetryCount: 5, UpstreamRetryDelay: time.Millisecond})
+
+	_, err := client.Response(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "")
+	var httpErr *HTTPStatusError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected HTTP status error, got %T %v", err, err)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("expected one upstream attempt, got %d", got)
+	}
+	if got := httpErr.RetriesPerformed; got != 0 {
+		t.Fatalf("expected no retries, got %d", got)
+	}
+}
