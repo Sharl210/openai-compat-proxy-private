@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +27,7 @@ var imageArtifactRootDirOverride string
 var imageArtifactTTL = 24 * time.Hour
 var imageArtifactNow = time.Now
 var imageArtifactCleanupInterval = 30 * time.Minute
+var imageResponseDownloadClient = &http.Client{Timeout: 30 * time.Second}
 
 var imageArtifactsInit sync.Map
 
@@ -85,6 +88,10 @@ func handleImagesPassthrough(routePath string, upstreamPath string) http.Handler
 
 		payload, respContentType, err = rewriteImageResponseForRequestedFormat(r, prepared.requestedFormat, payload, respContentType)
 		if err != nil {
+			if isImageResponseDownloadTimeout(err) {
+				errorsx.WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "image result download timed out")
+				return
+			}
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", err.Error())
 			return
 		}
@@ -392,7 +399,7 @@ func rewriteImageResponseForRequestedFormat(r *http.Request, requestedFormat str
 	}
 	switch requestedFormat {
 	case "b64_json":
-		changed, err := convertImageResponseURLToB64(data)
+		changed, err := convertImageResponseURLToB64(r.Context(), data)
 		if err != nil {
 			return nil, "", err
 		}
@@ -451,7 +458,7 @@ func extractRequestedImageResponseFormat(body []byte, contentType string) (strin
 	return text, true
 }
 
-func convertImageResponseURLToB64(data []any) (bool, error) {
+func convertImageResponseURLToB64(ctx context.Context, data []any) (bool, error) {
 	changed := false
 	for _, raw := range data {
 		item, _ := raw.(map[string]any)
@@ -466,7 +473,11 @@ func convertImageResponseURLToB64(data []any) (bool, error) {
 		if urlText == "" {
 			continue
 		}
-		resp, err := http.Get(urlText)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, urlText, nil)
+		if err != nil {
+			return false, err
+		}
+		resp, err := imageResponseDownloadClient.Do(request)
 		if err != nil {
 			return false, err
 		}
@@ -483,6 +494,14 @@ func convertImageResponseURLToB64(data []any) (bool, error) {
 		changed = true
 	}
 	return changed, nil
+}
+
+func isImageResponseDownloadTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var timeoutErr net.Error
+	return errors.As(err, &timeoutErr) && timeoutErr.Timeout()
 }
 
 func convertImageResponseB64ToURL(r *http.Request, data []any) (bool, error) {

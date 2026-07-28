@@ -82,6 +82,58 @@ func TestImagesGenerationsPassesThroughJSONAndMappedModel(t *testing.T) {
 	}
 }
 
+func TestImageGenerationReturnsGatewayTimeoutWhenResultDownloadTimesOut(t *testing.T) {
+	downloadStarted := make(chan struct{})
+	downloadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(downloadStarted)
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer downloadServer.Close()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"url":"` + downloadServer.URL + `/generated.png"}]}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "image",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:              "image",
+			Enabled:         true,
+			UpstreamBaseURL: upstream.URL,
+			UpstreamAPIKey:  "provider-upstream-key",
+			ManualModels:    []string{"gpt-image-2"},
+		}},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/image/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"otter"}`)).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer root-secret")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	select {
+	case <-downloadStarted:
+	default:
+		t.Fatal("expected image result download to start")
+	}
+
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected status 504, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"upstream_timeout"`) {
+		t.Fatalf("expected upstream timeout error, got %s", rec.Body.String())
+	}
+}
+
 func TestImagesEditsPassesThroughMultipartAndMappedModel(t *testing.T) {
 	var gotPath string
 	var gotAuth string
