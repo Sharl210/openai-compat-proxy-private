@@ -56,6 +56,12 @@ func (formatter *StreamFormatter) FinishAtBoundary() string {
 	return output
 }
 
+// HasTrailingBoldSpan reports whether the last emitted segment is a complete
+// non-empty bold span that can be joined to a following reasoning segment.
+func (formatter *StreamFormatter) HasTrailingBoldSpan() bool {
+	return formatter != nil && formatter.afterHeading
+}
+
 func (formatter *StreamFormatter) ensureInitialized() {
 	if formatter.initialized {
 		return

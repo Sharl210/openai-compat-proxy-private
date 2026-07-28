@@ -106,6 +106,7 @@ type responsesStreamState struct {
 	activeReasoningItems       map[string]bool
 	reasoningItemsClosed       map[string]bool
 	reasoningFormatStates      map[reasoningSummaryKey]*reasoningTextState
+	reasoningTitleBoundary     bool
 	syntheticInjected          bool
 	syntheticSummary           strings.Builder
 	toolItems                  map[string]*responsesToolItemState
@@ -198,6 +199,7 @@ type responseProjectionState struct {
 	activeReasoningItems       map[string]bool
 	reasoningItemsClosed       map[string]bool
 	reasoningFormatStates      map[reasoningSummaryKey]*reasoningTextState
+	reasoningTitleBoundary     bool
 	syntheticInjected          bool
 	realReasoningSeen          bool
 	compactionLifecycleStarted bool
@@ -234,6 +236,7 @@ type responseEventWriterHelper struct {
 	reasoningFormatItemID       string
 	reasoningFormatAliasPending bool
 	reasoningFormatAliases      map[reasoningSummaryKey]string
+	reasoningTitleBoundary      bool
 	reasoningSummaryParts       map[string]map[int]*strings.Builder
 	reasoningSummaryPartClosed  map[string]map[int]bool
 	reasoningSummaryTextDone    map[string]map[int]bool
@@ -402,6 +405,10 @@ func (state *reasoningTextState) finishAtBoundary() string {
 	return formattedDelta
 }
 
+func (state *reasoningTextState) hasTrailingBoldSpan() bool {
+	return state != nil && !state.preserving && state.formatter.HasTrailingBoldSpan()
+}
+
 func (state *reasoningTextState) formatSnapshot(snapshot string, preserve bool) (string, bool) {
 	if state == nil || snapshot == "" {
 		return snapshot, state == nil
@@ -433,7 +440,9 @@ func (h *responseEventWriterHelper) reasoningFormatState(itemID string, summaryI
 }
 
 func (h *responseEventWriterHelper) formatReasoningContentDelta(itemID string, summaryIndex int, delta string, preserve bool) string {
-	return h.reasoningFormatState(itemID, summaryIndex).formatDelta(delta, preserve)
+	state := h.reasoningFormatState(itemID, summaryIndex)
+	formatted := state.formatDelta(delta, preserve)
+	return h.consumeReasoningTitleBoundary(state, formatted, preserve)
 }
 
 func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string, summaryIndex int, snapshot string, preserve bool) (string, string, bool) {
@@ -442,7 +451,39 @@ func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string
 	if handled {
 		delta += state.finishAtBoundary()
 	}
+	delta = h.consumeReasoningTitleBoundary(state, delta, preserve)
 	return delta, state.formatted.String(), handled
+}
+
+func (h *responseEventWriterHelper) consumeReasoningTitleBoundary(state *reasoningTextState, text string, preserve bool) string {
+	if text == "" || !h.reasoningTitleBoundary {
+		return text
+	}
+	h.reasoningTitleBoundary = false
+	if preserve || !startsWithCompleteBoldSpan(text) {
+		return text
+	}
+	formatted := "\n\n" + text
+	state.formatted.Reset()
+	state.formatted.WriteString(formatted)
+	return formatted
+}
+
+func startsWithCompleteBoldSpan(text string) bool {
+	if !strings.HasPrefix(text, "**") {
+		return false
+	}
+	end := strings.Index(text[2:], "**")
+	return end > 0
+}
+
+func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, summaryIndex int, preserve bool) {
+	if preserve || h.reasoningFormatStates == nil {
+		h.reasoningTitleBoundary = false
+		return
+	}
+	state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}]
+	h.reasoningTitleBoundary = state != nil && state.hasTrailingBoldSpan()
 }
 
 func (h *responseEventWriterHelper) clearReasoningFormatState(itemID string, summaryIndex int) {
@@ -546,6 +587,7 @@ func (h *responseEventWriterHelper) clearReasoningFormatStates() {
 func (h *responseEventWriterHelper) resetReasoningFormatPhase() {
 	h.reasoningFormatItemID = ""
 	h.reasoningFormatAliasPending = false
+	h.reasoningTitleBoundary = false
 }
 
 func reasoningPayloadIsOpaque(value any) bool {
@@ -2182,6 +2224,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					evt.Data["part"] = map[string]any{"type": "summary_text", "text": text}
 					h.markReasoningSummaryTextDone(itemID, summaryIndex)
 					h.markReasoningSummaryPartClosed(itemID, summaryIndex)
+					h.markReasoningTitleBoundary(itemID, summaryIndex, preserveReasoningPayload || reasoningPayloadIsOpaque(evt.Data["part"]))
 					h.clearReasoningFormatState(itemID, summaryIndex)
 				default:
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, summaryIndex)
@@ -2713,6 +2756,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		activeReasoningItems:       state.activeReasoningItems,
 		reasoningItemsClosed:       state.reasoningItemsClosed,
 		reasoningFormatStates:      state.reasoningFormatStates,
+		reasoningTitleBoundary:     state.reasoningTitleBoundary,
 		syntheticInjected:          state.syntheticInjected,
 		realReasoningSeen:          state.realReasoningSeen,
 		syntheticSummary:           &state.syntheticSummary,
@@ -2754,6 +2798,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 	state.activeReasoningItems = h.activeReasoningItems
 	state.reasoningItemsClosed = h.reasoningItemsClosed
 	state.reasoningFormatStates = h.reasoningFormatStates
+	state.reasoningTitleBoundary = h.reasoningTitleBoundary
 	state.syntheticInjected = h.syntheticInjected
 	state.realReasoningSeen = h.realReasoningSeen
 	state.terminalSeen = h.terminalSeen
@@ -2892,6 +2937,7 @@ func newResponseEventWriterHelper(downstreamType string, state responseProjectio
 		activeReasoningItems:       state.activeReasoningItems,
 		reasoningItemsClosed:       state.reasoningItemsClosed,
 		reasoningFormatStates:      state.reasoningFormatStates,
+		reasoningTitleBoundary:     state.reasoningTitleBoundary,
 		syntheticInjected:          state.syntheticInjected,
 		realReasoningSeen:          state.realReasoningSeen,
 		syntheticSummary:           state.syntheticSummary,

@@ -89,9 +89,9 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 			body: `{"model":"gpt-5","stream":true,"input":"hello"}`,
 			fragments: []string{
 				`"delta":"**标题**"`,
-				`"delta":"**后续**"`,
-				`"delta":"**第三标题**"`,
-				`"delta":"**第四标题**"`,
+				`"delta":"\n\n**后续**"`,
+				`"delta":"\n\n**第三标题**"`,
+				`"delta":"\n\n**第四标题**"`,
 			},
 		},
 		{
@@ -269,8 +269,8 @@ func assertResponsesReasoningSummaryTerminalSnapshots(t *testing.T, body string)
 	response, _ := completed["response"].(map[string]any)
 	output, _ := response["output"].([]any)
 	expectedByItem := map[string][]string{
-		"rs_native": {"**标题**", "**后续**", "**第三标题**"},
-		"rs_next":   {"**第四标题**"},
+		"rs_native": {"**标题**", "\n\n**后续**", "\n\n**第三标题**"},
+		"rs_next":   {"\n\n**第四标题**"},
 	}
 	for itemID, expected := range expectedByItem {
 		for summaryIndex, want := range expected {
