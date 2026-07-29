@@ -483,45 +483,100 @@ func TestNormalizeChatFrame_ToolCall(t *testing.T) {
 }
 
 func TestNormalizeChatFrame_ToolCallWithArgumentsInSameFrame(t *testing.T) {
-	// 测试当 tool_call 的 name 和 arguments 在同一个 frame 中时
-	frame := &sseFrame{
-		Event: "chat",
-		Data:  `{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"id":"tool_0","function":{"name":"get_weather","arguments":"{\"location\":\"LA\"}"}}]}}]}`,
-	}
-
 	state := &chatNormalizationState{
 		toolIDsByIndex: map[int]string{},
 		toolSent:       map[string]bool{},
 	}
-
-	events, done, err := normalizeChatFrame(frame, state)
-	if err != nil {
-		t.Fatalf("normalizeChatFrame error: %v", err)
-	}
-	if done {
-		t.Fatal("unexpected done")
+	frames := []string{
+		`{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"id":"tool_0","function":{"name":"get_weather","arguments":"{"}}]}}]}`,
+		`{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"location\":\"LA\"}"}}]}}]}`,
+		`{"id":"chat-123","choices":[{"finish_reason":"tool_calls"}]}`,
+		`[DONE]`,
 	}
 
-	t.Logf("=== Events (%d total) ===", len(events))
-	for i, evt := range events {
-		dataStr, _ := json.Marshal(evt.Data)
-		t.Logf("  [%d] %s: %s", i, evt.Event, dataStr)
-	}
-
-	var doneCount, deltaCount int
-	for _, evt := range events {
-		switch evt.Event {
-		case "response.output_item.done":
-			doneCount++
-		case "response.function_call_arguments.delta":
-			deltaCount++
+	var events []Event
+	for _, data := range frames {
+		batch, done, err := normalizeChatFrame(&sseFrame{Event: "chat", Data: data}, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		events = append(events, batch...)
+		if done && data != "[DONE]" {
+			t.Fatalf("unexpected completion before [DONE]: %#v", events)
 		}
 	}
-	if doneCount != 1 {
-		t.Fatalf("expected exactly one output_item.done, got %d events=%#v", doneCount, events)
+
+	var addedItem, doneItem map[string]any
+	var addedCount, doneCount int
+	var arguments strings.Builder
+	for _, evt := range events {
+		switch evt.Event {
+		case "response.output_item.added":
+			item, _ := evt.Data["item"].(map[string]any)
+			if stringValue(item["type"]) == "function_call" {
+				addedItem = item
+				addedCount++
+			}
+		case "response.function_call_arguments.delta":
+			arguments.WriteString(stringValue(evt.Data["delta"]))
+		case "response.output_item.done":
+			item, _ := evt.Data["item"].(map[string]any)
+			if stringValue(item["type"]) == "function_call" {
+				doneItem = item
+				doneCount++
+			}
+		}
 	}
-	if deltaCount != 0 {
-		t.Fatalf("expected same-frame complete tool call to avoid duplicate function_call_arguments.delta, got %d events=%#v", deltaCount, events)
+	if addedItem == nil || doneItem == nil || addedCount != 1 || doneCount != 1 {
+		t.Fatalf("expected one function call lifecycle, got %#v", events)
+	}
+	if got := arguments.String(); got != `{"location":"LA"}` {
+		t.Fatalf("unexpected streamed arguments %q", got)
+	}
+	if got := stringValue(doneItem["arguments"]); got != arguments.String() {
+		t.Fatalf("expected terminal arguments %q, got %q", arguments.String(), got)
+	}
+}
+
+func TestNormalizeChatFrame_MultipleToolCallsKeepUpstreamOrder(t *testing.T) {
+	state := &chatNormalizationState{
+		toolIDsByIndex: map[int]string{},
+		toolSent:       map[string]bool{},
+	}
+	frames := []string{
+		`{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_first","function":{"name":"first","arguments":"{"}},{"index":1,"id":"call_second","function":{"name":"second","arguments":"{"}}]}}]}`,
+		`{"id":"chat-123","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a\":1}"}},{"index":1,"function":{"arguments":"\"b\":2}"}}]}}]}`,
+		`{"id":"chat-123","choices":[{"finish_reason":"tool_calls"}]}`,
+		`[DONE]`,
+	}
+
+	var events []Event
+	for _, data := range frames {
+		batch, _, err := normalizeChatFrame(&sseFrame{Event: "chat", Data: data}, state)
+		if err != nil {
+			t.Fatalf("normalizeChatFrame error: %v", err)
+		}
+		events = append(events, batch...)
+	}
+
+	var addedIDs, doneIDs []string
+	for _, evt := range events {
+		item, _ := evt.Data["item"].(map[string]any)
+		if stringValue(item["type"]) != "function_call" {
+			continue
+		}
+		switch evt.Event {
+		case "response.output_item.added":
+			addedIDs = append(addedIDs, stringValue(item["id"]))
+		case "response.output_item.done":
+			doneIDs = append(doneIDs, stringValue(item["id"]))
+		}
+	}
+	if got, want := strings.Join(addedIDs, ","), "call_first,call_second"; got != want {
+		t.Fatalf("added order = %q, want %q; events=%#v", got, want, events)
+	}
+	if got, want := strings.Join(doneIDs, ","), "call_first,call_second"; got != want {
+		t.Fatalf("done order = %q, want %q; events=%#v", got, want, events)
 	}
 }
 

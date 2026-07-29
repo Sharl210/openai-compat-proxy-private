@@ -519,7 +519,24 @@ func finalizeChatTerminalEvents(state *chatNormalizationState) []Event {
 	var events []Event
 	incomplete := isChatIncompleteFinishReason(state.pendingFinish)
 	if state.pendingItems != nil && !incomplete {
-		for itemID, pending := range state.pendingItems {
+		pendingItemIDs := append([]string(nil), state.pendingItemOrder...)
+		seenPendingItemIDs := make(map[string]bool, len(pendingItemIDs))
+		for _, itemID := range pendingItemIDs {
+			seenPendingItemIDs[itemID] = true
+		}
+		for itemID := range state.pendingItems {
+			if !seenPendingItemIDs[itemID] {
+				pendingItemIDs = append(pendingItemIDs, itemID)
+			}
+		}
+		if len(pendingItemIDs) > len(state.pendingItemOrder) {
+			sort.Strings(pendingItemIDs[len(state.pendingItemOrder):])
+		}
+		for _, itemID := range pendingItemIDs {
+			pending := state.pendingItems[itemID]
+			if pending == nil {
+				continue
+			}
 			item := map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": pending["name"]}
 			if args, ok := pending["arguments"].(string); ok && args != "" {
 				item["arguments"] = args
@@ -528,6 +545,7 @@ func finalizeChatTerminalEvents(state *chatNormalizationState) []Event {
 			state.toolSent[itemID] = true
 		}
 		state.pendingItems = nil
+		state.pendingItemOrder = nil
 	}
 	responseData := map[string]any{"id": state.responseID, "object": "response"}
 	if state.pendingFinish != "" {
@@ -577,6 +595,7 @@ type chatNormalizationState struct {
 	completed                   bool
 	pendingFinish               string
 	pendingItems                map[string]map[string]any
+	pendingItemOrder            []string
 	pendingThinkingTag          string
 	pendingThinking             string
 	pendingLegacyXMLToolText    string
@@ -712,21 +731,20 @@ func normalizeChatFrame(frame *sseFrame, state *chatNormalizationState) ([]Event
 				name := stringValue(function["name"])
 				arguments := stringValue(function["arguments"])
 				if name != "" || stringValue(tool["id"]) != "" {
-					emittedDoneWithArguments := false
 					if !state.toolSent[itemID] {
-						if arguments != "" {
-							events = append(events, Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name, "arguments": arguments}}})
-							state.toolSent[itemID] = true
-							emittedDoneWithArguments = true
-						} else {
-							events = append(events, Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}}})
-							if state.pendingItems == nil {
-								state.pendingItems = map[string]map[string]any{}
-							}
-							state.pendingItems[itemID] = map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}
+						events = append(events, Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}}})
+						state.toolSent[itemID] = true
+						if state.pendingItems == nil {
+							state.pendingItems = map[string]map[string]any{}
 						}
+						state.pendingItems[itemID] = map[string]any{"type": "function_call", "id": itemID, "call_id": itemID, "name": name}
+						state.pendingItemOrder = append(state.pendingItemOrder, itemID)
 					}
-					if arguments != "" && !emittedDoneWithArguments {
+					if arguments != "" {
+						if pending := state.pendingItems[itemID]; pending != nil {
+							existingArgs, _ := pending["arguments"].(string)
+							pending["arguments"] = existingArgs + arguments
+						}
 						events = append(events, Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": itemID, "delta": arguments}})
 					}
 				} else if arguments != "" {

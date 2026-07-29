@@ -3612,16 +3612,16 @@
       "terminal_status": "completed",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -4064,16 +4064,16 @@
       "terminal_status": "completed",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -4516,16 +4516,16 @@
       "terminal_status": "completed",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -4892,7 +4892,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -4973,16 +4973,16 @@
       "terminal_status": "completed",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "f589b481b2d07aad3178e3261dcf57964497492bc724a7b1ee6c89e01d08ec45"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -5018,7 +5018,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -5354,7 +5354,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -5435,16 +5435,16 @@
       "terminal_status": "completed",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "f589b481b2d07aad3178e3261dcf57964497492bc724a7b1ee6c89e01d08ec45"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -5480,7 +5480,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -5816,7 +5816,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -5897,16 +5897,16 @@
       "terminal_status": "completed",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "f589b481b2d07aad3178e3261dcf57964497492bc724a7b1ee6c89e01d08ec45"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -5942,7 +5942,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -15216,16 +15216,16 @@
       "finish_reason": "tool_calls",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -15584,16 +15584,16 @@
       "finish_reason": "tool_calls",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -15952,16 +15952,16 @@
       "finish_reason": "tool_calls",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -16242,7 +16242,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -16322,16 +16322,16 @@
       "finish_reason": "tool_calls",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "84cfbec3910e2610bec9fb6c654cd5c495f96740536e4e289fa112524eed8c6d"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -16367,7 +16367,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -16616,7 +16616,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -16696,16 +16696,16 @@
       "finish_reason": "tool_calls",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "84cfbec3910e2610bec9fb6c654cd5c495f96740536e4e289fa112524eed8c6d"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -16741,7 +16741,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -16990,7 +16990,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -17070,16 +17070,16 @@
       "finish_reason": "tool_calls",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "84cfbec3910e2610bec9fb6c654cd5c495f96740536e4e289fa112524eed8c6d"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -17115,7 +17115,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -25221,16 +25221,16 @@
       "finish_reason": "tool_use",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -25585,16 +25585,16 @@
       "finish_reason": "tool_use",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -25949,16 +25949,16 @@
       "finish_reason": "tool_use",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "95077d052b262efe0621647b94936338769103558891351c6b18d4e5c2d08d4c"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -26236,7 +26236,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -26315,16 +26315,16 @@
       "finish_reason": "tool_use",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "bdc55214ce0298d2a4b2d2fc19e750c3328dfbf13046943e0f5b66c9cf7ed9e6"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -26360,7 +26360,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -26606,7 +26606,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -26685,16 +26685,16 @@
       "finish_reason": "tool_use",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "bdc55214ce0298d2a4b2d2fc19e750c3328dfbf13046943e0f5b66c9cf7ed9e6"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -26730,7 +26730,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -26976,7 +26976,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
@@ -27055,16 +27055,16 @@
       "finish_reason": "tool_use",
       "archives": {
         "canonical.ndjson": {
-          "records": 4,
-          "sha256": "d19052b315305971b2c3be8fdfaa8f7b881f955fa91974b6fb259a7a728414c6"
+          "records": 6,
+          "sha256": "d7fb58eb1d944b2ef4626d45f43a520c4ddc33a714638e8270ffdc71bd9831b9"
         },
         "final.ndjson": {
           "records": 1,
           "sha256": "bdc55214ce0298d2a4b2d2fc19e750c3328dfbf13046943e0f5b66c9cf7ed9e6"
         },
         "raw.ndjson": {
-          "records": 4,
-          "sha256": "4943e64c9e9d121449fbcd44526aad69b947f31839a4baf545d2035ef9ba72ff"
+          "records": 6,
+          "sha256": "5499024472d7ca08efb5e764e0eecb86bc51af8ae1c0af3c0d8233fcdbc00ce4"
         },
         "request.ndjson": {
           "records": 1,
@@ -27100,7 +27100,7 @@
           "attrs": {
             "attempt": "1",
             "cached_tokens": "44",
-            "event_count": "4",
+            "event_count": "6",
             "request_id": "req-\u003cid\u003e"
           }
         },
