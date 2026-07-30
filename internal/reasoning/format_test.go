@@ -12,7 +12,8 @@ func TestFormatTextSeparatesBoldTitleFromFollowingContent(t *testing.T) {
 		want  string
 	}{
 		{name: "plain content", input: "**标题**正文", want: "**标题**正文"},
-		{name: "title after content", input: "正文**标题**后续", want: "正文**标题**后续"},
+		{name: "title after content", input: "正文**标题**后续", want: "正文\n**标题**后续"},
+		{name: "content followed by adjacent titles", input: "正文**第一标题****第二标题**", want: "正文\n**第一标题**\n\n**第二标题**"},
 		{name: "title without body", input: "**标题**", want: "**标题**"},
 		{name: "adjacent bold titles", input: "**一****二**后续", want: "**一**\n\n**二**后续"},
 		{name: "adjacent bold titles without body", input: "**一****二**", want: "**一**\n\n**二**"},
@@ -132,6 +133,23 @@ func TestFormatBlockFormatsTypedSummaryParts(t *testing.T) {
 	}
 }
 
+func TestFormatBlockSeparatesTitleSequenceAcrossSummaryParts(t *testing.T) {
+	block := map[string]any{
+		"summary": []any{
+			map[string]any{"type": "summary_text", "text": "正文**第一标题**"},
+			map[string]any{"type": "summary_text", "text": "**第二标题**"},
+		},
+	}
+
+	formatted := FormatBlock(block)
+	parts := formatted["summary"].([]any)
+	first := parts[0].(map[string]any)["text"].(string)
+	second := parts[1].(map[string]any)["text"].(string)
+	if got := first + second; got != "正文\n**第一标题**\n\n**第二标题**" {
+		t.Fatalf("formatted summary=%q, want content and title sequence separated", got)
+	}
+}
+
 func TestFormatBlockPreservesNilSummarySlices(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -196,6 +214,18 @@ func TestFormatDeltaSeparatesAdjacentBoldTitlesAcrossChunks(t *testing.T) {
 	second, combined := FormatDelta(combined, "**后续**")
 	if second != "\n\n**后续**" || combined != "**标题**\n\n**后续**" {
 		t.Fatalf("expected adjacent titles separated across chunks, got second=%q combined=%q", second, combined)
+	}
+}
+
+func TestFormatDeltaSeparatesTitleAfterContentAcrossChunks(t *testing.T) {
+	first, combined := FormatDelta("", "正文")
+	if first != "正文" || combined != "正文" {
+		t.Fatalf("expected content unchanged, got first=%q combined=%q", first, combined)
+	}
+
+	second, combined := FormatDelta(combined, "**标题****后续**")
+	if second != "\n**标题**\n\n**后续**" || combined != "正文\n**标题**\n\n**后续**" {
+		t.Fatalf("expected content and titles to be separated, got second=%q combined=%q", second, combined)
 	}
 }
 

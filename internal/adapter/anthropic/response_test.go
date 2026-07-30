@@ -95,6 +95,17 @@ func TestBuildResponseSeparatesAdjacentThinkingTitles(t *testing.T) {
 	}
 }
 
+func TestBuildResponseSeparatesThinkingTitlesAfterContent(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Reasoning: map[string]any{"thinking": "正文**第一标题****第二标题**"},
+	}, "req_thinking", "claude-sonnet-4-5")
+
+	content, _ := resp["content"].([]map[string]any)
+	if got, _ := content[0]["thinking"].(string); got != "正文\n**第一标题**\n\n**第二标题**" {
+		t.Fatalf("expected content and thinking titles to be separated, got %#v", content[0])
+	}
+}
+
 func TestBuildResponsePrefersOriginalReasoningBlocks(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
 		Text:      "最终答案",

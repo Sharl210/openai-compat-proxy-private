@@ -261,6 +261,25 @@ func TestBuildResponseFormatsUnsignedRawReasoningBlocks(t *testing.T) {
 	}
 }
 
+func TestBuildResponseSeparatesRawReasoningTitlesAfterContent(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{ReasoningBlocks: []map[string]any{{
+		"type":     "thinking",
+		"thinking": "正文**第一标题****第二标题**",
+	}}})
+
+	output := resp["output"].([]map[string]any)
+	for _, item := range output {
+		if item["type"] != "reasoning" {
+			continue
+		}
+		if got, _ := item["thinking"].(string); got != "正文\n**第一标题**\n\n**第二标题**" {
+			t.Fatalf("expected content and reasoning titles to be separated, got %#v", item)
+		}
+		return
+	}
+	t.Fatalf("expected reasoning output item, got %#v", output)
+}
+
 func TestBuildResponseFormatsRawReasoningAndPreservedReasoningItems(t *testing.T) {
 	raw := "**ssss****sssss****sdad**"
 	resp := BuildResponse(aggregate.Result{

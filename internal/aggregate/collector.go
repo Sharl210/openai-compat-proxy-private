@@ -479,6 +479,13 @@ func stringValue(value any) string {
 }
 
 func reasoningSummaryFromItem(item map[string]any) string {
+	if reasoningSummaryIsOpaque(item) {
+		return rawReasoningSummaryFromItem(item)
+	}
+	return reasoningtext.FormatText(rawReasoningSummaryFromItem(item))
+}
+
+func rawReasoningSummaryFromItem(item map[string]any) string {
 	parts, _ := item["summary"].([]any)
 	if len(parts) == 0 {
 		return ""
@@ -493,7 +500,26 @@ func reasoningSummaryFromItem(item map[string]any) string {
 			builder.WriteString(text)
 		}
 	}
-	return reasoningtext.FormatText(builder.String())
+	return builder.String()
+}
+
+func reasoningSummaryIsOpaque(item map[string]any) bool {
+	for _, key := range []string{"signature", "encrypted_content", "opaque"} {
+		switch value := item[key].(type) {
+		case string:
+			if value != "" {
+				return true
+			}
+		case bool:
+			if value {
+				return true
+			}
+		case nil:
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func reasoningBlocksFromMap(reasoning map[string]any) []map[string]any {

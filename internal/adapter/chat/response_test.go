@@ -116,6 +116,18 @@ func TestBuildResponseSeparatesAdjacentReasoningTitles(t *testing.T) {
 	}
 }
 
+func TestBuildResponseSeparatesReasoningTitlesAfterContent(t *testing.T) {
+	resp := BuildResponse(aggregate.Result{
+		Reasoning: map[string]any{"reasoning_content": "正文**第一标题****第二标题**"},
+	})
+
+	choices, _ := resp["choices"].([]map[string]any)
+	message, _ := choices[0]["message"].(map[string]any)
+	if got, _ := message["reasoning_content"].(string); got != "正文\n**第一标题**\n\n**第二标题**" {
+		t.Fatalf("expected content and reasoning titles to be separated, got %#v", message)
+	}
+}
+
 func TestBuildResponseDerivesReasoningContentFromThinkingBlocks(t *testing.T) {
 	resp := BuildResponse(aggregate.Result{
 		ReasoningBlocks: []map[string]any{{

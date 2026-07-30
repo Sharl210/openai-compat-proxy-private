@@ -806,7 +806,7 @@ func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reason
 		return nil
 	}
 	itemID := reasoningFormatItemID(item)
-	if stringValue(item[internalReasoningFormatItemIDKey]) != "" {
+	if stringValue(item[internalReasoningFormatItemIDKey]) != "" || !hasStreamingReasoningSummaryState(states, itemID) {
 		var summary strings.Builder
 		for _, part := range parts {
 			summary.WriteString(part.text)
@@ -823,6 +823,18 @@ func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reason
 		}
 	}
 	return deltas
+}
+
+func hasStreamingReasoningSummaryState(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string) bool {
+	if states == nil {
+		return false
+	}
+	for key := range *states {
+		if key.itemID == itemID {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *responseEventWriterHelper) ensureToolItemState(itemID string) *responsesToolItemState {

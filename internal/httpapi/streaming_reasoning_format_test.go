@@ -30,13 +30,13 @@ func TestChatEventWriterFormatsNativeReasoningSummaryPartsAcrossIndexes(t *testi
 	for _, event := range []upstream.Event{
 		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
 		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
-		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "delta": "**标题**"}},
-		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "text": "**标题**"}},
-		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题**"}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "delta": "正文**标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "text": "正文**标题**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "正文**标题**"}}},
 		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
 		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 1, "delta": "**后续**"}},
 		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
-			"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题****后续**"}},
+			"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "正文**标题****后续**"}},
 		}}},
 		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	} {
@@ -46,13 +46,13 @@ func TestChatEventWriterFormatsNativeReasoningSummaryPartsAcrossIndexes(t *testi
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `"reasoning_content":"**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**后续**"`) {
-		t.Fatalf("expected adjacent titles to remain separated across reasoning event families, got %s", body)
+	if !strings.Contains(body, `"reasoning_content":"正文\n**标题**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**后续**"`) {
+		t.Fatalf("expected content and adjacent titles to remain separated across reasoning event families, got %s", body)
 	}
 	if strings.Contains(body, internalReasoningFormatItemIDKey) {
 		t.Fatalf("internal formatting key leaked to Chat output: %s", body)
 	}
-	if strings.Contains(body, `"reasoning_content":"**标题**\n\n**后续**"`) {
+	if strings.Contains(body, `"reasoning_content":"正文\n**标题**\n\n**后续**"`) {
 		t.Fatalf("completed reasoning snapshot replayed after projected deltas: %s", body)
 	}
 }
@@ -75,13 +75,13 @@ func TestAnthropicEventWriterFormatsNativeReasoningSummaryPartsAcrossIndexes(t *
 	for _, event := range []upstream.Event{
 		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_native", "type": "reasoning", "summary": []any{}}}},
 		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
-		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "delta": "**标题**"}},
-		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "text": "**标题**"}},
-		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题**"}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "delta": "正文**标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "text": "正文**标题**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_native", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "正文**标题**"}}},
 		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_native", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
 		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_native", "summary_index": 1, "delta": "**后续**"}},
 		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
-			"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题****后续**"}},
+			"id": "rs_native", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "正文**标题****后续**"}},
 		}}},
 		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	} {
@@ -91,13 +91,13 @@ func TestAnthropicEventWriterFormatsNativeReasoningSummaryPartsAcrossIndexes(t *
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `"thinking":"**标题**"`) || !strings.Contains(body, `"thinking":"\n\n**后续**"`) {
-		t.Fatalf("expected adjacent titles to remain separated across reasoning event families, got %s", body)
+	if !strings.Contains(body, `"thinking":"正文\n**标题**"`) || !strings.Contains(body, `"thinking":"\n\n**后续**"`) {
+		t.Fatalf("expected content and adjacent titles to remain separated across reasoning event families, got %s", body)
 	}
 	if strings.Contains(body, internalReasoningFormatItemIDKey) {
 		t.Fatalf("internal formatting key leaked to Anthropic output: %s", body)
 	}
-	if strings.Contains(body, `"thinking":"**标题**\n\n**后续**"`) {
+	if strings.Contains(body, `"thinking":"正文\n**标题**\n\n**后续**"`) {
 		t.Fatalf("completed reasoning snapshot replayed after projected deltas: %s", body)
 	}
 }
@@ -236,6 +236,15 @@ func TestResponsesEventWriterSeparatesAlternatingReasoningHeadingDeltas(t *testi
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, alternatingReasoningHeadingEvents()...)
 
 	assertAlternatingReasoningHeadingDeltas(t, body, "delta")
+}
+
+func TestResponsesEventWriterSeparatesReasoningTitlesAfterContent(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "正文**第一标题****第二标题**"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+
+	assertOrderedStreamFragments(t, body, `"delta":"正文\n**第一标题**\n\n**第二标题**"`)
 }
 
 func TestReasoningTitleStatesDoNotCrossItemsOrRewriteOpaqueContent(t *testing.T) {
@@ -559,6 +568,22 @@ func TestFormatStreamingReasoningItemSummarySupportsTypedOpaqueParts(t *testing.
 	item["encrypted_content"] = "enc_payload"
 	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, item); len(got) != 1 || got[0] != "**第一标题****第二标题**" {
 		t.Fatalf("typed opaque summary=%#v, want original bytes", got)
+	}
+}
+
+func TestFormatStreamingReasoningItemSummarySeparatesTitleSequenceAcrossFinalParts(t *testing.T) {
+	states := map[reasoningSummaryKey]*reasoningSummaryState{}
+	nextOrder := 0
+	item := map[string]any{
+		"id": "rs_final_only",
+		"summary": []any{
+			map[string]any{"type": "summary_text", "text": "正文**第一标题**"},
+			map[string]any{"type": "summary_text", "text": "**第二标题**"},
+		},
+	}
+
+	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, item); len(got) != 1 || got[0] != "正文\n**第一标题**\n\n**第二标题**" {
+		t.Fatalf("final-only summary=%#v, want content and title sequence separated", got)
 	}
 }
 

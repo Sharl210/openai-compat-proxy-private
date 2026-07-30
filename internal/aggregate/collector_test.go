@@ -507,6 +507,19 @@ func TestPayloadToSyntheticCanonicalEvents_NativeToolCalls(t *testing.T) {
 	}
 }
 
+func TestReasoningSummaryFromItemPreservesOpaqueTitleSequence(t *testing.T) {
+	item := map[string]any{
+		"signature": "sig_123",
+		"summary": []any{
+			map[string]any{"type": "summary_text", "text": "**第一标题****第二标题**"},
+		},
+	}
+
+	if got := reasoningSummaryFromItem(item); got != "**第一标题****第二标题**" {
+		t.Fatalf("opaque summary=%q, want original bytes", got)
+	}
+}
+
 // TestPayloadToSyntheticCanonicalEvents_Usage demonstrates that a non-stream payload's
 // usage can be represented as synthetic canonical events.
 func TestPayloadToSyntheticCanonicalEvents_Usage(t *testing.T) {

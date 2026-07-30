@@ -13,6 +13,9 @@ type StreamFormatter struct {
 	initialized   bool
 	lineStart     bool
 	afterHeading  bool
+	hasHeading    bool
+	hasOutput     bool
+	lastOutput    byte
 }
 
 func (formatter *StreamFormatter) Reset() {
@@ -25,6 +28,9 @@ func (formatter *StreamFormatter) Reset() {
 	formatter.initialized = true
 	formatter.lineStart = true
 	formatter.afterHeading = false
+	formatter.hasHeading = false
+	formatter.hasOutput = false
+	formatter.lastOutput = 0
 }
 
 func (formatter *StreamFormatter) Push(delta string) string {
@@ -104,9 +110,15 @@ func (formatter *StreamFormatter) drain(final bool) string {
 		}
 		if startsWithBoldSpan(pending) {
 			if endIndex := formatter.completeBoldSpanEnd(pending); endIndex > 0 {
+				if formatter.needsHeadingLineBreak() {
+					_ = output.WriteByte('\n')
+				}
 				_, _ = output.Write(pending[:endIndex])
 				formatter.lineStart = false
 				formatter.afterHeading = true
+				formatter.hasHeading = true
+				formatter.hasOutput = true
+				formatter.lastOutput = pending[endIndex-1]
 				formatter.discardPendingPrefix(endIndex)
 				continue
 			}
@@ -117,9 +129,19 @@ func (formatter *StreamFormatter) drain(final bool) string {
 
 		_ = output.WriteByte(pending[0])
 		formatter.lineStart = pending[0] == '\n'
+		formatter.hasOutput = true
+		formatter.lastOutput = pending[0]
 		formatter.discardPendingPrefix(1)
 	}
 	return output.String()
+}
+
+func (formatter *StreamFormatter) needsHeadingLineBreak() bool {
+	return !formatter.hasHeading && formatter.hasOutput && !formatter.lineStart && !formatter.afterHeading && !isInlineWhitespace(formatter.lastOutput)
+}
+
+func isInlineWhitespace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\r'
 }
 
 func (formatter *StreamFormatter) discardPendingPrefix(size int) {
@@ -257,6 +279,8 @@ func FormatBlock(block map[string]any) map[string]any {
 	}
 	if parts, ok := formatted["summary"].([]any); ok && parts != nil {
 		formattedParts := make([]any, len(parts))
+		var formatter StreamFormatter
+		lastTextIndex := -1
 		for index, rawPart := range parts {
 			part, ok := rawPart.(map[string]any)
 			if !ok {
@@ -268,14 +292,18 @@ func FormatBlock(block map[string]any) map[string]any {
 				formattedPart[key] = value
 			}
 			if text, ok := formattedPart["text"].(string); ok {
-				formattedPart["text"] = FormatText(text)
+				formattedPart["text"] = formatter.Push(text)
+				lastTextIndex = index
 			}
 			formattedParts[index] = formattedPart
 		}
+		appendSummaryFormatterTail(formattedParts, lastTextIndex, formatter.Finish())
 		formatted["summary"] = formattedParts
 	}
 	if parts, ok := formatted["summary"].([]map[string]any); ok && parts != nil {
 		formattedParts := make([]map[string]any, len(parts))
+		var formatter StreamFormatter
+		lastTextIndex := -1
 		for index, part := range parts {
 			if part == nil {
 				continue
@@ -285,11 +313,26 @@ func FormatBlock(block map[string]any) map[string]any {
 				formattedPart[key] = value
 			}
 			if text, ok := formattedPart["text"].(string); ok {
-				formattedPart["text"] = FormatText(text)
+				formattedPart["text"] = formatter.Push(text)
+				lastTextIndex = index
 			}
 			formattedParts[index] = formattedPart
+		}
+		if tail := formatter.Finish(); tail != "" && lastTextIndex >= 0 {
+			formattedParts[lastTextIndex]["text"] = formattedParts[lastTextIndex]["text"].(string) + tail
 		}
 		formatted["summary"] = formattedParts
 	}
 	return formatted
+}
+
+func appendSummaryFormatterTail(parts []any, index int, tail string) {
+	if tail == "" || index < 0 {
+		return
+	}
+	part, _ := parts[index].(map[string]any)
+	if part == nil {
+		return
+	}
+	part["text"] = part["text"].(string) + tail
 }
