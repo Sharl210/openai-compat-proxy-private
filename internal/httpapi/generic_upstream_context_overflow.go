@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"openai-compat-proxy/internal/upstream"
 )
@@ -21,7 +22,7 @@ func normalizeRetryExhaustedGeneric502ContextOverflow(w http.ResponseWriter, htt
 		!isStrictGenericTemporaryUnavailableResponse(httpErr.BodyBytes) {
 		return "", "", false
 	}
-	estimatedTokens, err := strconv.Atoi(w.Header().Get(headerProxyEstimatedInputTokens))
+	estimatedTokens, err := parseEstimatedInputTokensHeader(w.Header().Get(headerProxyEstimatedInputTokens))
 	if err != nil || estimatedTokens < genericUpstreamContextOverflowEstimatedTokenFloor {
 		return "", "", false
 	}
@@ -31,6 +32,14 @@ func normalizeRetryExhaustedGeneric502ContextOverflow(w http.ResponseWriter, htt
 		estimatedTokens,
 	)
 	return "context_length_exceeded", message, true
+}
+
+func parseEstimatedInputTokensHeader(value string) (int, error) {
+	firstField := strings.Fields(value)
+	if len(firstField) == 0 {
+		return 0, fmt.Errorf("estimated input tokens header is empty")
+	}
+	return strconv.Atoi(firstField[0])
 }
 
 func isStrictGenericTemporaryUnavailableResponse(body []byte) bool {
