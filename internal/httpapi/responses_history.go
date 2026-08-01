@@ -42,6 +42,7 @@ type responsesConversationSnapshot struct {
 	StructuredOutputTextRefs []responsesHistoryStructuredOutputTextRef
 	Bytes                    int64
 	ResponseID               string
+	SessionID                string
 	Scope                    string
 	PortableScope            string
 }
@@ -253,14 +254,18 @@ func cloneCanonicalContentPartsForHistory(parts []model.CanonicalContentPart) []
 }
 
 func (s *responsesHistoryStore) Save(providerID, responseID string, messages []model.CanonicalMessage, scopes ...string) {
-	s.save(providerID, responseID, messages, firstString(scopes...), "")
+	s.save(providerID, responseID, messages, firstString(scopes...), "", "")
 }
 
 func (s *responsesHistoryStore) SaveWithPortableScope(providerID, responseID string, messages []model.CanonicalMessage, scope, portableScope string) {
-	s.save(providerID, responseID, messages, scope, portableScope)
+	s.save(providerID, responseID, messages, scope, portableScope, "")
 }
 
-func (s *responsesHistoryStore) save(providerID, responseID string, messages []model.CanonicalMessage, scope, portableScope string) {
+func (s *responsesHistoryStore) SaveWithPortableScopeAndSession(providerID, responseID string, messages []model.CanonicalMessage, scope, portableScope, sessionID string) {
+	s.save(providerID, responseID, messages, scope, portableScope, sessionID)
+}
+
+func (s *responsesHistoryStore) save(providerID, responseID string, messages []model.CanonicalMessage, scope, portableScope, sessionID string) {
 	if s == nil || providerID == "" || responseID == "" || len(messages) == 0 {
 		return
 	}
@@ -296,13 +301,14 @@ func (s *responsesHistoryStore) save(providerID, responseID string, messages []m
 			s.mu.Unlock()
 			return
 		}
-		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes, ResponseID: responseID, Scope: scope, PortableScope: portableScope}
+		s.entries[key] = responsesConversationSnapshot{Bytes: recoveryBytes, ResponseID: responseID, SessionID: sessionID, Scope: scope, PortableScope: portableScope}
 		s.retainedBytes += recoveryBytes
 		s.indexToolCallsLocked(providerID, key, messages, scope, nil)
 	} else {
 		storedBytes := snapshotBytes + recoveryBytes
 		snapshot, storedMessages := newResponsesConversationSnapshot(messages, storedBytes)
 		snapshot.ResponseID = responseID
+		snapshot.SessionID = sessionID
 		snapshot.Scope = scope
 		snapshot.PortableScope = portableScope
 		s.entries[key] = snapshot
@@ -336,7 +342,11 @@ func (s *responsesHistoryStore) LoadScoped(providerID, responseID, scope string)
 	if !ok || (scope != "" && stored.Scope != scope) || len(stored.Messages) == 0 {
 		return nil
 	}
-	return loadResponsesConversationSnapshot(stored)
+	messages := loadResponsesConversationSnapshot(stored)
+	if len(messages) == 0 {
+		return nil
+	}
+	return messages
 }
 
 func (s *responsesHistoryStore) LoadPortable(responseID, portableScope string) []model.CanonicalMessage {
@@ -358,6 +368,40 @@ func (s *responsesHistoryStore) LoadPortable(responseID, portableScope string) [
 		return nil
 	}
 	return loadResponsesConversationSnapshot(matched)
+}
+
+func (s *responsesHistoryStore) LoadSessionIDScoped(providerID, responseID, scope string) string {
+	if s == nil || providerID == "" || responseID == "" {
+		return ""
+	}
+	s.mu.RLock()
+	stored, ok := s.entries[responsesHistoryKey(providerID, responseID)]
+	s.mu.RUnlock()
+	if !ok || (scope != "" && stored.Scope != scope) {
+		return ""
+	}
+	return normalizeProxySessionID(stored.SessionID)
+}
+
+func (s *responsesHistoryStore) LoadSessionIDPortable(responseID, portableScope string) string {
+	if s == nil || responseID == "" || portableScope == "" {
+		return ""
+	}
+	s.mu.RLock()
+	var sessionID string
+	matchCount := 0
+	for _, snapshot := range s.entries {
+		if snapshot.ResponseID != responseID || snapshot.PortableScope != portableScope {
+			continue
+		}
+		matchCount++
+		sessionID = snapshot.SessionID
+	}
+	s.mu.RUnlock()
+	if matchCount != 1 {
+		return ""
+	}
+	return normalizeProxySessionID(sessionID)
 }
 
 func (s *responsesHistoryStore) LoadOpaqueThinking(providerID, scope string, publicBlock map[string]any) (map[string]any, bool) {
@@ -1041,11 +1085,11 @@ func reasoningBlocksMatchForAnthropicThinkingReplay(left, right []map[string]any
 	return string(encodedLeft) == string(encodedRight)
 }
 
-func saveChatAnthropicThinkingHistory(history *responsesHistoryStore, providerID, scope string, messages []model.CanonicalMessage, result aggregate.Result) {
+func saveChatAnthropicThinkingHistory(history *responsesHistoryStore, providerID, scope, sessionID string, messages []model.CanonicalMessage, result aggregate.Result) {
 	if history == nil || providerID == "" || scope == "" || strings.TrimSpace(result.ResponseID) == "" {
 		return
 	}
-	saveResponsesHistorySnapshot(history, providerID, result.ResponseID, messages, assistantHistoryMessagesFromResult(result), scope)
+	saveResponsesHistorySnapshotWithSession(history, providerID, result.ResponseID, messages, assistantHistoryMessagesFromResult(result), sessionID, scope)
 }
 
 func recoverResponseItemReferencesForMessages(history *responsesHistoryStore, messages []model.CanonicalMessage, providerID string, scopes ...string) map[string]string {
@@ -1284,11 +1328,15 @@ func buildResponsesHistorySnapshot(base []model.CanonicalMessage, assistant []mo
 }
 
 func saveResponsesHistorySnapshot(history *responsesHistoryStore, providerID, responseID string, base []model.CanonicalMessage, assistant []model.CanonicalMessage, scopes ...string) {
+	saveResponsesHistorySnapshotWithSession(history, providerID, responseID, base, assistant, "", scopes...)
+}
+
+func saveResponsesHistorySnapshotWithSession(history *responsesHistoryStore, providerID, responseID string, base []model.CanonicalMessage, assistant []model.CanonicalMessage, sessionID string, scopes ...string) {
 	var portableScope string
 	if len(scopes) > 1 {
 		portableScope = scopes[1]
 	}
-	history.SaveWithPortableScope(providerID, responseID, selectResponsesHistoryMessages(base, assistant), firstString(scopes...), portableScope)
+	history.SaveWithPortableScopeAndSession(providerID, responseID, selectResponsesHistoryMessages(base, assistant), firstString(scopes...), portableScope, sessionID)
 }
 
 func selectResponsesHistoryMessages(base []model.CanonicalMessage, assistant []model.CanonicalMessage) []model.CanonicalMessage {

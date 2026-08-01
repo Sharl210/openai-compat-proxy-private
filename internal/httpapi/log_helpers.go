@@ -69,6 +69,7 @@ func canonicalLogAttrs(req model.CanonicalRequest) map[string]any {
 		reasoningMode = string(req.Reasoning.Mode)
 	}
 	return map[string]any{
+		"session_id":               req.SessionID,
 		"message_roles":            roles,
 		"message_hashes":           messageHashes,
 		"prefix_hashes":            prefixHashes,
