@@ -71,9 +71,10 @@ func semanticAttemptDigests(captures []capturedSemanticRequest) []semanticBodyDi
 
 func stableSemanticProxyHeaders(header http.Header) map[string]string {
 	excluded := map[string]bool{
+		"X-Proxy-Session-Id":          true,
 		"X-Provider-Today-Cache-Rate": true, "X-Provider-History-Cache-Rate": true,
 		"X-Root-Provider-Today-Cache-Rate": true, "X-Root-Provider-History-Cache-Rate": true,
-		"X-This-Usage-Cache-Write-Tokens": true,
+		"X-This-Usage-Cache-Write-Tokens":       true,
 		"X-Provider-Today-Cache-Write-Coverage": true, "X-Provider-History-Cache-Write-Coverage": true,
 		"X-Root-Provider-Today-Cache-Write-Coverage": true, "X-Root-Provider-History-Cache-Write-Coverage": true,
 		"X-Client-To-Proxy-Reasoning-Mode": true, "X-Proxy-To-Upstream-Reasoning-Mode": true,
@@ -93,7 +94,7 @@ func stableSemanticProxyHeaders(header http.Header) map[string]string {
 func validateSemanticProxyHeaders(delivery deliveryMode, headers map[string]string) error {
 	allowed := map[string]bool{}
 	for _, name := range []string{
-		"X-Request-Id", "X-Proxy-Normalization-Version", "X-Accel-Buffering",
+		"X-Request-Id", "X-Proxy-Session-Id", "X-Proxy-Normalization-Version", "X-Accel-Buffering",
 		"X-Cache-Info-Timezone", "X-This-Usage-Tokens", "X-Client-To-Proxy-Model",
 		"X-Client-To-Proxy-Service-Tier", "X-Client-To-Proxy-Reasoning-Parameters",
 		"X-Client-To-Proxy-Reasoning-Effort", "X-Client-To-Proxy-NoPrompt",
