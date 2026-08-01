@@ -1756,6 +1756,41 @@ func TestResponsesStreamReturnsHTTP400ForEarlyTopLevelContextTooLargeCode(t *tes
 	}
 }
 
+func TestResponsesStreamReturnsHTTP400ForOverflowAfterIncompleteToolCall(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.created\n" +
+			"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_tool_overflow\",\"status\":\"in_progress\"}}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}\n\n",
+		"event: response.function_call_arguments.delta\n" +
+			"data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"query\\\":\"}\n\n",
+		"event: error\n" +
+			"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"upstream context window exceeded\"}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"input":[{"role":"user","content":"hello"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected incomplete tool-call overflow to return HTTP 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `event:`) || strings.Contains(body, `"id":"rs_proxy"`) {
+		t.Fatalf("expected incomplete tool-call overflow not to start downstream SSE, got %s", body)
+	}
+	if !strings.Contains(body, `"code":"context_length_exceeded"`) || !strings.Contains(body, `prompt is too long`) {
+		t.Fatalf("expected compaction-recognizable context overflow body, got %s", body)
+	}
+}
+
 func TestResponsesStreamUpstreamDisconnectsWithoutTerminalEventStaysInSSEProtocol(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +

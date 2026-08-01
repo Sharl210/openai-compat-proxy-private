@@ -2747,6 +2747,49 @@ func TestEventStreamProbeContextOverflowBeforeOutput_detectsOverflowAfterEmptyOu
 	}
 }
 
+func TestEventStreamProbeContextOverflowBeforeOutput_detectsOverflowAfterIncompleteToolCall(t *testing.T) {
+	readCount := 0
+	stream := &EventStream{
+		resp:    &http.Response{Body: io.NopCloser(strings.NewReader(""))},
+		scanner: bufio.NewScanner(strings.NewReader("")),
+		readNext: func(*bufio.Scanner) ([]Event, error) {
+			readCount++
+			switch readCount {
+			case 1:
+				return []Event{
+					{Event: "response.created", Data: map[string]any{"response": map[string]any{"id": "resp_tool_overflow"}}},
+					{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}}},
+					{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":`}},
+				}, nil
+			case 2:
+				return []Event{{Event: "error", Data: map[string]any{"error": map[string]any{
+					"code":    "context_length_exceeded",
+					"message": "upstream context window exceeded",
+				}}}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	}
+
+	overflow, err := stream.ProbeContextOverflowBeforeOutput()
+	if err != nil {
+		t.Fatalf("probe incomplete tool-call context overflow: %v", err)
+	}
+	if overflow == nil {
+		t.Fatal("expected incomplete tool-call overflow to be detected before output")
+	}
+	if overflow.Error["code"] != "context_length_exceeded" {
+		t.Fatalf("expected normalized context overflow code, got %#v", overflow.Error)
+	}
+	if !strings.Contains(overflow.Message, "prompt is too long") || !strings.Contains(overflow.Message, "context_length_exceeded") {
+		t.Fatalf("expected compaction-recognizable overflow message, got %q", overflow.Message)
+	}
+	if readCount != 2 {
+		t.Fatalf("expected probe to read through incomplete tool-call lifecycle to overflow, got %d reads", readCount)
+	}
+}
+
 func TestEventStreamProbeContextOverflowBeforeOutput_classifiesDurableSemanticOutput(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2762,7 +2805,10 @@ func TestEventStreamProbeContextOverflowBeforeOutput_classifiesDurableSemanticOu
 		{name: "empty reasoning lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{}}}}, commit: false},
 		{name: "empty reasoning summary item", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": " \r\n"}}}}}, commit: false},
 		{name: "opaque reasoning lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_1", "type": "reasoning", "encrypted_content": "opaque"}}}, commit: true},
-		{name: "tool lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "arguments": ""}}}, commit: true},
+		{name: "tool lifecycle", event: Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "arguments": ""}}}, commit: false},
+		{name: "tool arguments delta", event: Event{Event: "response.function_call_arguments.delta", Data: map[string]any{"item_id": "fc_1", "delta": `{"query":`}}, commit: false},
+		{name: "tool arguments done", event: Event{Event: "response.function_call_arguments.done", Data: map[string]any{"item_id": "fc_1", "arguments": `{"query":"weather"}`}}, commit: true},
+		{name: "completed tool lifecycle", event: Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "arguments": `{"query":"weather"}`}}}, commit: true},
 		{name: "empty content text snapshot", event: Event{Event: "response.content_part.done", Data: map[string]any{"part": map[string]any{"type": "output_text", "text": ""}}}, commit: false},
 		{name: "content text snapshot", event: Event{Event: "response.content_part.done", Data: map[string]any{"part": map[string]any{"type": "output_text", "text": "answer"}}}, commit: false},
 		{name: "unknown content part", event: Event{Event: "response.content_part.done", Data: map[string]any{"part": map[string]any{"type": "output_image", "image_url": "https://example.test/image"}}}, commit: true},
