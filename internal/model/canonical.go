@@ -31,6 +31,7 @@ type CanonicalRequest struct {
 	ReasoningModeOrigin            ReasoningModeOrigin
 	PassThroughRawReasoning        bool
 	RequestID                      string
+	SessionID                      string
 	AuthMode                       string
 	SkipProviderSystemPrompt       bool
 	HasSyntheticReasoningReplay    bool

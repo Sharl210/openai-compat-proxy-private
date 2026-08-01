@@ -17,6 +17,7 @@ type CanonicalEnvelope struct {
 type CanonicalEvent struct {
 	Seq            int64
 	Ts             time.Time
+	SessionID      string `json:"session_id,omitempty"`
 	Type           string
 	ItemID         string
 	CallID         string
