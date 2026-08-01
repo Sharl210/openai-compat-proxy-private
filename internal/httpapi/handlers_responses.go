@@ -142,6 +142,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
+				recordResponsesLineageResult(r, responseID)
 				saveResponsesHistorySnapshotWithSession(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, historyScope, portableHistoryScope)
 			}
 			return
@@ -177,6 +178,7 @@ func handleResponses() http.HandlerFunc {
 			normalized := responsesadapter.BuildResponse(result)
 			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
+				recordResponsesLineageResult(r, responseID)
 				saveResponsesHistorySnapshotWithSession(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, historyScope, portableHistoryScope)
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
@@ -251,6 +253,7 @@ func handleResponses() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
+			recordResponsesLineageResult(r, responseID)
 			saveResponsesHistorySnapshotWithSession(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, historyScope, portableHistoryScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
@@ -360,6 +363,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
+			recordResponsesLineageResult(r, responseID)
 			saveResponsesHistorySnapshotWithSession(prepared.history, prepared.providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, prepared.historyScope, prepared.portableHistoryScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
@@ -469,6 +473,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	clientReasoningMode := initial.clientReasoningMode
 	requestID := initial.requestID
 	history := responsesHistoryFromRequest(r)
+	meta, _ := requestLineageFromRequest(r)
 	canon.Model = resolvedModel
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 		setConfigVersionHeaders(w, snapshot, providerID)
@@ -518,8 +523,12 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		if inheritedSessionID != "" {
 			r, _ = withProxySessionID(r, w, inheritedSessionID)
 			canon.SessionID = inheritedSessionID
+			meta, _ = ensureResolvedRequestLineage(r.Context(), canon.SessionID, previousResponseID)
+			applyCanonicalRequestLineage(&canon, meta)
 		}
 	}
+	meta, _ = ensureResolvedRequestLineage(r.Context(), canon.SessionID, previousResponseID)
+	applyCanonicalRequestLineage(&canon, meta)
 	var previousHistory []model.CanonicalMessage
 	if nonResponsesUpstream && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID != "" {
@@ -617,6 +626,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		return nil, false
 	}
 	canon.RequestID = requestID
+	applyCanonicalRequestLineage(&canon, meta)
 	canon.AuthMode = authMode
 	usageRecorder := combinedUsageRecorder(
 		cacheInfoUsageRecorder(r, requestID, providerID, providerCfg.UpstreamEndpointType),
