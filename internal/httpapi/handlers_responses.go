@@ -142,7 +142,7 @@ func handleResponses() http.HandlerFunc {
 				return
 			}
 			if responseID, _ := responsesadapter.BuildResponse(result)["id"].(string); responseID != "" {
-				saveResponsesHistorySnapshot(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), historyScope, portableHistoryScope)
+				saveResponsesHistorySnapshotWithSession(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, historyScope, portableHistoryScope)
 			}
 			return
 		}
@@ -177,7 +177,7 @@ func handleResponses() http.HandlerFunc {
 			normalized := responsesadapter.BuildResponse(result)
 			logNonStreamResponsesOutput(canon.RequestID, normalized)
 			if responseID, _ := normalized["id"].(string); responseID != "" {
-				saveResponsesHistorySnapshot(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), historyScope, portableHistoryScope)
+				saveResponsesHistorySnapshotWithSession(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, historyScope, portableHistoryScope)
 			}
 			mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -251,7 +251,7 @@ func handleResponses() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			saveResponsesHistorySnapshot(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), historyScope, portableHistoryScope)
+			saveResponsesHistorySnapshotWithSession(history, providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, historyScope, portableHistoryScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -360,7 +360,7 @@ func handleResponsesCompact() http.HandlerFunc {
 		normalized := responsesadapter.BuildResponse(result)
 		logNonStreamResponsesOutput(canon.RequestID, normalized)
 		if responseID, _ := normalized["id"].(string); responseID != "" {
-			saveResponsesHistorySnapshot(prepared.history, prepared.providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), prepared.historyScope, prepared.portableHistoryScope)
+			saveResponsesHistorySnapshotWithSession(prepared.history, prepared.providerID, responseID, canon.Messages, assistantHistoryMessagesFromResult(result), canon.SessionID, prepared.historyScope, prepared.portableHistoryScope)
 		}
 		mergePreservedResponsesTopLevelFields(normalized, canon.ResponseInputItems)
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
@@ -377,6 +377,7 @@ func handleResponsesCompact() http.HandlerFunc {
 }
 
 func prepareResponsesRequest(w http.ResponseWriter, r *http.Request, compact bool) (*preparedResponsesRequest, bool) {
+	r, _ = ensureProxySessionID(r, w)
 	initial, ok := decodeAndResolveResponsesRequest(w, r)
 	if !ok {
 		return nil, false
@@ -385,6 +386,7 @@ func prepareResponsesRequest(w http.ResponseWriter, r *http.Request, compact boo
 }
 
 func prepareResponsesCompactRequest(w http.ResponseWriter, r *http.Request) (*preparedResponsesRequest, bool) {
+	r, _ = ensureProxySessionID(r, w)
 	initial, ok := decodeAndResolveResponsesRequest(w, r)
 	if !ok {
 		return nil, false
@@ -407,6 +409,7 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
+	canon.SessionID = proxySessionIDFromRequest(r)
 	canon.ResponsesOpenAIBeta = r.Header.Get("OpenAI-Beta")
 	selectionEffort := clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false)
 	if selectionEffort != "" {
@@ -506,10 +509,22 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	portableReasoningProjection := !compact && projectClientResponsesReasoning(&canon, providerCfg.UpstreamEndpointType)
 	previousHistoryRestored := false
 	portableHistoryRestored := false
+	previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems)
+	if explicitProxySessionIDFromRequest(r) == "" && previousResponseID != "" {
+		inheritedSessionID := history.LoadSessionIDScoped(providerID, previousResponseID, historyScope)
+		if inheritedSessionID == "" {
+			inheritedSessionID = history.LoadSessionIDPortable(previousResponseID, portableHistoryScope)
+		}
+		if inheritedSessionID != "" {
+			r, _ = withProxySessionID(r, w, inheritedSessionID)
+			canon.SessionID = inheritedSessionID
+		}
+	}
+	var previousHistory []model.CanonicalMessage
 	if nonResponsesUpstream && shouldRestorePreviousConversation(canon.Messages) {
-		if previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems); previousResponseID != "" {
+		if previousResponseID != "" {
 			currentMessages := prepareCanonicalMessages(canon.Messages)
-			previousHistory := history.LoadScoped(providerID, previousResponseID, historyScope)
+			previousHistory = history.LoadScoped(providerID, previousResponseID, historyScope)
 			switch {
 			case len(previousHistory) > 0:
 				if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeChat {
@@ -588,7 +603,6 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		ProviderID:         providerID,
 		EndpointType:       providerCfg.UpstreamEndpointType,
 		FinalUpstreamModel: canon.Model,
-		BaseEstimate:       int64(estimateCanonicalInputTokens(canon)),
 		Canon:              canon,
 	})
 	*r = *r.Clone(observationCtx)

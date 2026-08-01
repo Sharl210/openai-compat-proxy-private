@@ -62,6 +62,8 @@ type EventStream struct {
 	readNext            func(*bufio.Scanner) ([]Event, error)
 	archive             *debugarchive.ArchiveWriter
 	archiveResponsesRaw bool
+	sessionID           string
+	deferredError       error
 	seq                 int64
 }
 
@@ -96,6 +98,10 @@ func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverf
 		events, err := s.readNext(s.scanner)
 		if err != nil {
 			s.pendingEvents = append(s.pendingEvents, buffered...)
+			if hasIncompleteToolLifecycle(buffered) {
+				s.deferredError = err
+				return nil, nil
+			}
 			return nil, err
 		}
 		if len(events) == 0 {
@@ -106,12 +112,31 @@ func (s *EventStream) ProbeContextOverflowBeforeOutput() (*PreOutputContextOverf
 	}
 }
 
+func hasIncompleteToolLifecycle(events []Event) bool {
+	for _, evt := range events {
+		switch evt.Event {
+		case "response.function_call_arguments.delta":
+			return true
+		case "response.output_item.added":
+			item, _ := evt.Data["item"].(map[string]any)
+			if isResponseToolCallItemType(stringValue(item["type"])) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func commitsDownstreamOutput(evt Event) bool {
 	switch evt.Event {
 	case "response.created", "response.in_progress":
 		return false
-	case "response.output_text.delta", "response.refusal.delta", "response.function_call_arguments.delta":
+	case "response.output_text.delta", "response.refusal.delta":
 		return hasNonWhitespaceEventText(evt.Data, "delta")
+	case "response.function_call_arguments.delta":
+		return false
+	case "response.function_call_arguments.done":
+		return true
 	case "response.reasoning.delta", "response.reasoning_summary_text.delta":
 		return hasNonWhitespaceEventText(evt.Data, "thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text")
 	case "response.reasoning_summary_text.done":
@@ -127,8 +152,17 @@ func commitsDownstreamOutput(evt Event) bool {
 	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
 		part, _ := evt.Data["part"].(map[string]any)
 		return hasNonWhitespaceEventText(part, "thinking", "reasoning_content", "summary", "reasoning", "content", "delta", "text")
-	case "response.output_item.added", "response.output_item.done":
+	case "response.output_item.added":
 		item, _ := evt.Data["item"].(map[string]any)
+		if isResponseToolCallItemType(stringValue(item["type"])) {
+			return false
+		}
+		return itemHasDurableSemanticOutput(item)
+	case "response.output_item.done":
+		item, _ := evt.Data["item"].(map[string]any)
+		if isResponseToolCallItemType(stringValue(item["type"])) {
+			return true
+		}
 		return itemHasDurableSemanticOutput(item)
 	default:
 		return true
@@ -484,6 +518,9 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 }
 
 func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {
+	if req.SessionID != "" {
+		ctx = WithSessionID(ctx, req.SessionID)
+	}
 	endpointType := c.endpointType()
 	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
 	if err != nil {
@@ -496,6 +533,7 @@ func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, aut
 	originalToolIDs := extractOriginalToolIDs(req)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
+		"session_id":    req.SessionID,
 		"model":         req.Model,
 		"endpoint_type": endpointType,
 		"stream":        true,
@@ -524,6 +562,7 @@ func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, aut
 	}); err != nil {
 		logging.Event("upstreamStreamBroken", mergeLogAttrs(map[string]any{
 			"request_id":  req.RequestID,
+			"session_id":  req.SessionID,
 			"streaming":   true,
 			"event_count": eventCount,
 		}, failureLogAttrs(err, "upstreamStreamBroken")))
@@ -531,12 +570,14 @@ func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, aut
 	}
 	logging.Event("upstreamStreamUsageObserved", map[string]any{
 		"request_id":     req.RequestID,
+		"session_id":     req.SessionID,
 		"upstream_event": "response.completed",
 		"cached_tokens":  cachedTokens,
 		"streaming":      false,
 	})
 	logging.Event("upstreamToProxyResponse", map[string]any{
 		"request_id":    req.RequestID,
+		"session_id":    req.SessionID,
 		"attempt":       1,
 		"event_count":   eventCount,
 		"cached_tokens": cachedTokens,
@@ -558,6 +599,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 			cachedTokens = tokens
 			logging.Event("upstreamStreamUsageObserved", map[string]any{
 				"request_id":     req.RequestID,
+				"session_id":     req.SessionID,
 				"upstream_event": evt.Event,
 				"cached_tokens":  tokens,
 			})
@@ -567,6 +609,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 	if err != nil {
 		logging.Event("upstreamStreamBroken", mergeLogAttrs(map[string]any{
 			"request_id":  req.RequestID,
+			"session_id":  req.SessionID,
 			"streaming":   true,
 			"event_count": eventCount,
 		}, failureLogAttrs(err, "upstreamStreamBroken")))
@@ -574,6 +617,7 @@ func (c *Client) StreamEvents(ctx context.Context, req model.CanonicalRequest, a
 	if err == nil {
 		logging.Event("upstreamToProxyResponse", map[string]any{
 			"request_id":    req.RequestID,
+			"session_id":    req.SessionID,
 			"attempt":       1,
 			"event_count":   eventCount,
 			"cached_tokens": cachedTokens,
@@ -592,6 +636,9 @@ func (c *Client) OpenEventStreamLazy(ctx context.Context, req model.CanonicalReq
 }
 
 func (c *Client) openPreparedEventStream(ctx context.Context, req model.CanonicalRequest, authorization string, primeFirstEvent bool) (*EventStream, error) {
+	if req.SessionID != "" {
+		ctx = WithSessionID(ctx, req.SessionID)
+	}
 	endpointType := c.endpointType()
 	body, err := c.buildUpstreamRequestBody(req, endpointType, true)
 	if err != nil {
@@ -605,6 +652,7 @@ func (c *Client) openPreparedEventStream(ctx context.Context, req model.Canonica
 	loggedBody := upstreamRequestLogBody(body)
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
+		"session_id":    req.SessionID,
 		"auth_mode":     req.AuthMode,
 		"model":         req.Model,
 		"stream":        true,
@@ -639,6 +687,9 @@ func (c *Client) Compact(ctx context.Context, req model.CanonicalRequest, author
 }
 
 func (c *Client) response(ctx context.Context, req model.CanonicalRequest, authorization string, compact bool) (map[string]any, error) {
+	if req.SessionID != "" {
+		ctx = WithSessionID(ctx, req.SessionID)
+	}
 	endpointType := c.endpointType()
 	body, err := c.buildUpstreamRequestBody(req, endpointType, false)
 	if err != nil {
@@ -650,6 +701,7 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 	}
 	attrs := map[string]any{
 		"request_id":    req.RequestID,
+		"session_id":    req.SessionID,
 		"model":         req.Model,
 		"endpoint_type": endpointType,
 		"stream":        true,
@@ -666,10 +718,11 @@ func (c *Client) response(ctx context.Context, req model.CanonicalRequest, autho
 		return nil, annotateRetryExhaustion(err, c.configuredRetryCount(), c.configuredRetryDelay())
 	}
 	if archive := debugarchive.ArchiveWriterFromContext(ctx); archive != nil {
-		_ = archive.WriteFinalSnapshot(debugarchive.FinalSnapshot{StatusCode: http.StatusOK, Response: payload})
+		_ = archive.WriteFinalSnapshot(debugarchive.FinalSnapshot{StatusCode: http.StatusOK, SessionID: req.SessionID, Response: payload})
 	}
 	logging.Event("upstreamToProxyResponse", map[string]any{
 		"request_id": req.RequestID,
+		"session_id": req.SessionID,
 		"attempt":    1,
 		"streaming":  false,
 		"response":   payload,
@@ -817,6 +870,7 @@ func (c *Client) streamEventsOnce(ctx context.Context, requestID string, body []
 }
 
 func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, originalToolIDs map[int]string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
+	sessionID := SessionIDFromContext(ctx)
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
@@ -831,6 +885,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
 			logging.Event("upstreamRequestFailed", mergeLogAttrs(map[string]any{
 				"request_id":         requestID,
+				"session_id":         sessionID,
 				"attempt":            attempt,
 				"retries_performed":  attempt - 1,
 				"configured_retries": retryCount,
@@ -840,6 +895,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 		}
 		logging.Event("upstreamRequestRetry", mergeLogAttrs(map[string]any{
 			"request_id":         requestID,
+			"session_id":         sessionID,
 			"attempt":            attempt,
 			"next_attempt":       attempt + 1,
 			"configured_retries": retryCount,
@@ -863,6 +919,7 @@ func (c *Client) openEventStreamWithRetry(ctx context.Context, requestID string,
 }
 
 func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, compact bool) (map[string]any, error) {
+	sessionID := SessionIDFromContext(ctx)
 	retryCount := c.configuredRetryCount()
 	retryDelay := c.configuredRetryDelay()
 	var lastErr error
@@ -877,6 +934,7 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 		if !shouldRetryRequestFailure(lastErr) || attempt > retryCount {
 			logging.Event("upstreamRequestFailed", mergeLogAttrs(map[string]any{
 				"request_id":         requestID,
+				"session_id":         sessionID,
 				"attempt":            attempt,
 				"retries_performed":  attempt - 1,
 				"configured_retries": retryCount,
@@ -886,6 +944,7 @@ func (c *Client) responseWithRetry(ctx context.Context, requestID string, endpoi
 		}
 		logging.Event("upstreamRequestRetry", mergeLogAttrs(map[string]any{
 			"request_id":         requestID,
+			"session_id":         sessionID,
 			"attempt":            attempt,
 			"next_attempt":       attempt + 1,
 			"configured_retries": retryCount,
@@ -945,6 +1004,7 @@ func responseEndpointPathForType(endpointType string, compact bool) string {
 }
 
 func (c *Client) openEventStream(ctx context.Context, endpointType string, body []byte, authorization string, anthropicBeta string, openAIBeta string, originalToolIDs map[int]string, requestID string, primeFirstEvent bool, allowEOFCompletion bool) (*EventStream, error) {
+	sessionID := SessionIDFromContext(ctx)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpointPathForType(endpointType), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -977,6 +1037,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 			pendingEvents:       events,
 			archive:             debugarchive.ArchiveWriterFromContext(ctx),
 			archiveResponsesRaw: normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses,
+			sessionID:           sessionID,
 		}, nil
 	}
 
@@ -986,6 +1047,7 @@ func (c *Client) openEventStream(ctx context.Context, endpointType string, body 
 		readNext:            eventBatchReaderForType(endpointType, c.upstreamThinkingTagStyle, c.upstreamXMLToolCallStyle, originalToolIDs, requestID, allowEOFCompletion),
 		archive:             debugarchive.ArchiveWriterFromContext(ctx),
 		archiveResponsesRaw: normalizeEndpointType(endpointType) == config.UpstreamEndpointTypeResponses,
+		sessionID:           sessionID,
 	}
 	if primeFirstEvent {
 		if err := stream.prime(); err != nil {
@@ -1103,6 +1165,11 @@ func (s *EventStream) Consume(onEvent func(Event) error) error {
 			return err
 		}
 	}
+	if s.deferredError != nil {
+		err := s.deferredError
+		s.deferredError = nil
+		return err
+	}
 	if s.scanner == nil {
 		return nil
 	}
@@ -1152,10 +1219,11 @@ func (s *EventStream) recordEvent(rawEvt Event, canonicalEvt Event) Event {
 	if rawEvt.RawEventName != "" {
 		rawEventName = rawEvt.RawEventName
 	}
-	_ = s.archive.WriteRawEvent(debugarchive.RawEventEnvelope{EventName: rawEventName, Raw: rawEvt.Raw})
+	_ = s.archive.WriteRawEvent(debugarchive.RawEventEnvelope{EventName: rawEventName, SessionID: s.sessionID, Raw: rawEvt.Raw})
 	s.seq++
 	canonical := model.CanonicalEvent{
 		Seq:          s.seq,
+		SessionID:    s.sessionID,
 		Type:         canonicalEvt.Event,
 		RawPayload:   rawEvt.Raw,
 		ProviderMeta: cloneMap(anyMap(canonicalEvt.Data["provider_meta"])),
@@ -1307,6 +1375,96 @@ func buildResponsesRequestBody(req model.CanonicalRequest, compatMode string) ([
 	return buildResponsesRequestBodyWithMasquerade(req, compatMode, config.MasqueradeTargetNone)
 }
 
+type ResponsesInputPreparation struct {
+	PreservedTopLevelFields map[string]any
+	Input                   []map[string]any
+	SetInput                bool
+}
+
+// PrepareResponsesInput builds the same input item sequence used by the
+// Responses request builder. The estimator uses this to avoid maintaining a
+// second, subtly different message-to-item conversion.
+func PrepareResponsesInput(req model.CanonicalRequest, includeReferences bool) ResponsesInputPreparation {
+	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
+	prepared := ResponsesInputPreparation{PreservedTopLevelFields: preservedTopLevelFields}
+	if len(responseInputItems) > 0 && (req.ResponseInputItemsAreOriginal || len(req.Messages) == 0) {
+		input := make([]map[string]any, 0, len(responseInputItems))
+		for _, item := range responseInputItems {
+			if isResponsesInstructionInputItem(item) {
+				continue
+			}
+			input = append(input, cloneMap(item))
+		}
+		if len(input) > 0 {
+			if includeReferences {
+				input = injectResponsesItemReferences(input, req.ResponseItemReferencesByCallID)
+			}
+			prepared.Input = input
+			prepared.SetInput = true
+		}
+		return prepared
+	}
+	if len(req.Messages) == 0 {
+		return prepared
+	}
+
+	var input []map[string]any
+	for _, msg := range req.Messages {
+		if len(msg.OrderedContent) > 0 {
+			input = append(input, buildResponsesOrderedInputItems(msg)...)
+			continue
+		}
+		if msg.Role == "tool" {
+			input = append(input, map[string]any{
+				"type":    "function_call_output",
+				"call_id": msg.ToolCallID,
+				"output":  buildToolOutput(msg.Parts),
+			})
+			continue
+		}
+
+		input = append(input, buildReasoningInputItems(msg)...)
+
+		item := map[string]any{"role": msg.Role}
+		var content []map[string]any
+		for _, part := range msg.Parts {
+			switch part.Type {
+			case "text":
+				content = append(content, map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text})
+			case "image_url", "input_image":
+				content = append(content, buildInputImageContent(part))
+			case "input_file":
+				if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
+					content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
+				}
+			case "input_audio":
+				if rawAudio, ok := part.Raw["input_audio"].(map[string]any); ok && len(rawAudio) > 0 {
+					content = append(content, map[string]any{"type": "input_audio", "input_audio": cloneMap(rawAudio)})
+				}
+			}
+		}
+		if len(content) > 0 {
+			item["content"] = content
+			input = append(input, item)
+		}
+
+		for _, toolCall := range msg.ToolCalls {
+			input = append(input, map[string]any{
+				"type":      "function_call",
+				"call_id":   toolCall.ID,
+				"name":      toolCall.Name,
+				"arguments": sanitizeToolArguments(toolCall.Arguments),
+			})
+		}
+	}
+	if includeReferences {
+		input = injectResponsesItemReferences(input, req.ResponseItemReferencesByCallID)
+	}
+	prepared.Input = input
+	prepared.SetInput = true
+	return prepared
+}
+
 func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatMode string, masqueradeTarget string) ([]byte, error) {
 	if err := validateRequestForEndpoint(req, config.UpstreamEndpointTypeResponses); err != nil {
 		return nil, err
@@ -1316,8 +1474,8 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 		"stream": req.Stream,
 	}
 	mergeResponsesPreservedTopLevelFields(payload, filteredPreservedTopLevelFieldsForEndpoint(req.PreservedTopLevelFields, config.UpstreamEndpointTypeResponses))
-	preservedTopLevelFields, responseInputItems := splitPreservedResponsesTopLevelFields(req.ResponseInputItems)
-	mergeResponsesPreservedTopLevelFields(payload, preservedTopLevelFields)
+	preparedInput := PrepareResponsesInput(req, masqueradeTarget == config.MasqueradeTargetOpenCode)
+	mergeResponsesPreservedTopLevelFields(payload, preparedInput.PreservedTopLevelFields)
 	if masqueradeTarget == config.MasqueradeTargetOpenCode {
 		delete(payload, "previous_response_id")
 	}
@@ -1366,74 +1524,8 @@ func buildResponsesRequestBodyWithMasquerade(req model.CanonicalRequest, compatM
 	if req.Instructions != "" {
 		payload["instructions"] = req.Instructions
 	}
-	if len(responseInputItems) > 0 && (req.ResponseInputItemsAreOriginal || len(req.Messages) == 0) {
-		input := make([]map[string]any, 0, len(responseInputItems))
-		for _, item := range responseInputItems {
-			if isResponsesInstructionInputItem(item) {
-				continue
-			}
-			input = append(input, cloneMap(item))
-		}
-		if len(input) > 0 {
-			if masqueradeTarget == config.MasqueradeTargetOpenCode {
-				input = injectResponsesItemReferences(input, req.ResponseItemReferencesByCallID)
-			}
-			payload["input"] = input
-		}
-	} else if len(req.Messages) > 0 {
-		var input []map[string]any
-		for _, msg := range req.Messages {
-			if len(msg.OrderedContent) > 0 {
-				input = append(input, buildResponsesOrderedInputItems(msg)...)
-				continue
-			}
-			if msg.Role == "tool" {
-				input = append(input, map[string]any{
-					"type":    "function_call_output",
-					"call_id": msg.ToolCallID,
-					"output":  buildToolOutput(msg.Parts),
-				})
-				continue
-			}
-
-			input = append(input, buildReasoningInputItems(msg)...)
-
-			item := map[string]any{"role": msg.Role}
-			var content []map[string]any
-			for _, part := range msg.Parts {
-				switch part.Type {
-				case "text":
-					content = append(content, map[string]any{"type": textPartTypeForRole(msg.Role), "text": part.Text})
-				case "image_url", "input_image":
-					content = append(content, buildInputImageContent(part))
-				case "input_file":
-					if rawFile, ok := part.Raw["input_file"].(map[string]any); ok && len(rawFile) > 0 {
-						content = append(content, map[string]any{"type": "input_file", "input_file": cloneMap(rawFile)})
-					}
-				case "input_audio":
-					if rawAudio, ok := part.Raw["input_audio"].(map[string]any); ok && len(rawAudio) > 0 {
-						content = append(content, map[string]any{"type": "input_audio", "input_audio": cloneMap(rawAudio)})
-					}
-				}
-			}
-			if len(content) > 0 {
-				item["content"] = content
-				input = append(input, item)
-			}
-
-			for _, toolCall := range msg.ToolCalls {
-				input = append(input, map[string]any{
-					"type":      "function_call",
-					"call_id":   toolCall.ID,
-					"name":      toolCall.Name,
-					"arguments": sanitizeToolArguments(toolCall.Arguments),
-				})
-			}
-		}
-		if masqueradeTarget == config.MasqueradeTargetOpenCode {
-			input = injectResponsesItemReferences(input, req.ResponseItemReferencesByCallID)
-		}
-		payload["input"] = input
+	if preparedInput.SetInput {
+		payload["input"] = preparedInput.Input
 	}
 	if len(req.Tools) > 0 {
 		payload["tools"] = buildResponsesUpstreamToolPayloads(req.Tools, compatMode)
