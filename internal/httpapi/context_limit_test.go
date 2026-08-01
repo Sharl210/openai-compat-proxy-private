@@ -263,11 +263,11 @@ func TestResponsesContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *te
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected uncertain estimate to reach upstream, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "context_length_exceeded") {
-		t.Fatalf("expected context overflow body, got %s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "context_length_exceeded") {
+		t.Fatalf("expected uncertain estimate not to create a local context overflow, got %s", rec.Body.String())
 	}
 }
 
@@ -282,21 +282,15 @@ func TestResponsesContextLimitPresentsDisplayedTokensInConfiguredLimitDomain(t *
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected uncertain estimate to reach upstream, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "300" {
 		t.Fatalf("expected configured limit header 300, got %q", got)
 	}
 	displayedEstimate := rec.Header().Get(headerProxyEstimatedInputTokens)
-	if displayedEstimate == "" || displayedEstimate == "73" || displayedEstimate == "339" {
-		t.Fatalf("expected displayed estimate to be remapped into user-configured limit domain, got %q", displayedEstimate)
-	}
-	if !strings.Contains(displayedEstimate, "(置信度:cold)") {
-		t.Fatalf("expected displayed estimate header to include confidence, got %q", displayedEstimate)
-	}
-	if !strings.Contains(rec.Body.String(), "estimated input tokens "+displayedEstimate+" exceed maximum 300") {
-		t.Fatalf("expected body to use same displayed estimate and configured limit domain, got %s", rec.Body.String())
+	if displayedEstimate == "" || strings.Contains(displayedEstimate, "置信度") {
+		t.Fatalf("expected raw numeric point estimate without display scaling, got %q", displayedEstimate)
 	}
 }
 
@@ -311,8 +305,8 @@ func TestChatContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *testing
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected uncertain estimate to reach upstream, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -328,7 +322,7 @@ func TestAnthropicContextLimitUsesSmallerLearnedGuardBeforeConfiguredLimit(t *te
 	req.Header.Set("anthropic-version", "2023-06-01")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected learned guard to reject early, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected uncertain estimate to reach upstream, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }

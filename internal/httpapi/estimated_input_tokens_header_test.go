@@ -89,8 +89,8 @@ func TestDisabledContextLimitUsesWarmedContextAwareEstimateInDecimalHeaderWithou
 	if got := rec.Header().Get(headerProxyModelLimitContextTokens); got != "-1" {
 		t.Fatalf("expected context limit header -1, got %q", got)
 	}
-	if got, want := rec.Header().Get(headerProxyEstimatedInputTokens), strconv.Itoa(baseEstimate*3); got != want {
-		t.Fatalf("expected learned decimal estimate %q, got %q", want, got)
+	if got, want := rec.Header().Get(headerProxyEstimatedInputTokens), strconv.Itoa(baseEstimate); got != want {
+		t.Fatalf("expected local point estimate %q without bucket-wide scaling, got %q", want, got)
 	}
 }
 

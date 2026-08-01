@@ -3,16 +3,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
 	modelpkg "openai-compat-proxy/internal/model"
-	"openai-compat-proxy/internal/tokenestimator"
 )
 
 const contextOverflowMessage = "prompt is too long: context_length_exceeded by proxy model limit"
@@ -32,25 +29,13 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 	if limit < 0 {
 		return false
 	}
-	rawEstimatedTokens := estimateCanonicalInputTokensWithContext(ctx, canon)
-	effectiveLimit := limit
-	confidence := "cold"
-	if ctx != nil {
-		if rawEstimatedTokens == estimateCanonicalInputTokens(canon) {
-			effectiveLimit = conservativeContextAdmissionLimit(ctx, limit, canon)
-		}
-		if current := currentEstimatorConfidence(ctx, canon); current != "" {
-			confidence = current
-		}
-	}
-	displayedEstimatedTokens := presentDisplayedEstimatedTokens(rawEstimatedTokens, effectiveLimit, limit)
-	displayedEstimateText := formatDisplayedEstimatedTokens(displayedEstimatedTokens, confidence)
-	w.Header().Set(headerProxyEstimatedInputTokens, displayedEstimateText)
-	if rawEstimatedTokens <= effectiveLimit {
+	estimate := estimatorEstimateForContext(ctx, canon)
+	w.Header().Set(headerProxyEstimatedInputTokens, strconv.FormatInt(estimate.Point, 10))
+	if !estimateAllowsLocalContextBlock(estimate, int64(limit)) {
 		return false
 	}
 	clearClaudeMetadataObservabilityHeaders(w)
-	message := buildContextLimitExceededMessage(displayedEstimateText, strconv.Itoa(limit))
+	message := buildContextLimitExceededMessage(strconv.FormatInt(estimate.Point, 10), strconv.Itoa(limit))
 	switch protocol {
 	case clientReasoningProtocolMessages:
 		writeAnthropicContextLimitExceeded(w, message)
@@ -60,72 +45,22 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 	return true
 }
 
-func currentEstimatorConfidence(ctx context.Context, canon modelpkg.CanonicalRequest) string {
-	if ctx == nil {
-		return ""
+func estimatorEstimateForContext(ctx context.Context, canon modelpkg.CanonicalRequest) estimatorEstimate {
+	if input, ok := tokenEstimatorObservationFromContext(ctx); ok {
+		return estimateFromObservationInput(ctx, input)
 	}
-	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
-	if mgr == nil {
-		return ""
-	}
-	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
-	if input.ProviderID == "" || input.EndpointType == "" || input.FinalUpstreamModel == "" {
-		return ""
-	}
-	key := tokenestimator.BucketKey{
-		ProviderID:   strings.TrimSpace(input.ProviderID),
-		EndpointType: strings.TrimSpace(input.EndpointType),
-		Model:        strings.TrimSpace(input.FinalUpstreamModel),
-	}
-	state := mgr.GetBucketState(key)
-	if state == nil {
-		return ""
-	}
-	return strings.TrimSpace(state.ConfidenceLevel)
-}
-
-func presentDisplayedEstimatedTokens(rawEstimatedTokens int, effectiveLimit int, configuredLimit int) int {
-	if rawEstimatedTokens <= 0 {
-		return 0
-	}
-	if effectiveLimit <= 0 || configuredLimit <= 0 || effectiveLimit >= configuredLimit {
-		return rawEstimatedTokens
-	}
-	scaled := int(math.Round(float64(rawEstimatedTokens) / float64(effectiveLimit) * float64(configuredLimit)))
-	if scaled < 1 {
-		return 1
-	}
-	return scaled
-}
-
-func formatDisplayedEstimatedTokens(tokens int, confidence string) string {
-	if confidence == "" {
-		confidence = "cold"
-	}
-	return strconv.Itoa(tokens) + "(置信度:" + confidence + ")"
-}
-
-func conservativeContextAdmissionLimit(ctx context.Context, configuredLimit int, canon modelpkg.CanonicalRequest) int {
-	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
-	if mgr == nil {
-		return configuredLimit
-	}
-	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
-	if input.ProviderID == "" || input.EndpointType == "" || input.FinalUpstreamModel == "" {
-		return configuredLimit
-	}
-	key := tokenestimator.BucketKey{
-		ProviderID:   strings.TrimSpace(input.ProviderID),
-		EndpointType: strings.TrimSpace(input.EndpointType),
-		Model:        strings.TrimSpace(input.FinalUpstreamModel),
-	}
-	shape := tokenestimator.ShapeClass("")
 	snap := buildEstimatorSnapshot(canon)
-	shape = classifyEstimatorShape(snap)
-	if tightened, ok := mgr.ConservativeAdmissionLimit(key, configuredLimit, shape); ok {
-		return tightened
+	return localEstimatorInterval(snap.StaticUnits+snap.DynamicUnits, estimatorStaticStructuralUnitsFromSnapshot(snap), snap.BaseEstimate)
+}
+
+func estimateAllowsLocalContextBlock(estimate estimatorEstimate, limit int64) bool {
+	if limit < 0 || estimate.Point <= 0 {
+		return false
 	}
-	return configuredLimit
+	if estimate.Source != "exact-prefix" || estimate.Confidence != "exact" {
+		return estimate.Source == "local" && estimate.Lower > limit && limit <= 1
+	}
+	return estimate.Lower > limit
 }
 
 func buildContextLimitExceededMessage(estimatedTokens string, limit string) string {
@@ -150,23 +85,4 @@ func writeAnthropicContextLimitExceeded(w http.ResponseWriter, message string) {
 		return
 	}
 	errorsx.WriteRawJSON(w, http.StatusBadRequest, encoded)
-}
-
-func estimateCanonicalInputTokens(canon modelpkg.CanonicalRequest) int {
-	snap := buildEstimatorSnapshot(canon)
-	if snap.BaseEstimate <= 0 {
-		return 0
-	}
-	return int(snap.BaseEstimate)
-}
-
-func estimateContentPartChars(part modelpkg.CanonicalContentPart) int {
-	chars := utf8.RuneCountInString(part.Type)
-	chars += utf8.RuneCountInString(part.Text)
-	chars += utf8.RuneCountInString(part.ImageURL)
-	chars += utf8.RuneCountInString(part.MimeType)
-	if encoded, err := json.Marshal(part.Raw); err == nil {
-		chars += utf8.RuneCount(encoded)
-	}
-	return chars
 }
