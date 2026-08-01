@@ -305,6 +305,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 |---|---|---|
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
 | `X-Proxy-Session-Id` | 本次请求所属的代理会话 ID；客户端显式携带时原样延续，否则代理生成并在后续 `previous_response_id` history 恢复请求中继承 | `session-7f3a2c10-4d8e-4a11-9b20-6f12d8e4c901` |
+| `X-Proxy-Session-Request-Id` | 当前代理会话内的请求序号；不替代 `X-Request-Id` | `r000001` |
 | `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
 | `X-This-Usage-Tokens` | 本次非流式响应的 usage 摘要；上游没有返回可用 usage 时为空字符串。流式响应不会返回这个头，因为最终 usage 在 SSE 末尾才可确定，普通响应头无法事后补值 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
@@ -663,6 +664,7 @@ tools prompt
   - 上述归档与对应结构化日志都会保留 `session_id`，可用 `X-Proxy-Session-Id` 将同一会话的跨请求记录串联起来
   - 当 Anthropic / Claude 流式上游在 `message_delta.usage` 中返回最终用量时，归档会额外保留一条 `canonical.ndjson` 的 `usage.update` 记录，并在 `raw.ndjson` 中保留原始 `message_delta` 帧；这只用于排查 `cache_read_input_tokens` / `cache_creation_input_tokens` 来源，不会作为下游 SSE 事件发给客户端
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
+- 结构化日志根目录下的 `session-index/<sha256(session_id)>/index.ndjson` 提供按会话的直接索引，`state.json` 保证进程重启后继续分配会话内请求序号；索引只保存请求标识、时间、状态和路由，不保存正文、密钥或媒体
 - 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**
 
 Responses 在非 Responses 上游场景下用于 `previous_response_id` 恢复的内存历史缓存，同时受 512 条和 256 MiB 总预算约束。超过预算时会优先驱逐最旧快照；单个快照本身超过预算时不缓存其完整多模态正文，但仍会在预算内保留工具调用恢复所需的轻量元数据。该限制只作用于跨请求缓存，不会裁剪当前请求发给模型的图片或文本。
