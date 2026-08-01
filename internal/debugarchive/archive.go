@@ -18,10 +18,11 @@ type RawEventEnvelope struct {
 }
 
 type FinalSnapshot struct {
-	StatusCode int            `json:"status_code"`
-	SessionID  string         `json:"session_id,omitempty"`
-	Response   map[string]any `json:"response,omitempty"`
-	Error      map[string]any `json:"error,omitempty"`
+	StatusCode     int            `json:"status_code"`
+	SessionID      string         `json:"session_id,omitempty"`
+	RequestLineage any            `json:"request_lineage,omitempty"`
+	Response       map[string]any `json:"response,omitempty"`
+	Error          map[string]any `json:"error,omitempty"`
 }
 
 type ArchiveWriter struct {

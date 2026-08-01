@@ -20,13 +20,19 @@ var requestCounter uint64
 const normalizationVersion = "v1"
 
 func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
+	return withRequestIDAndLineage(store, nil, next)
+}
+
+func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLineageStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestCounter, 1))
 		defer logging.CloseRequest(id)
 		w.Header().Set("X-Request-Id", id)
+		carrier := newRequestLineageCarrier(id, explicitProxySessionIDFromRequest(r))
+		r = r.Clone(withRequestLineageCarrier(r.Context(), carrier))
 		r, _ = ensureProxySessionID(r, w)
 		started := time.Now()
-		archiveWriter := archiveWriterForRequest(store, id, r.URL.Path)
+		archiveWriter := archiveWriterForRequest(store, r)
 		shouldLog := shouldLogAPITraffic(r.URL.Path)
 		capturedRequestBody := ""
 		if r.Body != nil && (archiveWriter != nil || shouldLog) {
@@ -37,26 +43,34 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 			recordedRequestBody = logging.RedactImageDataForLog([]byte(capturedRequestBody))
 		}
 		if archiveWriter != nil {
-			defer archiveWriter.Close()
+			defer func() { _ = archiveWriter.Close() }()
 			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
-			_ = archiveWriter.WriteRequest(map[string]any{
+			requestPayload := map[string]any{
 				"request_id":   id,
 				"session_id":   proxySessionIDFromRequest(r),
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
 				"request_body": recordedRequestBody,
-			})
+			}
+			if meta, ok := requestLineageFromRequest(r); ok {
+				appendRequestLineageLogFields(requestPayload, meta)
+			}
+			_ = archiveWriter.WriteRequest(requestPayload)
 		}
 		if shouldLog {
-			logging.Event("clientToProxyRequest", map[string]any{
+			attrs := map[string]any{
 				"request_id":   id,
 				"session_id":   proxySessionIDFromRequest(r),
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
 				"request_body": truncateBody([]byte(recordedRequestBody), 512),
-			})
+			}
+			if meta, ok := requestLineageFromRequest(r); ok {
+				appendRequestLineageLogFields(attrs, meta)
+			}
+			logging.Event("clientToProxyRequest", attrs)
 		}
 		cw := &responseCaptureWriter{
 			ResponseWriter: w,
@@ -67,6 +81,9 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		next.ServeHTTP(cw, r)
 		if archiveWriter != nil {
 			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status, SessionID: proxySessionIDFromRequest(r)}
+			if meta, ok := requestLineageFromRequest(r); ok {
+				snapshot.RequestLineage = meta
+			}
 			if body := bytes.TrimSpace(cw.body.Bytes()); len(body) > 0 && !cw.truncated {
 				var payload map[string]any
 				if err := json.Unmarshal(body, &payload); err == nil {
@@ -80,12 +97,21 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 			_ = archiveWriter.WriteFinalSnapshot(snapshot)
 		}
 		if shouldLog {
-			logging.Event("proxyToClientResponse", map[string]any{
+			attrs := map[string]any{
 				"request_id": id,
 				"session_id": proxySessionIDFromRequest(r),
 				"status":     cw.status,
 				"elapsed_ms": time.Since(started).Milliseconds(),
-			})
+			}
+			if meta, ok := requestLineageFromRequest(r); ok {
+				appendRequestLineageLogFields(attrs, meta)
+				if lineageStore != nil {
+					lineageStore.markCompleted(meta)
+				}
+			}
+			logging.Event("proxyToClientResponse", attrs)
+		} else if meta, ok := requestLineageFromRequest(r); ok && lineageStore != nil {
+			lineageStore.markCompleted(meta)
 		}
 	})
 }
@@ -135,7 +161,16 @@ func shouldArchiveAPITraffic(path string) bool {
 	return shouldLogAPITraffic(path)
 }
 
-func archiveWriterForRequest(store *config.RuntimeStore, requestID string, path string) *debugarchive.ArchiveWriter {
+func archiveWriterForRequest(store *config.RuntimeStore, r *http.Request) *debugarchive.ArchiveWriter {
+	if r == nil {
+		return nil
+	}
+	carrier := requestLineageCarrierFromContext(r.Context())
+	requestID := ""
+	if carrier != nil {
+		requestID = carrier.requestUIDValue()
+	}
+	path := r.URL.Path
 	if requestID == "" {
 		return nil
 	}

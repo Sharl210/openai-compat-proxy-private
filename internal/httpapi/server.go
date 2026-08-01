@@ -19,6 +19,7 @@ type Server struct {
 	handler            http.Handler
 	admin              *adminUI
 	history            *responsesHistoryStore
+	lineage            *requestLineageStore
 	upstreamTransports *upstream.TransportPool
 	transportReconcile sync.Mutex
 
@@ -35,6 +36,7 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager,
 		store:              store,
 		CacheInfo:          cacheMgr,
 		TokenEstimator:     tokenEstimatorMgr,
+		lineage:            newRequestLineageStore(),
 		upstreamTransports: upstream.NewTransportPool(),
 	}
 	if snapshot := store.Active(); snapshot != nil {
@@ -67,7 +69,7 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager,
 	mux.HandleFunc(canonicalV1EmbeddingsPath, allowMethods(handleEmbeddings(), http.MethodPost))
 	mux.HandleFunc(canonicalV1RerankPath, allowMethods(handleRerank(), http.MethodPost))
 	srv.mux = mux
-	srv.handler = withRequestID(store, http.HandlerFunc(srv.serveHTTP))
+	srv.handler = withRequestIDAndLineage(store, srv.lineage, http.HandlerFunc(srv.serveHTTP))
 	return srv
 }
 
@@ -100,7 +102,7 @@ func allowMethods(next http.HandlerFunc, methods ...string) http.HandlerFunc {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.handler == nil {
-		s.handler = withRequestID(s.store, http.HandlerFunc(s.serveHTTP))
+		s.handler = withRequestIDAndLineage(s.store, s.lineage, http.HandlerFunc(s.serveHTTP))
 	}
 	s.handler.ServeHTTP(w, r)
 }
@@ -147,6 +149,9 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.TokenEstimator != nil {
 			ctx = withTokenEstimatorManager(ctx, s.TokenEstimator)
+		}
+		if s.lineage != nil {
+			ctx = withRequestLineageStore(ctx, s.lineage)
 		}
 		ctx = withRuntimeStore(ctx, s.store)
 		ctx = withResponsesHistory(ctx, s.history)

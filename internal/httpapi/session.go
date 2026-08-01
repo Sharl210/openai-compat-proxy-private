@@ -41,6 +41,9 @@ func withProxySessionID(r *http.Request, w http.ResponseWriter, sessionID string
 	}
 	ctx := context.WithValue(r.Context(), proxySessionIDContextKey{}, sessionID)
 	ctx = upstream.WithSessionID(ctx, sessionID)
+	if carrier := requestLineageCarrierFromContext(ctx); carrier != nil {
+		carrier.setSessionID(sessionID)
+	}
 	updated := r.WithContext(ctx)
 	setProxySessionIDHeader(w, sessionID)
 	return updated, sessionID
