@@ -16,6 +16,7 @@ import (
 
 func handleChat() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r, sessionID := ensureProxySessionID(r, w)
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
 
@@ -123,12 +124,10 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 		}
-		baseEstimate := int64(estimateCanonicalInputTokens(canon))
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,
 			EndpointType:       providerCfg.UpstreamEndpointType,
 			FinalUpstreamModel: canon.Model,
-			BaseEstimate:       baseEstimate,
 			Canon:              canon,
 		}))
 		if err := setDirectionalObservabilityHeadersWithClientReasoningMode(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort, clientReasoningMode, reasoningModeFallback); err != nil {
@@ -142,6 +141,7 @@ func handleChat() http.HandlerFunc {
 			return
 		}
 		canon.RequestID = requestID
+		canon.SessionID = sessionID
 		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
@@ -214,7 +214,7 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.Messages, result)
+				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.SessionID, canon.Messages, result)
 			}
 			return
 		}
@@ -248,7 +248,7 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.Messages, result)
+				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.SessionID, canon.Messages, result)
 			}
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 			w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
@@ -311,7 +311,7 @@ func handleChat() http.HandlerFunc {
 			return
 		}
 		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
-			saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.Messages, result)
+			saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.SessionID, canon.Messages, result)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

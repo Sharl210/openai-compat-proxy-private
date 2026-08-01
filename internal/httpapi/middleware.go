@@ -24,6 +24,7 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		id := fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&requestCounter, 1))
 		defer logging.CloseRequest(id)
 		w.Header().Set("X-Request-Id", id)
+		r, _ = ensureProxySessionID(r, w)
 		started := time.Now()
 		archiveWriter := archiveWriterForRequest(store, id, r.URL.Path)
 		shouldLog := shouldLogAPITraffic(r.URL.Path)
@@ -40,6 +41,7 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
 			_ = archiveWriter.WriteRequest(map[string]any{
 				"request_id":   id,
+				"session_id":   proxySessionIDFromRequest(r),
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
@@ -49,6 +51,7 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		if shouldLog {
 			logging.Event("clientToProxyRequest", map[string]any{
 				"request_id":   id,
+				"session_id":   proxySessionIDFromRequest(r),
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
@@ -63,7 +66,7 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(cw, r)
 		if archiveWriter != nil {
-			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status}
+			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status, SessionID: proxySessionIDFromRequest(r)}
 			if body := bytes.TrimSpace(cw.body.Bytes()); len(body) > 0 && !cw.truncated {
 				var payload map[string]any
 				if err := json.Unmarshal(body, &payload); err == nil {
@@ -79,6 +82,7 @@ func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 		if shouldLog {
 			logging.Event("proxyToClientResponse", map[string]any{
 				"request_id": id,
+				"session_id": proxySessionIDFromRequest(r),
 				"status":     cw.status,
 				"elapsed_ms": time.Since(started).Milliseconds(),
 			})

@@ -16,6 +16,7 @@ import (
 
 func handleAnthropicMessages() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r, sessionID := ensureProxySessionID(r, w)
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
 		if strings.TrimSpace(r.Header.Get("anthropic-version")) == "" {
@@ -123,12 +124,10 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
 			return
 		}
-		baseEstimate := int64(estimateCanonicalInputTokens(canon))
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,
 			EndpointType:       providerCfg.UpstreamEndpointType,
 			FinalUpstreamModel: canon.Model,
-			BaseEstimate:       baseEstimate,
 			Canon:              canon,
 		}))
 		if err := setDirectionalObservabilityHeadersWithClientReasoningMode(w, r, provider, providerCfg, providerID, &canon, rawClientModel, clientServiceTier, clientReasoningParameters, clientReasoningEffort, clientReasoningMode, reasoningModeFallback); err != nil {
@@ -142,6 +141,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		canon.RequestID = requestID
+		canon.SessionID = sessionID
 		ctx := r.Context()
 		usageRecorder := combinedUsageRecorder(
 			cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType),
