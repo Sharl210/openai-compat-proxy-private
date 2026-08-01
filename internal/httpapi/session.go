@@ -13,10 +13,7 @@ import (
 	"openai-compat-proxy/internal/upstream"
 )
 
-const (
-	headerProxySessionID        = "X-Proxy-Session-Id"
-	headerProxySessionRequestID = "X-Proxy-Session-Request-Id"
-)
+const headerProxySessionID = "X-Proxy-Session-Id"
 
 const maxProxySessionIDLength = 256
 
@@ -64,18 +61,6 @@ func proxySessionIDFromRequest(r *http.Request) string {
 	return normalizeProxySessionID(r.Header.Get(headerProxySessionID))
 }
 
-func requestSessionIDFromRequest(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if carrier := requestLineageCarrierFromContext(r.Context()); carrier != nil {
-		if sessionID := carrier.sessionIDValue(); sessionID != "" {
-			return sessionID
-		}
-	}
-	return proxySessionIDFromRequest(r)
-}
-
 func explicitProxySessionIDFromRequest(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -89,22 +74,6 @@ func setProxySessionIDHeader(w http.ResponseWriter, sessionID string) {
 	}
 	if normalized := normalizeProxySessionID(sessionID); normalized != "" {
 		w.Header().Set(headerProxySessionID, normalized)
-	}
-}
-
-func setProxySessionRequestIDHeader(w http.ResponseWriter, meta requestLineage) {
-	if w == nil || strings.TrimSpace(meta.ConversationRequestID) == "" {
-		return
-	}
-	w.Header().Set(headerProxySessionRequestID, meta.ConversationRequestID)
-}
-
-func markProxySessionConflict(r *http.Request, inheritedSessionID string) {
-	if r == nil {
-		return
-	}
-	if carrier := requestLineageCarrierFromContext(r.Context()); carrier != nil {
-		carrier.setSessionConflict(inheritedSessionID)
 	}
 }
 

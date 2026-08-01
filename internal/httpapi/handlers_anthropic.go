@@ -128,7 +128,6 @@ func handleAnthropicMessages() http.HandlerFunc {
 		canon.SessionID = sessionID
 		meta, _ := ensureResolvedRequestLineage(r.Context(), sessionID, "")
 		applyCanonicalRequestLineage(&canon, meta)
-		setProxySessionRequestIDHeader(w, meta)
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,
 			EndpointType:       providerCfg.UpstreamEndpointType,
