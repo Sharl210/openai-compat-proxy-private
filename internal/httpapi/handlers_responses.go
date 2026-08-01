@@ -515,20 +515,23 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	previousHistoryRestored := false
 	portableHistoryRestored := false
 	previousResponseID := previousResponseIDFromItems(canon.ResponseInputItems)
-	if explicitProxySessionIDFromRequest(r) == "" && previousResponseID != "" {
-		inheritedSessionID := history.LoadSessionIDScoped(providerID, previousResponseID, historyScope)
+	explicitSessionID := explicitProxySessionIDFromRequest(r)
+	inheritedSessionID := ""
+	if previousResponseID != "" {
+		inheritedSessionID = history.LoadSessionIDScoped(providerID, previousResponseID, historyScope)
 		if inheritedSessionID == "" {
 			inheritedSessionID = history.LoadSessionIDPortable(previousResponseID, portableHistoryScope)
 		}
-		if inheritedSessionID != "" {
+		if explicitSessionID == "" && inheritedSessionID != "" {
 			r, _ = withProxySessionID(r, w, inheritedSessionID)
 			canon.SessionID = inheritedSessionID
-			meta, _ = ensureResolvedRequestLineage(r.Context(), canon.SessionID, previousResponseID)
-			applyCanonicalRequestLineage(&canon, meta)
+		} else if explicitSessionID != "" && inheritedSessionID != "" && explicitSessionID != inheritedSessionID {
+			markProxySessionConflict(r, inheritedSessionID)
 		}
 	}
 	meta, _ = ensureResolvedRequestLineage(r.Context(), canon.SessionID, previousResponseID)
 	applyCanonicalRequestLineage(&canon, meta)
+	setProxySessionRequestIDHeader(w, meta)
 	var previousHistory []model.CanonicalMessage
 	if nonResponsesUpstream && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID != "" {

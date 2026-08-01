@@ -128,6 +128,7 @@ func handleChat() http.HandlerFunc {
 		canon.SessionID = sessionID
 		meta, _ := ensureResolvedRequestLineage(r.Context(), sessionID, "")
 		applyCanonicalRequestLineage(&canon, meta)
+		setProxySessionRequestIDHeader(w, meta)
 		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,
