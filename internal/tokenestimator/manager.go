@@ -38,17 +38,21 @@ type Observation struct {
 }
 
 type Manager struct {
-	providersDir     string
-	location         *time.Location
-	enabledFn        func() []string
-	mu               sync.RWMutex
-	buckets          map[BucketKey]*BucketState
-	bucketOrder      []BucketKey
-	bucketLimit      int
-	seenRequests     map[string]struct{}
-	seenRequestOrder []string
-	recentLimit      int
-	seenRequestLimit int
+	providersDir           string
+	location               *time.Location
+	enabledFn              func() []string
+	mu                     sync.RWMutex
+	buckets                map[BucketKey]*BucketState
+	bucketOrder            []BucketKey
+	bucketLimit            int
+	seenRequests           map[string]struct{}
+	seenRequestOrder       []string
+	recentLimit            int
+	seenRequestLimit       int
+	prefixLedgers          map[BucketKey]*prefixLedger
+	prefixLedgerMaxEntries int
+	prefixLedgerMaxBytes   int64
+	prefixPersistMu        sync.Mutex
 }
 
 func NewManager(providersDir string, location *time.Location, enabledFn func() []string) *Manager {
@@ -59,14 +63,17 @@ func NewManager(providersDir string, location *time.Location, enabledFn func() [
 		enabledFn = func() []string { return nil }
 	}
 	m := &Manager{
-		providersDir:     providersDir,
-		location:         location,
-		enabledFn:        enabledFn,
-		buckets:          map[BucketKey]*BucketState{},
-		bucketLimit:      defaultBucketLimit,
-		seenRequests:     map[string]struct{}{},
-		recentLimit:      defaultRecentSampleLimit,
-		seenRequestLimit: defaultSeenRequestLimit,
+		providersDir:           providersDir,
+		location:               location,
+		enabledFn:              enabledFn,
+		buckets:                map[BucketKey]*BucketState{},
+		bucketLimit:            defaultBucketLimit,
+		seenRequests:           map[string]struct{}{},
+		recentLimit:            defaultRecentSampleLimit,
+		seenRequestLimit:       defaultSeenRequestLimit,
+		prefixLedgers:          map[BucketKey]*prefixLedger{},
+		prefixLedgerMaxEntries: defaultPrefixLedgerMaxEntries,
+		prefixLedgerMaxBytes:   defaultPrefixLedgerMaxBytes,
 	}
 	_ = m.loadExistingBuckets()
 	return m

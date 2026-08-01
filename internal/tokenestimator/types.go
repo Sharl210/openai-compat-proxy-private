@@ -66,3 +66,17 @@ type BucketState struct {
 	AvgToolResultCount        float64         `json:"avg_tool_result_count"`
 	AvgMultimodalItemCount    float64         `json:"avg_multimodal_item_count"`
 }
+
+const PrefixMeasurementVersion = 2
+
+type PrefixMeasurement struct {
+	Version                int       `json:"version"`
+	WireContextFingerprint string    `json:"wire_context_fingerprint"`
+	PrefixFingerprint      string    `json:"prefix_fingerprint"`
+	PrefixUnits            int64     `json:"prefix_units"`
+	StructuralUnits        int64     `json:"structural_units"`
+	LocalEstimate          int64     `json:"local_estimate"`
+	InputTokens            int64     `json:"input_tokens"`
+	CachedTokens           int64     `json:"cached_tokens"`
+	RecordedAt             time.Time `json:"recorded_at"`
+}
