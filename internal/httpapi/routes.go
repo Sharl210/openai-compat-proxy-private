@@ -40,6 +40,7 @@ const routeInfoKey routeContextKey = "route-info"
 const runtimeSnapshotKey routeContextKey = "runtime-snapshot"
 const cacheInfoManagerKey routeContextKey = "cache-info-manager"
 const tokenEstimatorManagerKey routeContextKey = "token-estimator-manager"
+const requestLineageStoreKey routeContextKey = "request-lineage-store"
 const responsesHistoryContextKey routeContextKey = "responses-history"
 const routeRequestEffortKey routeContextKey = "route-request-effort"
 const routeProviderSelectionEffortKey routeContextKey = "route-provider-selection-effort"
@@ -141,6 +142,28 @@ func withTokenEstimatorManager(ctx context.Context, manager *tokenestimator.Mana
 func tokenEstimatorManagerFromRequest(r *http.Request) *tokenestimator.Manager {
 	manager, _ := r.Context().Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
 	return manager
+}
+
+func withRequestLineageStore(ctx context.Context, store *requestLineageStore) context.Context {
+	if store == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, requestLineageStoreKey, store)
+}
+
+func requestLineageStoreFromContext(ctx context.Context) *requestLineageStore {
+	if ctx == nil {
+		return nil
+	}
+	store, _ := ctx.Value(requestLineageStoreKey).(*requestLineageStore)
+	return store
+}
+
+func requestLineageStoreFromRequest(r *http.Request) *requestLineageStore {
+	if r == nil {
+		return nil
+	}
+	return requestLineageStoreFromContext(r.Context())
 }
 
 func withResponsesHistory(ctx context.Context, history *responsesHistoryStore) context.Context {

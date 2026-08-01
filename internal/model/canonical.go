@@ -31,6 +31,14 @@ type CanonicalRequest struct {
 	ReasoningModeOrigin            ReasoningModeOrigin
 	PassThroughRawReasoning        bool
 	RequestID                      string
+	ConversationID                 string
+	ConversationRequestSeq         uint64
+	ConversationRequestID          string
+	LineageNodeID                  string
+	LineageParentNodeID            string
+	LineageParentRequestUID        string
+	LineageParentResponseID        string
+	LineageRootMode                string
 	SessionID                      string
 	AuthMode                       string
 	SkipProviderSystemPrompt       bool
