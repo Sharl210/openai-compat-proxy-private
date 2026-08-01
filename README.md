@@ -28,7 +28,7 @@
 | provider 级系统提示词 | ✅ | `SYSTEM_PROMPT_FILES` + `SYSTEM_PROMPT_POSITION` |
 | 伪装客户端（实验性） | ✅ | 支持 `opencode` / `claude` / `codex` / `none` |
 | 调试归档 | ✅ | 仅当 `LOG_ENABLE=true` 且 `OPENAI_COMPAT_DEBUG_ARCHIVE_DIR` 非空时写出 `request/raw/canonical/final.ndjson`；保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制（与 `LOG_MAX_REQUESTS` 解耦） |
-| 动态 token estimator（phase-1） | ✅ | 基于 `provider + upstream_endpoint_type + 最终上游模型` 持久化记录真实 usage，生成 JSON/TXT 观测状态与建议修正；当前只做学习与展示，不直接参与上下文拦截准入 |
+| 动态 token estimator（measured-prefix） | ✅ | 按最终上游模型和最终 canonical 请求生成 wire/prefix 指纹；仅持久化有界 hash 与 usage 数字，完整前缀命中时使用 exact 测量，未知前缀保守放行到上游首输出探针 |
 | 健康检查与 Linux 部署脚本 | ✅ | 自带 `healthz`、deploy / restart / stop / uninstall |
 | 内置 Web 管理台 | ✅ | 裸根路径 `/` 提供 Material 3 风格管理界面：文件浏览 / 文件编辑 / 运行状态 |
 
@@ -304,6 +304,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | 响应头 | 作用 | 示例 |
 |---|---|---|
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
+| `X-Proxy-Session-Id` | 本次请求所属的代理会话 ID；客户端显式携带时原样延续，否则代理生成并在后续 `previous_response_id` history 恢复请求中继承 | `session-7f3a2c10-4d8e-4a11-9b20-6f12d8e4c901` |
 | `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
 | `X-This-Usage-Tokens` | 本次非流式响应的 usage 摘要；上游没有返回可用 usage 时为空字符串。流式响应不会返回这个头，因为最终 usage 在 SSE 末尾才可确定，普通响应头无法事后补值 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
@@ -320,7 +321,7 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | `X-Proxy-To-Upstream-Claude-Metadata-Session-Id` | Anthropic 上游、Claude 伪装且本次会实际向上游请求体注入 `metadata.user_id` 时，代理动态生成的 `session_id`；未实际注入时为空字符串 | `11111111-1111-4111-8111-111111111111` |
 | `X-Proxy-To-Upstream-Max-Output-Tokens` | 代理经过客户端请求、provider 默认值和强制开关处理后，最终实际发给上游的最大输出 token 数；没有最终值时不返回 | `64000` |
 | `X-Proxy-Model-Limit-Context-Tokens` | 代理层对当前最终上游模型命中的上下文窗口限制；`-1` 表示代理层不主动限制 | `400000` |
-| `X-Proxy-Estimated-Input-Tokens` | 代理对最终 canonical 输入内容的预估 token 数；正常已认证文本生成请求常驻返回。该值是估算而非上游精确 usage，`MODEL_LIMIT_CONTEXT_TOKENS=-1` 时仍返回但不会据此拦截请求；命中正数代理限制时可能附带 estimator 置信度 | `1234` |
+| `X-Proxy-Estimated-Input-Tokens` | 代理对最终 canonical 输入内容的 numeric 预估 token 数；正常已认证文本生成请求常驻返回。该值是估算而非上游精确 usage；`MODEL_LIMIT_CONTEXT_TOKENS=-1` 时仍返回但不会据此拦截请求，未知前缀不会在代理层按普通正数限制提前拒绝 | `1234` |
 | `X-Provider-Name` | 本次请求命中的 provider ID | `openai` |
 | `X-Provider-Today-Cache-Rate` | 本次请求命中 provider 今日缓存率 | `25.00 %` |
 | `X-Provider-History-Cache-Rate` | 本次请求命中 provider 历史缓存率 | `25.00 %` |
@@ -551,17 +552,19 @@ GPT-5.6 的 `multi_agent` 是 Responses API 的服务端 beta，不是客户端�
 
 例如上游报告 `cached_tokens=800`、`cache_write_tokens=200`、`input_tokens=1000` 时，缓存命中率继续只统计读取 `800 / 1000`；缓存写入覆盖率独立统计 `200 / 1000`，两者不能混成同一个“缓存率”，`total_tokens` 也不会额外相加写入 token。
 
-### 3.14 动态 token estimator 的快速纠偏
+### 3.14 动态 token estimator 的 measured-prefix 准入
 
-当前 token estimator 仍保留 cold-start 的静态估算兜底，但一旦已经拿到该 provider / endpoint / 最终上游模型的真实 usage 样本，后续 admission estimate 会直接吸收历史修正，而不再长期停留在原始 `chars/4` 基线附近。
+token estimator 以最终发给上游的 provider、上游协议、模型和 canonical 请求形状生成两层指纹：wire-context fingerprint 覆盖提示词、工具、推理和请求控制字段，prefix fingerprint 覆盖按顺序编码的消息或 Responses input item 前缀。持久化ledger只保存版本、指纹、前缀数字特征、归一化 input/cached usage 和时间，不保存原始请求、历史正文或凭据。
 
-当前行为可以概括为：
+估算与准入规则如下：
 
-- cold-start：继续走静态估算基线
-- 有历史 observation：优先按历史样本修正下一次 estimate
-- 只有没有历史修正时，才继续单独依赖保守 guard 去压低 limit
+- cold-start：使用有界本地估算和区间，只用于展示和决定是否需要继续探针
+- 完整 canonical 前缀与当前 wire context 精确命中历史usage时，使用 exact full-prefix point
+- 只命中较短的已测前缀时，对未测的本地后缀做有界估算，并将结果标记为 uncertain
+- uncertain 估算不会按普通正数 `MODEL_LIMIT_CONTEXT_TOKENS` 在代理层提前拒绝；请求继续到上游首输出探针，由真实的 `context_length_exceeded` / `prompt is too long` 触发兼容错误
+- 只有 exact 测量能够证明当前完整前缀超过限制时，代理才在上游调用前返回上下文超限；`-1` 仍表示代理层不主动限制
 
-这会让 `MODEL_LIMIT_CONTEXT_TOKENS` 的提前拦截，更快贴近同模型/同形态请求的真实上下文消耗，而不是只靠一次次撞线后慢慢把 limit 收紧。
+`Token_Estimator` 目录中的模型usage状态文件仍保留统计摘要；同一分桶下的 measured-prefix ledger另存为对应JSON旁的 `.prefix_ledger.json`，并受固定条目数与字节预算限制。删除对应模型目录或文件后，下一次请求按冷启动重新学习。
 
 ### 4. 模型映射与 reasoning suffix
 
@@ -655,6 +658,7 @@ tools prompt
   - `raw.ndjson`
   - `canonical.ndjson`
   - `final.ndjson`
+  - 上述归档与对应结构化日志都会保留 `session_id`，可用 `X-Proxy-Session-Id` 将同一会话的跨请求记录串联起来
   - 当 Anthropic / Claude 流式上游在 `message_delta.usage` 中返回最终用量时，归档会额外保留一条 `canonical.ndjson` 的 `usage.update` 记录，并在 `raw.ndjson` 中保留原始 `message_delta` 帧；这只用于排查 `cache_read_input_tokens` / `cache_creation_input_tokens` 来源，不会作为下游 SSE 事件发给客户端
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
 - 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**
@@ -791,7 +795,7 @@ phase-1 动态 token estimator 会在 `<PROVIDERS_DIR>/Token_Estimator/` 下即�
 - `upstream_endpoint_type`
 - `最终真正发给上游的模型名`
 
-当前阶段只做学习、观测和建议修正，不直接反向修改 `MODEL_LIMIT_CONTEXT_TOKENS` 的准入判断。TXT 摘要里会展示样本数、置信度、`runtime_ready`、平均 input/cached/uncached token，以及建议修正系数。用户如果在管理台删除某个 provider 目录、某个 endpoint 目录、或某个模型对应文件，代理会把它当成冷启动重新学习。
+TXT 摘要里会展示样本数、置信度、`runtime_ready`、平均 input/cached/uncached token，以及建议修正系数；measured-prefix ledger只保存有界指纹和数字usage，用于exact full-prefix lookup与uncertain上游探针回退。用户如果在管理台删除某个 provider 目录、某个 endpoint 目录、或某个模型对应文件，代理会把它当成冷启动重新学习。
 
 ### provider `.env`
 
