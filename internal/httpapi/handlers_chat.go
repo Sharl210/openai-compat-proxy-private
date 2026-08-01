@@ -124,6 +124,11 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 		}
+		canon.RequestID = requestID
+		canon.SessionID = sessionID
+		meta, _ := ensureResolvedRequestLineage(r.Context(), sessionID, "")
+		applyCanonicalRequestLineage(&canon, meta)
+		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,
 			EndpointType:       providerCfg.UpstreamEndpointType,
@@ -140,9 +145,6 @@ func handleChat() http.HandlerFunc {
 		if writeContextLimitExceededIfNeeded(r.Context(), w, provider, canon, clientReasoningProtocolChat) {
 			return
 		}
-		canon.RequestID = requestID
-		canon.SessionID = sessionID
-		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		attrs := map[string]any{
 			"request_id":    canon.RequestID,
 			"route":         "/v1/chat/completions",

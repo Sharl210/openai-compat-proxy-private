@@ -124,6 +124,10 @@ func handleAnthropicMessages() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
 			return
 		}
+		canon.RequestID = requestID
+		canon.SessionID = sessionID
+		meta, _ := ensureResolvedRequestLineage(r.Context(), sessionID, "")
+		applyCanonicalRequestLineage(&canon, meta)
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,
 			EndpointType:       providerCfg.UpstreamEndpointType,
@@ -140,8 +144,6 @@ func handleAnthropicMessages() http.HandlerFunc {
 		if writeContextLimitExceededIfNeeded(r.Context(), w, provider, canon, clientReasoningProtocolMessages) {
 			return
 		}
-		canon.RequestID = requestID
-		canon.SessionID = sessionID
 		ctx := r.Context()
 		usageRecorder := combinedUsageRecorder(
 			cacheInfoUsageRecorder(r, canon.RequestID, providerID, providerCfg.UpstreamEndpointType),
