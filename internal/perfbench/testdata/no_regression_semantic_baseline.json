@@ -168,7 +168,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -248,7 +254,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -292,7 +298,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -542,7 +554,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -622,7 +640,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -666,7 +684,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -916,7 +940,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -996,7 +1026,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -1040,7 +1070,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -1296,7 +1332,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -1376,7 +1418,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "7c7ad8fe5f6c09b5355a75c88aba5323657842aa6fefa20b106645b629c60bdf"
+          "sha256": "df892a9093a48500abb0798884d16afc44f02fb9355a35a860f896196d44c989"
         },
         "raw.ndjson": {
           "records": 10,
@@ -1426,7 +1468,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -1682,7 +1730,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -1762,7 +1816,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "7c7ad8fe5f6c09b5355a75c88aba5323657842aa6fefa20b106645b629c60bdf"
+          "sha256": "df892a9093a48500abb0798884d16afc44f02fb9355a35a860f896196d44c989"
         },
         "raw.ndjson": {
           "records": 10,
@@ -1812,7 +1866,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -2068,7 +2128,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -2148,7 +2214,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "7c7ad8fe5f6c09b5355a75c88aba5323657842aa6fefa20b106645b629c60bdf"
+          "sha256": "df892a9093a48500abb0798884d16afc44f02fb9355a35a860f896196d44c989"
         },
         "raw.ndjson": {
           "records": 10,
@@ -2198,7 +2264,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -2454,7 +2526,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -2534,7 +2612,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "6784d3de76c4347adb96b82f7efd036697eb72f5e7f289c8ca6354ea239c5bbd"
+          "sha256": "59f619a85b9a0a5b8c6393e55d0efcf4c708b53e06e40454b21eff416923acd2"
         },
         "raw.ndjson": {
           "records": 0,
@@ -2584,7 +2662,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -2840,7 +2924,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -2920,7 +3010,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "6784d3de76c4347adb96b82f7efd036697eb72f5e7f289c8ca6354ea239c5bbd"
+          "sha256": "59f619a85b9a0a5b8c6393e55d0efcf4c708b53e06e40454b21eff416923acd2"
         },
         "raw.ndjson": {
           "records": 0,
@@ -2970,7 +3060,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -3226,7 +3322,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -3306,7 +3408,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "6784d3de76c4347adb96b82f7efd036697eb72f5e7f289c8ca6354ea239c5bbd"
+          "sha256": "59f619a85b9a0a5b8c6393e55d0efcf4c708b53e06e40454b21eff416923acd2"
         },
         "raw.ndjson": {
           "records": 0,
@@ -3356,7 +3458,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -3606,7 +3714,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -3686,7 +3800,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -3730,7 +3844,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -4064,7 +4184,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -4144,7 +4270,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -4188,7 +4314,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -4522,7 +4654,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -4602,7 +4740,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -4646,7 +4784,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -4986,7 +5130,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -5066,7 +5216,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "4873508a6c8b35fbad00b19195ea18d06ed802191d57ab685a1ba6a44a4f8a9c"
+          "sha256": "66a4c0d49dadb01f8ec9c135ad562d03e73306dd91f48747a93bb19ec53f5c43"
         },
         "raw.ndjson": {
           "records": 6,
@@ -5116,7 +5266,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -5456,7 +5612,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -5536,7 +5698,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "4873508a6c8b35fbad00b19195ea18d06ed802191d57ab685a1ba6a44a4f8a9c"
+          "sha256": "66a4c0d49dadb01f8ec9c135ad562d03e73306dd91f48747a93bb19ec53f5c43"
         },
         "raw.ndjson": {
           "records": 6,
@@ -5586,7 +5748,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -5926,7 +6094,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -6006,7 +6180,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "4873508a6c8b35fbad00b19195ea18d06ed802191d57ab685a1ba6a44a4f8a9c"
+          "sha256": "66a4c0d49dadb01f8ec9c135ad562d03e73306dd91f48747a93bb19ec53f5c43"
         },
         "raw.ndjson": {
           "records": 6,
@@ -6056,7 +6230,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -6396,7 +6576,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -6476,7 +6662,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "841ca928802bf0f5bbfcfa2ff554e0e51b27ee4b4f70eed230b9450513febb80"
+          "sha256": "b4953e8782d49b583a5a366d7b2c7eda09894a7f9373335070c07169f3088052"
         },
         "raw.ndjson": {
           "records": 0,
@@ -6526,7 +6712,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -6866,7 +7058,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -6946,7 +7144,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "841ca928802bf0f5bbfcfa2ff554e0e51b27ee4b4f70eed230b9450513febb80"
+          "sha256": "b4953e8782d49b583a5a366d7b2c7eda09894a7f9373335070c07169f3088052"
         },
         "raw.ndjson": {
           "records": 0,
@@ -6996,7 +7194,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -7336,7 +7540,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -7416,7 +7626,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "841ca928802bf0f5bbfcfa2ff554e0e51b27ee4b4f70eed230b9450513febb80"
+          "sha256": "b4953e8782d49b583a5a366d7b2c7eda09894a7f9373335070c07169f3088052"
         },
         "raw.ndjson": {
           "records": 0,
@@ -7466,7 +7676,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -7800,7 +8016,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -7880,7 +8102,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -7924,7 +8146,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -8258,7 +8486,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -8338,7 +8572,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -8382,7 +8616,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -8716,7 +8956,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -8796,7 +9042,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -8840,7 +9086,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -9180,7 +9432,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -9260,7 +9518,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "d7e13b06502116dd9c38432bab2e8234c3b542f5c436f8bf1f24a9fc6e48a2b4"
+          "sha256": "3bbe1f3a3d7d8aa3e28a23de1e0fe59022b3dfd3107563738b3dcd98eb446b69"
         },
         "raw.ndjson": {
           "records": 8,
@@ -9310,7 +9568,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -9650,7 +9914,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -9730,7 +10000,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "d7e13b06502116dd9c38432bab2e8234c3b542f5c436f8bf1f24a9fc6e48a2b4"
+          "sha256": "3bbe1f3a3d7d8aa3e28a23de1e0fe59022b3dfd3107563738b3dcd98eb446b69"
         },
         "raw.ndjson": {
           "records": 8,
@@ -9780,7 +10050,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -10120,7 +10396,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -10200,7 +10482,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "d7e13b06502116dd9c38432bab2e8234c3b542f5c436f8bf1f24a9fc6e48a2b4"
+          "sha256": "3bbe1f3a3d7d8aa3e28a23de1e0fe59022b3dfd3107563738b3dcd98eb446b69"
         },
         "raw.ndjson": {
           "records": 8,
@@ -10250,7 +10532,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -10590,7 +10878,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -10670,7 +10964,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "daa4fa45d90cc9e19a5e4f675a8229bee1737eab0065a3b3a2d0a8bf10e98859"
+          "sha256": "3054f43808da8a1259050e56fec6e5d9656dc9312a1651d704d5184cac1a63b0"
         },
         "raw.ndjson": {
           "records": 0,
@@ -10720,7 +11014,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -11060,7 +11360,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -11140,7 +11446,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "daa4fa45d90cc9e19a5e4f675a8229bee1737eab0065a3b3a2d0a8bf10e98859"
+          "sha256": "3054f43808da8a1259050e56fec6e5d9656dc9312a1651d704d5184cac1a63b0"
         },
         "raw.ndjson": {
           "records": 0,
@@ -11190,7 +11496,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -11530,7 +11842,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -11610,7 +11928,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "daa4fa45d90cc9e19a5e4f675a8229bee1737eab0065a3b3a2d0a8bf10e98859"
+          "sha256": "3054f43808da8a1259050e56fec6e5d9656dc9312a1651d704d5184cac1a63b0"
         },
         "raw.ndjson": {
           "records": 0,
@@ -11660,7 +11978,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -11994,7 +12318,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -12074,7 +12404,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -12118,7 +12448,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -12368,7 +12704,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -12448,7 +12790,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -12492,7 +12834,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -12742,7 +13090,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -12822,7 +13176,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -12866,7 +13220,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -13120,7 +13480,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -13199,7 +13565,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f046c1a8422f203e1c965a8f0fd6151d95a31e03d490e0fcbe15e07c9358b344"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 10,
@@ -13249,7 +13615,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -13502,7 +13874,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -13581,7 +13959,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f046c1a8422f203e1c965a8f0fd6151d95a31e03d490e0fcbe15e07c9358b344"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 10,
@@ -13631,7 +14009,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -13884,7 +14268,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -13963,7 +14353,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f046c1a8422f203e1c965a8f0fd6151d95a31e03d490e0fcbe15e07c9358b344"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 10,
@@ -14013,7 +14403,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -14266,7 +14662,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -14345,7 +14747,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "c854ff67954d8fe543712b44ad095faf3d1f2525d4c094ff97e2f0bef6d71b9f"
+          "sha256": "b80d4d9b16002cbe5efd104d69da3b75023a8a55a7181e4d3c48f6ac2f4ffac1"
         },
         "raw.ndjson": {
           "records": 0,
@@ -14395,7 +14797,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -14648,7 +15056,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -14727,7 +15141,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "c854ff67954d8fe543712b44ad095faf3d1f2525d4c094ff97e2f0bef6d71b9f"
+          "sha256": "b80d4d9b16002cbe5efd104d69da3b75023a8a55a7181e4d3c48f6ac2f4ffac1"
         },
         "raw.ndjson": {
           "records": 0,
@@ -14777,7 +15191,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -15030,7 +15450,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -15109,7 +15535,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "c854ff67954d8fe543712b44ad095faf3d1f2525d4c094ff97e2f0bef6d71b9f"
+          "sha256": "b80d4d9b16002cbe5efd104d69da3b75023a8a55a7181e4d3c48f6ac2f4ffac1"
         },
         "raw.ndjson": {
           "records": 0,
@@ -15159,7 +15585,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -15408,7 +15840,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -15488,7 +15926,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -15532,7 +15970,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -15782,7 +16226,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -15862,7 +16312,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -15906,7 +16356,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -16156,7 +16612,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -16236,7 +16698,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -16280,7 +16742,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -16534,7 +17002,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -16613,7 +17087,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f046c1a8422f203e1c965a8f0fd6151d95a31e03d490e0fcbe15e07c9358b344"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 6,
@@ -16663,7 +17137,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -16916,7 +17396,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -16995,7 +17481,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f046c1a8422f203e1c965a8f0fd6151d95a31e03d490e0fcbe15e07c9358b344"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 6,
@@ -17045,7 +17531,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -17298,7 +17790,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -17377,7 +17875,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f046c1a8422f203e1c965a8f0fd6151d95a31e03d490e0fcbe15e07c9358b344"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 6,
@@ -17427,7 +17925,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -17680,7 +18184,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -17759,7 +18269,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "6d9b3483593a39e0779e876113c88c35d18ac4b0b07cc94d673b0c43e1fbf6ce"
+          "sha256": "1b099f12c0fc2299b6e15f274465596446a5a68a56a1bba8ce8c36bbd87a084b"
         },
         "raw.ndjson": {
           "records": 0,
@@ -17809,7 +18319,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -18062,7 +18578,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -18141,7 +18663,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "6d9b3483593a39e0779e876113c88c35d18ac4b0b07cc94d673b0c43e1fbf6ce"
+          "sha256": "1b099f12c0fc2299b6e15f274465596446a5a68a56a1bba8ce8c36bbd87a084b"
         },
         "raw.ndjson": {
           "records": 0,
@@ -18191,7 +18713,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -18444,7 +18972,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -18523,7 +19057,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "6d9b3483593a39e0779e876113c88c35d18ac4b0b07cc94d673b0c43e1fbf6ce"
+          "sha256": "1b099f12c0fc2299b6e15f274465596446a5a68a56a1bba8ce8c36bbd87a084b"
         },
         "raw.ndjson": {
           "records": 0,
@@ -18573,7 +19107,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -18822,7 +19362,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -18902,7 +19448,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -18946,7 +19492,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -19196,7 +19748,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -19276,7 +19834,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -19320,7 +19878,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -19570,7 +20134,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -19650,7 +20220,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -19694,7 +20264,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -19948,7 +20524,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -20027,7 +20609,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "02d2416bfc63e409c80e172e187c5be8acaa5ef7358ac0ac29231a85cc4cf8d6"
+          "sha256": "8a2a02da3a602d9d9e0f557865dce9bc68303957d78f054cd7bbecaebfd36a29"
         },
         "raw.ndjson": {
           "records": 8,
@@ -20077,7 +20659,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -20330,7 +20918,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -20409,7 +21003,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "02d2416bfc63e409c80e172e187c5be8acaa5ef7358ac0ac29231a85cc4cf8d6"
+          "sha256": "8a2a02da3a602d9d9e0f557865dce9bc68303957d78f054cd7bbecaebfd36a29"
         },
         "raw.ndjson": {
           "records": 8,
@@ -20459,7 +21053,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -20712,7 +21312,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -20791,7 +21397,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "02d2416bfc63e409c80e172e187c5be8acaa5ef7358ac0ac29231a85cc4cf8d6"
+          "sha256": "8a2a02da3a602d9d9e0f557865dce9bc68303957d78f054cd7bbecaebfd36a29"
         },
         "raw.ndjson": {
           "records": 8,
@@ -20841,7 +21447,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -21094,7 +21706,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -21173,7 +21791,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "eaffe09162aa6b48b99b6769c92029d5c18e4d134a0b7df5914e046935da2c89"
+          "sha256": "5c4a4317fc99c5a6cc6f67cdd598b4dc3667e43d6a1bf45cce35f57e15cdbe36"
         },
         "raw.ndjson": {
           "records": 0,
@@ -21223,7 +21841,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -21476,7 +22100,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -21555,7 +22185,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "eaffe09162aa6b48b99b6769c92029d5c18e4d134a0b7df5914e046935da2c89"
+          "sha256": "5c4a4317fc99c5a6cc6f67cdd598b4dc3667e43d6a1bf45cce35f57e15cdbe36"
         },
         "raw.ndjson": {
           "records": 0,
@@ -21605,7 +22235,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -21858,7 +22494,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -21937,7 +22579,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "eaffe09162aa6b48b99b6769c92029d5c18e4d134a0b7df5914e046935da2c89"
+          "sha256": "5c4a4317fc99c5a6cc6f67cdd598b4dc3667e43d6a1bf45cce35f57e15cdbe36"
         },
         "raw.ndjson": {
           "records": 0,
@@ -21987,7 +22629,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -22234,7 +22882,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -22313,7 +22967,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -22357,7 +23011,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -22604,7 +23264,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -22683,7 +23349,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -22727,7 +23393,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -22974,7 +23646,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -23053,7 +23731,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -23097,7 +23775,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -23348,7 +24032,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -23426,7 +24116,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "fc782cdf485c781fac48118e9d24d10f7d9e469a170d2d97e6c3ac166b5b2fe8"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -23476,7 +24166,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -23726,7 +24422,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -23804,7 +24506,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "fc782cdf485c781fac48118e9d24d10f7d9e469a170d2d97e6c3ac166b5b2fe8"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -23854,7 +24556,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -24104,7 +24812,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -24182,7 +24896,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "fc782cdf485c781fac48118e9d24d10f7d9e469a170d2d97e6c3ac166b5b2fe8"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -24232,7 +24946,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -24482,7 +25202,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -24560,7 +25286,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "2e5d6cbeaeac8ca2e639845f95fff2a161eac1d6d194e898405574ed1f81e38e"
+          "sha256": "7f45c64630a171801b83b7baf98d0ddcaf0c25fd7687a5ad2a236e656879a31a"
         },
         "raw.ndjson": {
           "records": 0,
@@ -24610,7 +25336,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -24860,7 +25592,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -24938,7 +25676,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "2e5d6cbeaeac8ca2e639845f95fff2a161eac1d6d194e898405574ed1f81e38e"
+          "sha256": "7f45c64630a171801b83b7baf98d0ddcaf0c25fd7687a5ad2a236e656879a31a"
         },
         "raw.ndjson": {
           "records": 0,
@@ -24988,7 +25726,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -25238,7 +25982,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -25316,7 +26066,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "2e5d6cbeaeac8ca2e639845f95fff2a161eac1d6d194e898405574ed1f81e38e"
+          "sha256": "7f45c64630a171801b83b7baf98d0ddcaf0c25fd7687a5ad2a236e656879a31a"
         },
         "raw.ndjson": {
           "records": 0,
@@ -25366,7 +26116,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -25612,7 +26368,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -25691,7 +26453,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -25735,7 +26497,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -25982,7 +26750,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -26061,7 +26835,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -26105,7 +26879,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -26352,7 +27132,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -26431,7 +27217,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -26475,7 +27261,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -26726,7 +27518,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -26804,7 +27602,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "fc782cdf485c781fac48118e9d24d10f7d9e469a170d2d97e6c3ac166b5b2fe8"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -26854,7 +27652,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -27104,7 +27908,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -27182,7 +27992,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "fc782cdf485c781fac48118e9d24d10f7d9e469a170d2d97e6c3ac166b5b2fe8"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -27232,7 +28042,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -27482,7 +28298,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -27560,7 +28382,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "fc782cdf485c781fac48118e9d24d10f7d9e469a170d2d97e6c3ac166b5b2fe8"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -27610,7 +28432,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -27860,7 +28688,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -27938,7 +28772,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "3549c3ef41477ea956e8bbda8cb6dadbf39285b049ec771c948de9f72260f0ff"
+          "sha256": "47ddc89aa619badf8a4aa8bff3689fd047b453b8d73190bc6b5306cefd3caa42"
         },
         "raw.ndjson": {
           "records": 0,
@@ -27988,7 +28822,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -28238,7 +29078,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -28316,7 +29162,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "3549c3ef41477ea956e8bbda8cb6dadbf39285b049ec771c948de9f72260f0ff"
+          "sha256": "47ddc89aa619badf8a4aa8bff3689fd047b453b8d73190bc6b5306cefd3caa42"
         },
         "raw.ndjson": {
           "records": 0,
@@ -28366,7 +29212,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -28616,7 +29468,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -28694,7 +29552,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "3549c3ef41477ea956e8bbda8cb6dadbf39285b049ec771c948de9f72260f0ff"
+          "sha256": "47ddc89aa619badf8a4aa8bff3689fd047b453b8d73190bc6b5306cefd3caa42"
         },
         "raw.ndjson": {
           "records": 0,
@@ -28744,7 +29602,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -28990,7 +29854,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -29069,7 +29939,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -29113,7 +29983,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -29360,7 +30236,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -29439,7 +30321,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -29483,7 +30365,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -29730,7 +30618,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -29809,7 +30703,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "774df6e30e771b0a206881dfe6445f21fd58bcf7e5d3caf7d42720f15952c12e"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -29853,7 +30747,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -30104,7 +31004,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -30182,7 +31088,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "d81bc872bab934720a9e4f5f6d628767f5b45a934d6a69e9313484e7cead2599"
+          "sha256": "02e4bc1965c25161cf660671b71cc753b6ed5c3e7cf226755f4d2d9289b930d2"
         },
         "raw.ndjson": {
           "records": 8,
@@ -30232,7 +31138,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -30482,7 +31394,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -30560,7 +31478,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "d81bc872bab934720a9e4f5f6d628767f5b45a934d6a69e9313484e7cead2599"
+          "sha256": "02e4bc1965c25161cf660671b71cc753b6ed5c3e7cf226755f4d2d9289b930d2"
         },
         "raw.ndjson": {
           "records": 8,
@@ -30610,7 +31528,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -30860,7 +31784,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -30938,7 +31868,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "d81bc872bab934720a9e4f5f6d628767f5b45a934d6a69e9313484e7cead2599"
+          "sha256": "02e4bc1965c25161cf660671b71cc753b6ed5c3e7cf226755f4d2d9289b930d2"
         },
         "raw.ndjson": {
           "records": 8,
@@ -30988,7 +31918,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -31238,7 +32174,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -31316,7 +32258,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "716315f56e8a043472767460c505671762f59cd851a4150ba756e51dde59d468"
+          "sha256": "f6d26cf4588f0dde9ba61d439a51922523ea243d0c69238f10183eef9f42e9b3"
         },
         "raw.ndjson": {
           "records": 0,
@@ -31366,7 +32308,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -31616,7 +32564,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -31694,7 +32648,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "716315f56e8a043472767460c505671762f59cd851a4150ba756e51dde59d468"
+          "sha256": "f6d26cf4588f0dde9ba61d439a51922523ea243d0c69238f10183eef9f42e9b3"
         },
         "raw.ndjson": {
           "records": 0,
@@ -31744,7 +32698,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -31994,7 +32954,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
@@ -32072,7 +33038,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "716315f56e8a043472767460c505671762f59cd851a4150ba756e51dde59d468"
+          "sha256": "f6d26cf4588f0dde9ba61d439a51922523ea243d0c69238f10183eef9f42e9b3"
         },
         "raw.ndjson": {
           "records": 0,
@@ -32122,7 +33088,13 @@
         {
           "name": "proxyToClientResponse",
           "attrs": {
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "request_id": "req-\u003cid\u003e",
+            "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
             "status": "200"
           }
