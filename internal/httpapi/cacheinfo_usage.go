@@ -42,7 +42,8 @@ func tokenEstimatorUsageRecorder(ctx context.Context, requestID string, upstream
 		return nil
 	}
 	manager, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
-	if manager == nil {
+	lineageStore := requestLineageStoreFromContext(ctx)
+	if manager == nil && lineageStore == nil {
 		return nil
 	}
 	if bypass {

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -369,7 +370,8 @@ func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWr
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
 	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
-	w.Header().Set(headerProxyEstimatedInputTokens, strconv.Itoa(estimateCanonicalInputTokensWithContext(r.Context(), *canon)))
+	estimate := estimatorEstimateForContext(r.Context(), *canon)
+	w.Header().Set(headerProxyEstimatedInputTokens, formatEstimatedInputTokensHeader(r.Context(), *canon, estimate))
 	setProxyModelLimitContextHeader(w, provider, *canon)
 	w.Header().Set(headerProxyToUpstreamServiceTier, strings.TrimSpace(preview.UpstreamServiceTier))
 	if !canon.OmitMaxOutputTokens && canon.MaxOutputTokens != nil && *canon.MaxOutputTokens > 0 {
@@ -396,6 +398,19 @@ func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWr
 	setClaudeMetadataObservabilityHeaders(w, providerCfg, *canon)
 	setCacheRateHeaders(w, r, providerID)
 	return nil
+}
+
+func formatEstimatedInputTokensHeader(ctx context.Context, canon modelpkg.CanonicalRequest, estimate estimatorEstimate) string {
+	if estimate.Point <= 0 {
+		return "0"
+	}
+	if input, ok := tokenEstimatorObservationFromContext(ctx); ok && input.ConfirmedBaseline > 0 && input.IncrementalEstimateValid && input.IncrementalEstimate >= 0 {
+		return strconv.FormatInt(estimate.Point, 10) + " (" + strconv.FormatInt(input.ConfirmedBaseline, 10) + "+" + strconv.FormatInt(input.IncrementalEstimate, 10) + ")"
+	}
+	if estimate.Point > 0 {
+		return strconv.FormatInt(estimate.Point, 10)
+	}
+	return strconv.Itoa(estimateCanonicalInputTokens(canon))
 }
 
 func clientReasoningModeForRequest(r *http.Request, rawClientModel string, canon modelpkg.CanonicalRequest, provider config.ProviderConfig, providerCfg config.Config) string {

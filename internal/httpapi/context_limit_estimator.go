@@ -31,6 +31,7 @@ type tokenEstimatorObservationInput struct {
 	EndpointType             string
 	FinalUpstreamModel       string
 	BaseEstimate             int64
+	ConfirmedBaseline        int64
 	IncrementalEstimate      int64
 	IncrementalEstimateValid bool
 	Canon                    modelpkg.CanonicalRequest
@@ -55,6 +56,7 @@ type estimatorPrefixPoint struct {
 type estimatorCoordinate struct {
 	Version                string
 	WireContextFingerprint string
+	LineageWireFingerprint string
 	PrefixFingerprint      string
 	PrefixUnits            int64
 	StructuralUnits        int64
@@ -150,7 +152,7 @@ func buildEstimatorSnapshotForContext(providerID, endpointType string, canon mod
 		snap.InputItemCount = int64(len(canon.ResponseInputItems))
 	}
 
-	wireContext, wireUnits, wireFingerprintOK := buildEstimatorWireContext(providerID, endpointType, canon)
+	wireContext, lineageWireContext, wireUnits, wireFingerprintOK := buildEstimatorWireContextFingerprints(providerID, endpointType, canon)
 	snap.StaticUnits = wireUnits
 	snap.TextChars += wireUnits
 
@@ -165,6 +167,7 @@ func buildEstimatorSnapshotForContext(providerID, endpointType string, canon mod
 	coordinate := estimatorCoordinate{Version: estimatorCoordinateVersion}
 	if wireFingerprintOK {
 		coordinate.WireContextFingerprint = wireContext
+		coordinate.LineageWireFingerprint = lineageWireContext
 	}
 	var dynamicUnits int64
 	var structuralUnits int64
@@ -243,14 +246,16 @@ func buildEstimatorSnapshotForContext(providerID, endpointType string, canon mod
 }
 
 func buildEstimatorWireContext(providerID, endpointType string, canon modelpkg.CanonicalRequest) (string, int64, bool) {
+	fingerprint, _, units, ok := buildEstimatorWireContextFingerprints(providerID, endpointType, canon)
+	return fingerprint, units, ok
+}
+
+func buildEstimatorWireContextFingerprints(providerID, endpointType string, canon modelpkg.CanonicalRequest) (string, string, int64, bool) {
 	preservedTopLevelFields := canon.PreservedTopLevelFields
 	instructionParts := canon.InstructionParts
 	if endpointType == config.UpstreamEndpointTypeResponses {
 		prepared := upstream.PrepareResponsesInput(canon, len(canon.ResponseItemReferencesByCallID) > 0)
 		preservedTopLevelFields = mergeEstimatorWireFields(canon.PreservedTopLevelFields, prepared.PreservedTopLevelFields)
-		if len(canon.ResponseItemReferencesByCallID) > 0 {
-			delete(preservedTopLevelFields, "previous_response_id")
-		}
 		instructionParts = nil
 	}
 	wire := estimatorWireContext{
@@ -287,14 +292,30 @@ func buildEstimatorWireContext(providerID, endpointType string, canon modelpkg.C
 	}
 	encoded, err := json.Marshal(wire)
 	if err != nil {
-		return "", 0, false
+		return "", "", 0, false
 	}
 	payload := make([]byte, 0, len(estimatorCoordinateVersion)+1+len(encoded))
 	payload = append(payload, estimatorCoordinateVersion...)
 	payload = append(payload, 0)
 	payload = append(payload, encoded...)
 	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:]), int64(utf8.RuneCount(encoded)), true
+	lineageWire := wire
+	lineagePreservedTopLevelFields := mergeEstimatorWireFields(preservedTopLevelFields, nil)
+	delete(lineagePreservedTopLevelFields, "previous_response_id")
+	if len(lineagePreservedTopLevelFields) == 0 {
+		lineagePreservedTopLevelFields = nil
+	}
+	lineageWire.PreservedTopLevelFields = lineagePreservedTopLevelFields
+	lineageEncoded, err := json.Marshal(lineageWire)
+	if err != nil {
+		return "", "", 0, false
+	}
+	lineagePayload := make([]byte, 0, len(estimatorCoordinateVersion)+1+len(lineageEncoded))
+	lineagePayload = append(lineagePayload, estimatorCoordinateVersion...)
+	lineagePayload = append(lineagePayload, 0)
+	lineagePayload = append(lineagePayload, lineageEncoded...)
+	lineageSum := sha256.Sum256(lineagePayload)
+	return hex.EncodeToString(sum[:]), hex.EncodeToString(lineageSum[:]), int64(utf8.RuneCount(encoded)), true
 }
 
 func mergeEstimatorWireFields(base, extra map[string]any) map[string]any {
@@ -503,6 +524,7 @@ func withTokenEstimatorObservation(ctx context.Context, input tokenEstimatorObse
 	if input.BaseEstimate <= 0 {
 		input.BaseEstimate = input.Snapshot.BaseEstimate
 	}
+	input.applyLineageEstimate(ctx)
 	input.Estimate = estimateFromObservationInput(ctx, input)
 	input.Canon = modelpkg.CanonicalRequest{}
 	return context.WithValue(ctx, tokenEstimatorObservationKey, input)
@@ -547,9 +569,6 @@ func recordTokenEstimatorUsage(ctx context.Context, requestID string, usage usag
 		return nil
 	}
 	mgr, _ := ctx.Value(tokenEstimatorManagerKey).(*tokenestimator.Manager)
-	if mgr == nil {
-		return nil
-	}
 	input, _ := ctx.Value(tokenEstimatorObservationKey).(tokenEstimatorObservationInput)
 	if input.ProviderID == "" || input.FinalUpstreamModel == "" || usage.InputTokens <= 0 {
 		return nil
@@ -561,30 +580,47 @@ func recordTokenEstimatorUsage(ctx context.Context, requestID string, usage usag
 		input.Now = time.Now().UTC()
 	}
 	input.Usage = usage
-	if input.BaseEstimate > 0 {
+	var firstErr error
+	if mgr != nil && input.BaseEstimate > 0 {
 		if err := mgr.RecordObservation(requestID, buildTokenEstimatorObservation(input)); err != nil {
-			return err
+			firstErr = err
 		}
 	}
 	coordinate := input.Coordinate
-	if coordinate.WireContextFingerprint == "" || coordinate.PrefixFingerprint == "" {
-		return nil
+	if mgr != nil && coordinate.WireContextFingerprint != "" && coordinate.PrefixFingerprint != "" {
+		if err := mgr.RecordPrefixMeasurement(tokenestimator.BucketKey{
+			ProviderID:   input.ProviderID,
+			EndpointType: input.EndpointType,
+			Model:        input.FinalUpstreamModel,
+		}, tokenestimator.PrefixMeasurement{
+			Version:                tokenestimator.PrefixMeasurementVersion,
+			WireContextFingerprint: coordinate.WireContextFingerprint,
+			PrefixFingerprint:      coordinate.PrefixFingerprint,
+			PrefixUnits:            coordinate.PrefixUnits,
+			StructuralUnits:        coordinate.StructuralUnits,
+			LocalEstimate:          coordinate.LocalEstimate,
+			InputTokens:            usage.InputTokens,
+			CachedTokens:           usage.CachedTokens,
+			RecordedAt:             input.Now,
+		}); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return mgr.RecordPrefixMeasurement(tokenestimator.BucketKey{
-		ProviderID:   input.ProviderID,
-		EndpointType: input.EndpointType,
-		Model:        input.FinalUpstreamModel,
-	}, tokenestimator.PrefixMeasurement{
-		Version:                tokenestimator.PrefixMeasurementVersion,
-		WireContextFingerprint: coordinate.WireContextFingerprint,
-		PrefixFingerprint:      coordinate.PrefixFingerprint,
-		PrefixUnits:            coordinate.PrefixUnits,
-		StructuralUnits:        coordinate.StructuralUnits,
-		LocalEstimate:          coordinate.LocalEstimate,
-		InputTokens:            usage.InputTokens,
-		CachedTokens:           usage.CachedTokens,
-		RecordedAt:             input.Now,
-	})
+	if store := requestLineageStoreFromContext(ctx); store != nil {
+		if meta, ok := requestLineageFromContext(ctx); ok {
+			store.recordFinalizedEstimate(meta, requestLineageEstimatorFact{
+				Bucket:                 tokenestimator.BucketKey{ProviderID: input.ProviderID, EndpointType: input.EndpointType, Model: input.FinalUpstreamModel},
+				WireContextFingerprint: coordinate.WireContextFingerprint,
+				LineageWireFingerprint: coordinate.LineageWireFingerprint,
+				PrefixFingerprint:      coordinate.PrefixFingerprint,
+				PrefixUnits:            coordinate.PrefixUnits,
+				StructuralUnits:        coordinate.StructuralUnits,
+				LocalEstimate:          coordinate.LocalEstimate,
+				InputTokens:            usage.InputTokens,
+			})
+		}
+	}
+	return firstErr
 }
 
 func estimateCanonicalInputTokens(canon modelpkg.CanonicalRequest) int {
@@ -620,6 +656,10 @@ func estimateFromObservationInput(ctx context.Context, input tokenEstimatorObser
 		return estimatorEstimate{}
 	}
 	local := localEstimatorInterval(snapshot.StaticUnits+snapshot.DynamicUnits, estimatorStaticStructuralUnitsFromSnapshot(snapshot), snapshot.BaseEstimate)
+	if input.IncrementalEstimateValid && input.ConfirmedBaseline > 0 {
+		point := input.ConfirmedBaseline + input.IncrementalEstimate
+		return estimatorEstimate{Point: point, Lower: point, Upper: point, Source: "lineage-parent-plus-local-delta", Confidence: "uncertain"}
+	}
 	coordinate := input.Coordinate
 	if coordinate.WireContextFingerprint == "" || coordinate.PrefixFingerprint == "" {
 		return local
@@ -654,6 +694,46 @@ func estimateFromObservationInput(ctx context.Context, input tokenEstimatorObser
 		}
 	}
 	return local
+}
+
+func (input *tokenEstimatorObservationInput) applyLineageEstimate(ctx context.Context) {
+	if input == nil || ctx == nil {
+		return
+	}
+	meta, ok := requestLineageFromContext(ctx)
+	if !ok || meta.ParentNodeID == "" {
+		return
+	}
+	store := requestLineageStoreFromContext(ctx)
+	parent, ok := store.parentFinalizedEstimate(meta)
+	if !ok {
+		return
+	}
+	key := tokenestimator.BucketKey{ProviderID: input.ProviderID, EndpointType: input.EndpointType, Model: input.FinalUpstreamModel}
+	parentLineageWireFingerprint := parent.LineageWireFingerprint
+	if parentLineageWireFingerprint == "" {
+		parentLineageWireFingerprint = parent.WireContextFingerprint
+	}
+	if parent.Bucket != key || parentLineageWireFingerprint == "" || parentLineageWireFingerprint != input.Coordinate.LineageWireFingerprint {
+		return
+	}
+	delta := input.Coordinate.LocalEstimate
+	for _, point := range input.Coordinate.PrefixPoints {
+		if point.Fingerprint != parent.PrefixFingerprint {
+			continue
+		}
+		if point.PrefixUnits < parent.PrefixUnits || point.StructuralUnits < parent.StructuralUnits || point.LocalEstimate < parent.LocalEstimate {
+			return
+		}
+		delta = input.Coordinate.LocalEstimate - point.LocalEstimate
+		break
+	}
+	if delta < 0 {
+		return
+	}
+	input.ConfirmedBaseline = parent.InputTokens
+	input.IncrementalEstimate = delta
+	input.IncrementalEstimateValid = true
 }
 
 func estimatorStaticStructuralUnitsFromSnapshot(snap estimatorSnapshot) int64 {

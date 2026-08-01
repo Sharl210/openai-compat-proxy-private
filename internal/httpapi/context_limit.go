@@ -30,7 +30,7 @@ func writeContextLimitExceededIfNeeded(ctx context.Context, w http.ResponseWrite
 		return false
 	}
 	estimate := estimatorEstimateForContext(ctx, canon)
-	w.Header().Set(headerProxyEstimatedInputTokens, strconv.FormatInt(estimate.Point, 10))
+	w.Header().Set(headerProxyEstimatedInputTokens, formatEstimatedInputTokensHeader(ctx, canon, estimate))
 	if !estimateAllowsLocalContextBlock(estimate, int64(limit)) {
 		return false
 	}
