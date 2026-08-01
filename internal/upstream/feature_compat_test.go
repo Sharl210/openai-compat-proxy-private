@@ -116,6 +116,19 @@ func TestCheckResponsesFeatureCompatibilityAllowsSummaryOnlyReasoningFromProduct
 	}
 }
 
+func TestCheckResponsesFeatureCompatibilityAllowsPhaseMetadataOnRepresentableItems(t *testing.T) {
+	req := model.CanonicalRequest{ResponseInputItems: []map[string]any{
+		{"type": "message", "phase": "commentary"},
+		{"type": "function_call", "phase": "analysis"},
+		{"type": "function_call_output", "phase": "analysis"},
+	}}
+	for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		if err := CheckResponsesFeatureCompatibility(req, endpoint); err != nil {
+			t.Fatalf("%s upstream should ignore phase metadata on representable items: %v", endpoint, err)
+		}
+	}
+}
+
 func TestCheckResponsesFeatureCompatibilityRejectsNonRepresentablePersistedReasoning(t *testing.T) {
 	for _, testCase := range []struct {
 		name string

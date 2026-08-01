@@ -100,7 +100,7 @@ func hasUnsupportedPersistedResponsesItem(items []map[string]any, upstreamEndpoi
 			}
 			continue
 		}
-		if _, ok := item["phase"]; ok {
+		if _, ok := item["phase"]; ok && !isRepresentableResponsesInputItem(itemType) {
 			return true
 		}
 		if _, encrypted := item["encrypted_content"]; encrypted {
@@ -108,6 +108,15 @@ func hasUnsupportedPersistedResponsesItem(items []map[string]any, upstreamEndpoi
 		}
 	}
 	return false
+}
+
+func isRepresentableResponsesInputItem(itemType string) bool {
+	switch itemType {
+	case "message", "function_call", "function_call_output":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasRepresentablePersistedReasoningItem(item map[string]any, upstreamEndpointType string) bool {

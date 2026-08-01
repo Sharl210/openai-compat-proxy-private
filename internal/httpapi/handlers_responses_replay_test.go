@@ -131,6 +131,43 @@ func TestResponsesCompactionLikeInputUsesNormalResponsesPath(t *testing.T) {
 	}
 }
 
+func TestResponsesRouteAllowsPhaseMetadataOnRepresentableMessageForNonResponsesUpstream(t *testing.T) {
+	for _, endpointType := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		t.Run(endpointType, func(t *testing.T) {
+			upstreamHits := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamHits++
+				w.Header().Set("Content-Type", "application/json")
+				if endpointType == config.UpstreamEndpointTypeAnthropic {
+					_, _ = w.Write([]byte(`{"id":"msg_phase","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"id":"chat_phase","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+			}))
+			defer upstream.Close()
+
+			cfg := testResponsesConfigWithEndpoint(upstream.URL, endpointType)
+			cfg.DownstreamNonStreamStrategy = config.DownstreamNonStreamStrategyUpstreamNonStream
+			cfg.Providers[0].SupportsModels = false
+			cfg.Providers[0].ManualModels = []string{"gpt-5"}
+			server := NewServer(cfg)
+			defer server.Close()
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+				"model":"gpt-5",
+				"input":[{"type":"message","role":"user","phase":"commentary","content":[{"type":"input_text","text":"hello"}]}]
+			}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK || upstreamHits != 1 {
+				t.Fatalf("expected phase metadata on representable message to reach %s upstream, status=%d hits=%d body=%s", endpointType, rec.Code, upstreamHits, rec.Body.String())
+			}
+		})
+	}
+}
+
 func assertReplayUpstreamInputHasAdjacentToolShape(t *testing.T, request map[string]any) {
 	t.Helper()
 	input, _ := request["input"].([]any)
