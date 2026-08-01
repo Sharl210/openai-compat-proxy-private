@@ -176,7 +176,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -255,7 +254,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -307,7 +306,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -564,7 +562,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -643,7 +640,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -695,7 +692,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -952,7 +948,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -1031,7 +1026,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -1083,7 +1078,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -1346,7 +1340,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -1425,7 +1418,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f0a0b8447bedce11e9a6c40619418d79858ac16d2b17699122563a01e3b85e2c"
+          "sha256": "df892a9093a48500abb0798884d16afc44f02fb9355a35a860f896196d44c989"
         },
         "raw.ndjson": {
           "records": 10,
@@ -1483,7 +1476,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -1746,7 +1738,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -1825,7 +1816,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f0a0b8447bedce11e9a6c40619418d79858ac16d2b17699122563a01e3b85e2c"
+          "sha256": "df892a9093a48500abb0798884d16afc44f02fb9355a35a860f896196d44c989"
         },
         "raw.ndjson": {
           "records": 10,
@@ -1883,7 +1874,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -2146,7 +2136,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -2225,7 +2214,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "f0a0b8447bedce11e9a6c40619418d79858ac16d2b17699122563a01e3b85e2c"
+          "sha256": "df892a9093a48500abb0798884d16afc44f02fb9355a35a860f896196d44c989"
         },
         "raw.ndjson": {
           "records": 10,
@@ -2283,7 +2272,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -2546,7 +2534,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -2625,7 +2612,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d52785270df23457b7dc940644f205c57ff5ed00d20239fed17d463b38016185"
+          "sha256": "59f619a85b9a0a5b8c6393e55d0efcf4c708b53e06e40454b21eff416923acd2"
         },
         "raw.ndjson": {
           "records": 0,
@@ -2683,7 +2670,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -2946,7 +2932,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -3025,7 +3010,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d52785270df23457b7dc940644f205c57ff5ed00d20239fed17d463b38016185"
+          "sha256": "59f619a85b9a0a5b8c6393e55d0efcf4c708b53e06e40454b21eff416923acd2"
         },
         "raw.ndjson": {
           "records": 0,
@@ -3083,7 +3068,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -3346,7 +3330,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -3425,7 +3408,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d52785270df23457b7dc940644f205c57ff5ed00d20239fed17d463b38016185"
+          "sha256": "59f619a85b9a0a5b8c6393e55d0efcf4c708b53e06e40454b21eff416923acd2"
         },
         "raw.ndjson": {
           "records": 0,
@@ -3483,7 +3466,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -3740,7 +3722,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -3819,7 +3800,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -3871,7 +3852,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -4212,7 +4192,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -4291,7 +4270,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -4343,7 +4322,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -4684,7 +4662,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -4763,7 +4740,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -4815,7 +4792,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -5162,7 +5138,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -5241,7 +5216,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "037d35a1ae28e482f0e35d2a48521f5e3c70ed7d2e908b79e66db179c2f04d72"
+          "sha256": "66a4c0d49dadb01f8ec9c135ad562d03e73306dd91f48747a93bb19ec53f5c43"
         },
         "raw.ndjson": {
           "records": 6,
@@ -5299,7 +5274,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -5646,7 +5620,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -5725,7 +5698,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "037d35a1ae28e482f0e35d2a48521f5e3c70ed7d2e908b79e66db179c2f04d72"
+          "sha256": "66a4c0d49dadb01f8ec9c135ad562d03e73306dd91f48747a93bb19ec53f5c43"
         },
         "raw.ndjson": {
           "records": 6,
@@ -5783,7 +5756,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -6130,7 +6102,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -6209,7 +6180,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "037d35a1ae28e482f0e35d2a48521f5e3c70ed7d2e908b79e66db179c2f04d72"
+          "sha256": "66a4c0d49dadb01f8ec9c135ad562d03e73306dd91f48747a93bb19ec53f5c43"
         },
         "raw.ndjson": {
           "records": 6,
@@ -6267,7 +6238,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -6614,7 +6584,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -6693,7 +6662,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "e827d3881d9d7f1875d5e3104b9e3a77062ea3c20d2c921c6261fde1afe9ce28"
+          "sha256": "b4953e8782d49b583a5a366d7b2c7eda09894a7f9373335070c07169f3088052"
         },
         "raw.ndjson": {
           "records": 0,
@@ -6751,7 +6720,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -7098,7 +7066,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -7177,7 +7144,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "e827d3881d9d7f1875d5e3104b9e3a77062ea3c20d2c921c6261fde1afe9ce28"
+          "sha256": "b4953e8782d49b583a5a366d7b2c7eda09894a7f9373335070c07169f3088052"
         },
         "raw.ndjson": {
           "records": 0,
@@ -7235,7 +7202,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -7582,7 +7548,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -7661,7 +7626,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "e827d3881d9d7f1875d5e3104b9e3a77062ea3c20d2c921c6261fde1afe9ce28"
+          "sha256": "b4953e8782d49b583a5a366d7b2c7eda09894a7f9373335070c07169f3088052"
         },
         "raw.ndjson": {
           "records": 0,
@@ -7719,7 +7684,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -8060,7 +8024,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -8139,7 +8102,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -8191,7 +8154,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -8532,7 +8494,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -8611,7 +8572,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -8663,7 +8624,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -9004,7 +8964,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -9083,7 +9042,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -9135,7 +9094,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -9482,7 +9440,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -9561,7 +9518,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "af33616c2d3da08d7e35ec0a5e6ea20a4e6cd3e72a6f7c9265312983c389720f"
+          "sha256": "3bbe1f3a3d7d8aa3e28a23de1e0fe59022b3dfd3107563738b3dcd98eb446b69"
         },
         "raw.ndjson": {
           "records": 8,
@@ -9619,7 +9576,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -9966,7 +9922,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -10045,7 +10000,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "af33616c2d3da08d7e35ec0a5e6ea20a4e6cd3e72a6f7c9265312983c389720f"
+          "sha256": "3bbe1f3a3d7d8aa3e28a23de1e0fe59022b3dfd3107563738b3dcd98eb446b69"
         },
         "raw.ndjson": {
           "records": 8,
@@ -10103,7 +10058,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -10450,7 +10404,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -10529,7 +10482,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "af33616c2d3da08d7e35ec0a5e6ea20a4e6cd3e72a6f7c9265312983c389720f"
+          "sha256": "3bbe1f3a3d7d8aa3e28a23de1e0fe59022b3dfd3107563738b3dcd98eb446b69"
         },
         "raw.ndjson": {
           "records": 8,
@@ -10587,7 +10540,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -10934,7 +10886,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -11013,7 +10964,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "95f8c88dfc2362c7f49ddd61e594427f03b9a050849e5a1c1aea6f238408c02e"
+          "sha256": "3054f43808da8a1259050e56fec6e5d9656dc9312a1651d704d5184cac1a63b0"
         },
         "raw.ndjson": {
           "records": 0,
@@ -11071,7 +11022,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -11418,7 +11368,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -11497,7 +11446,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "95f8c88dfc2362c7f49ddd61e594427f03b9a050849e5a1c1aea6f238408c02e"
+          "sha256": "3054f43808da8a1259050e56fec6e5d9656dc9312a1651d704d5184cac1a63b0"
         },
         "raw.ndjson": {
           "records": 0,
@@ -11555,7 +11504,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -11902,7 +11850,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -11981,7 +11928,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "95f8c88dfc2362c7f49ddd61e594427f03b9a050849e5a1c1aea6f238408c02e"
+          "sha256": "3054f43808da8a1259050e56fec6e5d9656dc9312a1651d704d5184cac1a63b0"
         },
         "raw.ndjson": {
           "records": 0,
@@ -12039,7 +11986,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -12380,7 +12326,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -12459,7 +12404,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -12511,7 +12456,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -12768,7 +12712,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -12847,7 +12790,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -12899,7 +12842,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -13156,7 +13098,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -13235,7 +13176,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -13287,7 +13228,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -13548,7 +13488,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -13626,7 +13565,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "83d6c90e69dd00008ed82d37fc218a91295829753a4885dbe0fad590c3bdcf72"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 10,
@@ -13684,7 +13623,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -13944,7 +13882,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -14022,7 +13959,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "83d6c90e69dd00008ed82d37fc218a91295829753a4885dbe0fad590c3bdcf72"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 10,
@@ -14080,7 +14017,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -14340,7 +14276,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -14418,7 +14353,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "83d6c90e69dd00008ed82d37fc218a91295829753a4885dbe0fad590c3bdcf72"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 10,
@@ -14476,7 +14411,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -14736,7 +14670,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -14814,7 +14747,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "ff8fe92882178193b406bf6793452d12866d24668e5933c8e63337f0c8819353"
+          "sha256": "b80d4d9b16002cbe5efd104d69da3b75023a8a55a7181e4d3c48f6ac2f4ffac1"
         },
         "raw.ndjson": {
           "records": 0,
@@ -14872,7 +14805,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -15132,7 +15064,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -15210,7 +15141,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "ff8fe92882178193b406bf6793452d12866d24668e5933c8e63337f0c8819353"
+          "sha256": "b80d4d9b16002cbe5efd104d69da3b75023a8a55a7181e4d3c48f6ac2f4ffac1"
         },
         "raw.ndjson": {
           "records": 0,
@@ -15268,7 +15199,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -15528,7 +15458,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -15606,7 +15535,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "ff8fe92882178193b406bf6793452d12866d24668e5933c8e63337f0c8819353"
+          "sha256": "b80d4d9b16002cbe5efd104d69da3b75023a8a55a7181e4d3c48f6ac2f4ffac1"
         },
         "raw.ndjson": {
           "records": 0,
@@ -15664,7 +15593,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -15920,7 +15848,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -15999,7 +15926,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -16051,7 +15978,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -16308,7 +16234,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -16387,7 +16312,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -16439,7 +16364,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -16696,7 +16620,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -16775,7 +16698,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -16827,7 +16750,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -17088,7 +17010,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -17166,7 +17087,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "83d6c90e69dd00008ed82d37fc218a91295829753a4885dbe0fad590c3bdcf72"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 6,
@@ -17224,7 +17145,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -17484,7 +17404,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -17562,7 +17481,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "83d6c90e69dd00008ed82d37fc218a91295829753a4885dbe0fad590c3bdcf72"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 6,
@@ -17620,7 +17539,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -17880,7 +17798,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -17958,7 +17875,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "83d6c90e69dd00008ed82d37fc218a91295829753a4885dbe0fad590c3bdcf72"
+          "sha256": "5a7915767453d3c42d9c3fc912da167567094b5a1096f9e1318aa58a6c60d601"
         },
         "raw.ndjson": {
           "records": 6,
@@ -18016,7 +17933,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -18276,7 +18192,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -18354,7 +18269,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "017f0e5bdd1c5d2b25ad97d2ff7833af04aa1381170ae048cf655956f8ad5379"
+          "sha256": "1b099f12c0fc2299b6e15f274465596446a5a68a56a1bba8ce8c36bbd87a084b"
         },
         "raw.ndjson": {
           "records": 0,
@@ -18412,7 +18327,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -18672,7 +18586,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -18750,7 +18663,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "017f0e5bdd1c5d2b25ad97d2ff7833af04aa1381170ae048cf655956f8ad5379"
+          "sha256": "1b099f12c0fc2299b6e15f274465596446a5a68a56a1bba8ce8c36bbd87a084b"
         },
         "raw.ndjson": {
           "records": 0,
@@ -18808,7 +18721,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -19068,7 +18980,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -19146,7 +19057,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "017f0e5bdd1c5d2b25ad97d2ff7833af04aa1381170ae048cf655956f8ad5379"
+          "sha256": "1b099f12c0fc2299b6e15f274465596446a5a68a56a1bba8ce8c36bbd87a084b"
         },
         "raw.ndjson": {
           "records": 0,
@@ -19204,7 +19115,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -19460,7 +19370,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -19539,7 +19448,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -19591,7 +19500,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -19848,7 +19756,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -19927,7 +19834,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -19979,7 +19886,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -20236,7 +20142,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -20315,7 +20220,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -20367,7 +20272,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -20628,7 +20532,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -20706,7 +20609,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "0a3bfde0d48972baf03cb60a85837c13c6ec9fbfed2f63fe57c96417d7e710ff"
+          "sha256": "8a2a02da3a602d9d9e0f557865dce9bc68303957d78f054cd7bbecaebfd36a29"
         },
         "raw.ndjson": {
           "records": 8,
@@ -20764,7 +20667,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -21024,7 +20926,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -21102,7 +21003,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "0a3bfde0d48972baf03cb60a85837c13c6ec9fbfed2f63fe57c96417d7e710ff"
+          "sha256": "8a2a02da3a602d9d9e0f557865dce9bc68303957d78f054cd7bbecaebfd36a29"
         },
         "raw.ndjson": {
           "records": 8,
@@ -21160,7 +21061,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -21420,7 +21320,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -21498,7 +21397,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "0a3bfde0d48972baf03cb60a85837c13c6ec9fbfed2f63fe57c96417d7e710ff"
+          "sha256": "8a2a02da3a602d9d9e0f557865dce9bc68303957d78f054cd7bbecaebfd36a29"
         },
         "raw.ndjson": {
           "records": 8,
@@ -21556,7 +21455,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -21816,7 +21714,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -21894,7 +21791,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d1e82fad20c71079b2d512180bff7ab90a308e29319c012448eb96308bf5b456"
+          "sha256": "5c4a4317fc99c5a6cc6f67cdd598b4dc3667e43d6a1bf45cce35f57e15cdbe36"
         },
         "raw.ndjson": {
           "records": 0,
@@ -21952,7 +21849,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -22212,7 +22108,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -22290,7 +22185,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d1e82fad20c71079b2d512180bff7ab90a308e29319c012448eb96308bf5b456"
+          "sha256": "5c4a4317fc99c5a6cc6f67cdd598b4dc3667e43d6a1bf45cce35f57e15cdbe36"
         },
         "raw.ndjson": {
           "records": 0,
@@ -22348,7 +22243,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -22608,7 +22502,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -22686,7 +22579,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d1e82fad20c71079b2d512180bff7ab90a308e29319c012448eb96308bf5b456"
+          "sha256": "5c4a4317fc99c5a6cc6f67cdd598b4dc3667e43d6a1bf45cce35f57e15cdbe36"
         },
         "raw.ndjson": {
           "records": 0,
@@ -22744,7 +22637,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -22998,7 +22890,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -23076,7 +22967,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -23128,7 +23019,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -23382,7 +23272,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -23460,7 +23349,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -23512,7 +23401,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -23766,7 +23654,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -23844,7 +23731,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -23896,7 +23783,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -24154,7 +24040,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -24231,7 +24116,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "1ff93ac7a03c20331bf8e2439308fca2197cb279f11eec7b35bb2d111c27274a"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -24289,7 +24174,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -24546,7 +24430,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -24623,7 +24506,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "1ff93ac7a03c20331bf8e2439308fca2197cb279f11eec7b35bb2d111c27274a"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -24681,7 +24564,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -24938,7 +24820,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -25015,7 +24896,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "1ff93ac7a03c20331bf8e2439308fca2197cb279f11eec7b35bb2d111c27274a"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 10,
@@ -25073,7 +24954,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -25330,7 +25210,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -25407,7 +25286,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "f08b2ceaae6cc159652eecdd848e29cb0397d0c630b4ebe0a2bde72e2fc68aef"
+          "sha256": "7f45c64630a171801b83b7baf98d0ddcaf0c25fd7687a5ad2a236e656879a31a"
         },
         "raw.ndjson": {
           "records": 0,
@@ -25465,7 +25344,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -25722,7 +25600,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -25799,7 +25676,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "f08b2ceaae6cc159652eecdd848e29cb0397d0c630b4ebe0a2bde72e2fc68aef"
+          "sha256": "7f45c64630a171801b83b7baf98d0ddcaf0c25fd7687a5ad2a236e656879a31a"
         },
         "raw.ndjson": {
           "records": 0,
@@ -25857,7 +25734,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -26114,7 +25990,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -26191,7 +26066,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "f08b2ceaae6cc159652eecdd848e29cb0397d0c630b4ebe0a2bde72e2fc68aef"
+          "sha256": "7f45c64630a171801b83b7baf98d0ddcaf0c25fd7687a5ad2a236e656879a31a"
         },
         "raw.ndjson": {
           "records": 0,
@@ -26249,7 +26124,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -26502,7 +26376,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -26580,7 +26453,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -26632,7 +26505,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -26886,7 +26758,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -26964,7 +26835,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -27016,7 +26887,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -27270,7 +27140,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -27348,7 +27217,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -27400,7 +27269,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -27658,7 +27526,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -27735,7 +27602,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "1ff93ac7a03c20331bf8e2439308fca2197cb279f11eec7b35bb2d111c27274a"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -27793,7 +27660,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -28050,7 +27916,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -28127,7 +27992,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "1ff93ac7a03c20331bf8e2439308fca2197cb279f11eec7b35bb2d111c27274a"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -28185,7 +28050,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -28442,7 +28306,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -28519,7 +28382,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "1ff93ac7a03c20331bf8e2439308fca2197cb279f11eec7b35bb2d111c27274a"
+          "sha256": "e89a11f586656ad80dfd8bd204a0defe8af3d72e1153c341a1cc75e029addb6d"
         },
         "raw.ndjson": {
           "records": 6,
@@ -28577,7 +28440,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -28834,7 +28696,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -28911,7 +28772,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "a23d19ff5c7b0cc3fc144b5bbfbf98072a2a1c0bacdb7ce6449e1d527f509743"
+          "sha256": "47ddc89aa619badf8a4aa8bff3689fd047b453b8d73190bc6b5306cefd3caa42"
         },
         "raw.ndjson": {
           "records": 0,
@@ -28969,7 +28830,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -29226,7 +29086,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -29303,7 +29162,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "a23d19ff5c7b0cc3fc144b5bbfbf98072a2a1c0bacdb7ce6449e1d527f509743"
+          "sha256": "47ddc89aa619badf8a4aa8bff3689fd047b453b8d73190bc6b5306cefd3caa42"
         },
         "raw.ndjson": {
           "records": 0,
@@ -29361,7 +29220,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -29618,7 +29476,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -29695,7 +29552,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "a23d19ff5c7b0cc3fc144b5bbfbf98072a2a1c0bacdb7ce6449e1d527f509743"
+          "sha256": "47ddc89aa619badf8a4aa8bff3689fd047b453b8d73190bc6b5306cefd3caa42"
         },
         "raw.ndjson": {
           "records": 0,
@@ -29753,7 +29610,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -30006,7 +29862,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -30084,7 +29939,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -30136,7 +29991,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -30390,7 +30244,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -30468,7 +30321,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -30520,7 +30373,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -30774,7 +30626,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -30852,7 +30703,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "8a6680ff93a7d21ee7d781b6179f4dd2e907047bf28247d1727bda1af05f1921"
+          "sha256": "0591c7b2223e45929656e405f7656fe8d85e175153cf47ddda5a497c58f9c07d"
         },
         "raw.ndjson": {
           "records": 8,
@@ -30904,7 +30755,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -31162,7 +31012,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -31239,7 +31088,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "806e4c698e21b54f25dad0e9949254d0a314dac5b40b61ebf0c28421a599f33a"
+          "sha256": "02e4bc1965c25161cf660671b71cc753b6ed5c3e7cf226755f4d2d9289b930d2"
         },
         "raw.ndjson": {
           "records": 8,
@@ -31297,7 +31146,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -31554,7 +31402,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -31631,7 +31478,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "806e4c698e21b54f25dad0e9949254d0a314dac5b40b61ebf0c28421a599f33a"
+          "sha256": "02e4bc1965c25161cf660671b71cc753b6ed5c3e7cf226755f4d2d9289b930d2"
         },
         "raw.ndjson": {
           "records": 8,
@@ -31689,7 +31536,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -31946,7 +31792,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -32023,7 +31868,7 @@
         },
         "final.ndjson": {
           "records": 1,
-          "sha256": "806e4c698e21b54f25dad0e9949254d0a314dac5b40b61ebf0c28421a599f33a"
+          "sha256": "02e4bc1965c25161cf660671b71cc753b6ed5c3e7cf226755f4d2d9289b930d2"
         },
         "raw.ndjson": {
           "records": 8,
@@ -32081,7 +31926,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -32338,7 +32182,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -32415,7 +32258,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d414a4d8825e199f8b9d7611e74f1ba770e4d771514bf91a1c1cd7e7c6155f8f"
+          "sha256": "f6d26cf4588f0dde9ba61d439a51922523ea243d0c69238f10183eef9f42e9b3"
         },
         "raw.ndjson": {
           "records": 0,
@@ -32473,7 +32316,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -32730,7 +32572,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -32807,7 +32648,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d414a4d8825e199f8b9d7611e74f1ba770e4d771514bf91a1c1cd7e7c6155f8f"
+          "sha256": "f6d26cf4588f0dde9ba61d439a51922523ea243d0c69238f10183eef9f42e9b3"
         },
         "raw.ndjson": {
           "records": 0,
@@ -32865,7 +32706,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -33122,7 +32962,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
@@ -33199,7 +33038,7 @@
         },
         "final.ndjson": {
           "records": 2,
-          "sha256": "d414a4d8825e199f8b9d7611e74f1ba770e4d771514bf91a1c1cd7e7c6155f8f"
+          "sha256": "f6d26cf4588f0dde9ba61d439a51922523ea243d0c69238f10183eef9f42e9b3"
         },
         "raw.ndjson": {
           "records": 0,
@@ -33257,7 +33096,6 @@
             "request_id": "req-\u003cid\u003e",
             "request_uid": "req-\u003cid\u003e",
             "session_id": "session-\u003cuuid\u003e",
-            "session_index_status": "persisted",
             "status": "200"
           }
         }
