@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"openai-compat-proxy/internal/logging"
 	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/tokenestimator"
 )
@@ -32,9 +31,6 @@ type requestLineage struct {
 	ParentRequestUID       string `json:"lineage_parent_request_uid,omitempty"`
 	ParentResponseID       string `json:"lineage_parent_response_id,omitempty"`
 	RootMode               string `json:"lineage_root_mode,omitempty"`
-	SessionConflict        bool   `json:"session_conflict,omitempty"`
-	SessionConflictWith    string `json:"session_conflict_with,omitempty"`
-	SessionIndexStatus     string `json:"session_index_status,omitempty"`
 }
 
 type requestLineageEstimatorFact struct {
@@ -71,7 +67,6 @@ type requestLineageStore struct {
 	conversationOrder    []string
 	conversationLimit    int
 	nodesPerConversation int
-	sessionIndex         *logging.SessionRequestIndex
 }
 
 // requestLineageCarrier carries the final request lineage metadata through the
@@ -79,11 +74,10 @@ type requestLineageStore struct {
 // session/conversation identity after request decoding without forcing the
 // middleware to parse or infer parentage up front.
 type requestLineageCarrier struct {
-	mu           sync.Mutex
-	requestUID   string
-	sessionID    string
-	conflictWith string
-	lineage      *requestLineage
+	mu         sync.Mutex
+	requestUID string
+	sessionID  string
+	lineage    *requestLineage
 }
 
 func (c *requestLineageCarrier) requestUIDValue() string {
@@ -95,16 +89,11 @@ func (c *requestLineageCarrier) requestUIDValue() string {
 	return strings.TrimSpace(c.requestUID)
 }
 
-func newRequestLineageStore(indices ...*logging.SessionRequestIndex) *requestLineageStore {
-	var sessionIndex *logging.SessionRequestIndex
-	if len(indices) > 0 {
-		sessionIndex = indices[0]
-	}
+func newRequestLineageStore() *requestLineageStore {
 	return &requestLineageStore{
 		conversations:        map[string]*requestLineageConversation{},
 		conversationLimit:    defaultRequestLineageConversationLimit,
 		nodesPerConversation: defaultRequestLineageNodesPerConversation,
-		sessionIndex:         sessionIndex,
 	}
 }
 
@@ -170,23 +159,6 @@ func (c *requestLineageCarrier) setSessionID(sessionID string) {
 	c.mu.Unlock()
 }
 
-func (c *requestLineageCarrier) setSessionConflict(sessionID string) {
-	if c == nil {
-		return
-	}
-	sessionID = normalizeProxySessionID(sessionID)
-	if sessionID == "" {
-		return
-	}
-	c.mu.Lock()
-	c.conflictWith = sessionID
-	if c.lineage != nil {
-		c.lineage.SessionConflict = true
-		c.lineage.SessionConflictWith = sessionID
-	}
-	c.mu.Unlock()
-}
-
 func (c *requestLineageCarrier) lineageSnapshot() (requestLineage, bool) {
 	if c == nil {
 		return requestLineage{}, false
@@ -203,22 +175,30 @@ func (c *requestLineageCarrier) ensureResolved(store *requestLineageStore, sessi
 	if c == nil || store == nil {
 		return requestLineage{}, false
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.lineage != nil {
-		return *c.lineage, true
-	}
 	sessionID = normalizeProxySessionID(firstString(sessionID, c.sessionID))
 	if sessionID == "" || strings.TrimSpace(c.requestUID) == "" {
 		return requestLineage{}, false
 	}
 	parentResponseID = strings.TrimSpace(parentResponseID)
+	c.mu.Lock()
+	if c.lineage != nil {
+		meta := *c.lineage
+		c.mu.Unlock()
+		return meta, true
+	}
 	c.sessionID = sessionID
-	meta := store.allocateWithConflict(sessionID, c.requestUID, parentResponseID, c.conflictWith)
+	c.mu.Unlock()
+	meta := store.allocate(sessionID, c.requestUID, parentResponseID)
 	if meta.NodeID == "" {
 		return requestLineage{}, false
 	}
-	c.lineage = &meta
+	c.mu.Lock()
+	if c.lineage == nil {
+		c.lineage = &meta
+	} else {
+		meta = *c.lineage
+	}
+	c.mu.Unlock()
 	return meta, true
 }
 
@@ -236,14 +216,9 @@ func finalizeRequestLineage(ctx context.Context, sessionID string) (requestLinea
 }
 
 func (s *requestLineageStore) allocate(conversationID, requestUID, parentResponseID string) requestLineage {
-	return s.allocateWithConflict(conversationID, requestUID, parentResponseID, "")
-}
-
-func (s *requestLineageStore) allocateWithConflict(conversationID, requestUID, parentResponseID, conflictWith string) requestLineage {
 	conversationID = normalizeProxySessionID(conversationID)
 	requestUID = strings.TrimSpace(requestUID)
 	parentResponseID = strings.TrimSpace(parentResponseID)
-	conflictWith = normalizeProxySessionID(conflictWith)
 	if conversationID == "" || requestUID == "" {
 		return requestLineage{}
 	}
@@ -265,26 +240,8 @@ func (s *requestLineageStore) allocateWithConflict(conversationID, requestUID, p
 	} else if !s.makeNodeRoomLocked(conversation) {
 		return requestLineage{}
 	}
-	seq := conversation.NextSeq + 1
-	indexStatus := ""
-	if s.sessionIndex != nil {
-		persistedSeq, err := s.sessionIndex.Reserve(conversationID, requestUID, requestUID)
-		if err != nil {
-			indexStatus = "degraded"
-			logging.Event("sessionIndexPersistenceDegraded", map[string]any{
-				"request_id":    requestUID,
-				"session_id":    conversationID,
-				"lookup_status": "degraded",
-				"lookup_error":  err.Error(),
-				"request_uid":   requestUID,
-				"route":         "lineage.allocate",
-			})
-		} else {
-			indexStatus = "persisted"
-			seq = persistedSeq
-		}
-	}
-	conversation.NextSeq = seq
+	conversation.NextSeq++
+	seq := conversation.NextSeq
 	meta := requestLineage{
 		ConversationID:         conversationID,
 		ConversationRequestSeq: seq,
@@ -293,9 +250,6 @@ func (s *requestLineageStore) allocateWithConflict(conversationID, requestUID, p
 		NodeID:                 fmt.Sprintf("n%06d", seq),
 		ParentResponseID:       parentResponseID,
 		RootMode:               requestLineageRootModeRoot,
-		SessionConflict:        conflictWith != "",
-		SessionConflictWith:    conflictWith,
-		SessionIndexStatus:     indexStatus,
 	}
 	if parentResponseID != "" {
 		meta.RootMode = requestLineageRootModeUnanchored
@@ -409,36 +363,6 @@ func (s *requestLineageStore) markCompleted(meta requestLineage) {
 		s.removeConversationLocked(meta.ConversationID)
 	}
 	s.pruneConversationsLocked()
-}
-
-func (s *requestLineageStore) recordSessionRequest(meta requestLineage, status int, route string) {
-	if s == nil || s.sessionIndex == nil || meta.ConversationID == "" || meta.NodeID == "" {
-		return
-	}
-	record := logging.SessionRequestRecord{
-		Event:                  "completed",
-		SessionID:              meta.ConversationID,
-		ConversationRequestSeq: meta.ConversationRequestSeq,
-		ConversationRequestID:  meta.ConversationRequestID,
-		RequestUID:             meta.RequestUID,
-		XRequestID:             meta.RequestUID,
-		Status:                 status,
-		Route:                  strings.TrimSpace(route),
-		SessionConflict:        meta.SessionConflict,
-		SessionConflictWith:    meta.SessionConflictWith,
-		LookupStatus:           meta.SessionIndexStatus,
-	}
-	if err := s.sessionIndex.Append(record); err != nil {
-		logging.Event("sessionIndexPersistenceDegraded", map[string]any{
-			"request_id":               meta.RequestUID,
-			"session_id":               meta.ConversationID,
-			"conversation_request_seq": meta.ConversationRequestSeq,
-			"conversation_request_id":  meta.ConversationRequestID,
-			"lookup_status":            "degraded",
-			"lookup_error":             err.Error(),
-			"route":                    strings.TrimSpace(route),
-		})
-	}
 }
 
 func (s *requestLineageStore) parentFinalizedEstimate(meta requestLineage) (requestLineageEstimatorFact, bool) {
@@ -622,13 +546,6 @@ func appendRequestLineageLogFields(attrs map[string]any, meta requestLineage) {
 	}
 	if meta.ParentResponseID != "" {
 		attrs["lineage_parent_response_id"] = meta.ParentResponseID
-	}
-	if meta.SessionConflict {
-		attrs["session_conflict"] = true
-		attrs["session_conflict_with"] = meta.SessionConflictWith
-	}
-	if meta.SessionIndexStatus != "" {
-		attrs["session_index_status"] = meta.SessionIndexStatus
 	}
 }
 

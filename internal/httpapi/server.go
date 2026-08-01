@@ -9,7 +9,6 @@ import (
 	"openai-compat-proxy/internal/cacheinfo"
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/errorsx"
-	"openai-compat-proxy/internal/logging"
 	"openai-compat-proxy/internal/tokenestimator"
 	"openai-compat-proxy/internal/upstream"
 )
@@ -33,23 +32,11 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager, tokenEstimatorMgr *tokenestimator.Manager) *Server {
-	var sessionIndex *logging.SessionRequestIndex
-	if store != nil {
-		if snapshot := store.Active(); snapshot != nil {
-			logRoot := strings.TrimSpace(snapshot.Config.LogFilePath)
-			if logRoot == "" && snapshot.Config.LogEnable {
-				logRoot = "logs"
-			}
-			if logRoot != "" {
-				sessionIndex = logging.NewSessionRequestIndex(logRoot)
-			}
-		}
-	}
 	srv := &Server{
 		store:              store,
 		CacheInfo:          cacheMgr,
 		TokenEstimator:     tokenEstimatorMgr,
-		lineage:            newRequestLineageStore(sessionIndex),
+		lineage:            newRequestLineageStore(),
 		upstreamTransports: upstream.NewTransportPool(),
 	}
 	if snapshot := store.Active(); snapshot != nil {
