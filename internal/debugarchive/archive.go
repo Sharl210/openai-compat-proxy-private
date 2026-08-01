@@ -13,11 +13,13 @@ import (
 
 type RawEventEnvelope struct {
 	EventName string          `json:"event_name"`
+	SessionID string          `json:"session_id,omitempty"`
 	Raw       json.RawMessage `json:"raw"`
 }
 
 type FinalSnapshot struct {
 	StatusCode int            `json:"status_code"`
+	SessionID  string         `json:"session_id,omitempty"`
 	Response   map[string]any `json:"response,omitempty"`
 	Error      map[string]any `json:"error,omitempty"`
 }
