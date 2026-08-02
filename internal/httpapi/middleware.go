@@ -47,7 +47,7 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
 			requestPayload := map[string]any{
 				"request_id":   id,
-				"session_id":   proxySessionIDFromRequest(r),
+				"session_id":   requestSessionIDFromRequest(r),
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
@@ -61,7 +61,7 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 		if shouldLog {
 			attrs := map[string]any{
 				"request_id":   id,
-				"session_id":   proxySessionIDFromRequest(r),
+				"session_id":   requestSessionIDFromRequest(r),
 				"method":       r.Method,
 				"path":         r.URL.Path,
 				"content_type": r.Header.Get("Content-Type"),
@@ -79,9 +79,16 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 			captureLimit:   archiveCaptureLimit(store),
 		}
 		next.ServeHTTP(cw, r)
+		meta, lineageOK := requestLineageFromRequest(r)
+		if !lineageOK && lineageStore != nil && carrier != nil {
+			meta, lineageOK = carrier.ensureResolved(lineageStore, requestSessionIDFromRequest(r), "")
+		}
+		if lineageOK && lineageStore != nil {
+			lineageStore.recordSessionRequest(meta, cw.status, r.URL.Path)
+		}
 		if archiveWriter != nil {
-			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status, SessionID: proxySessionIDFromRequest(r)}
-			if meta, ok := requestLineageFromRequest(r); ok {
+			snapshot := debugarchive.FinalSnapshot{StatusCode: cw.status, SessionID: requestSessionIDFromRequest(r)}
+			if lineageOK {
 				snapshot.RequestLineage = meta
 			}
 			if body := bytes.TrimSpace(cw.body.Bytes()); len(body) > 0 && !cw.truncated {
@@ -99,18 +106,16 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 		if shouldLog {
 			attrs := map[string]any{
 				"request_id": id,
-				"session_id": proxySessionIDFromRequest(r),
+				"session_id": requestSessionIDFromRequest(r),
 				"status":     cw.status,
 				"elapsed_ms": time.Since(started).Milliseconds(),
 			}
-			if meta, ok := requestLineageFromRequest(r); ok {
+			if lineageOK {
 				appendRequestLineageLogFields(attrs, meta)
-				if lineageStore != nil {
-					lineageStore.markCompleted(meta)
-				}
 			}
 			logging.Event("proxyToClientResponse", attrs)
-		} else if meta, ok := requestLineageFromRequest(r); ok && lineageStore != nil {
+		}
+		if lineageOK && lineageStore != nil {
 			lineageStore.markCompleted(meta)
 		}
 	})
