@@ -17,6 +17,7 @@
 | provider 内部统一走一种上游协议 | ✅ | `UPSTREAM_ENDPOINT_TYPE=responses/chat/anthropic`，代理层负责跨协议适配 |
 | 流式 / 非流式 | ✅ | 支持 SSE 转发、超时兜底、错误终态补发，也支持 `proxy_buffer` / `upstream_non_stream` |
 | 工具调用与多轮 tool result 回传 | ✅ | 三套入口都已实现；其中 `/v1/responses` 的高层语义覆盖最全面 |
+| 隐式会话与请求序号 | ✅ | 客户端未携带 `X-Proxy-Session-Id` 时，代理可基于同一路由、调用方和连续 canonical history 复用已有可复用输出状态的会话，并返回会话内递增请求序号 |
 | reasoning / thinking 兼容 | ✅ | 支持请求体参数、模型 suffix、Anthropic thinking、上游 reasoning 内容回写与流式拆分 |
 | Responses compact 端点 | ✅ | `/v1/responses/compact` 非流式 Responses 专用；`responses` 上游走远程 compact 透传，`chat` / `anthropic` 上游走代理本地 compact 回退；普通 `/v1/responses` SSE 流现可携带 compaction items |
 | 无 /v1 路由别名 | ✅ | `/responses`、`/chat/completions`、`/messages`、`/models`、`/responses/compact` 及其 `/{providerId}/...` 形式均可等效访问对应 `/v1/*` 入口；复用同一套 handler 与鉴权语义 |
@@ -304,7 +305,8 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 | 响应头 | 作用 | 示例 |
 |---|---|---|
 | `X-Request-Id` | 本次请求在代理层的唯一追踪 ID | `req-1743870000000000000-1` |
-| `X-Proxy-Session-Id` | 本次请求所属的代理会话 ID；客户端显式携带时原样延续，否则代理生成并在后续 `previous_response_id` history 恢复请求中继承 | `session-7f3a2c10-4d8e-4a11-9b20-6f12d8e4c901` |
+| `X-Proxy-Session-Id` | 本次请求所属的代理会话 ID；客户端显式携带时原样延续，未携带时代理会先尝试按连续 canonical history 复用已有可复用输出状态的隐式会话，无法唯一匹配时才生成新的会话 ID | `session-7f3a2c10-4d8e-4a11-9b20-6f12d8e4c901` |
+| `X-Proxy-Session-Request-Id` | 当前代理会话内的递增请求标识；每个会话从 `r000001` 开始，可用于把同一会话中的请求按顺序关联 | `r000002` |
 | `X-Cache-Info-Timezone` | 当前运行时使用的 `CACHE_INFO_TIMEZONE`，同时影响 Cache_Info 统计展示和版本时间响应头的格式化时区 | `Asia/Shanghai` |
 | `X-This-Usage-Tokens` | 本次非流式响应的 usage 摘要；上游没有返回可用 usage 时为空字符串。流式响应不会返回这个头，因为最终 usage 在 SSE 末尾才可确定，普通响应头无法事后补值 | `↑ 1,333,111(1,111,001 cached) \| ↓ 1,231` |
 | `X-Client-To-Proxy-Model` | 客户端发给代理的原始模型名，**保留 suffix**，方便确认 `model-high` 这类写法是否真的进到了代理层 | `gpt-5-high` |
@@ -344,6 +346,10 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 - 这组透明度响应头**不需要额外配置变量**，默认直接返回。
 - `X-Client-To-Proxy-*` 关注的是**客户端 → 代理**这段链路。
 - `X-Proxy-To-Upstream-*` 关注的是**代理 → 上游**这段链路。
+- `X-Proxy-Session-Request-Id` 只在当前会话内保证顺序；`X-Request-Id` 仍是跨会话的全局请求追踪 ID。
+- 客户端显式发送 `X-Proxy-Session-Id` 时，显式会话优先于隐式历史匹配；代理不会因为 `/models` 展示集合缺少某个模型而拒绝或取消会话复用。
+- 未携带会话头的请求会按当前 canonical route、调用方身份和已解析的消息或 Responses input history 查找唯一匹配。只有上一次请求已经产生可复用的下游输出，且历史能形成可识别连续关系时，后续请求才会继承同一 `X-Proxy-Session-Id`；如果该请求最终失败，代理会在结束时撤销后续复用资格；历史不连续或多个会话同时匹配时不会强行复用。
+- Responses 请求优先按 canonical `input` item history 匹配；Chat / Anthropic 请求按 canonical message history 匹配。模型、提示词文件和其它不属于会话历史的请求字段不会单独构成隐式会话匹配条件。
 - 服务层级和 reasoning 透明度响应头在没有值时也会保留为空字符串，便于客户端区分“头不存在”和“本次请求未设置对应链路参数”。
 - Claude metadata 三个透明度响应头只在有效伪装目标为 `claude`、上游协议为 `anthropic`，且本次请求没有被代理层提前拦截、会实际向上游请求体注入 `metadata.user_id` 时填值；它们展示的是代理最终装配到上游请求体里的值，不区分这些值来自用户显式配置还是 provider ID 默认派生。
 - `X-Client-To-Proxy-Reasoning-Parameters` 是客户端侧的**主信息**；它展示的是客户端协议视角下、经过本地优先级解析后的参数组。
@@ -660,7 +666,7 @@ tools prompt
   - `raw.ndjson`
   - `canonical.ndjson`
   - `final.ndjson`
-  - 上述归档与对应结构化日志都会保留 `session_id`，可用 `X-Proxy-Session-Id` 将同一会话的跨请求记录串联起来
+  - 上述归档与对应结构化日志都会保留 `session_id`、`conversation_request_seq` 和 `conversation_request_id`，可用 `X-Proxy-Session-Id` 与 `X-Proxy-Session-Request-Id` 将同一会话的跨请求记录按顺序串联起来
   - 当 Anthropic / Claude 流式上游在 `message_delta.usage` 中返回最终用量时，归档会额外保留一条 `canonical.ndjson` 的 `usage.update` 记录，并在 `raw.ndjson` 中保留原始 `message_delta` 帧；这只用于排查 `cache_read_input_tokens` / `cache_creation_input_tokens` 来源，不会作为下游 SSE 事件发给客户端
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
 - 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**

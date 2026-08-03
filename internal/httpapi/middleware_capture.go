@@ -2,21 +2,36 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/upstream"
 )
 
 type responseCaptureWriter struct {
 	http.ResponseWriter
-	status       int
-	body         bytes.Buffer
-	captureBody  bool
-	captureLimit int64
-	truncated    bool
+	status                         int
+	body                           bytes.Buffer
+	captureBody                    bool
+	captureLimit                   int64
+	truncated                      bool
+	onSuccessfulDownstreamOutput   func()
+	successfulDownstreamOutputOnce sync.Once
+	successfulDownstreamOutput     bool
+	finalDownstreamOutcome         downstreamOutcome
 }
+
+type downstreamOutcome uint8
+
+const (
+	downstreamOutcomeUnknown downstreamOutcome = iota
+	downstreamOutcomeReusable
+	downstreamOutcomeNotReusable
+)
 
 func (w *responseCaptureWriter) WriteHeader(status int) {
 	w.status = status
@@ -24,16 +39,193 @@ func (w *responseCaptureWriter) WriteHeader(status int) {
 }
 
 func (w *responseCaptureWriter) Write(data []byte) (int, error) {
-	if w.captureBody && !strings.HasPrefix(strings.ToLower(w.Header().Get("Content-Type")), "text/event-stream") {
+	isEventStream := strings.HasPrefix(strings.ToLower(w.Header().Get("Content-Type")), "text/event-stream")
+	if w.captureBody && !isEventStream {
 		w.capture(data)
 	}
-	return w.ResponseWriter.Write(data)
+	n, err := w.ResponseWriter.Write(data)
+	if !isEventStream && err == nil && n > 0 && responseCaptureStatusAllowsReuse(w.status) {
+		w.markSuccessfulDownstreamOutput()
+	}
+	return n, err
 }
 
 func (w *responseCaptureWriter) Flush() {
 	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func (w *responseCaptureWriter) markSuccessfulDownstreamOutput() {
+	if w == nil {
+		return
+	}
+	w.successfulDownstreamOutput = true
+	w.successfulDownstreamOutputOnce.Do(func() {
+		if w.onSuccessfulDownstreamOutput != nil {
+			w.onSuccessfulDownstreamOutput()
+		}
+	})
+}
+
+func (w *responseCaptureWriter) hasSuccessfulDownstreamOutput() bool {
+	return w != nil && w.successfulDownstreamOutput
+}
+
+func (w *responseCaptureWriter) markFinalDownstreamOutcome(reusable bool) {
+	if w == nil {
+		return
+	}
+	if reusable {
+		w.finalDownstreamOutcome = downstreamOutcomeReusable
+		return
+	}
+	w.finalDownstreamOutcome = downstreamOutcomeNotReusable
+}
+
+func (w *responseCaptureWriter) finalDownstreamReuseDecision() (bool, bool) {
+	if w == nil {
+		return false, false
+	}
+	switch w.finalDownstreamOutcome {
+	case downstreamOutcomeReusable:
+		return true, true
+	case downstreamOutcomeNotReusable:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func (w *responseCaptureWriter) isEventStream() bool {
+	return w != nil && strings.HasPrefix(strings.ToLower(w.Header().Get("Content-Type")), "text/event-stream")
+}
+
+type finalDownstreamOutcomeMarker interface {
+	markFinalDownstreamOutcome(reusable bool)
+}
+
+func markFinalDownstreamOutcome(w http.ResponseWriter, reusable bool) {
+	marker, ok := w.(finalDownstreamOutcomeMarker)
+	if ok {
+		marker.markFinalDownstreamOutcome(reusable)
+	}
+}
+
+func markTerminalDownstreamEvent(w http.ResponseWriter, event string) {
+	switch strings.TrimSpace(event) {
+	case "response.completed", "response.done":
+		markFinalDownstreamOutcome(w, true)
+	case "error", "response.failed", "response.incomplete":
+		markFinalDownstreamOutcome(w, false)
+	}
+}
+
+type successfulDownstreamOutputMarker interface {
+	markSuccessfulDownstreamOutput()
+}
+
+func markSuccessfulDownstreamOutput(w http.ResponseWriter) {
+	marker, ok := w.(successfulDownstreamOutputMarker)
+	if ok {
+		marker.markSuccessfulDownstreamOutput()
+	}
+}
+
+func markSuccessfulChatChunk(w http.ResponseWriter, delta map[string]any) {
+	if !commitsChatChunkOutput(delta) {
+		return
+	}
+	markSuccessfulDownstreamOutput(w)
+}
+
+func commitsChatChunkOutput(delta map[string]any) bool {
+	if len(delta) == 0 {
+		return false
+	}
+	if _, isError := delta["error"]; isError {
+		return false
+	}
+	if hasNonWhitespaceDownstreamValue(delta, "content", "reasoning_content", "refusal") {
+		return true
+	}
+	if toolCalls, ok := delta["tool_calls"]; ok {
+		switch calls := toolCalls.(type) {
+		case []any:
+			if len(calls) > 0 {
+				return true
+			}
+		case []map[string]any:
+			if len(calls) > 0 {
+				return true
+			}
+		}
+	}
+	functionCall, _ := delta["function_call"].(map[string]any)
+	return len(functionCall) > 0
+}
+
+func markSuccessfulDownstreamEvent(w http.ResponseWriter, event string, data map[string]any) {
+	if !commitsHTTPDownstreamOutput(event, data) {
+		return
+	}
+	markSuccessfulDownstreamOutput(w)
+}
+
+func markSuccessfulDownstreamRawEvent(w http.ResponseWriter, event string, payload []byte) {
+	var data map[string]any
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return
+	}
+	markSuccessfulDownstreamEvent(w, event, data)
+}
+
+func commitsHTTPDownstreamOutput(event string, data map[string]any) bool {
+	switch strings.TrimSpace(event) {
+	case "content_block_delta":
+		delta, _ := data["delta"].(map[string]any)
+		switch strings.TrimSpace(stringValue(delta["type"])) {
+		case "text_delta":
+			return hasNonWhitespaceDownstreamValue(delta, "text")
+		case "thinking_delta":
+			return hasNonWhitespaceDownstreamValue(delta, "thinking")
+		default:
+			return false
+		}
+	case "response.output_text.delta",
+		"response.output_text.done",
+		"response.refusal.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.reasoning.delta",
+		"response.reasoning_summary_text.delta",
+		"response.reasoning_summary_text.done",
+		"response.content_part.added",
+		"response.content_part.done",
+		"response.reasoning_summary_part.added",
+		"response.reasoning_summary_part.done",
+		"response.output_item.added",
+		"response.output_item.done":
+		return upstream.CommitsDownstreamOutput(upstream.Event{Event: event, Data: data})
+	case "response.refusal.done":
+		return hasNonWhitespaceDownstreamValue(data, "delta", "text", "refusal")
+	default:
+		return false
+	}
+}
+
+func hasNonWhitespaceDownstreamValue(data map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		value, _ := data[key].(string)
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func responseCaptureStatusAllowsReuse(status int) bool {
+	return (status == 0 || status >= http.StatusOK) && status < http.StatusMultipleChoices
 }
 
 func (w *responseCaptureWriter) capture(data []byte) {

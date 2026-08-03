@@ -413,7 +413,11 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return nil, false
 	}
-	canon.SessionID = proxySessionIDFromRequest(r)
+	sessionID := proxySessionIDFromRequest(r)
+	if previousResponseIDFromItems(canon.ResponseInputItems) == "" {
+		r, sessionID = resolveImplicitProxySessionID(r, w, newImplicitSessionHistory(canon.Messages, canon.ResponseInputItems))
+	}
+	canon.SessionID = sessionID
 	canon.ResponsesOpenAIBeta = r.Header.Get("OpenAI-Beta")
 	selectionEffort := clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false)
 	if selectionEffort != "" {
@@ -532,6 +536,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	meta, _ = ensureResolvedRequestLineage(r.Context(), canon.SessionID, previousResponseID)
 	applyCanonicalRequestLineage(&canon, meta)
 	setProxySessionRequestIDHeader(w, meta)
+	emitClientToProxyRequestLog(r)
 	var previousHistory []model.CanonicalMessage
 	if nonResponsesUpstream && shouldRestorePreviousConversation(canon.Messages) {
 		if previousResponseID != "" {

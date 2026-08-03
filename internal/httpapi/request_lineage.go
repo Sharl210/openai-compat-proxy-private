@@ -72,6 +72,7 @@ type requestLineageStore struct {
 	conversationLimit    int
 	nodesPerConversation int
 	sessionIndex         *logging.SessionRequestIndex
+	implicitSessions     *implicitSessionStore
 }
 
 // requestLineageCarrier carries the final request lineage metadata through the
@@ -105,6 +106,7 @@ func newRequestLineageStore(indices ...*logging.SessionRequestIndex) *requestLin
 		conversationLimit:    defaultRequestLineageConversationLimit,
 		nodesPerConversation: defaultRequestLineageNodesPerConversation,
 		sessionIndex:         sessionIndex,
+		implicitSessions:     newImplicitSessionStore(),
 	}
 }
 
@@ -386,9 +388,23 @@ func (s *requestLineageStore) recordFinalizedEstimate(meta requestLineage, fact 
 	node.FinalizedFact = &cloned
 }
 
+func (s *requestLineageStore) markReusable(meta requestLineage) {
+	if s == nil || meta.RequestUID == "" || s.implicitSessions == nil {
+		return
+	}
+	s.implicitSessions.markReusable(meta.RequestUID)
+}
+
 func (s *requestLineageStore) markCompleted(meta requestLineage) {
+	s.markFinished(meta, true)
+}
+
+func (s *requestLineageStore) markFinished(meta requestLineage, reusable bool) {
 	if s == nil || meta.ConversationID == "" || meta.NodeID == "" {
 		return
+	}
+	if s.implicitSessions != nil {
+		s.implicitSessions.markFinished(meta.RequestUID, reusable)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

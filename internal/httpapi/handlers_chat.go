@@ -26,6 +26,7 @@ func handleChat() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		r, sessionID = resolveImplicitProxySessionID(r, w, newImplicitSessionHistory(canon.Messages, nil))
 		selectionEffort := clientToProxyReasoningEffort(canon.Model, canon.Reasoning, false)
 		if selectionEffort != "" {
 			*r = *r.Clone(context.WithValue(r.Context(), routeProviderSelectionEffortKey, selectionEffort))
@@ -129,6 +130,7 @@ func handleChat() http.HandlerFunc {
 		meta, _ := ensureResolvedRequestLineage(r.Context(), sessionID, "")
 		applyCanonicalRequestLineage(&canon, meta)
 		setProxySessionRequestIDHeader(w, meta)
+		emitClientToProxyRequestLog(r)
 		canon.AuthMode = authModeForResolvedProviderUpstream(r, providerCfg, providerID)
 		r = r.Clone(withTokenEstimatorObservation(r.Context(), tokenEstimatorObservationInput{
 			ProviderID:         providerID,

@@ -169,6 +169,11 @@ func commitsDownstreamOutput(evt Event) bool {
 	}
 }
 
+// CommitsDownstreamOutput reports whether an event carries durable downstream output.
+func CommitsDownstreamOutput(evt Event) bool {
+	return commitsDownstreamOutput(evt)
+}
+
 func hasNonWhitespaceEventText(data map[string]any, keys ...string) bool {
 	for _, key := range keys {
 		if strings.TrimSpace(stringValue(data[key])) != "" {

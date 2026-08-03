@@ -56,6 +56,11 @@ func proxySessionIDFromRequest(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
+	if carrier := requestLineageCarrierFromContext(r.Context()); carrier != nil {
+		if sessionID := carrier.sessionIDValue(); sessionID != "" {
+			return sessionID
+		}
+	}
 	if sessionID, ok := r.Context().Value(proxySessionIDContextKey{}).(string); ok {
 		if normalized := normalizeProxySessionID(sessionID); normalized != "" {
 			return normalized

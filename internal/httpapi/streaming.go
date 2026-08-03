@@ -2416,6 +2416,8 @@ func (w *ResponsesEventWriter) WriteEvent(event string, data map[string]any) err
 	if w.flusher != nil {
 		w.flusher.Flush()
 	}
+	markSuccessfulDownstreamEvent(w.w, event, data)
+	markTerminalDownstreamEvent(w.w, event)
 	return nil
 }
 
@@ -2443,6 +2445,8 @@ func (w *ResponsesEventWriter) WriteSSERaw(event string, payload []byte) error {
 	if w.flusher != nil {
 		w.flusher.Flush()
 	}
+	markSuccessfulDownstreamRawEvent(w.w, event, payload)
+	markTerminalDownstreamEvent(w.w, event)
 	return nil
 }
 
@@ -2584,16 +2588,20 @@ func writeResponsesSSE(w http.ResponseWriter, flusher http.Flusher, events []ups
 		if flusher != nil {
 			flusher.Flush()
 		}
+		markSuccessfulDownstreamEvent(w, evt.Event, evt.Data)
+		markTerminalDownstreamEvent(w, evt.Event)
 	}
 	return nil
 }
 
 func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, requestID string, healthFlag string, message string) error {
+	markFinalDownstreamOutcome(w, false)
 	event := responsesTerminalFailureEvent(healthFlag)
+	data := responsesTerminalFailureData(event, requestID, healthFlag, message, nil)
 	if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
 		return err
 	}
-	payload, err := responseStreamPayload(event, responsesTerminalFailureData(event, requestID, healthFlag, message, nil))
+	payload, err := responseStreamPayload(event, data)
 	if err != nil {
 		return err
 	}
@@ -2603,6 +2611,8 @@ func writeResponsesTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	if flusher != nil {
 		flusher.Flush()
 	}
+	markSuccessfulDownstreamEvent(w, event, data)
+	markTerminalDownstreamEvent(w, event)
 	return nil
 }
 
@@ -3560,6 +3570,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
 			return err
 		}
+		markFinalDownstreamOutcome(w, true)
 	case "error", "response.failed", "response.incomplete":
 		state.terminalSeen = true
 		state.textTail.Discard()
@@ -3637,10 +3648,12 @@ func writeAnthropicSSEEvent(w http.ResponseWriter, flusher http.Flusher, event s
 	if flusher != nil {
 		flusher.Flush()
 	}
+	markSuccessfulDownstreamEvent(w, event, payload)
 	return nil
 }
 
 func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, requestID string, healthFlag string, message string, upstreamError map[string]any) error {
+	markFinalDownstreamOutcome(w, false)
 	healthFlag, message, upstreamError = normalizeContextOverflowTerminalFailure(healthFlag, message, upstreamError)
 	if state != nil {
 		if err := closeTextBlock(state, w, flusher); err != nil {
@@ -3664,7 +3677,11 @@ func writeAnthropicTerminalFailure(w http.ResponseWriter, flusher http.Flusher, 
 	}); err != nil {
 		return err
 	}
-	return writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+	if err := writeAnthropicSSEEvent(w, flusher, "message_stop", map[string]any{"type": "message_stop"}); err != nil {
+		return err
+	}
+	markFinalDownstreamOutcome(w, false)
+	return nil
 }
 
 func anthropicMessageStartMessage(state *anthropicStreamState) map[string]any {
@@ -4478,10 +4495,20 @@ func writeChatChunk(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	if flusher != nil {
 		flusher.Flush()
 	}
+	markSuccessfulChatChunk(w, delta)
+	if finishReason != "" {
+		markFinalDownstreamOutcome(w, finishReason != "error" && !hasChatChunkError(delta))
+	}
 	return nil
 }
 
+func hasChatChunkError(delta map[string]any) bool {
+	_, ok := delta["error"]
+	return ok
+}
+
 func writeChatTerminalFailure(w http.ResponseWriter, flusher http.Flusher, healthFlag string, message string, upstreamError map[string]any) error {
+	markFinalDownstreamOutcome(w, false)
 	healthFlag, message, upstreamError = normalizeContextOverflowTerminalFailure(healthFlag, message, upstreamError)
 	errObj := map[string]any{"health_flag": healthFlag, "message": message}
 	for key, value := range upstreamError {

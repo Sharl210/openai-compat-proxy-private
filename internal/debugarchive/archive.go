@@ -78,6 +78,10 @@ func (w *ArchiveWriter) WriteRequest(payload map[string]any) error {
 	return w.writeJSON(w.reqFile, payload)
 }
 
+func (w *ArchiveWriter) ReplaceRequest(payload map[string]any) error {
+	return w.replaceJSON(w.reqFile, payload)
+}
+
 func (w *ArchiveWriter) WriteRawEvent(event RawEventEnvelope) error {
 	return w.writeJSON(w.rawFile, event)
 }
@@ -101,6 +105,27 @@ func (w *ArchiveWriter) writeJSON(f *os.File, v any) error {
 	data = []byte(logging.RedactImageDataForLog(data))
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
+
+func (w *ArchiveWriter) replaceJSON(f *os.File, v any) error {
+	if f == nil {
+		return nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	data = []byte(logging.RedactImageDataForLog(data))
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return err
+	}
 	_, err = f.Write(append(data, '\n'))
 	return err
 }

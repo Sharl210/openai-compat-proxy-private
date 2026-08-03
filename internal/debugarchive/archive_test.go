@@ -77,6 +77,42 @@ func TestArchiveWriter_WriteRequest_SingleLineNDJSON(t *testing.T) {
 	}
 }
 
+func TestArchiveWriter_ReplaceRequest_RewritesSingleLineNDJSON(t *testing.T) {
+	tmp := t.TempDir()
+	writer := NewArchiveWriter(tmp, "req-replace-req")
+	if writer == nil {
+		t.Fatal("expected non-nil ArchiveWriter")
+	}
+	if err := writer.WriteRequest(map[string]any{"session_id": "session-initial"}); err != nil {
+		t.Fatalf("WriteRequest failed: %v", err)
+	}
+	if err := writer.ReplaceRequest(map[string]any{
+		"session_id":      "session-final",
+		"lineage_node_id": "n000001",
+	}); err != nil {
+		t.Fatalf("ReplaceRequest failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, "req-replace-req", "request.ndjson"))
+	if err != nil {
+		t.Fatalf("failed to read request.ndjson: %v", err)
+	}
+	lines := splitLines(string(data))
+	if len(lines) != 1 {
+		t.Fatalf("expected one request record after replacement, got %d", len(lines))
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &decoded); err != nil {
+		t.Fatalf("request.ndjson is not valid NDJSON: %v", err)
+	}
+	if decoded["session_id"] != "session-final" || decoded["lineage_node_id"] != "n000001" {
+		t.Fatalf("expected final request payload, got %#v", decoded)
+	}
+}
+
 func TestArchiveWriter_WriteRequest_AppendMultipleRequests(t *testing.T) {
 	tmp := t.TempDir()
 	writer := NewArchiveWriter(tmp, "req-multi-req")

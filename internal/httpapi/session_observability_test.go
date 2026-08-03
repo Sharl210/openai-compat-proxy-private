@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 
 	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/logging"
+	"openai-compat-proxy/internal/model"
 )
 
 func TestExplicitSessionRequestIDsAndPersistentRecords(t *testing.T) {
@@ -70,7 +73,7 @@ func TestExplicitSessionRequestIDsAndPersistentRecords(t *testing.T) {
 	}
 }
 
-func TestMissingSessionCreatesDistinctSessionsForChatAndAnthropic(t *testing.T) {
+func TestMissingSessionContinuesCanonicalHistoryForChatAndAnthropic(t *testing.T) {
 	t.Run("chat", func(t *testing.T) {
 		root := t.TempDir()
 		upstream := newSessionChatUpstream(t)
@@ -78,9 +81,9 @@ func TestMissingSessionCreatesDistinctSessionsForChatAndAnthropic(t *testing.T) 
 		server := NewServer(sessionObservabilityConfig(root, upstream.URL, config.UpstreamEndpointTypeChat, true, false, false))
 		defer server.Close()
 
-		first := sendSessionRequest(t, server, "/v1/chat/completions", `{"model":"gpt-5","messages":[{"role":"user","content":"one"}]}`, nil)
-		second := sendSessionRequest(t, server, "/v1/chat/completions", `{"model":"gpt-5","messages":[{"role":"user","content":"two"}]}`, nil)
-		assertDistinctGeneratedSessions(t, first, second)
+		first := sendSessionRequest(t, server, "/chat/completions", `{"model":"gpt-5","messages":[{"role":"user","content":"one"}]}`, nil)
+		second := sendSessionRequest(t, server, "/v1/chat/completions", `{"model":"gpt-5","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"ok"},{"role":"user","content":"two"}]}`, nil)
+		assertContinuedGeneratedSession(t, first, second)
 	})
 
 	t.Run("anthropic", func(t *testing.T) {
@@ -90,10 +93,120 @@ func TestMissingSessionCreatesDistinctSessionsForChatAndAnthropic(t *testing.T) 
 		server := NewServer(sessionObservabilityConfig(root, upstream.URL, config.UpstreamEndpointTypeAnthropic, false, true, false))
 		defer server.Close()
 
-		first := sendSessionRequest(t, server, "/v1/messages", `{"model":"gpt-5","max_tokens":64,"messages":[{"role":"user","content":"one"}]}`, map[string]string{"anthropic-version": "2023-06-01"})
-		second := sendSessionRequest(t, server, "/v1/messages", `{"model":"gpt-5","max_tokens":64,"messages":[{"role":"user","content":"two"}]}`, map[string]string{"anthropic-version": "2023-06-01"})
-		assertDistinctGeneratedSessions(t, first, second)
+		first := sendSessionRequest(t, server, "/messages", `{"model":"gpt-5","max_tokens":64,"messages":[{"role":"user","content":"one"}]}`, map[string]string{"anthropic-version": "2023-06-01"})
+		second := sendSessionRequest(t, server, "/v1/messages", `{"model":"gpt-5","max_tokens":64,"messages":[{"role":"user","content":"one"},{"role":"assistant","content":"ok"},{"role":"user","content":"two"}]}`, map[string]string{"anthropic-version": "2023-06-01"})
+		assertContinuedGeneratedSession(t, first, second)
 	})
+}
+
+func TestMissingSessionAccessLogUsesResolvedSessionAndLineage(t *testing.T) {
+	root := initMiddlewareTestLogger(t)
+	upstream := newSessionChatUpstream(t)
+	defer upstream.Close()
+	serverConfig := sessionObservabilityConfig(root, upstream.URL, config.UpstreamEndpointTypeChat, true, false, false)
+	serverConfig.Providers[0].UpstreamAPIKey = ""
+	server := NewServer(serverConfig)
+	defer server.Close()
+
+	first := sendSessionRequest(t, server, "/v1/chat/completions", `{"model":"gpt-5","messages":[{"role":"user","content":"one"}]}`, map[string]string{"X-Upstream-Authorization": "Bearer test-key"})
+	second := sendSessionRequest(t, server, "/v1/chat/completions", `{"model":"gpt-5","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"ok"},{"role":"user","content":"two"}]}`, nil)
+
+	sessionID := first.Header().Get(headerProxySessionID)
+	if sessionID == "" || second.Header().Get(headerProxySessionID) != sessionID {
+		t.Fatalf("expected both responses to use one generated session, first=%q second=%q", sessionID, second.Header().Get(headerProxySessionID))
+	}
+	for _, test := range []struct {
+		name      string
+		requestID string
+		sequence  string
+	}{
+		{name: "first", requestID: first.Header().Get("X-Request-Id"), sequence: "r000001"},
+		{name: "second", requestID: second.Header().Get("X-Request-Id"), sequence: "r000002"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assertClientToProxyRequestLog(t, root, test.requestID, sessionID, test.sequence)
+		})
+	}
+}
+
+func TestMissingSessionResponsesAccessLogUsesResolvedSessionAndLineage(t *testing.T) {
+	root := initMiddlewareTestLogger(t)
+	upstream := newSessionResponsesUpstream(t)
+	defer upstream.Close()
+	server := NewServer(sessionObservabilityConfig(root, upstream.URL, config.UpstreamEndpointTypeResponses, false, false, true))
+	defer server.Close()
+
+	first := sendSessionRequest(t, server, "/responses", `{"model":"gpt-5","input":[{"role":"user","content":"one"}]}`, nil)
+	second := sendSessionRequest(t, server, "/v1/responses", `{"model":"gpt-5","input":[{"role":"user","content":"one"},{"role":"assistant","content":[{"type":"output_text","text":"ok"}]},{"role":"user","content":"two"}]}`, nil)
+	assertContinuedGeneratedSession(t, first, second)
+	assertClientToProxyRequestLog(t, root, first.Header().Get("X-Request-Id"), first.Header().Get(headerProxySessionID), "r000001")
+	assertClientToProxyRequestLog(t, root, second.Header().Get("X-Request-Id"), second.Header().Get(headerProxySessionID), "r000002")
+}
+
+func TestMissingSessionFallbackAccessLogIsEmittedOnce(t *testing.T) {
+	root := initMiddlewareTestLogger(t)
+	lineageStore := newRequestLineageStore(logging.NewSessionRequestIndex(root))
+	priorHistory := []model.CanonicalMessage{{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "one"}}}}
+	lineageStore.implicitSessions.observe("prior-request", "stable-session", "/v1/chat/completions", "anonymous", priorHistory)
+	lineageStore.implicitSessions.markCompleted("prior-request")
+	handler := withRequestIDAndLineage(nil, lineageStore, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.Clone(withRequestLineageStore(r.Context(), lineageStore))
+		continuedHistory := append(append([]model.CanonicalMessage{}, priorHistory...), model.CanonicalMessage{
+			Role:  "assistant",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "ok"}},
+		}, model.CanonicalMessage{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "two"}},
+		})
+		r, sessionID := resolveImplicitProxySessionID(r, w, newImplicitSessionHistory(continuedHistory, nil))
+		if sessionID != "stable-session" {
+			t.Errorf("expected implicit handler resolution to use stable-session, got %q", sessionID)
+		}
+		if _, ok := ensureResolvedRequestLineage(r.Context(), sessionID, ""); !ok {
+			t.Error("expected fallback handler to resolve request lineage")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assertClientToProxyRequestLog(t, root, rec.Header().Get("X-Request-Id"), "stable-session", "r000001")
+}
+
+func TestMissingSessionContinuesCanonicalHistoryForResponses(t *testing.T) {
+	root := t.TempDir()
+	upstream := newSessionResponsesUpstream(t)
+	defer upstream.Close()
+	server := NewServer(sessionObservabilityConfig(root, upstream.URL, config.UpstreamEndpointTypeResponses, false, false, true))
+	defer server.Close()
+
+	first := sendSessionRequest(t, server, "/responses", `{"model":"gpt-5","input":[{"role":"user","content":"one"}]}`, nil)
+	second := sendSessionRequest(t, server, "/v1/responses", `{"model":"gpt-5","input":[{"role":"user","content":"one"},{"role":"assistant","content":[{"type":"output_text","text":"ok"}]},{"role":"user","content":"two"}]}`, nil)
+	assertContinuedGeneratedSession(t, first, second)
+}
+
+func TestMissingSessionContinuesResponsesHistoryAcrossToolRoundNormalization(t *testing.T) {
+	root := t.TempDir()
+	upstream := newSessionResponsesUpstream(t)
+	defer upstream.Close()
+	server := NewServer(sessionObservabilityConfig(root, upstream.URL, config.UpstreamEndpointTypeResponses, false, false, true))
+	defer server.Close()
+
+	first := sendSessionRequest(t, server, "/v1/responses", `{"model":"gpt-5","input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"use tools"}]},
+		{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"plan"}]},
+		{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{}"}
+	]}`, nil)
+	second := sendSessionRequest(t, server, "/responses", `{"model":"gpt-5","input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"use tools"}]},
+		{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"plan"}]},
+		{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{}"},
+		{"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"result"},
+		{"type":"function_call","id":"fc_2","call_id":"call_2","name":"lookup","arguments":"{}"},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+	]}`, nil)
+
+	assertContinuedGeneratedSession(t, first, second)
 }
 
 func TestResponsesPreviousResponseIDInheritsSessionAndExplicitSessionConflictIsRecorded(t *testing.T) {
@@ -290,18 +403,57 @@ func sendSessionRequest(t *testing.T, server *Server, path, body string, headers
 	return rec
 }
 
-func assertDistinctGeneratedSessions(t *testing.T, first, second *httptest.ResponseRecorder) {
+func assertContinuedGeneratedSession(t *testing.T, first, second *httptest.ResponseRecorder) {
 	t.Helper()
 	if first.Code != http.StatusOK || second.Code != http.StatusOK {
 		t.Fatalf("expected successful requests, first=%d second=%d", first.Code, second.Code)
 	}
 	firstSession := first.Header().Get(headerProxySessionID)
 	secondSession := second.Header().Get(headerProxySessionID)
-	if firstSession == "" || secondSession == "" || firstSession == secondSession {
-		t.Fatalf("expected distinct generated sessions, first=%q second=%q", firstSession, secondSession)
+	if firstSession == "" || secondSession == "" || firstSession != secondSession {
+		t.Fatalf("expected canonical history to continue one generated session, first=%q second=%q", firstSession, secondSession)
 	}
-	if first.Header().Get(headerProxySessionRequestID) != "r000001" || second.Header().Get(headerProxySessionRequestID) != "r000001" {
-		t.Fatalf("expected each generated session to start at r000001, first=%q second=%q", first.Header().Get(headerProxySessionRequestID), second.Header().Get(headerProxySessionRequestID))
+	if first.Header().Get(headerProxySessionRequestID) != "r000001" || second.Header().Get(headerProxySessionRequestID) != "r000002" {
+		t.Fatalf("expected continued generated session IDs r000001/r000002, first=%q second=%q", first.Header().Get(headerProxySessionRequestID), second.Header().Get(headerProxySessionRequestID))
+	}
+}
+
+func assertClientToProxyRequestLog(t *testing.T, logDir, requestID, sessionID, requestSequence string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(logDir, requestID+".txt"))
+	if err != nil {
+		t.Fatalf("read request log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	clientIndex := -1
+	responseIndex := -1
+	clientEventCount := 0
+	var clientEvent map[string]any
+	for index, line := range lines {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode log line %d: %v", index, err)
+		}
+		switch eventName, _ := event["event"].(string); eventName {
+		case "clientToProxyRequest":
+			clientEventCount++
+			clientIndex = index
+			clientEvent = event
+		case "proxyToClientResponse":
+			responseIndex = index
+		}
+	}
+	if clientEventCount != 1 || clientIndex < 0 || responseIndex < 0 || clientEvent == nil {
+		t.Fatalf("expected one client event and one response event, got %s", data)
+	}
+	if clientIndex >= responseIndex {
+		t.Fatalf("expected client event before response event, client=%d response=%d", clientIndex, responseIndex)
+	}
+	if got, _ := clientEvent["session_id"].(string); got != sessionID {
+		t.Fatalf("client event used session %q, expected %q", got, sessionID)
+	}
+	if got, _ := clientEvent["conversation_request_id"].(string); got != requestSequence {
+		t.Fatalf("client event used request sequence %q, expected %q", got, requestSequence)
 	}
 }
 

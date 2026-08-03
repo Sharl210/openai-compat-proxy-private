@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +20,58 @@ import (
 var requestCounter uint64
 
 const normalizationVersion = "v1"
+
+type clientToProxyRequestLogContextKey struct{}
+
+type clientToProxyRequestLogState struct {
+	once        sync.Once
+	requestID   string
+	method      string
+	path        string
+	contentType string
+	requestBody string
+}
+
+func withClientToProxyRequestLogState(ctx context.Context, state *clientToProxyRequestLogState) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if state == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, clientToProxyRequestLogContextKey{}, state)
+}
+
+func emitClientToProxyRequestLog(r *http.Request) {
+	if r == nil {
+		return
+	}
+	state, _ := r.Context().Value(clientToProxyRequestLogContextKey{}).(*clientToProxyRequestLogState)
+	if state == nil {
+		return
+	}
+	state.emit(r)
+}
+
+func (s *clientToProxyRequestLogState) emit(r *http.Request) {
+	if s == nil || r == nil {
+		return
+	}
+	s.once.Do(func() {
+		attrs := map[string]any{
+			"request_id":   s.requestID,
+			"session_id":   requestSessionIDFromRequest(r),
+			"method":       s.method,
+			"path":         s.path,
+			"content_type": s.contentType,
+			"request_body": truncateBody([]byte(s.requestBody), 512),
+		}
+		if meta, ok := requestLineageFromRequest(r); ok {
+			appendRequestLineageLogFields(attrs, meta)
+		}
+		logging.Event("clientToProxyRequest", attrs)
+	})
+}
 
 func withRequestID(store *config.RuntimeStore, next http.Handler) http.Handler {
 	return withRequestIDAndLineage(store, nil, next)
@@ -31,6 +85,14 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 		carrier := newRequestLineageCarrier(id, explicitProxySessionIDFromRequest(r))
 		r = r.Clone(withRequestLineageCarrier(r.Context(), carrier))
 		r, _ = ensureProxySessionID(r, w)
+		markSuccessfulDownstreamOutput := func() {
+			if lineageStore == nil || carrier == nil {
+				return
+			}
+			if meta, ok := carrier.lineageSnapshot(); ok {
+				lineageStore.markReusable(meta)
+			}
+		}
 		started := time.Now()
 		archiveWriter := archiveWriterForRequest(store, r)
 		shouldLog := shouldLogAPITraffic(r.URL.Path)
@@ -42,46 +104,37 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 		if recordedRequestBody == capturedRequestBody {
 			recordedRequestBody = logging.RedactImageDataForLog([]byte(capturedRequestBody))
 		}
+		if shouldLog {
+			r = r.WithContext(withClientToProxyRequestLogState(r.Context(), &clientToProxyRequestLogState{
+				requestID:   id,
+				method:      r.Method,
+				path:        r.URL.Path,
+				contentType: r.Header.Get("Content-Type"),
+				requestBody: recordedRequestBody,
+			}))
+		}
 		if archiveWriter != nil {
 			defer func() { _ = archiveWriter.Close() }()
 			r = r.WithContext(debugarchive.WithArchiveWriter(r.Context(), archiveWriter))
-			requestPayload := map[string]any{
-				"request_id":   id,
-				"session_id":   requestSessionIDFromRequest(r),
-				"method":       r.Method,
-				"path":         r.URL.Path,
-				"content_type": r.Header.Get("Content-Type"),
-				"request_body": recordedRequestBody,
-			}
-			if meta, ok := requestLineageFromRequest(r); ok {
-				appendRequestLineageLogFields(requestPayload, meta)
-			}
-			_ = archiveWriter.WriteRequest(requestPayload)
 		}
-		if shouldLog {
-			attrs := map[string]any{
-				"request_id":   id,
-				"session_id":   requestSessionIDFromRequest(r),
-				"method":       r.Method,
-				"path":         r.URL.Path,
-				"content_type": r.Header.Get("Content-Type"),
-				"request_body": truncateBody([]byte(recordedRequestBody), 512),
-			}
-			if meta, ok := requestLineageFromRequest(r); ok {
-				appendRequestLineageLogFields(attrs, meta)
-			}
-			logging.Event("clientToProxyRequest", attrs)
+		if archiveWriter != nil {
+			_ = archiveWriter.WriteRequest(requestArchivePayload(id, r, recordedRequestBody))
 		}
 		cw := &responseCaptureWriter{
-			ResponseWriter: w,
-			status:         http.StatusOK,
-			captureBody:    archiveWriter != nil,
-			captureLimit:   archiveCaptureLimit(store),
+			ResponseWriter:               w,
+			status:                       http.StatusOK,
+			captureBody:                  archiveWriter != nil,
+			captureLimit:                 archiveCaptureLimit(store),
+			onSuccessfulDownstreamOutput: markSuccessfulDownstreamOutput,
 		}
 		next.ServeHTTP(cw, r)
 		meta, lineageOK := requestLineageFromRequest(r)
 		if !lineageOK && lineageStore != nil && carrier != nil {
 			meta, lineageOK = carrier.ensureResolved(lineageStore, requestSessionIDFromRequest(r), "")
+		}
+		emitClientToProxyRequestLog(r)
+		if archiveWriter != nil {
+			_ = archiveWriter.ReplaceRequest(requestArchivePayload(id, r, recordedRequestBody))
 		}
 		if lineageOK && lineageStore != nil {
 			lineageStore.recordSessionRequest(meta, cw.status, r.URL.Path)
@@ -116,9 +169,32 @@ func withRequestIDAndLineage(store *config.RuntimeStore, lineageStore *requestLi
 			logging.Event("proxyToClientResponse", attrs)
 		}
 		if lineageOK && lineageStore != nil {
-			lineageStore.markCompleted(meta)
+			reusable, finalOutcomeKnown := cw.finalDownstreamReuseDecision()
+			if !finalOutcomeKnown {
+				if cw.isEventStream() {
+					reusable = false
+				} else {
+					reusable = cw.hasSuccessfulDownstreamOutput()
+				}
+			}
+			lineageStore.markFinished(meta, reusable)
 		}
 	})
+}
+
+func requestArchivePayload(id string, r *http.Request, recordedRequestBody string) map[string]any {
+	payload := map[string]any{
+		"request_id":   id,
+		"session_id":   requestSessionIDFromRequest(r),
+		"method":       r.Method,
+		"path":         r.URL.Path,
+		"content_type": r.Header.Get("Content-Type"),
+		"request_body": recordedRequestBody,
+	}
+	if meta, ok := requestLineageFromRequest(r); ok {
+		appendRequestLineageLogFields(payload, meta)
+	}
+	return payload
 }
 
 func shouldLogAPITraffic(path string) bool {

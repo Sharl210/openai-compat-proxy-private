@@ -140,11 +140,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -263,7 +270,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -271,11 +278,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -528,11 +542,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -651,7 +672,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -659,11 +680,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -916,11 +944,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -1039,7 +1074,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -1047,11 +1082,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -1304,11 +1346,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -1433,7 +1482,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -1441,11 +1490,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -1704,11 +1760,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -1833,7 +1896,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -1841,11 +1904,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -2104,11 +2174,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -2233,7 +2310,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -2241,11 +2318,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -2504,11 +2588,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -2633,7 +2724,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -2641,11 +2732,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -2904,11 +3002,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -3033,7 +3138,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -3041,11 +3146,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -3304,11 +3416,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -3433,7 +3552,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -3441,11 +3560,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -3704,11 +3830,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -3827,7 +3960,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -3835,11 +3968,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -4176,11 +4316,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -4299,7 +4446,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -4307,11 +4454,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -4648,11 +4802,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -4771,7 +4932,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -4779,11 +4940,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -5120,11 +5288,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -5249,7 +5424,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -5257,11 +5432,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -5604,11 +5786,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -5733,7 +5922,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -5741,11 +5930,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -6088,11 +6284,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -6217,7 +6420,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -6225,11 +6428,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -6572,11 +6782,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -6701,7 +6918,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -6709,11 +6926,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -7056,11 +7280,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -7185,7 +7416,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -7193,11 +7424,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -7540,11 +7778,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -7669,7 +7914,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -7677,11 +7922,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -8024,11 +8276,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -8147,7 +8406,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -8155,11 +8414,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -8496,11 +8762,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -8619,7 +8892,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -8627,11 +8900,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -8968,11 +9248,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -9091,7 +9378,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "334f168d789be76481915aad0fbd38a474691153c5de80ddff6f2217032208db"
+          "sha256": "adb09090340c531dee0645558d35af5610805a5755fd252d0d825a63ba3529f3"
         }
       },
       "log_events": [
@@ -9099,11 +9386,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -9440,11 +9734,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -9569,7 +9870,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -9577,11 +9878,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -9924,11 +10232,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -10053,7 +10368,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -10061,11 +10376,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -10408,11 +10730,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -10537,7 +10866,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -10545,11 +10874,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -10892,11 +11228,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -11021,7 +11364,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -11029,11 +11372,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -11376,11 +11726,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -11505,7 +11862,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -11513,11 +11870,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -11860,11 +12224,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"model\":\"perf-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"deterministic fixture\"},{\"type\":\"input_image\",\"image_url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -11989,7 +12360,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d20fbbdb00d2a7512917fd3b05c7a9f55086d1398ec3c6dd4beac1a40b746da2"
+          "sha256": "9d408510e37a6ee421fce700a706f7def844f49c54a277a5483e58cedd8e7ab5"
         }
       },
       "log_events": [
@@ -11997,11 +12368,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/responses",
             "request_body": "{\"input\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"input_text\"},{\"image_url\":\"image\",\"type\":\"input_image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -12344,11 +12722,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -12467,7 +12852,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -12475,11 +12860,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -12732,11 +13124,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -12855,7 +13254,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -12863,11 +13262,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -13120,11 +13526,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -13243,7 +13656,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -13251,11 +13664,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -13506,11 +13926,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -13634,7 +14061,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -13642,11 +14069,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -13902,11 +14336,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -14030,7 +14471,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -14038,11 +14479,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -14298,11 +14746,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -14426,7 +14881,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -14434,11 +14889,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -14694,11 +15156,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -14822,7 +15291,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -14830,11 +15299,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -15090,11 +15566,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -15218,7 +15701,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -15226,11 +15709,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -15486,11 +15976,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -15614,7 +16111,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -15622,11 +16119,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -15884,11 +16388,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -16007,7 +16518,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -16015,11 +16526,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -16272,11 +16790,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -16395,7 +16920,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -16403,11 +16928,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -16660,11 +17192,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -16783,7 +17322,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -16791,11 +17330,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -17046,11 +17592,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -17174,7 +17727,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -17182,11 +17735,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -17442,11 +18002,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -17570,7 +18137,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -17578,11 +18145,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -17838,11 +18412,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -17966,7 +18547,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -17974,11 +18555,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -18234,11 +18822,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -18362,7 +18957,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -18370,11 +18965,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -18630,11 +19232,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -18758,7 +19367,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -18766,11 +19375,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -19026,11 +19642,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -19154,7 +19777,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -19162,11 +19785,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -19424,11 +20054,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -19547,7 +20184,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -19555,11 +20192,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -19812,11 +20456,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -19935,7 +20586,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -19943,11 +20594,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -20200,11 +20858,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -20323,7 +20988,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "d52111687f1c0fedf9ef53b93d0a815d04c6c563abca7e3a3789503c8e7a60ce"
+          "sha256": "b67e1807ad9f611c95a93ea9a35cec85f7f6866fc321e0c5f56fa7271e95bb01"
         }
       },
       "log_events": [
@@ -20331,11 +20996,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -20586,11 +21258,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -20714,7 +21393,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -20722,11 +21401,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -20982,11 +21668,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -21110,7 +21803,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -21118,11 +21811,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -21378,11 +22078,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -21506,7 +22213,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -21514,11 +22221,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -21774,11 +22488,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -21902,7 +22623,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -21910,11 +22631,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -22170,11 +22898,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -22298,7 +23033,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -22306,11 +23041,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -22566,11 +23308,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"model\":\"perf-model\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"image",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -22694,7 +23443,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "5f6268dfe6a65539128d09623e204983e2d57e3196abe3e6b8a5ebd9c6f7236e"
+          "sha256": "19651969c3fefe5efee4f3cae3b3843d2762eabb06b9aca267f4749635fbe308"
         }
       },
       "log_events": [
@@ -22702,11 +23451,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/chat/completions",
             "request_body": "{\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"image_url\":{\"url\":\"image\"},\"type\":\"image_url\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -22962,11 +23718,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -23084,7 +23847,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -23092,11 +23855,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -23346,11 +24116,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -23468,7 +24245,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -23476,11 +24253,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -23730,11 +24514,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -23852,7 +24643,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -23860,11 +24651,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -24112,11 +24910,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -24239,7 +25044,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -24247,11 +25052,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -24504,11 +25316,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -24631,7 +25450,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -24639,11 +25458,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -24896,11 +25722,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -25023,7 +25856,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -25031,11 +25864,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -25288,11 +26128,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -25415,7 +26262,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -25423,11 +26270,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -25680,11 +26534,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -25807,7 +26668,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -25815,11 +26676,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -26072,11 +26940,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -26199,7 +27074,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -26207,11 +27082,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -26466,11 +27348,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -26588,7 +27477,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -26596,11 +27485,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -26850,11 +27746,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -26972,7 +27875,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -26980,11 +27883,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -27234,11 +28144,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -27356,7 +28273,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -27364,11 +28281,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -27616,11 +28540,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -27743,7 +28674,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -27751,11 +28682,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -28008,11 +28946,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -28135,7 +29080,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -28143,11 +29088,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -28400,11 +29352,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -28527,7 +29486,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -28535,11 +29494,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -28792,11 +29758,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -28919,7 +29892,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -28927,11 +29900,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -29184,11 +30164,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -29311,7 +30298,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -29319,11 +30306,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -29576,11 +30570,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -29703,7 +30704,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -29711,11 +30712,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -29970,11 +30978,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -30092,7 +31107,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -30100,11 +31115,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -30354,11 +31376,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -30476,7 +31505,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -30484,11 +31513,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -30738,11 +31774,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -30860,7 +31903,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "243521d6301870512864376584dccfd213e0548c069980754092f07871450970"
+          "sha256": "468ecf04453f94808c9465c92c1a5ffa322611f7753668e367a4e991d5a0dbc9"
         }
       },
       "log_events": [
@@ -30868,11 +31911,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":true}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -31120,11 +32170,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -31247,7 +32304,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -31255,11 +32312,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -31512,11 +32576,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -31639,7 +32710,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -31647,11 +32718,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -31904,11 +32982,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -32031,7 +33116,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -32039,11 +33124,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -32296,11 +33388,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -32423,7 +33522,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -32431,11 +33530,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -32688,11 +33794,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -32815,7 +33928,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -32823,11 +33936,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -33080,11 +34200,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"model\":\"perf-model\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"deterministic fixture\"},{\"type\":\"image\",\"source\":{\"type\":\"\u003cimage-encoding\u003e\",\"media_type\":\"image/png\",\"data\":\"image\"...[TRUNCATED]",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
@@ -33207,7 +34334,7 @@
         },
         "request.ndjson": {
           "records": 1,
-          "sha256": "dee9ceebe4f8a08a8b713b534e5299d85a8ef11413dce4b804f50b95ae0945aa"
+          "sha256": "663901605cc20b0da94183c0d854a6e575c03a7398de40d09338769810390a1c"
         }
       },
       "log_events": [
@@ -33215,11 +34342,18 @@
           "name": "clientToProxyRequest",
           "attrs": {
             "content_type": "application/json",
+            "conversation_id": "session-\u003cuuid\u003e",
+            "conversation_request_id": "r000001",
+            "conversation_request_seq": "1",
+            "lineage_node_id": "n000001",
+            "lineage_root_mode": "root",
             "method": "POST",
             "path": "/v1/messages",
             "request_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"deterministic fixture\",\"type\":\"text\"},{\"source\":{\"data\":\"image\",\"media_type\":\"image/png\",\"type\":\"\u003cimage-encoding\u003e\"},\"type\":\"image\"}],\"role\":\"user\"}],\"model\":\"perf-model\",\"stream\":false}",
             "request_id": "req-\u003cid\u003e",
-            "session_id": "session-\u003cuuid\u003e"
+            "request_uid": "req-\u003cid\u003e",
+            "session_id": "session-\u003cuuid\u003e",
+            "session_index_status": "persisted"
           }
         },
         {
