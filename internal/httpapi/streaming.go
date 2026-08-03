@@ -2199,6 +2199,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 						evt.Data["text"] = text
 					}
 					h.markReasoningSummaryTextDone(itemID, summaryIndex)
+					h.markReasoningTitleBoundary(itemID, summaryIndex, preserveReasoningPayload)
 				case "response.reasoning_summary_part.done":
 					if h.reasoningSummaryPartClosedFor(itemID, summaryIndex) {
 						result.skipWrite = true

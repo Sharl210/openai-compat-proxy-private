@@ -102,6 +102,117 @@ func TestAnthropicEventWriterFormatsNativeReasoningSummaryPartsAcrossIndexes(t *
 	}
 }
 
+func TestChatEventWriterSeparatesTitlesWhenSummaryTextDoneHasNoPartDone(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range summaryTextDoneWithoutPartDoneEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**第一标题**"`,
+		`"reasoning_content":"\n\n**第二标题**"`,
+	)
+}
+
+func TestAnthropicEventWriterSeparatesTitlesWhenSummaryTextDoneHasNoPartDone(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range summaryTextDoneWithoutPartDoneEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"thinking":"**第一标题**"`,
+		`"thinking":"\n\n**第二标题**"`,
+	)
+}
+
+func TestResponsesEventWriterSeparatesTitlesWhenSummaryTextDoneHasNoPartDone(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, summaryTextDoneWithoutPartDoneEvents()...)
+
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+	if strings.Contains(body, "**第一标题****第二标题**") {
+		t.Fatalf("completed reasoning snapshot retained adjacent titles: %s", body)
+	}
+}
+
+func TestResponsesEventWriterSeparatesFragmentedTitleAfterSummaryTextDoneWithoutPartDone(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, summaryTextDoneWithoutPartDoneEvents("**第二", "标题**")...)
+
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+}
+
+func TestResponsesEventWriterHandlesLateSummaryPartDoneAfterSummaryTextDone(t *testing.T) {
+	events := summaryTextDoneWithoutPartDoneEvents()
+	latePartDone := upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{
+		"item_id":       "rs_missing_part_done",
+		"summary_index": 0,
+		"part":          map[string]any{"type": "summary_text", "text": "**第一标题**"},
+	}}
+	events = append(events[:6], append([]upstream.Event{latePartDone}, events[6:]...)...)
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, events...)
+
+	if count := strings.Count(body, `"delta":"\n\n**第二标题**"`); count != 1 {
+		t.Fatalf("expected one separated second-title delta after late part.done, got %d: %s", count, body)
+	}
+}
+
+func TestResponsesEventWriterPreservesOpaqueReasoningWhenSummaryTextDoneHasNoPartDone(t *testing.T) {
+	events := summaryTextDoneWithoutPartDoneEvents()
+	for index := range events {
+		events[index].Data["encrypted_content"] = "enc_payload"
+		if item, _ := events[index].Data["item"].(map[string]any); item != nil {
+			item["encrypted_content"] = "enc_payload"
+		}
+	}
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, events...)
+
+	if strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+		t.Fatalf("opaque reasoning delta was reformatted: %s", body)
+	}
+	if !strings.Contains(body, `"text":"**第一标题****第二标题**"`) {
+		t.Fatalf("opaque reasoning snapshot changed, got %s", body)
+	}
+}
+
 func TestChatEventWriterFormatsSeparateReasoningPhases(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{
@@ -613,6 +724,32 @@ func standaloneSummaryTitleEvents() []upstream.Event {
 		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_title", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题**"}}}}},
 		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	}
+}
+
+func summaryTextDoneWithoutPartDoneEvents(secondTitleDeltas ...string) []upstream.Event {
+	if len(secondTitleDeltas) == 0 {
+		secondTitleDeltas = []string{"**第二标题**"}
+	}
+	events := []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_missing_part_done", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_missing_part_done", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_missing_part_done", "summary_index": 0, "delta": "**第一标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_missing_part_done", "summary_index": 0, "text": "**第一标题**"}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_missing_part_done", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
+	}
+	for _, delta := range secondTitleDeltas {
+		events = append(events, upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_missing_part_done", "summary_index": 1, "delta": delta}})
+	}
+	events = append(events,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_missing_part_done", "type": "reasoning", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "**第一标题**"},
+				map[string]any{"type": "summary_text", "text": "**第二标题**"},
+			},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	return events
 }
 
 func splitAdjacentReasoningHeadingEvents() []upstream.Event {
