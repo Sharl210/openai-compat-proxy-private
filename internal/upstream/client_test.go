@@ -332,6 +332,46 @@ func TestClientStreamIntoRetriesBeforeFirstEvent(t *testing.T) {
 	}
 }
 
+func TestClientStreamIntoRetriesChatToolCallBeforeFirstEvent(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"message":"temporary upstream failure"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"id\":\"chatcmpl_retry_tool\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_weather\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}}]},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl_retry_tool\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, config.Config{UpstreamEndpointType: config.UpstreamEndpointTypeChat, UpstreamRetryCount: 1, UpstreamRetryDelay: time.Millisecond})
+	var events []Event
+	err := client.StreamInto(context.Background(), model.CanonicalRequest{Model: "gpt-5"}, "", func(event Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamInto error: %v", err)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("expected one retry before first chat event, got %d attempts", attempts.Load())
+	}
+	seen := map[string]bool{}
+	for _, event := range events {
+		seen[event.Event] = true
+	}
+	for _, expected := range []string{"response.output_item.added", "response.function_call_arguments.delta", "response.output_item.done", "response.completed"} {
+		if !seen[expected] {
+			t.Fatalf("expected normalized chat tool event %q, got %#v", expected, events)
+		}
+	}
+}
+
 func TestClientStreamIntoDoesNotRetryAfterFirstEvent(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

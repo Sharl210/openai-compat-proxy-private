@@ -143,7 +143,7 @@ func TestResponsesNonStreamPreservesSpecificUpstreamJSONErrors(t *testing.T) {
 					Enabled:               true,
 					UpstreamBaseURL:       upstream.URL,
 					UpstreamAPIKey:        "test-key",
-					UpstreamEndpointType:   config.UpstreamEndpointTypeResponses,
+					UpstreamEndpointType:  config.UpstreamEndpointTypeResponses,
 					SupportsResponses:     true,
 					UpstreamRetryCountSet: true,
 					UpstreamRetryCount:    1,
@@ -288,5 +288,68 @@ func TestResponsesStreamRetriesBeforeFirstUpstreamEvent(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "event: response.completed") {
 		t.Fatalf("expected successful SSE body after retry, got %s", rec.Body.String())
+	}
+}
+
+func TestChatStreamRetriesBeforeFirstUpstreamEventAndPreservesToolCall(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"message":"temporary upstream failure"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"id\":\"chatcmpl_retry_tool\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_weather\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}}]},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl_retry_tool\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                    "openai",
+			Enabled:               true,
+			UpstreamBaseURL:       upstream.URL,
+			UpstreamAPIKey:        "test-key",
+			UpstreamEndpointType:  config.UpstreamEndpointTypeChat,
+			SupportsChat:          true,
+			SupportsResponses:     true,
+			UpstreamRetryCountSet: true,
+			UpstreamRetryCount:    1,
+			UpstreamRetryDelaySet: true,
+			UpstreamRetryDelay:    10 * time.Millisecond,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5",
+		"stream":true,
+		"messages":[{"role":"user","content":"What is the weather in Shanghai?"}],
+		"tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected retried chat stream to succeed, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("expected one retry before first chat upstream event, got %d attempts", attempts.Load())
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{`"tool_calls"`, `"id":"call_weather"`, `"name":"get_weather"`, `"finish_reason":"tool_calls"`, "data: [DONE]"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected retried chat tool stream to contain %s, got %s", expected, body)
+		}
 	}
 }
