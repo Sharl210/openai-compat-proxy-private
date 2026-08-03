@@ -35,6 +35,9 @@ func normalizeRetryExhaustedGeneric502ContextOverflow(w http.ResponseWriter, htt
 }
 
 func parseEstimatedInputTokensHeader(value string) (int, error) {
+	if openingParenthesis := strings.IndexByte(value, '('); openingParenthesis >= 0 {
+		value = value[:openingParenthesis]
+	}
 	firstField := strings.Fields(value)
 	if len(firstField) == 0 {
 		return 0, fmt.Errorf("estimated input tokens header is empty")

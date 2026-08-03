@@ -17,12 +17,19 @@ const genericTemporaryUnavailableResponse = `{"error":{"message":"Upstream servi
 const genericContextOverflowTestTokenFloor = 1_000_000
 
 func TestParseEstimatedInputTokensHeaderAcceptsLineageBreakdown(t *testing.T) {
-	got, err := parseEstimatedInputTokensHeader("1000030 (1000000+30)")
-	if err != nil {
-		t.Fatalf("parseEstimatedInputTokensHeader returned error: %v", err)
-	}
-	if got != 1000030 {
-		t.Fatalf("parseEstimatedInputTokensHeader = %d, want 1000030", got)
+	for _, value := range []string{
+		"1000030(1000000+30)",
+		"1000030 (1000000+30)",
+	} {
+		t.Run(value, func(t *testing.T) {
+			got, err := parseEstimatedInputTokensHeader(value)
+			if err != nil {
+				t.Fatalf("parseEstimatedInputTokensHeader returned error: %v", err)
+			}
+			if got != 1000030 {
+				t.Fatalf("parseEstimatedInputTokensHeader = %d, want 1000030", got)
+			}
+		})
 	}
 }
 

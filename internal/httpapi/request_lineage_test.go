@@ -241,7 +241,7 @@ func TestFormatEstimatedInputTokensHeaderOnlyUsesLineageTupleWhenConfirmed(t *te
 		IncrementalEstimate:      30,
 		IncrementalEstimateValid: true,
 	})
-	if got := formatEstimatedInputTokensHeader(ctx, canon, estimatorEstimate{Point: 153}); got != "153 (123+30)" {
+	if got := formatEstimatedInputTokensHeader(ctx, canon, estimatorEstimate{Point: 153}); got != "153(123+30)" {
 		t.Fatalf("expected confirmed lineage header, got %q", got)
 	}
 	if got := formatEstimatedInputTokensHeader(context.Background(), canon, estimatorEstimate{Point: 153}); got != "153" {

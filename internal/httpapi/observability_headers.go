@@ -405,7 +405,7 @@ func formatEstimatedInputTokensHeader(ctx context.Context, canon modelpkg.Canoni
 		return "0"
 	}
 	if input, ok := tokenEstimatorObservationFromContext(ctx); ok && input.ConfirmedBaseline > 0 && input.IncrementalEstimateValid && input.IncrementalEstimate >= 0 {
-		return strconv.FormatInt(estimate.Point, 10) + " (" + strconv.FormatInt(input.ConfirmedBaseline, 10) + "+" + strconv.FormatInt(input.IncrementalEstimate, 10) + ")"
+		return strconv.FormatInt(estimate.Point, 10) + "(" + strconv.FormatInt(input.ConfirmedBaseline, 10) + "+" + strconv.FormatInt(input.IncrementalEstimate, 10) + ")"
 	}
 	if estimate.Point > 0 {
 		return strconv.FormatInt(estimate.Point, 10)
