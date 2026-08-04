@@ -80,11 +80,13 @@ type requestLineageStore struct {
 // session/conversation identity after request decoding without forcing the
 // middleware to parse or infer parentage up front.
 type requestLineageCarrier struct {
-	mu           sync.Mutex
-	requestUID   string
-	sessionID    string
-	conflictWith string
-	lineage      *requestLineage
+	mu                       sync.Mutex
+	requestUID               string
+	sessionID                string
+	implicitParentSessionID  string
+	implicitParentRequestUID string
+	conflictWith             string
+	lineage                  *requestLineage
 }
 
 func (c *requestLineageCarrier) requestUIDValue() string {
@@ -169,7 +171,29 @@ func (c *requestLineageCarrier) setSessionID(sessionID string) {
 	}
 	c.mu.Lock()
 	c.sessionID = sessionID
+	if c.implicitParentSessionID != "" && c.implicitParentSessionID != sessionID {
+		c.implicitParentSessionID = ""
+		c.implicitParentRequestUID = ""
+	}
 	c.mu.Unlock()
+}
+
+func (c *requestLineageCarrier) setImplicitParentRequestUID(sessionID, requestUID string) {
+	if c == nil {
+		return
+	}
+	sessionID = normalizeProxySessionID(sessionID)
+	requestUID = strings.TrimSpace(requestUID)
+	if sessionID == "" || requestUID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if currentSessionID := normalizeProxySessionID(c.sessionID); currentSessionID != "" && currentSessionID != sessionID {
+		return
+	}
+	c.implicitParentSessionID = sessionID
+	c.implicitParentRequestUID = requestUID
 }
 
 func (c *requestLineageCarrier) setSessionConflict(sessionID string) {
@@ -216,7 +240,11 @@ func (c *requestLineageCarrier) ensureResolved(store *requestLineageStore, sessi
 	}
 	parentResponseID = strings.TrimSpace(parentResponseID)
 	c.sessionID = sessionID
-	meta := store.allocateWithConflict(sessionID, c.requestUID, parentResponseID, c.conflictWith)
+	implicitParentRequestUID := ""
+	if parentResponseID == "" && c.implicitParentSessionID == sessionID {
+		implicitParentRequestUID = c.implicitParentRequestUID
+	}
+	meta := store.allocateWithConflict(sessionID, c.requestUID, parentResponseID, implicitParentRequestUID, c.conflictWith)
 	if meta.NodeID == "" {
 		return requestLineage{}, false
 	}
@@ -238,13 +266,14 @@ func finalizeRequestLineage(ctx context.Context, sessionID string) (requestLinea
 }
 
 func (s *requestLineageStore) allocate(conversationID, requestUID, parentResponseID string) requestLineage {
-	return s.allocateWithConflict(conversationID, requestUID, parentResponseID, "")
+	return s.allocateWithConflict(conversationID, requestUID, parentResponseID, "", "")
 }
 
-func (s *requestLineageStore) allocateWithConflict(conversationID, requestUID, parentResponseID, conflictWith string) requestLineage {
+func (s *requestLineageStore) allocateWithConflict(conversationID, requestUID, parentResponseID, implicitParentRequestUID, conflictWith string) requestLineage {
 	conversationID = normalizeProxySessionID(conversationID)
 	requestUID = strings.TrimSpace(requestUID)
 	parentResponseID = strings.TrimSpace(parentResponseID)
+	implicitParentRequestUID = strings.TrimSpace(implicitParentRequestUID)
 	conflictWith = normalizeProxySessionID(conflictWith)
 	if conversationID == "" || requestUID == "" {
 		return requestLineage{}
@@ -303,6 +332,15 @@ func (s *requestLineageStore) allocateWithConflict(conversationID, requestUID, p
 		meta.RootMode = requestLineageRootModeUnanchored
 		if parentNodeID, ok := conversation.ResponseIndex[parentResponseID]; ok {
 			if parent := conversation.Nodes[parentNodeID]; parent != nil {
+				meta.ParentNodeID = parent.Meta.NodeID
+				meta.ParentRequestUID = parent.Meta.RequestUID
+				meta.RootMode = requestLineageRootModeAnchored
+				parent.ChildNodeIDs = append(parent.ChildNodeIDs, meta.NodeID)
+			}
+		}
+	} else if implicitParentRequestUID != "" {
+		if parentNodeID, ok := conversation.RequestIndex[implicitParentRequestUID]; ok {
+			if parent := conversation.Nodes[parentNodeID]; parent != nil && parent.Completed && parent.Meta.ConversationID == conversationID {
 				meta.ParentNodeID = parent.Meta.NodeID
 				meta.ParentRequestUID = parent.Meta.RequestUID
 				meta.RootMode = requestLineageRootModeAnchored

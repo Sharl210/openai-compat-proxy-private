@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	responsesadapter "openai-compat-proxy/internal/adapter/responses"
 	"openai-compat-proxy/internal/config"
 	modelpkg "openai-compat-proxy/internal/model"
 	"openai-compat-proxy/internal/tokenestimator"
+	"openai-compat-proxy/internal/upstream"
 )
 
 func TestRequestLineageStoreSupportsMultipleChildrenAndRecursiveDescendants(t *testing.T) {
@@ -339,5 +342,213 @@ func TestResponsesLineageHeaderUsesConfirmedUsageAcrossSiblingsAndDescendants(t 
 	}
 	if calls.Load() != int32(len(responses)) {
 		t.Fatalf("expected exactly %d upstream calls, got %d", len(responses), calls.Load())
+	}
+}
+
+func TestResponsesImplicitHistoryLineageUsesMatchedParentInsteadOfNewestSessionRequest(t *testing.T) {
+	server := newResponsesLineageTestServer(t, []responsesLineageTestReply{
+		{id: "resp-root", inputTokens: 123},
+		{id: "resp-unrelated", inputTokens: 777},
+		{id: "resp-continuation", inputTokens: 160},
+	})
+
+	root := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","input":[{"role":"user","content":"one"}]}`, "")
+	requireResponsesLineageSuccess(t, "root", root)
+	sessionID := root.Header().Get(headerProxySessionID)
+	if sessionID == "" {
+		t.Fatal("expected root request to establish a proxy session")
+	}
+
+	unrelated := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","input":[{"role":"user","content":"unrelated"}]}`, sessionID)
+	requireResponsesLineageSuccess(t, "unrelated", unrelated)
+
+	continuation := sendResponsesLineageRequest(t, server, implicitResponsesContinuationInput(), "")
+	requireResponsesLineageSuccess(t, "implicit continuation", continuation)
+	if got := continuation.Header().Get(headerProxySessionID); got != sessionID {
+		t.Fatalf("expected uniquely matched history to reuse session %q, got %q", sessionID, got)
+	}
+	requireConfirmedLineageEstimateHeader(t, continuation.Header().Get(headerProxyEstimatedInputTokens), 123)
+}
+
+func TestResponsesAmbiguousImplicitHistoryDoesNotInheritLineage(t *testing.T) {
+	server := newResponsesLineageTestServer(t, []responsesLineageTestReply{
+		{id: "resp-first", inputTokens: 123},
+		{id: "resp-second", inputTokens: 777},
+		{id: "resp-ambiguous", inputTokens: 160},
+	})
+
+	first := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","input":[{"role":"user","content":"one"}]}`, "")
+	requireResponsesLineageSuccess(t, "first root", first)
+	firstSessionID := first.Header().Get(headerProxySessionID)
+	second := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","input":[{"role":"user","content":"one"}]}`, "")
+	requireResponsesLineageSuccess(t, "second root", second)
+	secondSessionID := second.Header().Get(headerProxySessionID)
+	if firstSessionID == "" || secondSessionID == "" || firstSessionID == secondSessionID {
+		t.Fatalf("expected independent roots to establish distinct sessions, first=%q second=%q", firstSessionID, secondSessionID)
+	}
+
+	continuation := sendResponsesLineageRequest(t, server, implicitResponsesContinuationInput(), "")
+	requireResponsesLineageSuccess(t, "ambiguous continuation", continuation)
+	if got := continuation.Header().Get(headerProxySessionID); got == firstSessionID || got == secondSessionID {
+		t.Fatalf("expected ambiguous history not to reuse either matching session, got %q", got)
+	}
+	requirePlainEstimatedInputTokensHeader(t, continuation.Header().Get(headerProxyEstimatedInputTokens))
+}
+
+func TestResponsesExplicitSessionHistoryDoesNotInheritUnverifiedImplicitParent(t *testing.T) {
+	server := newResponsesLineageTestServer(t, []responsesLineageTestReply{
+		{id: "resp-root", inputTokens: 123},
+		{id: "resp-explicit-continuation", inputTokens: 160},
+	})
+	const sessionID = "explicit-session"
+
+	root := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","input":[{"role":"user","content":"one"}]}`, sessionID)
+	requireResponsesLineageSuccess(t, "explicit root", root)
+	continuation := sendResponsesLineageRequest(t, server, implicitResponsesContinuationInput(), sessionID)
+	requireResponsesLineageSuccess(t, "explicit continuation", continuation)
+	if got := continuation.Header().Get(headerProxySessionID); got != sessionID {
+		t.Fatalf("expected explicit session %q to remain unchanged, got %q", sessionID, got)
+	}
+	requirePlainEstimatedInputTokensHeader(t, continuation.Header().Get(headerProxyEstimatedInputTokens))
+}
+
+func TestResponsesImplicitHistoryBindsMatchedSessionToOriginalRequestContext(t *testing.T) {
+	store := newRequestLineageStore()
+	decoded, err := responsesadapter.DecodeRequest(strings.NewReader(implicitResponsesContinuationInput()))
+	if err != nil {
+		t.Fatalf("decode canonical Responses fixture: %v", err)
+	}
+	rootHistory := newImplicitSessionHistory(nil, decoded.ResponseInputItems[:2])
+	store.implicitSessions.observeHistory("request-root", "session-root", "/v1/responses", "caller-1", rootHistory)
+	store.implicitSessions.markCompleted("request-root")
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(implicitResponsesContinuationInput()))
+	request.Header.Set("Content-Type", "application/json")
+	carrier := newRequestLineageCarrier("request-child", "")
+	ctx := withRequestLineageCarrier(context.Background(), carrier)
+	ctx = withRequestLineageStore(ctx, store)
+	ctx = withInboundCallerIdentity(ctx, "caller-1")
+	ctx = withRuntimeSnapshot(ctx, config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                "openai",
+			Enabled:           true,
+			ManualModels:      []string{"gpt-5.4"},
+			SupportsResponses: true,
+		}},
+	}).Active())
+	ctx = withRouteInfo(ctx, routeInfo{ProviderID: "openai", CanonicalPath: "/v1/responses", Legacy: true})
+	request = request.WithContext(ctx)
+	recorder := httptest.NewRecorder()
+
+	initial, ok := decodeAndResolveResponsesRequest(recorder, request)
+	if !ok || initial == nil {
+		t.Fatalf("expected Responses request decoding and routing to succeed, status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := upstream.SessionIDFromContext(request.Context()); got != "session-root" {
+		t.Fatalf("expected matched session in upstream context, got %q", got)
+	}
+	if got := proxySessionIDFromRequest(request); got != "session-root" {
+		t.Fatalf("expected matched session in request context, got %q", got)
+	}
+	if initial.canon.SessionID != "session-root" {
+		t.Fatalf("expected canonical request to use matched session, got %q", initial.canon.SessionID)
+	}
+}
+
+type responsesLineageTestReply struct {
+	id          string
+	inputTokens int
+}
+
+func newResponsesLineageTestServer(t *testing.T, replies []responsesLineageTestReply) *Server {
+	t.Helper()
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		index := int(calls.Add(1)) - 1
+		if index < 0 || index >= len(replies) {
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+			return
+		}
+		reply := replies[index]
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":%d,"output_tokens":1,"total_tokens":%d}}`, reply.id, reply.inputTokens, reply.inputTokens+1)
+	}))
+	t.Cleanup(upstream.Close)
+
+	manager := tokenestimator.NewManager(t.TempDir(), time.UTC, func() []string { return []string{"openai"} })
+	return NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			ManualModels:         []string{"gpt-5.4"},
+			SupportsResponses:    true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		}},
+	}), nil, manager)
+}
+
+func sendResponsesLineageRequest(t *testing.T, server *Server, body, sessionID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if sessionID != "" {
+		req.Header.Set(headerProxySessionID, sessionID)
+	}
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	return rec
+}
+
+func implicitResponsesContinuationInput() string {
+	return `{"model":"gpt-5.4","input":[{"role":"user","content":"one"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]},{"role":"user","content":"two"}]}`
+}
+
+func requireResponsesLineageSuccess(t *testing.T, name string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s request failed: status=%d body=%s", name, rec.Code, rec.Body.String())
+	}
+}
+
+func requireConfirmedLineageEstimateHeader(t *testing.T, value string, baseline int) {
+	t.Helper()
+	open := strings.IndexByte(value, '(')
+	if open <= 0 || !strings.HasSuffix(value, ")") {
+		t.Fatalf("expected total(confirmed+increment) estimate header, got %q", value)
+	}
+	total, err := strconv.Atoi(value[:open])
+	if err != nil {
+		t.Fatalf("parse total estimate %q: %v", value, err)
+	}
+	parts := strings.Split(strings.TrimSuffix(value[open+1:], ")"), "+")
+	if len(parts) != 2 {
+		t.Fatalf("expected confirmed+increment tuple, got %q", value)
+	}
+	confirmed, err := strconv.Atoi(parts[0])
+	if err != nil {
+		t.Fatalf("parse confirmed estimate %q: %v", value, err)
+	}
+	increment, err := strconv.Atoi(parts[1])
+	if err != nil {
+		t.Fatalf("parse incremental estimate %q: %v", value, err)
+	}
+	if confirmed != baseline || increment <= 0 || total != confirmed+increment {
+		t.Fatalf("expected total(%d+positive increment), got %q", baseline, value)
+	}
+}
+
+func requirePlainEstimatedInputTokensHeader(t *testing.T, value string) {
+	t.Helper()
+	if strings.Contains(value, "(") {
+		t.Fatalf("expected a plain estimated-token header without inherited lineage, got %q", value)
+	}
+	if tokens, err := strconv.Atoi(value); err != nil || tokens <= 0 {
+		t.Fatalf("expected a positive plain estimated-token header, got %q", value)
 	}
 }

@@ -415,7 +415,14 @@ func decodeAndResolveResponsesRequest(w http.ResponseWriter, r *http.Request) (*
 	}
 	sessionID := proxySessionIDFromRequest(r)
 	if previousResponseIDFromItems(canon.ResponseInputItems) == "" {
-		r, sessionID = resolveImplicitProxySessionID(r, w, newImplicitSessionHistory(canon.Messages, canon.ResponseInputItems))
+		originalRequest := r
+		var resolution implicitSessionResolution
+		r, resolution = resolveImplicitProxySessionIDWithResolution(r, w, newImplicitSessionHistory(canon.Messages, canon.ResponseInputItems))
+		if originalRequest != nil && r != nil && r != originalRequest {
+			*originalRequest = *r
+			r = originalRequest
+		}
+		sessionID = resolution.SessionID
 	}
 	canon.SessionID = sessionID
 	canon.ResponsesOpenAIBeta = r.Header.Get("OpenAI-Beta")
