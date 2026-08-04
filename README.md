@@ -572,7 +572,7 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
 
 `Token_Estimator` 目录中的模型usage状态文件仍保留统计摘要；同一分桶下的 measured-prefix ledger另存为对应JSON旁的 `.prefix_ledger.json`，并受固定条目数与字节预算限制。删除对应模型目录或文件后，下一次请求按冷启动重新学习。
 
-基于 `previous_response_id` 的请求会额外建立有界 lineage：同一会话允许一个父请求产生多个子请求，子请求还可以继续递归分叉；每个分支只复用自己直接父节点已经确认的 usage，再追加当前分支的本地增量，不会把兄弟分支的后续输入混入估算。lineage 命中时，`X-Proxy-Estimated-Input-Tokens` 会显示为 `总量(已确认基线+当前分支增量)`，例如 `153(123+30)`。lineage 只保存会话序号、请求 UID、父子索引、指纹和数字 usage，不保存请求正文；默认每个进程最多保留 512 个会话、每个会话最多 256 个节点。达到上限且没有安全可驱逐对象时，新请求仍正常处理，但该请求按无 lineage 的冷启动路径估算。
+显式 `previous_response_id` 的请求，以及按 canonical history 唯一解析到同一会话已完成父请求的隐式续接，都会建立有界 lineage：同一会话允许一个父请求产生多个子请求，子请求还可以继续递归分叉；每个分支只复用自己直接父节点已经确认的 usage，再追加当前分支的本地增量，不会把兄弟分支的后续输入混入估算。显式 `previous_response_id` 始终优先；隐式 history 匹配存在多个会话、同一会话内无法唯一确定父请求，或父节点尚未完成时，不会继承基线。lineage 命中时，`X-Proxy-Estimated-Input-Tokens` 会显示为 `总量(已确认基线+当前分支增量)`，例如 `153(123+30)`。lineage 只保存会话序号、请求 UID、父子索引、指纹和数字 usage，不保存请求正文；默认每个进程最多保留 512 个会话、每个会话最多 256 个节点。达到上限且没有安全可驱逐对象时，新请求仍正常处理，但该请求按无 lineage 的冷启动路径估算。
 
 ### 4. 模型映射与 reasoning suffix
 
