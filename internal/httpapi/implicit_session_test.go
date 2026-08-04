@@ -82,8 +82,8 @@ func TestImplicitSessionResolveAllowsReusableStateBeforeCompletion(t *testing.T)
 	store.observeHistory("request-1", "session-1", "/v1/responses", "caller-1", history)
 	store.markReusable("request-1")
 
-	if got := store.resolveHistory("/v1/responses", "caller-1", continuedHistory); got != "session-1" {
-		t.Fatalf("expected reusable in-flight history to resolve to session-1, got %q", got)
+	if got := store.resolveHistoryDetailed("/v1/responses", "caller-1", continuedHistory); got.SessionID != "session-1" || got.RequestUID != "request-1" {
+		t.Fatalf("expected reusable in-flight history to resolve to request-1 in session-1, got %#v", got)
 	}
 	if store.states["request-1"].completed {
 		t.Fatal("expected reusable in-flight history to remain incomplete")
@@ -163,8 +163,8 @@ func TestImplicitSessionFinalFailureClearsEarlyReusableStateAcrossProtocols(t *t
 				t.Fatal("expected partial output to make the in-flight state reusable")
 			}
 			store.implicitSessions.markReusable("request-1")
-			if got := store.implicitSessions.resolveHistory(test.route, "caller-1", continuedHistory); got != "session-1" {
-				t.Fatalf("expected in-flight state to resolve before final status, got %q", got)
+			if got := store.implicitSessions.resolveHistoryDetailed(test.route, "caller-1", continuedHistory); got.SessionID != "session-1" || got.RequestUID != "request-1" {
+				t.Fatalf("expected in-flight state to resolve before final status, got %#v", got)
 			}
 
 			store.implicitSessions.markFinished("request-1", false)

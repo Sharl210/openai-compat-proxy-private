@@ -40,6 +40,11 @@ type implicitSessionState struct {
 	order        uint64
 }
 
+type implicitSessionResolution struct {
+	SessionID  string
+	RequestUID string
+}
+
 type implicitSessionStore struct {
 	mu        sync.Mutex
 	states    map[string]implicitSessionState
@@ -51,18 +56,26 @@ func newImplicitSessionStore() *implicitSessionStore {
 }
 
 func (s *implicitSessionStore) resolve(route, caller string, messages []model.CanonicalMessage) string {
-	return s.resolveHistory(route, caller, newImplicitSessionHistory(messages, nil))
+	return s.resolveDetailed(route, caller, messages).SessionID
+}
+
+func (s *implicitSessionStore) resolveDetailed(route, caller string, messages []model.CanonicalMessage) implicitSessionResolution {
+	return s.resolveHistoryDetailed(route, caller, newImplicitSessionHistory(messages, nil))
 }
 
 func (s *implicitSessionStore) resolveHistory(route, caller string, history implicitSessionHistory) string {
+	return s.resolveHistoryDetailed(route, caller, history).SessionID
+}
+
+func (s *implicitSessionStore) resolveHistoryDetailed(route, caller string, history implicitSessionHistory) implicitSessionResolution {
 	if s == nil || len(history.prefixHashes) == 0 {
-		return ""
+		return implicitSessionResolution{}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for count := len(history.prefixHashes); count > 0; count-- {
-		matches := map[string]struct{}{}
+		matches := map[string]map[string]struct{}{}
 		for _, state := range s.states {
 			if !state.reusable || state.route != route || state.caller != caller || state.historyKind != history.kind || state.messageCount != count || state.prefixHash != history.prefixHashes[count-1] {
 				continue
@@ -70,18 +83,29 @@ func (s *implicitSessionStore) resolveHistory(route, caller string, history impl
 			if !state.anchored && !history.hasAnchorAfter(count) {
 				continue
 			}
-			matches[state.sessionID] = struct{}{}
+			requestUIDs := matches[state.sessionID]
+			if requestUIDs == nil {
+				requestUIDs = map[string]struct{}{}
+				matches[state.sessionID] = requestUIDs
+			}
+			requestUIDs[state.requestUID] = struct{}{}
 		}
 		if len(matches) == 1 {
-			for sessionID := range matches {
-				return sessionID
+			for sessionID, requestUIDs := range matches {
+				resolution := implicitSessionResolution{SessionID: sessionID}
+				if len(requestUIDs) == 1 {
+					for requestUID := range requestUIDs {
+						resolution.RequestUID = requestUID
+					}
+				}
+				return resolution
 			}
 		}
 		if len(matches) > 1 {
-			return ""
+			return implicitSessionResolution{}
 		}
 	}
-	return ""
+	return implicitSessionResolution{}
 }
 
 func (s *implicitSessionStore) observe(requestUID, sessionID, route, caller string, messages []model.CanonicalMessage) {
@@ -159,23 +183,33 @@ func (s *implicitSessionStore) markFinished(requestUID string, reusable bool) {
 }
 
 func resolveImplicitProxySessionID(r *http.Request, w http.ResponseWriter, history implicitSessionHistory) (*http.Request, string) {
+	r, resolution := resolveImplicitProxySessionIDWithResolution(r, w, history)
+	return r, resolution.SessionID
+}
+
+func resolveImplicitProxySessionIDWithResolution(r *http.Request, w http.ResponseWriter, history implicitSessionHistory) (*http.Request, implicitSessionResolution) {
 	if r == nil {
-		return r, ""
+		return r, implicitSessionResolution{}
 	}
 	sessionID := proxySessionIDFromRequest(r)
+	resolution := implicitSessionResolution{SessionID: sessionID}
 	store := requestLineageStoreFromRequest(r)
 	if store == nil || store.implicitSessions == nil || len(history.prefixHashes) == 0 {
-		return r, sessionID
+		return r, resolution
 	}
 	route := implicitSessionRouteKey(r)
 	caller := inboundCallerIdentityFromRequest(r)
 	if explicitProxySessionIDFromRequest(r) == "" {
-		if resolved := store.implicitSessions.resolveHistory(route, caller, history); resolved != "" {
-			r, sessionID = withProxySessionID(r, w, resolved)
+		if resolved := store.implicitSessions.resolveHistoryDetailed(route, caller, history); resolved.SessionID != "" {
+			r, sessionID = withProxySessionID(r, w, resolved.SessionID)
+			resolution = implicitSessionResolution{SessionID: sessionID, RequestUID: resolved.RequestUID}
+			if carrier := requestLineageCarrierFromContext(r.Context()); carrier != nil {
+				carrier.setImplicitParentRequestUID(sessionID, resolved.RequestUID)
+			}
 		}
 	}
 	store.implicitSessions.observeHistory(requestUIDFromRequest(r), sessionID, route, caller, history)
-	return r, sessionID
+	return r, resolution
 }
 
 func implicitSessionRouteKey(r *http.Request) string {
