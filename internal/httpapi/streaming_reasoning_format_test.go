@@ -358,6 +358,29 @@ func TestResponsesEventWriterSeparatesReasoningTitlesAfterContent(t *testing.T) 
 	assertOrderedStreamFragments(t, body, `"delta":"正文\n**第一标题**\n\n**第二标题**"`)
 }
 
+func TestResponsesEventWriterSeparatesTitlesAcrossSummaryIndexesWithoutDone(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_indexes", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_indexes", "summary_index": 0, "delta": "**第一标题**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_indexes", "summary_index": 1, "delta": "**第二标题**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_indexes", "type": "reasoning", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "**第一标题**"},
+				map[string]any{"type": "summary_text", "text": "**第二标题**"},
+			},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+	if strings.Contains(body, `"delta":"**第一标题****第二标题**"`) {
+		t.Fatalf("streamed summary indexes retained adjacent titles: %s", body)
+	}
+}
+
 func TestReasoningTitleStatesDoNotCrossItemsOrRewriteOpaqueContent(t *testing.T) {
 	helper := &responseEventWriterHelper{}
 	if got := helper.formatReasoningContentDelta("rs_one", 0, "**第一标题**", false); got != "**第一标题**" {

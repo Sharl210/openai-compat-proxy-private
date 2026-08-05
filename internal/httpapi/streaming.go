@@ -440,12 +440,14 @@ func (h *responseEventWriterHelper) reasoningFormatState(itemID string, summaryI
 }
 
 func (h *responseEventWriterHelper) formatReasoningContentDelta(itemID string, summaryIndex int, delta string, preserve bool) string {
+	h.inheritReasoningTitleBoundary(itemID, summaryIndex, preserve)
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	formatted := state.formatDelta(delta, preserve)
 	return h.consumeReasoningTitleBoundary(state, formatted, preserve)
 }
 
 func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string, summaryIndex int, snapshot string, preserve bool) (string, string, bool) {
+	h.inheritReasoningTitleBoundary(itemID, summaryIndex, preserve)
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	delta, handled := state.formatSnapshot(snapshot, preserve)
 	if handled {
@@ -453,6 +455,18 @@ func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string
 	}
 	delta = h.consumeReasoningTitleBoundary(state, delta, preserve)
 	return delta, state.formatted.String(), handled
+}
+
+func (h *responseEventWriterHelper) inheritReasoningTitleBoundary(itemID string, summaryIndex int, preserve bool) {
+	if preserve || h.reasoningTitleBoundary || summaryIndex <= 0 || h.reasoningFormatStates == nil {
+		return
+	}
+	previousKey := reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex - 1}
+	previous := h.reasoningFormatStates[previousKey]
+	if previous == nil || !previous.hasTrailingBoldSpan() {
+		return
+	}
+	h.reasoningTitleBoundary = true
 }
 
 func (h *responseEventWriterHelper) consumeReasoningTitleBoundary(state *reasoningTextState, text string, preserve bool) string {
