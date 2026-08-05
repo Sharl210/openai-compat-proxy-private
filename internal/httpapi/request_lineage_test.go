@@ -237,6 +237,37 @@ func TestRecordTokenEstimatorUsageStoresLatestConfirmedUsageForCompletedParent(t
 	}
 }
 
+func TestRecordResponsesLineageResultFallsBackToEstimateWithoutUsage(t *testing.T) {
+	store := newRequestLineageStore()
+	carrier := newRequestLineageCarrier("request-root", "session-1")
+	ctx := withRequestLineageCarrier(context.Background(), carrier)
+	ctx = withRequestLineageStore(ctx, store)
+	meta, ok := ensureResolvedRequestLineage(ctx, "session-1", "")
+	if !ok {
+		t.Fatal("expected root lineage allocation")
+	}
+	ctx = withTokenEstimatorObservation(ctx, tokenEstimatorObservationInput{
+		ProviderID:         "provider-a",
+		EndpointType:       "chat",
+		FinalUpstreamModel: "model-a",
+		Snapshot:           estimatorSnapshot{BaseEstimate: 280},
+		Coordinate: estimatorCoordinate{
+			LineageWireFingerprint: "wire-family",
+			PrefixFingerprint:      "prefix-root",
+			LocalEstimate:          280,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"model-a"}`)).WithContext(ctx)
+	recordResponsesLineageResult(req, "response-root")
+	store.markCompleted(meta)
+
+	child := store.allocate("session-1", "request-child", "response-root")
+	fact, ok := store.parentFinalizedEstimate(child)
+	if !ok || fact.InputTokens != 280 {
+		t.Fatalf("expected estimate fallback to establish parent baseline 280, got fact=%#v ok=%v", fact, ok)
+	}
+}
+
 func TestFormatEstimatedInputTokensHeaderOnlyUsesLineageTupleWhenConfirmed(t *testing.T) {
 	canon := modelpkg.CanonicalRequest{}
 	ctx := context.WithValue(context.Background(), tokenEstimatorObservationKey, tokenEstimatorObservationInput{
@@ -343,6 +374,30 @@ func TestResponsesLineageHeaderUsesConfirmedUsageAcrossSiblingsAndDescendants(t 
 	if calls.Load() != int32(len(responses)) {
 		t.Fatalf("expected exactly %d upstream calls, got %d", len(responses), calls.Load())
 	}
+}
+
+func TestResponsesLineageHeaderUsesEstimatedParentWhenUpstreamOmitsUsage(t *testing.T) {
+	server := newResponsesLineageTestServer(t, []responsesLineageTestReply{
+		{id: "resp-root", omitUsage: true},
+		{id: "resp-child", omitUsage: true},
+	})
+
+	root := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","input":"root"}`, "")
+	requireResponsesLineageSuccess(t, "root without usage", root)
+	rootEstimate := root.Header().Get(headerProxyEstimatedInputTokens)
+	requirePlainEstimatedInputTokensHeader(t, rootEstimate)
+	baseline, err := strconv.Atoi(rootEstimate)
+	if err != nil {
+		t.Fatalf("parse root estimate %q: %v", rootEstimate, err)
+	}
+
+	sessionID := root.Header().Get(headerProxySessionID)
+	if sessionID == "" {
+		t.Fatal("expected root response to expose a proxy session ID")
+	}
+	child := sendResponsesLineageRequest(t, server, `{"model":"gpt-5.4","previous_response_id":"resp-root","input":"child"}`, sessionID)
+	requireResponsesLineageSuccess(t, "child without usage", child)
+	requireConfirmedLineageEstimateHeader(t, child.Header().Get(headerProxyEstimatedInputTokens), baseline)
 }
 
 func TestResponsesImplicitHistoryLineageUsesMatchedParentInsteadOfNewestSessionRequest(t *testing.T) {
@@ -460,6 +515,7 @@ func TestResponsesImplicitHistoryBindsMatchedSessionToOriginalRequestContext(t *
 type responsesLineageTestReply struct {
 	id          string
 	inputTokens int
+	omitUsage   bool
 }
 
 func newResponsesLineageTestServer(t *testing.T, replies []responsesLineageTestReply) *Server {
@@ -473,7 +529,12 @@ func newResponsesLineageTestServer(t *testing.T, replies []responsesLineageTestR
 		}
 		reply := replies[index]
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":%d,"output_tokens":1,"total_tokens":%d}}`, reply.id, reply.inputTokens, reply.inputTokens+1)
+		body := fmt.Sprintf(`{"id":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]`, reply.id)
+		if !reply.omitUsage {
+			body += fmt.Sprintf(`,"usage":{"input_tokens":%d,"output_tokens":1,"total_tokens":%d}`, reply.inputTokens, reply.inputTokens+1)
+		}
+		body += `}`
+		_, _ = fmt.Fprint(w, body)
 	}))
 	t.Cleanup(upstream.Close)
 

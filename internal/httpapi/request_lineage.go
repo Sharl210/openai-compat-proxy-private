@@ -426,6 +426,20 @@ func (s *requestLineageStore) recordFinalizedEstimate(meta requestLineage, fact 
 	node.FinalizedFact = &cloned
 }
 
+func (s *requestLineageStore) hasFinalizedEstimate(meta requestLineage) bool {
+	if s == nil || meta.ConversationID == "" || meta.NodeID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conversation := s.conversations[meta.ConversationID]
+	if conversation == nil {
+		return false
+	}
+	node := conversation.Nodes[meta.NodeID]
+	return node != nil && node.FinalizedFact != nil && node.FinalizedFact.InputTokens > 0
+}
+
 func (s *requestLineageStore) markReusable(meta requestLineage) {
 	if s == nil || meta.RequestUID == "" || s.implicitSessions == nil {
 		return
@@ -711,6 +725,16 @@ func recordResponsesLineageResult(r *http.Request, responseID string) {
 	}
 	store.recordResponseID(meta, responseID)
 	if input, ok := tokenEstimatorObservationFromContext(r.Context()); ok {
+		if store.hasFinalizedEstimate(meta) {
+			return
+		}
+		estimate := input.Estimate
+		if estimate.Point <= 0 {
+			estimate = estimateFromObservationInput(r.Context(), input)
+		}
+		if estimate.Point <= 0 {
+			return
+		}
 		coordinate := input.Coordinate
 		store.recordFinalizedEstimate(meta, requestLineageEstimatorFact{
 			Bucket:                 tokenestimator.BucketKey{ProviderID: input.ProviderID, EndpointType: input.EndpointType, Model: input.FinalUpstreamModel},
@@ -720,7 +744,7 @@ func recordResponsesLineageResult(r *http.Request, responseID string) {
 			PrefixUnits:            coordinate.PrefixUnits,
 			StructuralUnits:        coordinate.StructuralUnits,
 			LocalEstimate:          coordinate.LocalEstimate,
-			InputTokens:            input.Usage.InputTokens,
+			InputTokens:            int64(estimate.Point),
 		})
 	}
 }
