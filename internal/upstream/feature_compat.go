@@ -100,7 +100,7 @@ func hasUnsupportedPersistedResponsesItem(items []map[string]any, upstreamEndpoi
 			}
 			continue
 		}
-		if _, ok := item["phase"]; ok && !isRepresentableResponsesInputItem(itemType) {
+		if _, ok := item["phase"]; ok && !isRepresentableResponsesInputItem(itemType, item) {
 			return true
 		}
 		if _, encrypted := item["encrypted_content"]; encrypted {
@@ -110,9 +110,14 @@ func hasUnsupportedPersistedResponsesItem(items []map[string]any, upstreamEndpoi
 	return false
 }
 
-func isRepresentableResponsesInputItem(itemType string) bool {
+func isRepresentableResponsesInputItem(itemType string, item map[string]any) bool {
 	switch itemType {
 	case "message", "function_call", "function_call_output":
+		return true
+	}
+	role, _ := item["role"].(string)
+	switch strings.TrimSpace(role) {
+	case "user", "assistant", "system", "developer", "tool":
 		return true
 	default:
 		return false

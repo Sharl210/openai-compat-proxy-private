@@ -291,6 +291,10 @@ func TestResponsesRouteRejectsSemanticFeaturesBeforeNonResponsesUpstream(t *test
 			body: `{"model":"gpt-5.6","input":[{"type":"reasoning","encrypted_content":"opaque","phase":"analysis","summary":[]}]}`,
 		},
 		{
+			name: "assistant phase metadata",
+			body: `{"model":"gpt-5.6","input":[{"role":"assistant","phase":"analysis","content":"continued answer"}]}`,
+		},
+		{
 			name: "reasoning context",
 			body: `{"model":"gpt-5.6","reasoning":{"context":"opaque"},"input":"hello"}`,
 		},
@@ -329,7 +333,7 @@ func TestResponsesRouteRejectsSemanticFeaturesBeforeNonResponsesUpstream(t *test
 
 				server.ServeHTTP(rec, req)
 
-				if feature.name == "persisted reasoning item" {
+				if feature.name == "persisted reasoning item" || feature.name == "assistant phase metadata" {
 					if rec.Code != http.StatusOK || upstreamHits != 1 {
 						t.Fatalf("expected client-owned persisted reasoning to reach upstream, status=%d calls=%d body=%s", rec.Code, upstreamHits, rec.Body.String())
 					}

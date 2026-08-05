@@ -121,6 +121,7 @@ func TestCheckResponsesFeatureCompatibilityAllowsPhaseMetadataOnRepresentableIte
 		{"type": "message", "phase": "commentary"},
 		{"type": "function_call", "phase": "analysis"},
 		{"type": "function_call_output", "phase": "analysis"},
+		{"role": "assistant", "phase": "analysis", "content": "continued answer"},
 	}}
 	for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
 		if err := CheckResponsesFeatureCompatibility(req, endpoint); err != nil {
