@@ -130,6 +130,143 @@ func TestLegacyChatRouteRoutesRootV1ModelMapTargetOutsideVisibleModels(t *testin
 	}
 }
 
+func TestLegacyResponsesRouteRootModelMapTargetQualifierSelectsConfiguredProviderWithoutVisibleTarget(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{
+		config.NewModelMapEntry("<<alpha>>root-alias", "<<beta>>root-target-not-listed"),
+	}
+	cfg.Providers[1].ManualModels = nil
+	cfg.Providers[1].ModelMap = nil
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"root-alias","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root qualified target to route without visible target membership, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected explicit root target provider beta, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "root-target-not-listed" {
+		t.Fatalf("expected qualified root target model to reach beta unchanged, got %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only qualified target provider to be called, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyResponsesRouteRootQualifiedSourceUsesExplicitRequestEffort(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.V1ModelMap = []config.ModelMapEntry{
+		config.NewModelMapEntry("<<alpha>>client-high", "<<beta>>qualified-target"),
+	}
+	cfg.Providers[1].ManualModels = nil
+	cfg.Providers[1].ModelMap = nil
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"client","reasoning":{"effort":"high"},"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected explicit request effort to route qualified root mapping, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected target provider beta for explicit effort mapping, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "qualified-target" {
+		t.Fatalf("expected qualified target model, got %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only beta upstream to receive explicit-effort request, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyResponsesRouteProviderModelMapTargetQualifierSwitchesProviderOnce(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.Providers[0].ModelMap = []config.ModelMapEntry{
+		config.NewModelMapEntry("provider-alias", "<<beta>>cross-provider-target"),
+	}
+	cfg.Providers[1].ManualModels = nil
+	cfg.Providers[1].ModelMap = nil
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"provider-alias","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected provider-qualified target to switch providers, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected provider-qualified target to switch from alpha to beta, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "cross-provider-target" {
+		t.Fatalf("expected provider-qualified target model to be sent once without recursive mapping, got %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only beta upstream to receive switched request, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
+func TestLegacyResponsesRouteProviderRegexModelMapTargetQualifierSwitchesProvider(t *testing.T) {
+	alpha := newResponsesProviderUpstream(t, "alpha")
+	defer alpha.Close()
+	beta := newResponsesProviderUpstream(t, "beta")
+	defer beta.Close()
+
+	cfg := testLegacyModelRoutingConfig(alpha.URL, beta.URL)
+	cfg.EnableNoPromptModelSuffix = true
+	cfg.Providers[0].ModelMap = []config.ModelMapEntry{
+		config.NewModelMapEntry("<<alpha>>#re:provider-(.*)", "<<beta>>cross-$1-noprompt"),
+	}
+	cfg.Providers[0].ManualModels = nil
+	cfg.Providers[1].ManualModels = nil
+	cfg.Providers[1].ModelMap = nil
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"provider-alias","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected provider regex target to switch providers, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected regex target provider beta, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "cross-alias" {
+		t.Fatalf("expected regex target capture without proxy-only noprompt suffix to reach beta, got %q", got)
+	}
+	if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
+		t.Fatalf("expected regex target noprompt to remain a proxy-only intent, got %q", got)
+	}
+	if alpha.Hits() != 0 || beta.Hits() != 1 {
+		t.Fatalf("expected only beta upstream to receive regex-switched request, alpha=%d beta=%d", alpha.Hits(), beta.Hits())
+	}
+}
+
 func TestLegacyResponsesRouteV1ModelMapTargetKeepsReasoningSuffixBehavior(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()

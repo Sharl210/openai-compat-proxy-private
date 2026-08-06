@@ -184,8 +184,14 @@ func prepareImagesRequest(w http.ResponseWriter, r *http.Request) (*preparedImag
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model cannot be routed")
 		return nil, false
 	}
-	if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
-		resolvedModel = mappedModel
+	if providerModelMapAppliedFromRequest(r) {
+		if intent, intentOK := proxyModelIntentFromRequest(r); intentOK && intent.HasModelMapAlias {
+			resolvedModel = config.ProxyModelIntentRoutingModel(intent)
+		}
+	} else {
+		if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
+			resolvedModel = mappedModel
+		}
 	}
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 		setConfigVersionHeaders(w, snapshot, providerID)
@@ -235,8 +241,14 @@ func prepareJSONPassthroughRequest(w http.ResponseWriter, r *http.Request) (*pre
 		errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_model", "requested model cannot be routed")
 		return nil, false
 	}
-	if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
-		resolvedModel = mappedModel
+	if providerModelMapAppliedFromRequest(r) {
+		if intent, intentOK := proxyModelIntentFromRequest(r); intentOK && intent.HasModelMapAlias {
+			resolvedModel = config.ProxyModelIntentRoutingModel(intent)
+		}
+	} else {
+		if mappedModel := provider.ResolveModel(resolvedModel, provider.EnableReasoningEffortSuffix); strings.TrimSpace(mappedModel) != "" {
+			resolvedModel = mappedModel
+		}
 	}
 	if snapshot, ok := runtimeSnapshotFromRequest(r); ok {
 		setConfigVersionHeaders(w, snapshot, providerID)

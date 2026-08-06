@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,6 +80,74 @@ func TestImagesGenerationsPassesThroughJSONAndMappedModel(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"b64_json":"ZmFrZQ=="`) {
 		t.Fatalf("expected upstream response passthrough, got %s", rec.Body.String())
+	}
+}
+
+func TestImagesGenerationsDoesNotRemapAfterProviderSwitch(t *testing.T) {
+	var alphaHits atomic.Int32
+	var betaBody string
+	alpha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		alphaHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1713833628,"data":[{"b64_json":"YWxwaGE="}]}`))
+	}))
+	defer alpha.Close()
+	beta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read beta upstream body: %v", err)
+		}
+		betaBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1713833628,"data":[{"b64_json":"YmV0YQ=="}]}`))
+	}))
+	defer beta.Close()
+
+	server := NewServer(config.Config{
+		ProxyAPIKey:          "root-secret",
+		DefaultProvider:      "alpha,beta",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{
+			{
+				ID:              "alpha",
+				Enabled:         true,
+				UpstreamBaseURL: alpha.URL,
+				UpstreamAPIKey:  "alpha-key",
+				ModelMap: []config.ModelMapEntry{
+					config.NewModelMapEntry("source", "<<beta>>target"),
+				},
+				ManualModels: []string{"source"},
+			},
+			{
+				ID:              "beta",
+				Enabled:         true,
+				UpstreamBaseURL: beta.URL,
+				UpstreamAPIKey:  "beta-key",
+				ModelMap: []config.ModelMapEntry{
+					config.NewModelMapEntry("target", "second-target"),
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"source","prompt":"otter"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer root-secret")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "beta" {
+		t.Fatalf("expected target provider beta, got %q", got)
+	}
+	if alphaHits.Load() != 0 {
+		t.Fatalf("expected source provider not to receive request, hits=%d", alphaHits.Load())
+	}
+	if !strings.Contains(betaBody, `"model":"target"`) || strings.Contains(betaBody, `"model":"second-target"`) {
+		t.Fatalf("expected one provider switch without a second mapping, got %s", betaBody)
 	}
 }
 
