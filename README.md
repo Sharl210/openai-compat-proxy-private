@@ -220,6 +220,21 @@ V1_MODEL_MAP=gpt-5.5:gpt-5.6,#re:alias-(.*):real-$1
 
 它只在 bare `/v1/*` 和无 `/v1` 裸别名上生效，不会影响显式 `/{providerId}/v1/*` 路由。`src` 默认按字面量精确匹配，所以 `gpt-5.5` 里的点就是普通点；只有以 `#re:` 开头时才按 Go regexp 全字符串匹配。捕获替换只支持 `$0-$9`，其中 `$0` 是完整匹配，`$1-$9` 是第 1 到第 9 个 regexp 捕获组，例如 `#re:mini(.*)o:real-$0-$1` 会把 `mini2o` 映射成 `real-mini2o-2`；`$10` 及以上会保留字面值，避免 `$12` 到底表示第 12 组还是 `$1` 后接 `2` 的歧义；如果要输出字面 `$`，在 target 中写成 `\$`，例如 `\$12` 输出 `$12`。根级 `V1_MODEL_MAP` 对 reasoning family 生效：`gpt-5.5`、`gpt-5.5-high`、以及“`gpt-5.5` + 显式 reasoning 参数”的等效请求，都会按同一家族进行预映射；`-noprompt` 仍然只是代理标记，只有在该能力开启时才会在代理层剥离，不参与映射 key。映射 target 不需要出现在默认分组的 `/models` 展示列表中；但命中 `HIDDEN_MODELS` 这一显式拒绝规则时，请求仍会失败。该字段属于根级可热加载配置。
 
+根级和 provider 级映射都支持在 source 或 target 开头写 `<<provider_id>>`：
+
+```env
+V1_MODEL_MAP=model-a:<<provider1>>gpt-5.6-terra
+MODEL_MAP=<<provider1>>model-a:<<provider2>>gpt-5.6-terra
+```
+
+`model-a:<<provider1>>gpt-5.6-terra` 会把请求路由到 `provider1.env` 中的 `gpt-5.6-terra`；source 侧的提供商标记限定该映射由指定 provider 负责，target 侧的提供商标记指定最终路由目标。`<<provider_id>>` 会在模型解析前剥离，因此可以和 `#re:`、`$0-$9` 捕获替换、reasoning suffix、`-pro`、`-adaptive`、`-ultra`、`-noprompt` 任意组合。完整组合示例：
+
+```env
+<<p0>>#re:alias-(.*):<<p1>>gpt-$1-high
+```
+
+其中`<<p0>>`是source provider，`#re:alias-(.*)`是source正则，冒号是映射分隔符，`<<p1>>`是target provider，`gpt-$1-high`是target模板。source provider必须写在`#re:`前面；只指定target provider时直接写`model-a:<<p1>>gpt-5.6-terra`。保存或热加载完整配置时只校验标记中的 provider ID 是否存在，不校验 target 模型是否存在或是否出现在`/models`；目标模型缺失时仍继续正常请求链，最终由现有模型不存在或上游错误逻辑处理。
+
 如果启用了 `ENABLE_DEFAULT_PROVIDER_MODEL_TAGS=true`，则默认分组会切到“标签模式”：
 
 - 这时会放弃上面的 overlay 覆盖模式，不再用“后面的 provider 覆盖前面的 provider”来隐藏同名模型
@@ -592,7 +607,7 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
 
 这些变量的实际含义：
 
-- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-noprompt-vip` 会先还原为内部 `gpt-5.5-low-noprompt`，再按 `low` 和 `-noprompt` 继续处理。
+- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-noprompt-vip` 会先还原为内部 `gpt-5.5-low-noprompt`，再按 `low` 和 `-noprompt` 继续处理。模板中禁止使用 `<<` 或 `>>`；这两个分隔符专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记 `<<provider_id>>`，配置保存或热加载时命中即校验失败。
 - `MODEL_ID_TEMPLATE_ROOT_ONLY`：旧兼容字段，仍可解析，但不再改变运行行为。只要 `MODEL_ID_TEMPLATE` 不是默认 `{{model}}`，该 provider 的所有外部入口都展示并接受模板后的模型 ID；raw provider ID 只存在于 provider 内部配置和上游请求链路中，不作为外部模型 ID 使用。
 
 - `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。这一项里“冒号左侧为原始模型”和“冒号右侧为原始模型”要分开看：
