@@ -490,7 +490,9 @@ func modelMapEntriesEqual(a, b []ModelMapEntry) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Key != b[i].Key || a[i].Target != b[i].Target {
+		if a[i].Key != b[i].Key || a[i].Target != b[i].Target ||
+			a[i].UnescapedKey != b[i].UnescapedKey || a[i].UnescapedTarget != b[i].UnescapedTarget ||
+			a[i].SourceProviderID != b[i].SourceProviderID || a[i].TargetProviderID != b[i].TargetProviderID {
 			return false
 		}
 	}
@@ -693,6 +695,64 @@ func (c Config) Validate() error {
 	if c.EnableLegacyV1Routes && len(c.Providers) > 0 && strings.TrimSpace(c.DefaultProvider) == "" {
 		return ErrInvalidConfig("legacy v1 routes require a default provider")
 	}
+	for _, provider := range c.Providers {
+		if strings.TrimSpace(provider.ModelIDTemplate) == "" {
+			continue
+		}
+		if _, err := normalizeModelIDTemplate(provider.ModelIDTemplate, "MODEL_ID_TEMPLATE", fmt.Sprintf("provider %s", provider.ID)); err != nil {
+			return err
+		}
+	}
+	if err := c.validateModelMapProviderReferences(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c Config) validateModelMapProviderReferences() error {
+	validateEntries := func(scope string, entries []ModelMapEntry) error {
+		for index, entry := range entries {
+			for _, side := range []struct {
+				name  string
+				value string
+			}{
+				{name: "source", value: entry.Key},
+				{name: "target", value: entry.Target},
+			} {
+				if strings.TrimSpace(side.value) == "" {
+					continue
+				}
+				if _, _, _, err := splitModelMapQualifiedModel(side.value); err != nil {
+					return ErrInvalidConfig(fmt.Sprintf("%s MODEL_MAP entry %d has invalid %s provider qualifier: %v", scope, index, side.name, err))
+				}
+			}
+			for _, reference := range []struct {
+				qualifier  string
+				providerID string
+			}{
+				{qualifier: "source", providerID: strings.TrimSpace(entry.SourceProviderID)},
+				{qualifier: "target", providerID: strings.TrimSpace(entry.TargetProviderID)},
+			} {
+				providerID := reference.providerID
+				if providerID == "" {
+					continue
+				}
+				if _, err := c.ProviderByID(providerID); err != nil {
+					return ErrInvalidConfig(fmt.Sprintf("%s MODEL_MAP entry %d references unknown %s provider: %s", scope, index, reference.qualifier, providerID))
+				}
+			}
+		}
+		return nil
+	}
+
+	if err := validateEntries("root V1_MODEL_MAP", c.V1ModelMap); err != nil {
+		return err
+	}
+	for _, provider := range c.Providers {
+		if err := validateEntries(fmt.Sprintf("provider %s", provider.ID), provider.ModelMap); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -729,7 +789,7 @@ func (c Config) ResolveV1ModelForRequest(model string, requestEffort string) str
 	if enabledModel, hasNoPrompt := stripEnabledNoPromptModelSuffix(trimmedModel, c.EnableNoPromptModelSuffix); hasNoPrompt {
 		trimmedModel = enabledModel
 	}
-	if mapped, _ := provider.resolveModelEntry(trimmedModel); mapped != "" {
+	if mapped, _ := provider.resolveModelEntryWithStaticPriority(trimmedModel, true); mapped != "" {
 		return mapped
 	}
 	baseModel := trimmedModel
@@ -743,12 +803,12 @@ func (c Config) ResolveV1ModelForRequest(model string, requestEffort string) str
 	if effectiveEffort != "" {
 		suffixedSource := baseModel + "-" + effectiveEffort
 		if suffixedSource != trimmedModel {
-			if mapped, _ := provider.resolveModelEntry(suffixedSource); mapped != "" {
+			if mapped, _ := provider.resolveModelEntryWithStaticPriority(suffixedSource, true); mapped != "" {
 				return mapped
 			}
 		}
 	}
-	if mapped, _ := provider.resolveModelEntry(baseModel); mapped != "" {
+	if mapped, _ := provider.resolveModelEntryWithStaticPriority(baseModel, true); mapped != "" {
 		if effectiveEffort == "" {
 			return mapped
 		}

@@ -262,6 +262,37 @@ func TestResolveV1ModelTreatsExplicitReasoningRequestAsSameFamilyMember(t *testi
 	}
 }
 
+func TestResolveV1ProxyModelIntentUsesSourceProviderWhenTargetQualifierIsAbsent(t *testing.T) {
+	cfg := Config{
+		V1ModelMap: []ModelMapEntry{
+			NewModelMapEntry("<<beta>>source-alias", "target-without-provider"),
+		},
+	}
+	intent, ok := cfg.ResolveV1ProxyModelIntent("source-alias")
+	if !ok {
+		t.Fatal("expected root qualified source to resolve")
+	}
+	if intent.BaseModel != "target-without-provider" || intent.TargetProviderID != "beta" {
+		t.Fatalf("expected source provider to select root route provider, got %#v", intent)
+	}
+	if got := intent.CanonicalModel(); got != "target-without-provider" {
+		t.Fatalf("expected provider metadata not to alter canonical model, got %q", got)
+	}
+}
+
+func TestResolveV1ModelForRequestPrefersLaterRuleForSameSource(t *testing.T) {
+	cfg := Config{
+		V1ModelMap: []ModelMapEntry{
+			NewModelMapEntry("client-alias", "upstream-a"),
+			NewModelMapEntry("client-alias", "upstream-b"),
+		},
+	}
+
+	if got := cfg.ResolveV1ModelForRequest("client-alias", ""); got != "upstream-b" {
+		t.Fatalf("expected later root MODEL_MAP rule to win, got %q", got)
+	}
+}
+
 func TestLoadFromValuesParsesRootUpstreamMaxOutputTokens(t *testing.T) {
 	cfg := LoadFromValues(map[string]string{
 		"UPSTREAM_MAX_OUTPUT_TOKENS":       "64000,gpt-5.5:128000,#re:.*gpt-.*:100000",
@@ -339,6 +370,115 @@ func TestValidateRootEnvValuesRejectsInvalidV1ModelMap(t *testing.T) {
 	err := ValidateRootEnvValues(map[string]string{"V1_MODEL_MAP": "missing-target:"})
 	if err == nil {
 		t.Fatalf("expected invalid V1_MODEL_MAP to fail validation")
+	}
+}
+
+func TestConfigValidateRejectsReservedModelIDTemplateDelimiters(t *testing.T) {
+	for _, template := range []string{
+		"packy-<<{{model}}-vip",
+		"packy-{{model}}>>-vip",
+	} {
+		t.Run(template, func(t *testing.T) {
+			cfg := Config{
+				ProvidersDir: "providers",
+				Providers: []ProviderConfig{{
+					ID:              "openai",
+					Enabled:         true,
+					ModelIDTemplate: template,
+				}},
+			}
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("expected MODEL_ID_TEMPLATE=%q to fail Config.Validate", template)
+			}
+			if !strings.Contains(err.Error(), "reserved for MODEL_MAP/V1_MODEL_MAP provider markers") {
+				t.Fatalf("expected reserved-delimiter validation error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildRuntimeSnapshotValidatesModelMapProviderReferencesWithoutCheckingTargetModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		rootMap   string
+		alphaMap  string
+		wantError bool
+	}{
+		{
+			name:     "valid provider references and absent target models",
+			rootMap:  "root-alias:<<beta>>target-not-listed",
+			alphaMap: "<<alpha>>source-alias:<<beta>>provider-target-not-listed",
+		},
+		{
+			name:      "unknown root source provider",
+			rootMap:   "<<missing>>root-alias:target",
+			wantError: true,
+		},
+		{
+			name:      "unknown root target provider",
+			rootMap:   "root-alias:<<missing>>target",
+			wantError: true,
+		},
+		{
+			name:      "unknown provider source provider",
+			alphaMap:  "<<missing>>source-alias:target",
+			wantError: true,
+		},
+		{
+			name:      "unknown provider target provider",
+			alphaMap:  "source-alias:<<missing>>target",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providersDir := filepath.Join(rootDir, "providers")
+			if err := os.MkdirAll(providersDir, 0o700); err != nil {
+				t.Fatalf("mkdir providers dir: %v", err)
+			}
+			root := strings.Join([]string{
+				"PROVIDERS_DIR=" + providersDir,
+				"DEFAULT_PROVIDER=alpha",
+				"ENABLE_LEGACY_V1_ROUTES=true",
+				"V1_MODEL_MAP=" + tt.rootMap,
+				"",
+			}, "\n")
+			rootPath := filepath.Join(rootDir, ".env")
+			if err := os.WriteFile(rootPath, []byte(root), 0o600); err != nil {
+				t.Fatalf("write root env: %v", err)
+			}
+			for _, provider := range []struct {
+				id       string
+				modelMap string
+			}{
+				{id: "alpha", modelMap: tt.alphaMap},
+				{id: "beta"},
+			} {
+				contents := strings.Join([]string{
+					"PROVIDER_ID=" + provider.id,
+					"PROVIDER_ENABLED=true",
+					"UPSTREAM_BASE_URL=https://example.test",
+					"SUPPORTS_RESPONSES=true",
+					"MODEL_MAP=" + provider.modelMap,
+					"",
+				}, "\n")
+				path := filepath.Join(providersDir, provider.id+".env")
+				if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+					t.Fatalf("write provider env %s: %v", provider.id, err)
+				}
+			}
+
+			_, err := BuildRuntimeSnapshot(rootPath)
+			if tt.wantError && err == nil {
+				t.Fatal("expected unknown provider reference to fail full snapshot validation")
+			}
+			if !tt.wantError && err != nil {
+				t.Fatalf("expected absent target model not to affect provider-reference validation: %v", err)
+			}
+		})
 	}
 }
 
