@@ -130,6 +130,58 @@ func TestCheckResponsesFeatureCompatibilityAllowsPhaseMetadataOnRepresentableIte
 	}
 }
 
+func TestCheckResponsesFeatureCompatibilityAllowsEncryptedMetadataOnRepresentableItems(t *testing.T) {
+	req := model.CanonicalRequest{ResponseInputItems: []map[string]any{
+		{
+			"type":              "function_call",
+			"call_id":           "call_1",
+			"name":              "lookup",
+			"arguments":         `{}`,
+			"encrypted_content": "transport-metadata",
+		},
+		{
+			"type":              "function_call_output",
+			"call_id":           "call_1",
+			"output":            `{"ok":true}`,
+			"encrypted_content": "transport-metadata",
+		},
+		{
+			"role":              "tool",
+			"tool_call_id":      "call_1",
+			"content":           "result",
+			"encrypted_content": "transport-metadata",
+		},
+	}}
+	for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		if err := CheckResponsesFeatureCompatibility(req, endpoint); err != nil {
+			t.Fatalf("%s upstream should accept representable items with ignorable encrypted metadata: %v", endpoint, err)
+		}
+	}
+}
+
+func TestCheckResponsesFeatureCompatibilityRejectsUnknownTypedRoleItem(t *testing.T) {
+	for _, item := range []map[string]any{
+		{
+			"type":    "vendor_state",
+			"role":    "assistant",
+			"phase":   "analysis",
+			"content": "opaque state",
+		},
+		{
+			"type":    "vendor_state",
+			"role":    "assistant",
+			"content": "opaque state",
+		},
+	} {
+		req := model.CanonicalRequest{ResponseInputItems: []map[string]any{item}}
+		for _, endpoint := range []string{config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+			if err := CheckResponsesFeatureCompatibility(req, endpoint); err == nil {
+				t.Fatalf("%s upstream should reject an unknown typed persisted item: %#v", endpoint, item)
+			}
+		}
+	}
+}
+
 func TestCheckResponsesFeatureCompatibilityRejectsNonRepresentablePersistedReasoning(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
