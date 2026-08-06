@@ -686,7 +686,7 @@ tools prompt
   - 目录最大保留数量由 `OPENAI_COMPAT_DEBUG_ARCHIVE_MAX_REQUESTS` 独立控制，超过后按目录修改时间自动清理旧 request_id 目录；与 `LOG_MAX_REQUESTS` 完全解耦
 - 为避免图片 base64、向量数据和 rerank 语料占用不必要空间，`/v1/images/*`、`/v1/embeddings`、`/v1/rerank` 及其无 `/v1` / 显式 provider 路由别名默认**不写结构化日志，也不写调试归档**
 
-Responses 在非 Responses 上游场景下用于 `previous_response_id` 恢复的内存历史缓存，同时受 512 条和 256 MiB 总预算约束。超过预算时会优先驱逐最旧快照；单个快照本身超过预算时不缓存其完整多模态正文，但仍会在预算内保留工具调用恢复所需的轻量元数据。该限制只作用于跨请求缓存，不会裁剪当前请求发给模型的图片或文本。
+Responses 在非 Responses 上游场景下用于 `previous_response_id` 恢复的内存历史缓存，同时受 `LOG_MAX_REQUESTS` 条数和 256 MiB 总预算约束；会话索引也自动使用同一条数上限，不需要额外配置。超过预算时会优先驱逐最旧快照；单个快照本身超过预算时不缓存其完整多模态正文，但仍会在预算内保留工具调用恢复所需的轻量元数据。该限制只作用于跨请求缓存，不会裁剪当前请求发给模型的图片或文本。`LOG_MAX_REQUESTS` 是启动期配置，修改后需要重启进程。
 
 ### 7. OpenAI Images / Embeddings / Rerank 虚拟透传端口
 

@@ -391,7 +391,7 @@ func TestConfigValidateRejectsReservedModelIDTemplateDelimiters(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected MODEL_ID_TEMPLATE=%q to fail Config.Validate", template)
 			}
-			if !strings.Contains(err.Error(), "reserved for MODEL_MAP/V1_MODEL_MAP provider markers") {
+			if !strings.Contains(err.Error(), "不能使用保留的 << 或 >> 分隔符") {
 				t.Fatalf("expected reserved-delimiter validation error, got %v", err)
 			}
 		})

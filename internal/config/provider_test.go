@@ -905,7 +905,7 @@ func TestLoadProviderFileRejectsReservedModelIDTemplateDelimiters(t *testing.T) 
 
 			if _, err := loadProviderFile(providerEnvPath); err == nil {
 				t.Fatalf("expected reserved MODEL_ID_TEMPLATE delimiter %q to fail", template)
-			} else if !strings.Contains(err.Error(), "reserved for MODEL_MAP/V1_MODEL_MAP provider markers") {
+			} else if !strings.Contains(err.Error(), "不能使用保留的 << 或 >> 分隔符") {
 				t.Fatalf("expected reserved-delimiter error, got %v", err)
 			}
 		})

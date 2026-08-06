@@ -53,7 +53,7 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager,
 		upstreamTransports: upstream.NewTransportPool(),
 	}
 	if snapshot := store.Active(); snapshot != nil {
-		srv.history = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, responsesHistoryToolCallRecoveryIndexPath(snapshot.Config.ProvidersDir))
+		srv.history = newResponsesHistoryStore(snapshot.Config.LogMaxRequests, responsesHistoryToolCallRecoveryIndexPath(snapshot.Config.ProvidersDir))
 	} else {
 		srv.history = newResponsesHistoryStore(defaultResponsesHistoryMaxSize, "")
 	}

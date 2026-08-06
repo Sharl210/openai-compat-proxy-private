@@ -581,13 +581,13 @@ const (
 func normalizeModelIDTemplate(value string, key string, path string) (string, error) {
 	template := strings.TrimSpace(value)
 	if template == "" {
-		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: must contain exactly one %s placeholder", key, path, modelIDTemplatePlaceholder))
+		return "", ErrInvalidConfig(fmt.Sprintf("配置项 %s 在文件 %s 中不能为空，且必须且只能包含一个 %s 占位符", key, path, modelIDTemplatePlaceholder))
 	}
 	if strings.Contains(template, "<<") || strings.Contains(template, ">>") {
-		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: << and >> are reserved for MODEL_MAP/V1_MODEL_MAP provider markers", key, path))
+		return "", ErrInvalidConfig(fmt.Sprintf("配置项 %s 在文件 %s 中不能使用保留的 << 或 >> 分隔符", key, path))
 	}
 	if strings.Count(template, modelIDTemplatePlaceholder) != 1 {
-		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: must contain exactly one %s placeholder", key, path, modelIDTemplatePlaceholder))
+		return "", ErrInvalidConfig(fmt.Sprintf("配置项 %s 在文件 %s 中必须且只能包含一个 %s 占位符", key, path, modelIDTemplatePlaceholder))
 	}
 	return template, nil
 }
