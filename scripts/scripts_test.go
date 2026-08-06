@@ -144,7 +144,7 @@ func TestDeployDoesNotCreateLegacyProxyLog(t *testing.T) {
 	port := mustReservePort(t)
 	providersDir := filepath.Join(repoDir, "providers")
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
-	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustWriteEnv(t, repoDir, fmt.Sprintf("# note: `MODEL_MAP` and $(not-a-command) are comments\nLISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
 
 	result := runScript(t, repoDir, "deploy-linux.sh")
@@ -168,7 +168,7 @@ func TestDeployInstallsAndEnablesSystemdService(t *testing.T) {
 	port := mustReservePort(t)
 	providersDir := filepath.Join(repoDir, "providers")
 	mustWriteFile(t, filepath.Join(providersDir, "openai.env"), "PROVIDER_ID=openai\n")
-	mustWriteEnv(t, repoDir, fmt.Sprintf("LISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
+	mustWriteEnv(t, repoDir, fmt.Sprintf("# note: `MODEL_MAP` and $(not-a-command) are comments\nLISTEN_ADDR=127.0.0.1:%d\nPROVIDERS_DIR=%s\n", port, providersDir))
 	mustBuildFakeProxy(t, repoDir)
 	systemctlPath, systemctlLog := mustWriteFakeSystemctl(t, repoDir)
 	unitDir := filepath.Join(repoDir, "systemd")
@@ -188,10 +188,8 @@ func TestDeployInstallsAndEnablesSystemdService(t *testing.T) {
 		"Description=OpenAI Compatibility Proxy",
 		"WorkingDirectory=" + repoDir,
 		"Environment=OPENAI_COMPAT_SYSTEMD_UNIT=%n",
-		"source \"$2\"",
-		"exec \"$4\"",
-		"\"" + filepath.Join(repoDir, ".env") + "\"",
-		"\"" + filepath.Join(repoDir, "bin", "openai-compat-proxy") + "\"",
+		"EnvironmentFile=-" + filepath.Join(repoDir, ".env"),
+		"ExecStart=" + filepath.Join(repoDir, "bin", "openai-compat-proxy"),
 		"Restart=always",
 		"WantedBy=multi-user.target",
 	} {

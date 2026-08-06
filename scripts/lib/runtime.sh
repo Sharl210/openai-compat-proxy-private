@@ -143,36 +143,30 @@ require_env_file() {
 
 load_env() {
   require_env_file
-  set -a
-  source "$ENV_FILE"
-  set +a
-  : "${LISTEN_ADDR:?LISTEN_ADDR is required in .env}"
-  : "${PROVIDERS_DIR:?PROVIDERS_DIR is required in .env}"
+  load_env_values || fail "LISTEN_ADDR and PROVIDERS_DIR are required in .env"
+}
+
+load_env_values() {
+  unset LISTEN_ADDR PROVIDERS_DIR
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    export "$key=$value"
+  done < "$ENV_FILE"
+  [[ -n "${LISTEN_ADDR:-}" && -n "${PROVIDERS_DIR:-}" ]] || return 1
 }
 
 load_env_if_present() {
   [[ -f "$ENV_FILE" ]] || return 1
-  local rc=0
-  unset LISTEN_ADDR
-  unset PROVIDERS_DIR
-  set +e
-  set -a
-  source "$ENV_FILE"
-  rc=$?
-  set +a
-  if [[ $rc -eq 0 && -z "${LISTEN_ADDR:-}" ]]; then
-    rc=1
-  fi
-  if [[ $rc -eq 0 && -z "${PROVIDERS_DIR:-}" ]]; then
-    rc=1
-  fi
-  set -e
-  if [[ $rc -ne 0 ]]; then
-    unset LISTEN_ADDR
-    unset PROVIDERS_DIR
+  load_env_values || {
+    unset LISTEN_ADDR PROVIDERS_DIR
     return 1
-  fi
-  return 0
+  }
 }
 
 validate_provider_inputs() {
@@ -508,7 +502,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$ROOT_DIR
 Environment=OPENAI_COMPAT_SYSTEMD_UNIT=%n
-ExecStart=/usr/bin/env bash -c 'cd "\$1"; set -a; source "\$2"; set +a; export LISTEN_ADDR="\$3"; exec "\$4"' bash "$ROOT_DIR" "$ENV_FILE" "$normalized_listen_addr" "$BIN_PATH"
+EnvironmentFile=-$ENV_FILE
+Environment=LISTEN_ADDR=$normalized_listen_addr
+ExecStart=$BIN_PATH
 Restart=always
 RestartSec=3
 
