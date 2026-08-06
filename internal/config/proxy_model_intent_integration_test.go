@@ -71,6 +71,22 @@ func TestConfigResolveV1ProxyModelIntent_keepsLiteralProTargetWhenCandidateExist
 	}
 }
 
+func TestConfigResolveV1ProxyModelIntentUsesExplicitRequestEffortForQualifiedSource(t *testing.T) {
+	cfg := Config{
+		V1ModelMap: []ModelMapEntry{
+			NewModelMapEntry("<<alpha>>client-high", "<<beta>>upstream-model"),
+		},
+	}
+
+	intent, ok := cfg.ResolveV1ProxyModelIntentWithTargetCandidatesAndRequestEffort("client", "high", nil)
+	if !ok {
+		t.Fatal("expected qualified source to match explicit request effort")
+	}
+	if intent.BaseModel != "upstream-model" || intent.ReasoningEffort != "high" || intent.TargetProviderID != "beta" {
+		t.Fatalf("expected request effort and target provider to survive root mapping, got %#v", intent)
+	}
+}
+
 func TestProviderConfigResolveMappedProxyModelIntent_appliesOnlyOneMap(t *testing.T) {
 	// Given
 	provider := ProviderConfig{ModelMap: []ModelMapEntry{

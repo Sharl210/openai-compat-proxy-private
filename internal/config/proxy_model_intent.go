@@ -7,11 +7,17 @@ import (
 )
 
 func (c Config) ResolveV1ProxyModelIntent(modelName string) (model.ProxyModelIntent, bool) {
-	return c.ResolveV1ProxyModelIntentWithTargetCandidates(modelName, nil)
+	return c.ResolveV1ProxyModelIntentWithTargetCandidatesAndRequestEffort(modelName, "", nil)
 }
 
 func (c Config) ResolveV1ProxyModelIntentWithTargetCandidates(modelName string, targetCandidates []string) (model.ProxyModelIntent, bool) {
+	return c.ResolveV1ProxyModelIntentWithTargetCandidatesAndRequestEffort(modelName, "", targetCandidates)
+}
+
+func (c Config) ResolveV1ProxyModelIntentWithTargetCandidatesAndRequestEffort(modelName string, requestEffort string, targetCandidates []string) (model.ProxyModelIntent, bool) {
 	provider := ProviderConfig{ModelMap: c.V1ModelMap}
+	modelName = strings.TrimSpace(modelName)
+	normalizedRequestEffort := normalizeReasoningEffort(requestEffort)
 	intent, ok := model.ParseProxyModelIntent(modelName, staticModelMapAliasCandidates(c.V1ModelMap), model.ProxyModelIntentAxes{
 		EnableReasoningEffort: true,
 		EnablePro:             true,
@@ -19,20 +25,15 @@ func (c Config) ResolveV1ProxyModelIntentWithTargetCandidates(modelName string, 
 		EnableNoPrompt:        c.EnableNoPromptModelSuffix,
 		EnableUltra:           true,
 	})
-	if ok {
-		if mapped, resolved := provider.resolveMappedProxyModelIntentWithTargetCandidates(intent, targetCandidates, false); resolved {
-			return mapped, true
-		}
+	if !ok {
+		intent = model.ProxyModelIntent{BaseModel: modelName}
 	}
-
-	baseModel := strings.TrimSpace(modelName)
-	if mapped, _ := provider.resolveModelEntry(baseModel); strings.TrimSpace(mapped) != "" {
-		target, parsed := parseModelMapTargetProxyModelIntent(mapped, targetCandidates)
-		if parsed {
-			return mergeProxyModelIntentMapTarget(model.ProxyModelIntent{BaseModel: baseModel}, target), true
-		}
-		if baseModel != "" {
-			return model.ProxyModelIntent{BaseModel: mapped}, true
+	if normalizedRequestEffort != "" && intent.ReasoningEffort == "" {
+		intent.ReasoningEffort = normalizedRequestEffort
+	}
+	if intent.BaseModel != "" {
+		if mapped, resolved := provider.resolveMappedProxyModelIntentWithTargetCandidatesAndSourceProvider(intent, targetCandidates, true, true); resolved {
+			return mapped, true
 		}
 	}
 	return model.ProxyModelIntent{}, false
@@ -43,12 +44,22 @@ func (p ProviderConfig) ResolveMappedProxyModelIntent(intent model.ProxyModelInt
 }
 
 func (p ProviderConfig) resolveMappedProxyModelIntentWithTargetCandidates(intent model.ProxyModelIntent, targetCandidates []string, reverse bool) (model.ProxyModelIntent, bool) {
+	return p.resolveMappedProxyModelIntentWithTargetCandidatesAndSourceProvider(intent, targetCandidates, reverse, false)
+}
+
+func (p ProviderConfig) resolveMappedProxyModelIntentWithTargetCandidatesAndSourceProvider(intent model.ProxyModelIntent, targetCandidates []string, reverse bool, useSourceProviderAsTarget bool) (model.ProxyModelIntent, bool) {
 	for _, candidate := range proxyModelIntentMapCandidates(intent) {
-		mapped, _ := p.resolveModelEntryWithOrder(candidate, reverse)
+		var mapped string
+		var entry ModelMapEntry
+		if useSourceProviderAsTarget {
+			mapped, entry = p.resolveModelEntryWithStaticPriority(candidate, reverse)
+		} else {
+			mapped, entry = p.resolveModelEntryWithOrder(candidate, reverse)
+		}
 		if strings.TrimSpace(mapped) == "" {
 			continue
 		}
-		target, parsed := parseModelMapTargetProxyModelIntent(mapped, targetCandidates)
+		target, parsed := parseModelMapTargetProxyModelIntentWithEntry(mapped, targetCandidates, entry, useSourceProviderAsTarget)
 		if !parsed {
 			continue
 		}
@@ -60,19 +71,26 @@ func (p ProviderConfig) resolveMappedProxyModelIntentWithTargetCandidates(intent
 }
 
 func parseModelMapTargetProxyModelIntent(modelName string, literalCandidates []string) (model.ProxyModelIntent, bool) {
+	return parseModelMapTargetProxyModelIntentWithEntry(modelName, literalCandidates, ModelMapEntry{}, false)
+}
+
+func parseModelMapTargetProxyModelIntentWithEntry(modelName string, literalCandidates []string, entry ModelMapEntry, useSourceProviderAsTarget bool) (model.ProxyModelIntent, bool) {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
 		return model.ProxyModelIntent{}, false
 	}
 	for _, literalCandidate := range literalCandidates {
 		if strings.TrimSpace(literalCandidate) == modelName {
-			return model.ProxyModelIntent{BaseModel: modelName}, true
+			return model.ProxyModelIntent{BaseModel: modelName, TargetProviderID: modelMapTargetProviderID(entry, useSourceProviderAsTarget)}, true
 		}
 	}
 
 	axes := model.ProxyModelIntentAxes{
 		EnableReasoningEffort: true,
 		EnablePro:             true,
+		EnableAdaptive:        true,
+		EnableNoPrompt:        true,
+		EnableUltra:           true,
 	}
 	var selected model.ProxyModelIntent
 	for offset := 0; offset < len(modelName); {
@@ -89,9 +107,20 @@ func parseModelMapTargetProxyModelIntent(modelName string, literalCandidates []s
 		offset++
 	}
 	if selected.BaseModel != "" {
+		selected.TargetProviderID = modelMapTargetProviderID(entry, useSourceProviderAsTarget)
 		return selected, true
 	}
-	return model.ProxyModelIntent{BaseModel: modelName}, true
+	return model.ProxyModelIntent{BaseModel: modelName, TargetProviderID: modelMapTargetProviderID(entry, useSourceProviderAsTarget)}, true
+}
+
+func modelMapTargetProviderID(entry ModelMapEntry, useSourceProviderAsTarget bool) string {
+	if targetProviderID := strings.TrimSpace(entry.TargetProviderID); targetProviderID != "" {
+		return targetProviderID
+	}
+	if useSourceProviderAsTarget {
+		return strings.TrimSpace(entry.SourceProviderID)
+	}
+	return ""
 }
 
 func mergeProxyModelIntentMapTarget(source model.ProxyModelIntent, target model.ProxyModelIntent) model.ProxyModelIntent {
@@ -101,6 +130,18 @@ func mergeProxyModelIntentMapTarget(source model.ProxyModelIntent, target model.
 	}
 	if target.ReasoningMode != "" {
 		source.ReasoningMode = target.ReasoningMode
+	}
+	if target.HasAdaptive {
+		source.HasAdaptive = true
+	}
+	if target.HasNoPrompt {
+		source.HasNoPrompt = true
+	}
+	if target.HasUltra {
+		source.HasUltra = true
+	}
+	if target.TargetProviderID != "" {
+		source.TargetProviderID = target.TargetProviderID
 	}
 	return source
 }
@@ -179,6 +220,9 @@ func (p ProviderConfig) AllowsLiteralModelMapTarget(modelName string) bool {
 		return false
 	}
 	for _, entry := range p.ModelMap {
+		if !p.ModelMapEntryAppliesToProvider(entry) {
+			continue
+		}
 		if !entry.TargetHasCaptures && strings.TrimSpace(entry.UnescapedTarget) == modelName {
 			return true
 		}
@@ -223,8 +267,11 @@ func (p ProviderConfig) RoutingModelCandidates() []string {
 		}
 		add(manualModel)
 	}
-	for _, alias := range staticModelMapAliasCandidates(p.ModelMap) {
-		add(alias)
+	for _, entry := range p.ModelMap {
+		if !p.ModelMapEntryAppliesToProvider(entry) || !entry.IsStaticKey {
+			continue
+		}
+		add(entry.UnescapedKey)
 	}
 	return candidates
 }

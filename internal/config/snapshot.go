@@ -565,7 +565,15 @@ func (s *RuntimeSnapshot) resolveProviderProxyModelIntent(providerID string, pro
 	if !ok {
 		return "", externalModel, model.ProxyModelIntent{}, false
 	}
-	return providerID, ProxyModelIntentRoutingModel(resolution.ResolvedIntent), resolution.ResolvedIntent, true
+	resolvedProviderID := providerID
+	if targetProviderID := strings.TrimSpace(resolution.ResolvedIntent.TargetProviderID); targetProviderID != "" {
+		targetProvider, err := s.Config.ProviderByID(targetProviderID)
+		if err != nil || !targetProvider.Enabled {
+			return "", externalModel, model.ProxyModelIntent{}, false
+		}
+		resolvedProviderID = targetProviderID
+	}
+	return resolvedProviderID, ProxyModelIntentRoutingModel(resolution.ResolvedIntent), resolution.ResolvedIntent, true
 }
 
 func stripNoPromptModelSuffix(model string) (string, bool) {
