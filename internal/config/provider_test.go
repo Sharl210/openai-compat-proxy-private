@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"openai-compat-proxy/internal/model"
 )
 
 func TestLoadProviderFileParsesMasqueradeClientVersion(t *testing.T) {
@@ -190,6 +192,82 @@ func TestResolveModelAndEffortTreatsModelMapSourceAndTargetSuffixIndependently(t
 				t.Fatalf("expected %q/%q, got %q/%q", tt.wantModel, tt.wantEffort, model, effort)
 			}
 		})
+	}
+}
+
+func TestParseModelMapNormalizesProviderQualifiersAndRegexColon(t *testing.T) {
+	raw := "<<alpha>>#re:client-(.*):<<beta>>upstream-$1-high-noprompt"
+	entries, err := parseModelMap(raw, "test MODEL_MAP")
+	if err != nil {
+		t.Fatalf("parseModelMap error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one model map entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.Key != "<<alpha>>#re:client-(.*)" || entry.Target != "<<beta>>upstream-$1-high-noprompt" {
+		t.Fatalf("expected raw qualified key/target to be preserved, got key=%q target=%q", entry.Key, entry.Target)
+	}
+	if entry.UnescapedKey != "#re:client-(.*)" || entry.UnescapedTarget != "upstream-$1-high-noprompt" {
+		t.Fatalf("expected normalized model text, got key=%q target=%q", entry.UnescapedKey, entry.UnescapedTarget)
+	}
+	if entry.SourceProviderID != "alpha" || entry.TargetProviderID != "beta" {
+		t.Fatalf("expected provider metadata alpha -> beta, got source=%q target=%q", entry.SourceProviderID, entry.TargetProviderID)
+	}
+	if got := entry.Resolve("client-gpt"); got != "upstream-gpt-high-noprompt" {
+		t.Fatalf("expected regex capture replacement after qualifier stripping, got %q", got)
+	}
+}
+
+func TestParseModelMapRejectsProviderQualifiersOutsideSidePrefix(t *testing.T) {
+	for _, raw := range []string{
+		"source<<alpha>>:target",
+		"source:target<<beta>>",
+		"<<alpha>><<beta>>source:target",
+		"#re:<<alpha>>source:target",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := parseModelMap(raw, "test MODEL_MAP"); err == nil {
+				t.Fatalf("expected provider qualifier placement to be rejected for %q", raw)
+			}
+		})
+	}
+}
+
+func TestProviderModelMapSourceQualifierFiltersOnlyQualifiedEntries(t *testing.T) {
+	qualified := NewModelMapEntry("<<alpha>>source", "qualified-target")
+	unqualified := NewModelMapEntry("source", "unqualified-target")
+
+	alpha := ProviderConfig{ID: "alpha", ModelMap: []ModelMapEntry{unqualified, qualified}}
+	if mapped, _ := alpha.ResolveModelAndEffortWithRequestEffort("source", "", false); mapped != "qualified-target" {
+		t.Fatalf("expected alpha to use its qualified rule, got %q", mapped)
+	}
+
+	beta := ProviderConfig{ID: "beta", ModelMap: []ModelMapEntry{unqualified, qualified}}
+	if mapped, _ := beta.ResolveModelAndEffortWithRequestEffort("source", "", false); mapped != "unqualified-target" {
+		t.Fatalf("expected beta to ignore alpha-qualified rule and use unqualified rule, got %q", mapped)
+	}
+}
+
+func TestProviderModelMapTargetQualifierCarriesThroughProxyIntentSuffixes(t *testing.T) {
+	provider := ProviderConfig{
+		ID: "alpha",
+		ModelMap: []ModelMapEntry{
+			NewModelMapEntry("<<alpha>>#re:client-(.*)", "<<beta>>upstream-$1-noprompt"),
+		},
+	}
+	intent, ok := provider.ResolveMappedProxyModelIntent(model.ProxyModelIntent{
+		BaseModel:       "client-gpt",
+		ReasoningEffort: "high",
+	})
+	if !ok {
+		t.Fatal("expected qualified regex MODEL_MAP to resolve")
+	}
+	if intent.BaseModel != "upstream-gpt" || intent.ReasoningEffort != "high" || !intent.HasNoPrompt || intent.TargetProviderID != "beta" {
+		t.Fatalf("unexpected resolved intent: %#v", intent)
+	}
+	if got := intent.CanonicalModel(); got != "upstream-gpt-high-noprompt" {
+		t.Fatalf("expected provider metadata not to alter CanonicalModel, got %q", got)
 	}
 }
 
@@ -807,6 +885,28 @@ func TestLoadProviderFileRejectsInvalidModelIDTemplate(t *testing.T) {
 
 			if _, err := loadProviderFile(providerEnvPath); err == nil {
 				t.Fatalf("expected invalid MODEL_ID_TEMPLATE %q to fail", template)
+			}
+		})
+	}
+}
+
+func TestLoadProviderFileRejectsReservedModelIDTemplateDelimiters(t *testing.T) {
+	for _, template := range []string{
+		"packy-<<{{model}}-vip",
+		"packy-{{model}}>>-vip",
+	} {
+		t.Run(template, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providerEnvPath := filepath.Join(rootDir, "openai.env")
+			providerBody := "PROVIDER_ID=openai\nMODEL_ID_TEMPLATE=" + template + "\n"
+			if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			if _, err := loadProviderFile(providerEnvPath); err == nil {
+				t.Fatalf("expected reserved MODEL_ID_TEMPLATE delimiter %q to fail", template)
+			} else if !strings.Contains(err.Error(), "reserved for MODEL_MAP/V1_MODEL_MAP provider markers") {
+				t.Fatalf("expected reserved-delimiter error, got %v", err)
 			}
 		})
 	}

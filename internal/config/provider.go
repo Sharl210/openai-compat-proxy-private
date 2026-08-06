@@ -97,6 +97,8 @@ type ModelMapEntry struct {
 	Target            string
 	UnescapedKey      string
 	UnescapedTarget   string
+	SourceProviderID  string
+	TargetProviderID  string
 	Pattern           *regexp.Regexp
 	IsStaticKey       bool
 	TargetHasCaptures bool
@@ -581,6 +583,9 @@ func normalizeModelIDTemplate(value string, key string, path string) (string, er
 	if template == "" {
 		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: must contain exactly one %s placeholder", key, path, modelIDTemplatePlaceholder))
 	}
+	if strings.Contains(template, "<<") || strings.Contains(template, ">>") {
+		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: << and >> are reserved for MODEL_MAP/V1_MODEL_MAP provider markers", key, path))
+	}
 	if strings.Count(template, modelIDTemplatePlaceholder) != 1 {
 		return "", ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: must contain exactly one %s placeholder", key, path, modelIDTemplatePlaceholder))
 	}
@@ -1056,21 +1061,42 @@ func parseModelMap(raw string, path string) ([]ModelMapEntry, error) {
 		if part == "" {
 			continue
 		}
-		key, target, ok := splitModelMapEntry(part)
-		if !ok || strings.TrimSpace(key) == "" || strings.TrimSpace(target) == "" {
+		rawKey, rawTarget, ok := splitModelMapEntry(part)
+		if !ok || strings.TrimSpace(rawKey) == "" || strings.TrimSpace(rawTarget) == "" {
 			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP entry in %s: %q (expected format: src:target,src2:target2)", path, part))
 		}
-		key = strings.TrimSpace(key)
-		target = strings.TrimSpace(target)
+		rawKey = strings.TrimSpace(rawKey)
+		rawTarget = strings.TrimSpace(rawTarget)
+		sourceProviderID, key, _, err := splitModelMapQualifiedModel(rawKey)
+		if err != nil {
+			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP source qualifier in %s: %q", path, rawKey))
+		}
+		targetProviderID, target, _, err := splitModelMapQualifiedModel(rawTarget)
+		if err != nil {
+			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP target qualifier in %s: %q", path, rawTarget))
+		}
 		if _, err := compileModelPatternStrict(key); err != nil {
 			return nil, ErrInvalidConfig(fmt.Sprintf("invalid MODEL_MAP pattern in %s: %q", path, key))
 		}
-		entries = append(entries, NewModelMapEntry(key, target))
+		entry := NewModelMapEntry(key, target)
+		entry.Key = rawKey
+		entry.Target = rawTarget
+		entry.SourceProviderID = sourceProviderID
+		entry.TargetProviderID = targetProviderID
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }
 
 func splitModelMapEntry(part string) (string, string, bool) {
+	source := strings.TrimSpace(part)
+	if strings.HasPrefix(source, "<<") {
+		if closingOffset := strings.Index(source[2:], ">>"); closingOffset >= 0 {
+			closingOffset += 2
+			source = strings.TrimSpace(source[closingOffset+2:])
+		}
+	}
+	regexSource := strings.HasPrefix(source, "#re:")
 	escaped := false
 	colonCount := 0
 	for i := 0; i < len(part); i++ {
@@ -1087,12 +1113,36 @@ func splitModelMapEntry(part string) (string, string, bool) {
 			continue
 		}
 		colonCount++
-		if strings.HasPrefix(strings.TrimSpace(part), "#re:") && colonCount == 1 {
+		if regexSource && colonCount == 1 {
 			continue
 		}
 		return part[:i], part[i+1:], true
 	}
 	return part, "", false
+}
+
+func splitModelMapQualifiedModel(value string) (string, string, bool, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "<<") {
+		if strings.Contains(value, "<<") || strings.Contains(value, ">>") {
+			return "", "", true, fmt.Errorf("provider qualifier must be at the beginning")
+		}
+		return "", value, false, nil
+	}
+	closingOffset := strings.Index(value[2:], ">>")
+	if closingOffset < 0 {
+		return "", "", true, fmt.Errorf("missing closing provider qualifier")
+	}
+	closingOffset += 2
+	providerID := strings.TrimSpace(value[2:closingOffset])
+	modelText := strings.TrimSpace(value[closingOffset+2:])
+	if providerID == "" || modelText == "" {
+		return "", "", true, fmt.Errorf("provider qualifier and model text are required")
+	}
+	if strings.Contains(modelText, "<<") || strings.Contains(modelText, ">>") {
+		return "", "", true, fmt.Errorf("provider qualifier must appear only once at the beginning")
+	}
+	return providerID, modelText, true, nil
 }
 
 func parseCommaSeparatedList(raw string) []string {
@@ -1148,12 +1198,26 @@ func unescapeString(s string) string {
 
 func NewModelMapEntry(key, target string) ModelMapEntry {
 	entry := ModelMapEntry{Key: key, Target: target}
-	entry.UnescapedKey = key
-	entry.UnescapedTarget = target
+	entry.UnescapedKey = strings.TrimSpace(key)
+	entry.UnescapedTarget = strings.TrimSpace(target)
+	if sourceProviderID, normalizedKey, _, err := splitModelMapQualifiedModel(key); err == nil {
+		entry.SourceProviderID = sourceProviderID
+		entry.UnescapedKey = normalizedKey
+	}
+	if targetProviderID, normalizedTarget, _, err := splitModelMapQualifiedModel(target); err == nil {
+		entry.TargetProviderID = targetProviderID
+		entry.UnescapedTarget = normalizedTarget
+	}
 	entry.Pattern = compileModelPattern(entry.UnescapedKey)
 	entry.IsStaticKey = isStaticModelPattern(entry.UnescapedKey)
 	entry.TargetHasCaptures = strings.Contains(entry.UnescapedTarget, "$")
 	return entry
+}
+
+func (p ProviderConfig) ModelMapEntryAppliesToProvider(entry ModelMapEntry) bool {
+	sourceProviderID := strings.TrimSpace(entry.SourceProviderID)
+	providerID := strings.TrimSpace(p.ID)
+	return sourceProviderID == "" || providerID == "" || sourceProviderID == providerID
 }
 
 func resolveProviderRelativePaths(providerEnvPath string, raw string) []string {
@@ -1532,6 +1596,33 @@ func (p ProviderConfig) resolveModelEntry(model string) (string, ModelMapEntry) 
 	return p.resolveModelEntryWithOrder(model, false)
 }
 
+func (p ProviderConfig) resolveModelEntryWithStaticPriority(model string, reverse bool) (string, ModelMapEntry) {
+	if p.ModelMap == nil {
+		return "", ModelMapEntry{}
+	}
+	if reverse {
+		for i := len(p.ModelMap) - 1; i >= 0; i-- {
+			entry := p.ModelMap[i]
+			if !entry.IsStaticKey || !p.ModelMapEntryAppliesToProvider(entry) {
+				continue
+			}
+			if matchModelPattern(model, entry) {
+				return applyCaptureReplacement(model, entry), entry
+			}
+		}
+	} else {
+		for _, entry := range p.ModelMap {
+			if !entry.IsStaticKey || !p.ModelMapEntryAppliesToProvider(entry) {
+				continue
+			}
+			if matchModelPattern(model, entry) {
+				return applyCaptureReplacement(model, entry), entry
+			}
+		}
+	}
+	return p.resolveModelEntryWithOrder(model, reverse)
+}
+
 func (p ProviderConfig) resolveModelEntryWithOrder(model string, reverse bool) (string, ModelMapEntry) {
 	if p.ModelMap == nil {
 		return "", ModelMapEntry{}
@@ -1539,6 +1630,9 @@ func (p ProviderConfig) resolveModelEntryWithOrder(model string, reverse bool) (
 	if reverse {
 		for i := len(p.ModelMap) - 1; i >= 0; i-- {
 			entry := p.ModelMap[i]
+			if !p.ModelMapEntryAppliesToProvider(entry) {
+				continue
+			}
 			if matchModelPattern(model, entry) {
 				return applyCaptureReplacement(model, entry), entry
 			}
@@ -1546,6 +1640,9 @@ func (p ProviderConfig) resolveModelEntryWithOrder(model string, reverse bool) (
 		return "", ModelMapEntry{}
 	}
 	for _, entry := range p.ModelMap {
+		if !p.ModelMapEntryAppliesToProvider(entry) {
+			continue
+		}
 		if matchModelPattern(model, entry) {
 			return applyCaptureReplacement(model, entry), entry
 		}
