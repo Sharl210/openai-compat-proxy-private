@@ -306,6 +306,12 @@ func buildEstimatorWireContextFingerprints(providerID, endpointType string, cano
 		lineagePreservedTopLevelFields = nil
 	}
 	lineageWire.PreservedTopLevelFields = lineagePreservedTopLevelFields
+	if endpointType != config.UpstreamEndpointTypeResponses {
+		// Non-Responses upstreams consume canonical Messages, so these replay
+		// fields do not change the confirmed parent context used as a baseline.
+		lineageWire.ResponseItemReferencesByCallID = nil
+		lineageWire.InputItemsAreOriginal = false
+	}
 	lineageEncoded, err := json.Marshal(lineageWire)
 	if err != nil {
 		return "", "", 0, false

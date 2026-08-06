@@ -400,6 +400,64 @@ func TestResponsesLineageHeaderUsesEstimatedParentWhenUpstreamOmitsUsage(t *test
 	requireConfirmedLineageEstimateHeader(t, child.Header().Get(headerProxyEstimatedInputTokens), baseline)
 }
 
+func TestResponsesLineageHeaderUsesEstimatedChatParentForToolContinuationWithoutUsage(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch calls.Add(1) {
+		case 1:
+			_, _ = fmt.Fprint(w, `{"id":"chatcmpl_root","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_lookup","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"weather\"}"}}]},"finish_reason":"tool_calls"}]}`)
+		case 2:
+			_, _ = fmt.Fprint(w, `{"id":"chatcmpl_child","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`)
+		default:
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		}
+	}))
+	defer upstream.Close()
+
+	manager := tokenestimator.NewManager(t.TempDir(), time.UTC, func() []string { return []string{"deepseek"} })
+	server := NewServerWithStore(config.NewStaticRuntimeStore(config.Config{
+		DefaultProvider:             "deepseek",
+		EnableLegacyV1Routes:        true,
+		LogEnable:                   false,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "deepseek",
+			Enabled:              true,
+			ManualModels:         []string{"deepseek-v4-flash"},
+			SupportsResponses:    true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+		}},
+	}), nil, manager)
+	defer server.Close()
+
+	root := sendResponsesLineageRequest(t, server, `{"model":"deepseek-v4-flash","input":"look up the weather"}`, "")
+	requireResponsesLineageSuccess(t, "chat root without usage", root)
+	rootEstimate := root.Header().Get(headerProxyEstimatedInputTokens)
+	requirePlainEstimatedInputTokensHeader(t, rootEstimate)
+	baseline, err := strconv.Atoi(rootEstimate)
+	if err != nil {
+		t.Fatalf("parse root estimate %q: %v", rootEstimate, err)
+	}
+	sessionID := root.Header().Get(headerProxySessionID)
+	if sessionID == "" {
+		t.Fatal("expected root response to expose a proxy session ID")
+	}
+
+	child := sendResponsesLineageRequest(t, server, `{"model":"deepseek-v4-flash","previous_response_id":"chatcmpl_root","input":[{"type":"function_call_output","call_id":"call_lookup","output":"{\"temperature\":20}"}]}`, sessionID)
+	requireResponsesLineageSuccess(t, "chat tool continuation without usage", child)
+	requireConfirmedLineageEstimateHeader(t, child.Header().Get(headerProxyEstimatedInputTokens), baseline)
+	if calls.Load() != 2 {
+		t.Fatalf("expected exactly two chat upstream calls, got %d", calls.Load())
+	}
+}
+
 func TestResponsesImplicitHistoryLineageUsesMatchedParentInsteadOfNewestSessionRequest(t *testing.T) {
 	server := newResponsesLineageTestServer(t, []responsesLineageTestReply{
 		{id: "resp-root", inputTokens: 123},

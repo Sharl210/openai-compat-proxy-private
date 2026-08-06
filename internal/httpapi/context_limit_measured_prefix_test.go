@@ -118,6 +118,38 @@ func TestMeasuredPrefixEstimatorFallsBackWhenWireContextChanges(t *testing.T) {
 	}
 }
 
+func TestLineageWireFingerprintNormalizesReplayArtifactsOnlyForNonResponsesUpstreams(t *testing.T) {
+	base := modelpkg.CanonicalRequest{
+		Model: "gpt-5.6",
+		Messages: []modelpkg.CanonicalMessage{
+			{Role: "user", Parts: []modelpkg.CanonicalContentPart{{Type: "text", Text: "stable context"}}},
+		},
+	}
+	replay := base
+	replay.ResponseInputItemsAreOriginal = true
+	replay.ResponseItemReferencesByCallID = map[string]string{"call_1": "fc_1"}
+
+	for _, endpointType := range []string{config.UpstreamEndpointTypeResponses, config.UpstreamEndpointTypeChat, config.UpstreamEndpointTypeAnthropic} {
+		wireBase, lineageBase, _, baseOK := buildEstimatorWireContextFingerprints("openai", endpointType, base)
+		wireReplay, lineageReplay, _, replayOK := buildEstimatorWireContextFingerprints("openai", endpointType, replay)
+		if !baseOK || !replayOK || wireBase == "" || wireReplay == "" || lineageBase == "" || lineageReplay == "" {
+			t.Fatalf("expected valid fingerprints for %s upstream", endpointType)
+		}
+		if wireBase == wireReplay {
+			t.Fatalf("expected full wire fingerprint to preserve replay artifacts for %s upstream", endpointType)
+		}
+		if endpointType == config.UpstreamEndpointTypeResponses {
+			if lineageBase == lineageReplay {
+				t.Fatalf("expected Responses lineage fingerprint to retain replay artifacts")
+			}
+			continue
+		}
+		if lineageBase != lineageReplay {
+			t.Fatalf("expected non-Responses lineage fingerprint to ignore replay artifacts, base=%s replay=%s", lineageBase, lineageReplay)
+		}
+	}
+}
+
 func TestMeasuredPrefixEstimatorHeaderUsesRawPointWithoutLimitScaling(t *testing.T) {
 	manager := tokenestimator.NewManager(t.TempDir(), time.UTC, func() []string { return []string{"openai"} })
 	canon := modelpkg.CanonicalRequest{
