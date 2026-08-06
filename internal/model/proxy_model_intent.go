@@ -29,6 +29,7 @@ type ProxyModelIntent struct {
 	HasUltra         bool
 	HasModelMapAlias bool
 	IsExactLiteral   bool
+	TargetProviderID string
 }
 
 func (intent ProxyModelIntent) CanonicalModel() string {
