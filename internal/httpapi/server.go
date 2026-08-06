@@ -41,7 +41,7 @@ func NewServerWithStore(store *config.RuntimeStore, cacheMgr *cacheinfo.Manager,
 				logRoot = "logs"
 			}
 			if logRoot != "" {
-				sessionIndex = logging.NewSessionRequestIndex(logRoot)
+				sessionIndex = logging.NewSessionRequestIndex(logRoot, snapshot.Config.LogMaxRequests)
 			}
 		}
 	}

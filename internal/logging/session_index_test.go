@@ -52,12 +52,40 @@ func TestSessionRequestIndexPersistsRequiredFieldsAndUsesSafeSessionPath(t *test
 	if len(records) != 2 {
 		t.Fatalf("expected allocation and completion records, got %d", len(records))
 	}
-	completed := records[len(records)-1]
+	var completed logging.SessionRequestRecord
+	for _, record := range records {
+		if record.Event == "completed" {
+			completed = record
+			break
+		}
+	}
 	if completed.SessionID != sessionID || completed.ConversationRequestSeq != 1 || completed.ConversationRequestID != "r000001" || completed.RequestUID != "req-1" || completed.XRequestID != "req-1" {
 		t.Fatalf("required identity fields missing: %#v", completed)
 	}
 	if completed.Timestamp == "" || completed.Status != 400 || completed.Route != "/v1/chat/completions" {
 		t.Fatalf("required lifecycle fields missing: %#v", completed)
+	}
+}
+
+func TestSessionRequestIndexRetainsConfiguredNewestRecordsFirst(t *testing.T) {
+	root := t.TempDir()
+	index := logging.NewSessionRequestIndex(root, 3)
+	for requestIndex := 1; requestIndex <= 4; requestIndex++ {
+		requestID := "req-" + strconv.Itoa(requestIndex)
+		if _, err := index.Reserve("bounded-session", requestID, requestID); err != nil {
+			t.Fatalf("reserve %s: %v", requestID, err)
+		}
+	}
+
+	records, err := index.Lookup("bounded-session")
+	if err != nil {
+		t.Fatalf("lookup bounded session: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("expected three newest records, got %d", len(records))
+	}
+	if records[0].ConversationRequestSeq != 4 || records[1].ConversationRequestSeq != 3 || records[2].ConversationRequestSeq != 2 {
+		t.Fatalf("expected newest-first sequences [4 3 2], got [%d %d %d]", records[0].ConversationRequestSeq, records[1].ConversationRequestSeq, records[2].ConversationRequestSeq)
 	}
 }
 

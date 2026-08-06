@@ -10,17 +10,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	sessionRequestIndexDirectory = "session-index"
-	sessionRequestIndexFile      = "index.ndjson"
-	sessionRequestStateFile      = "state.json"
-	sessionIndexCacheLimit       = 512
-	sessionIndexReservationLimit = 256
+	sessionRequestIndexDirectory  = "session-index"
+	sessionRequestIndexFile       = "index.ndjson"
+	sessionRequestStateFile       = "state.json"
+	sessionIndexCacheLimit        = 512
+	sessionIndexReservationLimit  = 256
+	defaultSessionIndexMaxRecords = 200
 )
 
 // SessionRequestRecord 只保存请求标识和生命周期元数据，不携带正文、凭据或媒体。
@@ -52,15 +54,21 @@ type sessionIndexCacheEntry struct {
 
 // SessionRequestIndex 按会话持久化直接索引，不在内存中保留请求内容。
 type SessionRequestIndex struct {
-	root  string
-	mu    sync.Mutex
-	cache map[string]*sessionIndexCacheEntry
+	root       string
+	mu         sync.Mutex
+	cache      map[string]*sessionIndexCacheEntry
+	maxRecords int
 }
 
-func NewSessionRequestIndex(root string) *SessionRequestIndex {
+func NewSessionRequestIndex(root string, maxRecords ...int) *SessionRequestIndex {
+	limit := defaultSessionIndexMaxRecords
+	if len(maxRecords) > 0 && maxRecords[0] > 0 {
+		limit = maxRecords[0]
+	}
 	return &SessionRequestIndex{
-		root:  strings.TrimSpace(root),
-		cache: make(map[string]*sessionIndexCacheEntry),
+		root:       strings.TrimSpace(root),
+		cache:      make(map[string]*sessionIndexCacheEntry),
+		maxRecords: limit,
 	}
 }
 
@@ -123,7 +131,7 @@ func (i *SessionRequestIndex) Reserve(sessionID, requestUID, xRequestID string) 
 	if err := writeSessionRequestStateLocked(directory, sessionID, sequence); err != nil {
 		return 0, err
 	}
-	if err := appendSessionRequestRecordLocked(directory, SessionRequestRecord{
+	if err := appendSessionRequestRecordLocked(directory, i.maxRecords, SessionRequestRecord{
 		Event:                  "allocated",
 		SessionID:              sessionID,
 		ConversationRequestSeq: sequence,
@@ -175,7 +183,7 @@ func (i *SessionRequestIndex) Append(record SessionRequestRecord) error {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create session request index directory: %w", err)
 	}
-	return appendSessionRequestRecordLocked(directory, record)
+	return appendSessionRequestRecordLocked(directory, i.maxRecords, record)
 }
 
 // Lookup 只读取目标会话对应的确定性索引，不扫描请求归档。
@@ -215,6 +223,7 @@ func (i *SessionRequestIndex) Lookup(sessionID string) ([]SessionRequestRecord, 
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	sortSessionRequestRecords(records)
 	return records, nil
 }
 
@@ -332,27 +341,88 @@ func writeSessionRequestStateLocked(directory, sessionID string, next uint64) er
 	return nil
 }
 
-func appendSessionRequestRecordLocked(directory string, record SessionRequestRecord) error {
-	data, err := json.Marshal(record)
+func appendSessionRequestRecordLocked(directory string, maxRecords int, record SessionRequestRecord) error {
+	path := filepath.Join(directory, sessionRequestIndexFile)
+	records, err := readSessionRequestRecords(path)
 	if err != nil {
-		return fmt.Errorf("encode session request index record: %w", err)
+		return err
 	}
-	file, err := os.OpenFile(filepath.Join(directory, sessionRequestIndexFile), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	records = append(records, record)
+	sortSessionRequestRecords(records)
+	if maxRecords <= 0 {
+		maxRecords = defaultSessionIndexMaxRecords
+	}
+	if len(records) > maxRecords {
+		records = records[:maxRecords]
+	}
+	data := make([]byte, 0, len(records)*256)
+	for _, existing := range records {
+		line, marshalErr := json.Marshal(existing)
+		if marshalErr != nil {
+			return fmt.Errorf("encode session request index record: %w", marshalErr)
+		}
+		data = append(data, line...)
+		data = append(data, '\n')
+	}
+	temporary, err := os.CreateTemp(directory, ".index-*.tmp")
 	if err != nil {
-		return fmt.Errorf("open session request index: %w", err)
+		return fmt.Errorf("create session request index: %w", err)
 	}
-	if _, err := writeBytes(file, append(data, '\n')); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("append session request index: %w", err)
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("set session request index permissions: %w", err)
 	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
+	if _, err := writeBytes(temporary, data); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("write session request index: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
 		return fmt.Errorf("sync session request index: %w", err)
 	}
-	if err := file.Close(); err != nil {
+	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close session request index: %w", err)
 	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace session request index: %w", err)
+	}
 	return nil
+}
+
+func readSessionRequestRecords(path string) ([]SessionRequestRecord, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read session request index: %w", err)
+	}
+	records := make([]SessionRequestRecord, 0)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var record SessionRequestRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			return nil, fmt.Errorf("decode session request index record: %w", err)
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+func sortSessionRequestRecords(records []SessionRequestRecord) {
+	sort.SliceStable(records, func(left, right int) bool {
+		leftTime, leftErr := time.Parse(time.RFC3339Nano, records[left].Timestamp)
+		rightTime, rightErr := time.Parse(time.RFC3339Nano, records[right].Timestamp)
+		if leftErr == nil && rightErr == nil && !leftTime.Equal(rightTime) {
+			return leftTime.After(rightTime)
+		}
+		return records[left].ConversationRequestSeq > records[right].ConversationRequestSeq
+	})
 }
 
 func writeBytes(writer io.Writer, data []byte) (int, error) {
