@@ -1269,6 +1269,57 @@ func TestDecodeRequestExtractsInstructionInputMessages(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPreservesAdditionalToolsInputItems(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"developer","type":"additional_tools","tools":[{"name":"functions","tools":[{"name":"bash"}]}]},
+			{"role":"developer","content":[{"type":"text","text":"developer two"}]},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if canon.Instructions != "developer two" {
+		t.Fatalf("expected only textual developer item promoted to instructions, got %q", canon.Instructions)
+	}
+	if len(canon.ResponseInputItems) != 2 {
+		t.Fatalf("expected additional_tools plus user item preserved, got %#v", canon.ResponseInputItems)
+	}
+	if got, _ := canon.ResponseInputItems[0]["type"].(string); got != "additional_tools" {
+		t.Fatalf("expected additional_tools item preserved first, got %#v", canon.ResponseInputItems[0])
+	}
+	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
+		t.Fatalf("expected only user canonical message to remain, got %#v", canon.Messages)
+	}
+}
+
+func TestDecodeRequestDoesNotPromoteAdditionalToolsContentIntoInstructions(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"developer","type":"additional_tools","content":[{"type":"text","text":"should stay opaque"}],"tools":[{"name":"functions","tools":[{"name":"bash"}]}]},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if canon.Instructions != "" {
+		t.Fatalf("expected additional_tools content not to become instructions, got %q", canon.Instructions)
+	}
+	if len(canon.ResponseInputItems) != 2 {
+		t.Fatalf("expected additional_tools item preserved alongside user item, got %#v", canon.ResponseInputItems)
+	}
+}
+
 func TestDecodeRequestAcceptsResponsesInputFileContent(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

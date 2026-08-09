@@ -863,6 +863,9 @@ func preserveResponsesInputItem(rawMap map[string]any) map[string]any {
 }
 
 func extractInstructionTextFromInputItem(item map[string]any) string {
+	if stringMapValue(item, "type") == "additional_tools" {
+		return ""
+	}
 	role, _ := item["role"].(string)
 	if !isInstructionRole(role) {
 		return ""
