@@ -1395,6 +1395,9 @@ func PrepareResponsesInput(req model.CanonicalRequest, includeReferences bool) R
 	if len(responseInputItems) > 0 && (req.ResponseInputItemsAreOriginal || len(req.Messages) == 0) {
 		input := make([]map[string]any, 0, len(responseInputItems))
 		for _, item := range responseInputItems {
+			if model.IsSyntheticResponsesReasoningPlaceholder(item) {
+				continue
+			}
 			if isResponsesInstructionInputItem(item) {
 				continue
 			}

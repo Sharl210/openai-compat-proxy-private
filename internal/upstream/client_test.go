@@ -3719,6 +3719,50 @@ func TestBuildResponsesRequestBodyDropsSyntheticReasoningPlaceholder(t *testing.
 	}
 }
 
+func TestBuildResponsesRequestBodyDropsSyntheticReasoningPlaceholderWithNullStateFieldsInRawInput(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "hello",
+				}},
+			},
+			{
+				"type":              "reasoning",
+				"id":                "rs_proxy",
+				"summary":           []map[string]any{},
+				"content":           nil,
+				"encrypted_content": nil,
+			},
+			{
+				"type":      "function_call",
+				"call_id":   "call_1",
+				"name":      "search_web",
+				"arguments": `{"query":"weather"}`,
+			},
+		},
+		ResponseInputItemsAreOriginal: true,
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["id"] == "rs_proxy" {
+			t.Fatalf("expected synthetic null-state rs_proxy reasoning item omitted from raw-first upstream payload, got %#v", input)
+		}
+	}
+}
+
 func TestBuildResponsesRequestBodyPreservesOpaqueProxyReasoningReplay(t *testing.T) {
 	req := model.CanonicalRequest{
 		Model: "gpt-5",

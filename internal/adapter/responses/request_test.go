@@ -828,6 +828,34 @@ func TestDecodeRequestDropsSyntheticTopLevelReasoningInputItem(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestDropsSyntheticTopLevelReasoningInputItemWithNullStateFields(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"user","content":"hello"},
+			{"type":"reasoning","id":"rs_proxy","summary":[],"content":null,"encrypted_content":null},
+			{"type":"function_call","call_id":"call_1","name":"search_web","arguments":"{\"query\":\"weather\"}"},
+			{"type":"function_call_output","call_id":"call_1","output":"{\"ok\":true}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	for _, item := range canon.ResponseInputItems {
+		if got, _ := item["id"].(string); got == "rs_proxy" {
+			t.Fatalf("expected synthetic rs_proxy reasoning item with null state fields to be dropped, got %#v", canon.ResponseInputItems)
+		}
+	}
+	for _, msg := range canon.Messages {
+		if len(msg.ReasoningBlocks) != 0 {
+			t.Fatalf("expected synthetic null-state rs_proxy reasoning item to stay out of canonical reasoning blocks, got %#v", canon.Messages)
+		}
+	}
+}
+
 func TestDecodeRequestSerializesLegacyRoleToolMessageThroughCanonicalResponsesPath(t *testing.T) {
 	// Given
 	var received map[string]any

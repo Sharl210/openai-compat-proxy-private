@@ -25,10 +25,29 @@ func HasResponsesReasoningState(item map[string]any) bool {
 		case "id", "type", "summary", "thinking", "text":
 			continue
 		default:
-			return true
+			if hasResponsesReasoningStateValue(item[key]) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func hasResponsesReasoningStateValue(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []any:
+		return len(typed) > 0
+	case []map[string]any:
+		return len(typed) > 0
+	case map[string]any:
+		return len(typed) > 0
+	default:
+		return true
+	}
 }
 
 func isSyntheticResponsesReasoningSummary(summary any) bool {
