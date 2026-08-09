@@ -161,6 +161,12 @@ func applyRootProviderTokenDefaults(cfg *Config) {
 		if !cfg.Providers[i].ReasoningSummaryDetailSet {
 			cfg.Providers[i].ReasoningSummaryDetail = cfg.ReasoningSummaryDetail
 		}
+		if !cfg.Providers[i].SupportsProgrammaticToolCallingSet {
+			cfg.Providers[i].SupportsProgrammaticToolCalling = cfg.SupportsProgrammaticToolCalling
+		}
+		if !cfg.Providers[i].SupportsParallelToolCallsControlSet {
+			cfg.Providers[i].SupportsParallelToolCallsControl = cfg.SupportsParallelToolCallsControl
+		}
 		if !cfg.Providers[i].EnableReasoningModeSuffixSet {
 			cfg.Providers[i].EnableReasoningModeSuffix = cfg.EffectiveEnableReasoningModeSuffix()
 		}

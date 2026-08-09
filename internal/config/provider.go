@@ -67,10 +67,12 @@ type ProviderConfig struct {
 	ReasoningModeProCapability             ReasoningModeProCapability
 	ReasoningModeProCapabilityRules        []ReasoningModeProCapabilityRule
 	SupportsProgrammaticToolCalling        bool
+	SupportsProgrammaticToolCallingSet     bool
 	SupportsResponsesMultiAgent            bool
 	UltraMaxConcurrentSubagents            int
 	UltraMaxConcurrentSubagentsSet         bool
 	SupportsParallelToolCallsControl       bool
+	SupportsParallelToolCallsControlSet    bool
 	UpstreamFirstByteTimeout               time.Duration
 	UpstreamStreamOpenTimeout              time.Duration
 	UpstreamRetryCount                     int
@@ -403,10 +405,14 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 				return ProviderConfig{}, err
 			}
 		case "SUPPORTS_PROGRAMMATIC_TOOL_CALLING":
-			provider.SupportsProgrammaticToolCalling, err = parseProviderSupportsBool(value, key, path)
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			provider.SupportsProgrammaticToolCalling, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+			provider.SupportsProgrammaticToolCallingSet = true
 		case "SUPPORTS_RESPONSES_MULTI_AGENT":
 			provider.SupportsResponsesMultiAgent, err = parseProviderSupportsBool(value, key, path)
 			if err != nil {
@@ -422,10 +428,14 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			}
 			provider.UltraMaxConcurrentSubagentsSet = true
 		case "SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL":
-			provider.SupportsParallelToolCallsControl, err = parseProviderSupportsBool(value, key, path)
+			if strings.TrimSpace(value) == "" {
+				break
+			}
+			provider.SupportsParallelToolCallsControl, err = parseProviderStrictBool(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
+			provider.SupportsParallelToolCallsControlSet = true
 		case "UPSTREAM_FIRST_BYTE_TIMEOUT":
 			parsed, err := parseProviderPositiveDuration(value, "UPSTREAM_FIRST_BYTE_TIMEOUT", path)
 			if err != nil {
@@ -736,7 +746,7 @@ func parseDefaultProviderIDs(raw string) ([]string, error) {
 	return ids, nil
 }
 
-func parseProviderSupportsBool(value string, key string, path string) (bool, error) {
+func parseProviderStrictBool(value string, key string, path string) (bool, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return false, nil
@@ -748,16 +758,8 @@ func parseProviderSupportsBool(value string, key string, path string) (bool, err
 	return parsed, nil
 }
 
-func parseProviderStrictBool(value string, key string, path string) (bool, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return false, nil
-	}
-	parsed, err := strconv.ParseBool(trimmed)
-	if err != nil {
-		return false, ErrInvalidConfig(fmt.Sprintf("invalid %s in %s: %q", key, path, value))
-	}
-	return parsed, nil
+func parseProviderSupportsBool(value string, key string, path string) (bool, error) {
+	return parseProviderStrictBool(value, key, path)
 }
 
 func normalizeUpstreamEndpointType(value string) (string, error) {

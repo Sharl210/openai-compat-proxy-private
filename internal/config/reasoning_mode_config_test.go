@@ -121,6 +121,39 @@ func TestProviderToolControlCapabilitiesDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestProviderToolControlCapabilitiesInheritRootDefaults(t *testing.T) {
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers: %v", err)
+	}
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=inherit\nSUPPORTS_PROGRAMMATIC_TOOL_CALLING=true\nSUPPORTS_PARALLEL_TOOL_CALLS_CONTROL=true\n", time.Now())
+	writeConfigFileWithMTime(t, filepath.Join(providersDir, "inherit.env"), "PROVIDER_ID=inherit\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://inherit.example\nSUPPORTS_PROGRAMMATIC_TOOL_CALLING=\nSUPPORTS_PARALLEL_TOOL_CALLS_CONTROL=\n", time.Now())
+	writeConfigFileWithMTime(t, filepath.Join(providersDir, "override.env"), "PROVIDER_ID=override\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://override.example\nSUPPORTS_PROGRAMMATIC_TOOL_CALLING=false\nSUPPORTS_PARALLEL_TOOL_CALLS_CONTROL=false\n", time.Now())
+
+	snapshot, err := BuildRuntimeSnapshot(rootEnvPath)
+	if err != nil {
+		t.Fatalf("build snapshot: %v", err)
+	}
+
+	inherit, err := snapshot.Config.ProviderByID("inherit")
+	if err != nil {
+		t.Fatalf("provider inherit: %v", err)
+	}
+	if !inherit.SupportsProgrammaticToolCalling || !inherit.SupportsParallelToolCallsControl {
+		t.Fatalf("expected inherit provider to use root defaults, got %#v", inherit)
+	}
+
+	override, err := snapshot.Config.ProviderByID("override")
+	if err != nil {
+		t.Fatalf("provider override: %v", err)
+	}
+	if override.SupportsProgrammaticToolCalling || override.SupportsParallelToolCallsControl {
+		t.Fatalf("expected explicit provider false to override root defaults, got %#v", override)
+	}
+}
+
 func TestUltraMultiAgentConfigurationDefaultsInheritanceAndOptOut(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

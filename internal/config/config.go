@@ -44,6 +44,8 @@ type Config struct {
 	DefaultProReasoningMode               bool
 	DefaultProReasoningModeExcludedModels []ModelPatternRule
 	UltraMaxConcurrentSubagents           int
+	SupportsProgrammaticToolCalling       bool
+	SupportsParallelToolCallsControl      bool
 	EnableLegacyV1Routes                  bool
 	DownstreamNonStreamStrategy           string
 	Providers                             []ProviderConfig
@@ -72,36 +74,38 @@ const (
 
 func Default() Config {
 	return Config{
-		ListenAddr:                     ":21021",
-		CacheInfoTimezone:              "Asia/Shanghai",
-		LogEnable:                      true,
-		ConnectTimeout:                 30 * time.Second,
-		FirstByteTimeout:               30 * time.Minute,
-		StreamOpenTimeout:              6 * time.Minute,
-		IdleTimeout:                    3 * time.Minute,
-		TotalTimeout:                   time.Hour,
-		UpstreamRetryCount:             DefaultUpstreamRetryCount,
-		UpstreamRetryDelay:             DefaultUpstreamRetryDelay,
-		UpstreamCacheControl:           UpstreamCacheControl5Min,
-		UpstreamEndpointType:           UpstreamEndpointTypeResponses,
-		ResponsesToolCompatMode:        ResponsesToolCompatModePreserve,
-		AnthropicMaxThinkingBudget:     32000,
-		ReasoningSummaryDetail:         ReasoningSummaryDetailDetailed,
-		UpstreamThinkingTagStyle:       UpstreamThinkingTagStyleOff,
-		UpstreamXMLToolCallStyle:       UpstreamXMLToolCallStyleLegacy,
-		InjectClaudeCodeMetadataUserID: true,
-		InjectClaudeCodeSystemPrompt:   true,
-		EnableNoPromptModelSuffix:      true,
-		EnableReasoningModeSuffix:      true,
-		DefaultProReasoningMode:        true,
-		UltraMaxConcurrentSubagents:    5,
-		DownstreamNonStreamStrategy:    DownstreamNonStreamStrategyProxyBuffer,
-		LogFilePath:                    "logs",
-		LogMaxRequests:                 200,
-		LogMaxBodySizeMB:               5.0,
-		DebugArchiveRootDir:            "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR",
-		DebugArchiveMaxRequests:        200,
-		ModelLimitContextTokens:        -1,
+		ListenAddr:                       ":21021",
+		CacheInfoTimezone:                "Asia/Shanghai",
+		LogEnable:                        true,
+		ConnectTimeout:                   30 * time.Second,
+		FirstByteTimeout:                 30 * time.Minute,
+		StreamOpenTimeout:                6 * time.Minute,
+		IdleTimeout:                      3 * time.Minute,
+		TotalTimeout:                     time.Hour,
+		UpstreamRetryCount:               DefaultUpstreamRetryCount,
+		UpstreamRetryDelay:               DefaultUpstreamRetryDelay,
+		UpstreamCacheControl:             UpstreamCacheControl5Min,
+		UpstreamEndpointType:             UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode:          ResponsesToolCompatModePreserve,
+		AnthropicMaxThinkingBudget:       32000,
+		ReasoningSummaryDetail:           ReasoningSummaryDetailDetailed,
+		UpstreamThinkingTagStyle:         UpstreamThinkingTagStyleOff,
+		UpstreamXMLToolCallStyle:         UpstreamXMLToolCallStyleLegacy,
+		InjectClaudeCodeMetadataUserID:   true,
+		InjectClaudeCodeSystemPrompt:     true,
+		EnableNoPromptModelSuffix:        true,
+		EnableReasoningModeSuffix:        true,
+		DefaultProReasoningMode:          true,
+		UltraMaxConcurrentSubagents:      5,
+		SupportsProgrammaticToolCalling:  true,
+		SupportsParallelToolCallsControl: true,
+		DownstreamNonStreamStrategy:      DownstreamNonStreamStrategyProxyBuffer,
+		LogFilePath:                      "logs",
+		LogMaxRequests:                   200,
+		LogMaxBodySizeMB:                 5.0,
+		DebugArchiveRootDir:              "OPENAI_COMPAT_DEBUG_ARCHIVE_DIR",
+		DebugArchiveMaxRequests:          200,
+		ModelLimitContextTokens:          -1,
 	}
 }
 
@@ -164,6 +168,12 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 		if parsed, err := parseMinInt(value, 1); err == nil {
 			cfg.UltraMaxConcurrentSubagents = parsed
 		}
+	}
+	if value, ok := lookup("SUPPORTS_PROGRAMMATIC_TOOL_CALLING"); ok && value != "" {
+		cfg.SupportsProgrammaticToolCalling = parseRootBool(value)
+	}
+	if value, ok := lookup("SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL"); ok && value != "" {
+		cfg.SupportsParallelToolCallsControl = parseRootBool(value)
 	}
 	if value, ok := lookup("ENABLE_LEGACY_V1_ROUTES"); ok && value != "" {
 		cfg.EnableLegacyV1Routes = parseRootBool(value)
@@ -850,6 +860,8 @@ func (c Config) hotReloadableRootEquals(other Config) bool {
 		c.EffectiveDefaultProReasoningMode() == other.EffectiveDefaultProReasoningMode() &&
 		modelPatternRulesEqual(c.DefaultProReasoningModeExcludedModels, other.DefaultProReasoningModeExcludedModels) &&
 		c.UltraMaxConcurrentSubagents == other.UltraMaxConcurrentSubagents &&
+		c.SupportsProgrammaticToolCalling == other.SupportsProgrammaticToolCalling &&
+		c.SupportsParallelToolCallsControl == other.SupportsParallelToolCallsControl &&
 		c.EnableLegacyV1Routes == other.EnableLegacyV1Routes &&
 		c.DownstreamNonStreamStrategy == other.DownstreamNonStreamStrategy &&
 		c.ConnectTimeout == other.ConnectTimeout &&
