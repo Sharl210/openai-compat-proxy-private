@@ -99,7 +99,7 @@ func TestDecodeRequestToResponsesUpstreamPromotesDeveloperToolsIntoTopLevelTools
 		"model":"gpt-5.5",
 		"input":[
 			{"role":"developer","content":[{"type":"input_text","text":"developer prompt"}],"tools":[
-				{"type":"namespace","name":"functions","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]},
+				{"name":"functions","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]},
 				{"type":"namespace","name":"collaboration","description":"Agent coordination tools","tools":[{"type":"function","name":"spawn_agent","description":"Spawn helper","parameters":{"type":"object"}}]}
 			]},
 			{"role":"user","content":[{"type":"input_text","text":"run ls"}]}
@@ -134,6 +134,9 @@ func TestDecodeRequestToResponsesUpstreamPromotesDeveloperToolsIntoTopLevelTools
 	functions := byName["functions"]
 	if got, _ := functions["type"].(string); got != "namespace" {
 		t.Fatalf("expected functions namespace tool preserved, got %#v", functions)
+	}
+	if got, _ := functions["description"].(string); got != "Namespace tools" {
+		t.Fatalf("expected functions namespace tool to receive default description, got %#v", functions)
 	}
 	if collaboration, ok := byName["collaboration"]; !ok || collaboration["description"] == nil {
 		t.Fatalf("expected collaboration namespace tool preserved, got %#v", tools)

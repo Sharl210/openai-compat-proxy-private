@@ -67,6 +67,8 @@ type reasoning struct {
 	Raw     map[string]any `json:"-"`
 }
 
+const defaultResponsesNamespaceToolDescription = "Namespace tools"
+
 func (r *request) UnmarshalJSON(data []byte) error {
 	type alias request
 	var decoded alias
@@ -336,10 +338,11 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 				"parameters":  cloneMapAny(t.Parameters),
 			}
 		}
+		rawTool = normalizeResponsesCanonicalToolRaw(rawTool)
 		canon.Tools = append(canon.Tools, model.CanonicalTool{
-			Type:        t.Type,
-			Name:        t.Name,
-			Description: t.Description,
+			Type:        firstNonEmptyString(t.Type, stringMapValue(rawTool, "type")),
+			Name:        firstNonEmptyString(t.Name, stringMapValue(rawTool, "name")),
+			Description: firstNonEmptyString(t.Description, stringMapValue(rawTool, "description")),
 			Parameters:  t.Parameters,
 			Raw:         rawTool,
 		})
@@ -621,6 +624,7 @@ func canonicalToolsFromResponsesInputItem(item map[string]any) []model.Canonical
 }
 
 func canonicalToolFromRawMap(raw map[string]any) model.CanonicalTool {
+	raw = normalizeResponsesCanonicalToolRaw(raw)
 	parameters, _ := raw["parameters"].(map[string]any)
 	return model.CanonicalTool{
 		Type:        stringMapValue(raw, "type"),
@@ -629,6 +633,48 @@ func canonicalToolFromRawMap(raw map[string]any) model.CanonicalTool {
 		Parameters:  cloneMapAny(parameters),
 		Raw:         cloneMapAny(raw),
 	}
+}
+
+func normalizeResponsesCanonicalToolRaw(raw map[string]any) map[string]any {
+	normalized := cloneMapAny(raw)
+	toolType := strings.TrimSpace(stringMapValue(normalized, "type"))
+	if toolType == "" {
+		toolType = inferResponsesCanonicalToolType(normalized)
+		if toolType != "" {
+			normalized["type"] = toolType
+		}
+	} else {
+		normalized["type"] = toolType
+	}
+	if toolType == "namespace" && strings.TrimSpace(stringMapValue(normalized, "description")) == "" {
+		normalized["description"] = defaultResponsesNamespaceToolDescription
+	}
+	return normalized
+}
+
+func inferResponsesCanonicalToolType(raw map[string]any) string {
+	if tools, exists := raw["tools"]; exists && tools != nil {
+		return "namespace"
+	}
+	if format, exists := raw["format"]; exists && format != nil {
+		return "custom"
+	}
+	if parameters, exists := raw["parameters"]; exists && parameters != nil {
+		return "function"
+	}
+	return ""
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func appendUniqueCanonicalTools(dst []model.CanonicalTool, tools []model.CanonicalTool, seen map[string]struct{}) []model.CanonicalTool {

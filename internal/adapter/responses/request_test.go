@@ -1324,6 +1324,9 @@ func TestDecodeRequestPreservesAdditionalToolsInputItems(t *testing.T) {
 	if len(canon.Tools) != 1 {
 		t.Fatalf("expected additional_tools item promoted to canonical tools, got %#v", canon.Tools)
 	}
+	if got := canon.Tools[0].Type; got != "namespace" {
+		t.Fatalf("expected missing type to normalize as namespace, got %#v", canon.Tools)
+	}
 	if got := canon.Tools[0].Name; got != "functions" {
 		t.Fatalf("expected promoted tool name functions, got %#v", canon.Tools)
 	}
@@ -1393,6 +1396,29 @@ func TestDecodeRequestPreservesDeveloperToolsInputItemsAndPromotesTools(t *testi
 	nested, _ := canon.Tools[0].Raw["tools"].([]any)
 	if len(nested) != 1 {
 		t.Fatalf("expected nested tools to survive promotion, got %#v", canon.Tools[0].Raw)
+	}
+}
+
+func TestDecodeRequestDeduplicatesPromotedDeveloperToolsAgainstTopLevelTools(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"tools":[{"type":"namespace","name":"functions","description":"Namespace tools","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]}],
+		"input":[
+			{"role":"developer","tools":[{"name":"functions","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]}]},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if len(canon.Tools) != 1 {
+		t.Fatalf("expected promoted developer tool to deduplicate against top-level tool, got %#v", canon.Tools)
+	}
+	if got := canon.Tools[0].Description; got != defaultResponsesNamespaceToolDescription {
+		t.Fatalf("expected namespace description normalization to participate in dedupe, got %#v", canon.Tools)
 	}
 }
 
