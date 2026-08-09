@@ -344,6 +344,10 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			Raw:         rawTool,
 		})
 	}
+	toolSignatures := make(map[string]struct{}, len(canon.Tools))
+	for _, tool := range canon.Tools {
+		toolSignatures[canonicalToolSignature(tool)] = struct{}{}
+	}
 	if req.ToolChoice != nil {
 		canon.ToolChoice = model.DecodeOpenAIToolChoice(req.ToolChoice)
 	}
@@ -373,6 +377,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 			canon.HasSyntheticReasoningReplay = true
 		}
 		if len(preserved) > 0 {
+			canon.Tools = appendUniqueCanonicalTools(canon.Tools, canonicalToolsFromResponsesInputItem(preserved), toolSignatures)
 			if instructionText := extractInstructionTextFromInputItem(preserved); instructionText != "" {
 				inputInstructions = append(inputInstructions, instructionText)
 				continue
@@ -594,6 +599,69 @@ func decodeInputItem(rawMap map[string]any) (map[string]any, model.CanonicalMess
 		return preserved, msg, true, false, nil
 	}
 	return cloneMapAny(rawMap), model.CanonicalMessage{}, false, false, nil
+}
+
+func canonicalToolsFromResponsesInputItem(item map[string]any) []model.CanonicalTool {
+	if !isResponsesAdditionalToolsInputItem(item) {
+		return nil
+	}
+	rawTools, ok := item["tools"].([]any)
+	if !ok || len(rawTools) == 0 {
+		return nil
+	}
+	tools := make([]model.CanonicalTool, 0, len(rawTools))
+	for _, rawTool := range rawTools {
+		toolMap, _ := rawTool.(map[string]any)
+		if len(toolMap) == 0 {
+			continue
+		}
+		tools = append(tools, canonicalToolFromRawMap(toolMap))
+	}
+	return tools
+}
+
+func canonicalToolFromRawMap(raw map[string]any) model.CanonicalTool {
+	parameters, _ := raw["parameters"].(map[string]any)
+	return model.CanonicalTool{
+		Type:        stringMapValue(raw, "type"),
+		Name:        stringMapValue(raw, "name"),
+		Description: stringMapValue(raw, "description"),
+		Parameters:  cloneMapAny(parameters),
+		Raw:         cloneMapAny(raw),
+	}
+}
+
+func appendUniqueCanonicalTools(dst []model.CanonicalTool, tools []model.CanonicalTool, seen map[string]struct{}) []model.CanonicalTool {
+	if len(tools) == 0 {
+		return dst
+	}
+	for _, tool := range tools {
+		signature := canonicalToolSignature(tool)
+		if _, exists := seen[signature]; exists {
+			continue
+		}
+		seen[signature] = struct{}{}
+		dst = append(dst, tool)
+	}
+	return dst
+}
+
+func canonicalToolSignature(tool model.CanonicalTool) string {
+	if len(tool.Raw) > 0 {
+		if encoded, err := json.Marshal(tool.Raw); err == nil {
+			return string(encoded)
+		}
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"type":        tool.Type,
+		"name":        tool.Name,
+		"description": tool.Description,
+		"parameters":  tool.Parameters,
+	})
+	if err == nil {
+		return string(encoded)
+	}
+	return tool.Type + "\x00" + tool.Name + "\x00" + tool.Description
 }
 
 func decodeResponsesMessageInputItem(rawMap map[string]any, role string) (model.CanonicalMessage, error) {
@@ -863,7 +931,7 @@ func preserveResponsesInputItem(rawMap map[string]any) map[string]any {
 }
 
 func extractInstructionTextFromInputItem(item map[string]any) string {
-	if stringMapValue(item, "type") == "additional_tools" {
+	if isResponsesAdditionalToolsInputItem(item) {
 		return ""
 	}
 	role, _ := item["role"].(string)
@@ -962,6 +1030,17 @@ func joinResponsesTextParts(parts []map[string]any) string {
 
 func isInstructionRole(role string) bool {
 	return role == "system" || role == "developer"
+}
+
+func isResponsesAdditionalToolsInputItem(item map[string]any) bool {
+	if stringMapValue(item, "type") == "additional_tools" {
+		return true
+	}
+	if stringMapValue(item, "role") != "developer" {
+		return false
+	}
+	_, hasTools := item["tools"]
+	return hasTools && item["tools"] != nil
 }
 
 func mergeResponsesInstructions(prepend string, existing string) string {

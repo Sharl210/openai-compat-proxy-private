@@ -140,3 +140,28 @@ func TestBuildResponsesUpstreamToolPayloadPreservesOfficialCodexRawToolFields(t 
 		t.Fatalf("expected web_search external_web_access to survive, got %#v", byType["web_search"])
 	}
 }
+
+func TestBuildResponsesUpstreamToolPayloadFillsMissingNamespaceDescription(t *testing.T) {
+	payload := buildResponsesUpstreamToolPayload(model.CanonicalTool{
+		Type: "namespace",
+		Name: "functions",
+		Raw: map[string]any{
+			"type": "namespace",
+			"name": "functions",
+			"tools": []any{map[string]any{
+				"type":        "function",
+				"name":        "bash",
+				"description": "Run shell",
+				"parameters":  map[string]any{"type": "object"},
+			}},
+		},
+	}, config.ResponsesToolCompatModePreserve)
+
+	if got, _ := payload["description"].(string); got != defaultResponsesNamespaceToolDescription {
+		t.Fatalf("expected missing namespace description to be filled, got %#v", payload)
+	}
+	nested, _ := payload["tools"].([]any)
+	if len(nested) != 1 {
+		t.Fatalf("expected nested tools preserved, got %#v", payload)
+	}
+}

@@ -1950,7 +1950,7 @@ func buildPreservedResponsesToolPayload(tool model.CanonicalTool) map[string]any
 	}
 	if trimmedType == "function" {
 		if len(tool.Raw) > 0 {
-			preserved := cloneMap(tool.Raw)
+			preserved, _ := cloneJSONValue(tool.Raw).(map[string]any)
 			preserved["type"] = tool.Type
 			if parameters, exists := preserved["parameters"]; exists && parameters == nil {
 				preserved["parameters"] = map[string]any{}
@@ -1965,9 +1965,10 @@ func buildPreservedResponsesToolPayload(tool model.CanonicalTool) map[string]any
 		}
 	}
 	if len(tool.Raw) > 0 {
-		preserved := cloneMap(tool.Raw)
+		preserved, _ := cloneJSONValue(tool.Raw).(map[string]any)
 		deleteEmptyResponsesToolFields(preserved)
 		preserved["type"] = tool.Type
+		ensureResponsesNamespaceToolDescription(preserved)
 		if len(preserved) > 1 {
 			return preserved
 		}
@@ -1982,8 +1983,11 @@ func buildPreservedResponsesToolPayload(tool model.CanonicalTool) map[string]any
 	if len(tool.Parameters) > 0 {
 		entry["parameters"] = cloneJSONValue(tool.Parameters)
 	}
+	ensureResponsesNamespaceToolDescription(entry)
 	return entry
 }
+
+const defaultResponsesNamespaceToolDescription = "Namespace tools"
 
 func deleteEmptyResponsesToolFields(payload map[string]any) {
 	for _, key := range []string{"name", "description"} {
@@ -1994,6 +1998,16 @@ func deleteEmptyResponsesToolFields(payload map[string]any) {
 	if parameters, ok := payload["parameters"].(map[string]any); ok && len(parameters) == 0 {
 		delete(payload, "parameters")
 	}
+}
+
+func ensureResponsesNamespaceToolDescription(payload map[string]any) {
+	if stringValue(payload["type"]) != "namespace" {
+		return
+	}
+	if strings.TrimSpace(stringValue(payload["description"])) != "" {
+		return
+	}
+	payload["description"] = defaultResponsesNamespaceToolDescription
 }
 
 func normalizeResponsesFunctionToolParameters(tool model.CanonicalTool) any {

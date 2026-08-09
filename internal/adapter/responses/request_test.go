@@ -1321,6 +1321,12 @@ func TestDecodeRequestPreservesAdditionalToolsInputItems(t *testing.T) {
 	if got, _ := canon.ResponseInputItems[0]["type"].(string); got != "additional_tools" {
 		t.Fatalf("expected additional_tools item preserved first, got %#v", canon.ResponseInputItems[0])
 	}
+	if len(canon.Tools) != 1 {
+		t.Fatalf("expected additional_tools item promoted to canonical tools, got %#v", canon.Tools)
+	}
+	if got := canon.Tools[0].Name; got != "functions" {
+		t.Fatalf("expected promoted tool name functions, got %#v", canon.Tools)
+	}
 	if len(canon.Messages) != 1 || canon.Messages[0].Role != "user" {
 		t.Fatalf("expected only user canonical message to remain, got %#v", canon.Messages)
 	}
@@ -1345,6 +1351,48 @@ func TestDecodeRequestDoesNotPromoteAdditionalToolsContentIntoInstructions(t *te
 	}
 	if len(canon.ResponseInputItems) != 2 {
 		t.Fatalf("expected additional_tools item preserved alongside user item, got %#v", canon.ResponseInputItems)
+	}
+	if len(canon.Tools) != 1 || canon.Tools[0].Name != "functions" {
+		t.Fatalf("expected additional_tools item promoted to canonical tools, got %#v", canon.Tools)
+	}
+}
+
+func TestDecodeRequestPreservesDeveloperToolsInputItemsAndPromotesTools(t *testing.T) {
+	req := `{
+		"model":"gpt-5",
+		"input":[
+			{"role":"developer","content":[{"type":"text","text":"developer prompt"}],"tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]}]},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	if canon.Instructions != "" {
+		t.Fatalf("expected developer.tools content to stay opaque, got %q", canon.Instructions)
+	}
+	if len(canon.ResponseInputItems) != 2 {
+		t.Fatalf("expected developer.tools item preserved alongside user item, got %#v", canon.ResponseInputItems)
+	}
+	developer := canon.ResponseInputItems[0]
+	if got, _ := developer["role"].(string); got != "developer" {
+		t.Fatalf("expected developer role preserved, got %#v", developer)
+	}
+	if _, exists := developer["tools"]; !exists {
+		t.Fatalf("expected developer tools item preserved, got %#v", developer)
+	}
+	if len(canon.Tools) != 1 {
+		t.Fatalf("expected developer.tools promoted to canonical tools, got %#v", canon.Tools)
+	}
+	if got := canon.Tools[0].Type; got != "namespace" {
+		t.Fatalf("expected promoted namespace tool, got %#v", canon.Tools)
+	}
+	nested, _ := canon.Tools[0].Raw["tools"].([]any)
+	if len(nested) != 1 {
+		t.Fatalf("expected nested tools to survive promotion, got %#v", canon.Tools[0].Raw)
 	}
 }
 

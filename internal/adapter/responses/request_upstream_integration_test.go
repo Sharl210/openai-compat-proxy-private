@@ -81,3 +81,75 @@ func TestDecodeRequestToResponsesUpstreamPreservesToolShapes(t *testing.T) {
 		t.Fatalf("expected non-empty parameters to remain an object, got %#v", zeta["parameters"])
 	}
 }
+
+func TestDecodeRequestToResponsesUpstreamPromotesDeveloperToolsIntoTopLevelTools(t *testing.T) {
+	var receivedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_developer_tools","status":"completed"}`))
+	}))
+	defer server.Close()
+
+	canon, err := responsesadapter.DecodeRequest(strings.NewReader(`{
+		"model":"gpt-5.5",
+		"input":[
+			{"role":"developer","content":[{"type":"input_text","text":"developer prompt"}],"tools":[
+				{"type":"namespace","name":"functions","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]},
+				{"type":"namespace","name":"collaboration","description":"Agent coordination tools","tools":[{"type":"function","name":"spawn_agent","description":"Spawn helper","parameters":{"type":"object"}}]}
+			]},
+			{"role":"user","content":[{"type":"input_text","text":"run ls"}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+
+	client := upstream.NewClient(server.URL, config.Config{
+		UpstreamEndpointType:    config.UpstreamEndpointTypeResponses,
+		ResponsesToolCompatMode: config.ResponsesToolCompatModePreserve,
+	})
+	if _, err := client.Response(context.Background(), canon, ""); err != nil {
+		t.Fatalf("upstream Response error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(receivedBody, &payload); err != nil {
+		t.Fatalf("unmarshal upstream payload: %v", err)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 2 {
+		t.Fatalf("expected developer.tools promoted into top-level tools, got %#v", payload["tools"])
+	}
+	byName := make(map[string]map[string]any, len(tools))
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		name, _ := tool["name"].(string)
+		byName[name] = tool
+	}
+	functions := byName["functions"]
+	if got, _ := functions["type"].(string); got != "namespace" {
+		t.Fatalf("expected functions namespace tool preserved, got %#v", functions)
+	}
+	if collaboration, ok := byName["collaboration"]; !ok || collaboration["description"] == nil {
+		t.Fatalf("expected collaboration namespace tool preserved, got %#v", tools)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected developer item plus user item preserved in input, got %#v", payload["input"])
+	}
+	developer, _ := input[0].(map[string]any)
+	if got, _ := developer["role"].(string); got != "developer" {
+		t.Fatalf("expected developer item preserved in input, got %#v", developer)
+	}
+	if _, exists := developer["tools"]; !exists {
+		t.Fatalf("expected developer tools to stay preserved in input, got %#v", developer)
+	}
+	if _, exists := payload["instructions"]; exists {
+		t.Fatalf("expected developer.tools content not to be rewritten into top-level instructions, got %#v", payload)
+	}
+}
