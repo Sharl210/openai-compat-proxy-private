@@ -42,6 +42,9 @@ func ClassifyResponsesFeatureCompatibility(req model.CanonicalRequest, upstreamE
 	if hasUnsupportedPersistedResponsesItem(req.ResponseInputItems, upstreamEndpointType) {
 		return ResponsesFeatureCompatibility{Decision: ResponsesFeatureCompatibilityDecisionReject, Feature: "persisted responses item"}
 	}
+	if hasAdditionalToolsInputItem(req.ResponseInputItems) {
+		return ResponsesFeatureCompatibility{Decision: ResponsesFeatureCompatibilityDecisionReject, Feature: "additional tools input item"}
+	}
 	if hasReasoningContext(req.Reasoning) {
 		return ResponsesFeatureCompatibility{Decision: ResponsesFeatureCompatibilityDecisionReject, Feature: "reasoning context"}
 	}
@@ -128,6 +131,15 @@ func isRepresentableResponsesInputItem(itemType string, item map[string]any) boo
 	default:
 		return false
 	}
+}
+
+func hasAdditionalToolsInputItem(items []map[string]any) bool {
+	for _, item := range items {
+		if strings.TrimSpace(stringValue(item["type"])) == "additional_tools" {
+			return true
+		}
+	}
+	return false
 }
 
 func hasRepresentablePersistedReasoningItem(item map[string]any, upstreamEndpointType string) bool {

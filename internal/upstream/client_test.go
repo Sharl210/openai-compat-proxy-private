@@ -3361,6 +3361,114 @@ func TestBuildResponsesRequestBodyOmitsInstructionInputMessages(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesRequestBodyPreservesAdditionalToolsInputItems(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model:        "gpt-5",
+		Instructions: "developer prompt",
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "developer",
+				"type": "additional_tools",
+				"tools": []map[string]any{{
+					"name":  "functions",
+					"tools": []map[string]any{{"name": "bash"}},
+				}},
+			},
+			{
+				"role": "developer",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "developer prompt",
+				}},
+			},
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "hello",
+				}},
+			},
+		},
+		ResponseInputItemsAreOriginal: true,
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected additional_tools plus user input upstream, got %#v", payload["input"])
+	}
+	additional, _ := input[0].(map[string]any)
+	if got, _ := additional["type"].(string); got != "additional_tools" {
+		t.Fatalf("expected additional_tools item preserved, got %#v", additional)
+	}
+	if _, exists := additional["content"]; exists {
+		t.Fatalf("expected preserved additional_tools item not to gain content, got %#v", additional)
+	}
+	user, _ := input[1].(map[string]any)
+	if got, _ := user["role"].(string); got != "user" {
+		t.Fatalf("expected user role to remain after additional_tools, got %#v", user)
+	}
+}
+
+func TestBuildResponsesRequestBodyPreservesAdditionalToolsInputItemsWhenRebuildingFromMessages(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "developer",
+				"type": "additional_tools",
+				"tools": []map[string]any{{
+					"name":  "functions",
+					"tools": []map[string]any{{"name": "bash"}},
+				}},
+			},
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "stale user item",
+				}},
+			},
+		},
+		ResponseInputItemsAreOriginal: false,
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected additional_tools plus rebuilt user input upstream, got %#v", payload["input"])
+	}
+	additional, _ := input[0].(map[string]any)
+	if got, _ := additional["type"].(string); got != "additional_tools" {
+		t.Fatalf("expected additional_tools item preserved during rebuild, got %#v", additional)
+	}
+	user, _ := input[1].(map[string]any)
+	if got, _ := user["role"].(string); got != "user" {
+		t.Fatalf("expected rebuilt user role after additional_tools, got %#v", user)
+	}
+	content, _ := user["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	if part["text"] != "hello" {
+		t.Fatalf("expected rebuilt canonical message content, got %#v", user)
+	}
+}
+
 func TestBuildResponsesRequestBodyPrefersCanonicalMessagesForCacheStableToolSequences(t *testing.T) {
 	logical := []model.CanonicalMessage{
 		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},

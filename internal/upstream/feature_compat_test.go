@@ -38,6 +38,14 @@ func TestCheckResponsesFeatureCompatibilityRejectsSemanticFeaturesOutsideRespons
 			req:  model.CanonicalRequest{ResponsePromptCacheKey: json.RawMessage(`"stable-key"`)},
 		},
 		{
+			name: "additional tools input item",
+			req: model.CanonicalRequest{ResponseInputItems: []map[string]any{{
+				"type":  "additional_tools",
+				"role":  "developer",
+				"tools": []any{map[string]any{"name": "functions"}},
+			}}},
+		},
+		{
 			name: "original image detail",
 			req: model.CanonicalRequest{Messages: []model.CanonicalMessage{{Parts: []model.CanonicalContentPart{{
 				Type: "input_image",

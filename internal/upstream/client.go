@@ -1413,7 +1413,7 @@ func PrepareResponsesInput(req model.CanonicalRequest, includeReferences bool) R
 		return prepared
 	}
 
-	var input []map[string]any
+	input := preservedResponsesAdditionalToolsItems(responseInputItems)
 	for _, msg := range req.Messages {
 		if len(msg.OrderedContent) > 0 {
 			input = append(input, buildResponsesOrderedInputItems(msg)...)
@@ -1739,7 +1739,39 @@ func buildResponsesContentPart(part model.CanonicalContentPart, role string) []m
 
 func isResponsesInstructionInputItem(item map[string]any) bool {
 	role, _ := item["role"].(string)
-	return role == "system" || role == "developer"
+	if role != "system" && role != "developer" {
+		return false
+	}
+	if isResponsesAdditionalToolsInputItem(item) {
+		return false
+	}
+	itemType, _ := item["type"].(string)
+	if itemType == "message" {
+		return true
+	}
+	_, hasContent := item["content"]
+	return hasContent
+}
+
+func isResponsesAdditionalToolsInputItem(item map[string]any) bool {
+	return stringValue(item["type"]) == "additional_tools"
+}
+
+func preservedResponsesAdditionalToolsItems(items []map[string]any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	preserved := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if !isResponsesAdditionalToolsInputItem(item) {
+			continue
+		}
+		preserved = append(preserved, cloneMap(item))
+	}
+	if len(preserved) == 0 {
+		return nil
+	}
+	return preserved
 }
 
 func normalizeResponsesToolChoice(raw map[string]any) map[string]any {
