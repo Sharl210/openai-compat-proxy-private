@@ -1757,7 +1757,14 @@ func isResponsesInstructionInputItem(item map[string]any) bool {
 }
 
 func isResponsesAdditionalToolsInputItem(item map[string]any) bool {
-	return stringValue(item["type"]) == "additional_tools"
+	if stringValue(item["type"]) == "additional_tools" {
+		return true
+	}
+	if stringValue(item["role"]) != "developer" {
+		return false
+	}
+	_, hasTools := item["tools"]
+	return hasTools && item["tools"] != nil
 }
 
 func preservedResponsesAdditionalToolsItems(items []map[string]any) []map[string]any {

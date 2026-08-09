@@ -46,6 +46,13 @@ func TestCheckResponsesFeatureCompatibilityRejectsSemanticFeaturesOutsideRespons
 			}}},
 		},
 		{
+			name: "developer tools field",
+			req: model.CanonicalRequest{ResponseInputItems: []map[string]any{{
+				"role":  "developer",
+				"tools": []any{map[string]any{"name": "functions"}},
+			}}},
+		},
+		{
 			name: "original image detail",
 			req: model.CanonicalRequest{Messages: []model.CanonicalMessage{{Parts: []model.CanonicalContentPart{{
 				Type: "input_image",

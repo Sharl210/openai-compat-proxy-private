@@ -135,7 +135,7 @@ func isRepresentableResponsesInputItem(itemType string, item map[string]any) boo
 
 func hasAdditionalToolsInputItem(items []map[string]any) bool {
 	for _, item := range items {
-		if strings.TrimSpace(stringValue(item["type"])) == "additional_tools" {
+		if isResponsesAdditionalToolsInputItem(item) {
 			return true
 		}
 	}

@@ -3469,6 +3469,115 @@ func TestBuildResponsesRequestBodyPreservesAdditionalToolsInputItemsWhenRebuildi
 	}
 }
 
+func TestBuildResponsesRequestBodyPreservesDeveloperToolsInputItemsInRawFirstPath(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "developer",
+				"tools": []map[string]any{{
+					"name":  "functions",
+					"tools": []map[string]any{{"name": "bash"}},
+				}},
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "developer prompt",
+				}},
+			},
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "hello",
+				}},
+			},
+		},
+		ResponseInputItemsAreOriginal: true,
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected developer-tools item plus user input upstream, got %#v", payload["input"])
+	}
+	developer, _ := input[0].(map[string]any)
+	if got, _ := developer["role"].(string); got != "developer" {
+		t.Fatalf("expected developer role preserved, got %#v", developer)
+	}
+	if _, exists := developer["tools"]; !exists {
+		t.Fatalf("expected developer tools preserved in raw-first path, got %#v", developer)
+	}
+	user, _ := input[1].(map[string]any)
+	if got, _ := user["role"].(string); got != "user" {
+		t.Fatalf("expected user role to remain after developer tools item, got %#v", user)
+	}
+}
+
+func TestBuildResponsesRequestBodyPreservesDeveloperToolsInputItemsWhenRebuildingFromMessages(t *testing.T) {
+	body, err := buildResponsesRequestBody(model.CanonicalRequest{
+		Model: "gpt-5",
+		Messages: []model.CanonicalMessage{{
+			Role:  "user",
+			Parts: []model.CanonicalContentPart{{Type: "text", Text: "hello"}},
+		}},
+		ResponseInputItems: []map[string]any{
+			{
+				"role": "developer",
+				"tools": []map[string]any{{
+					"name":  "functions",
+					"tools": []map[string]any{{"name": "bash"}},
+				}},
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "developer prompt",
+				}},
+			},
+			{
+				"role": "user",
+				"content": []map[string]any{{
+					"type": "input_text",
+					"text": "stale user item",
+				}},
+			},
+		},
+		ResponseInputItemsAreOriginal: false,
+	}, config.ResponsesToolCompatModePreserve)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestBody error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	input, _ := payload["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected developer-tools item plus rebuilt user input upstream, got %#v", payload["input"])
+	}
+	developer, _ := input[0].(map[string]any)
+	if got, _ := developer["role"].(string); got != "developer" {
+		t.Fatalf("expected developer role preserved during rebuild, got %#v", developer)
+	}
+	if _, exists := developer["tools"]; !exists {
+		t.Fatalf("expected developer tools preserved during rebuild, got %#v", developer)
+	}
+	user, _ := input[1].(map[string]any)
+	if got, _ := user["role"].(string); got != "user" {
+		t.Fatalf("expected rebuilt user role after developer tools item, got %#v", user)
+	}
+	content, _ := user["content"].([]any)
+	part, _ := content[0].(map[string]any)
+	if part["text"] != "hello" {
+		t.Fatalf("expected rebuilt canonical message content, got %#v", user)
+	}
+}
+
 func TestBuildResponsesRequestBodyPrefersCanonicalMessagesForCacheStableToolSequences(t *testing.T) {
 	logical := []model.CanonicalMessage{
 		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "先找永久会员字符串"}}},
