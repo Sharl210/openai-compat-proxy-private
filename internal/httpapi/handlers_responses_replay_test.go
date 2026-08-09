@@ -74,6 +74,79 @@ func TestResponsesStreamReplaysAdjacentToolProductionShapeAndEmitsBody(t *testin
 	assertReplayUpstreamInputHasAdjacentToolShape(t, upstreamRequest)
 }
 
+func TestResponsesPassesThroughAdditionalToolsInputItems(t *testing.T) {
+	var upstreamRequest map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(
+			"event: response.completed\n" +
+				"data: {\"response\":{\"output\":[{\"id\":\"msg_123\",\"type\":\"message\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+		))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                   "openai",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
+			SupportsResponses:    true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5.6-sol",
+		"stream":true,
+		"tool_choice":"auto",
+		"input":[
+			{"role":"developer","type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"bash","description":"Run shell","parameters":{"type":"object"}}]}]},
+			{"role":"developer","content":[{"type":"input_text","text":"developer prompt"}]},
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got, _ := upstreamRequest["instructions"].(string); got != "developer prompt" {
+		t.Fatalf("expected developer prompt promoted to instructions, got %#v", upstreamRequest["instructions"])
+	}
+	input, _ := upstreamRequest["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected upstream input to keep additional_tools plus user, got %#v", upstreamRequest["input"])
+	}
+	additional, _ := input[0].(map[string]any)
+	if got, _ := additional["type"].(string); got != "additional_tools" {
+		t.Fatalf("expected additional_tools input item preserved, got %#v", additional)
+	}
+	if _, exists := additional["content"]; exists {
+		t.Fatalf("expected additional_tools item not to gain content, got %#v", additional)
+	}
+	tools, _ := additional["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("expected additional_tools namespace to survive upstream request, got %#v", additional)
+	}
+	namespace, _ := tools[0].(map[string]any)
+	if got, _ := namespace["name"].(string); got != "functions" {
+		t.Fatalf("expected namespace tool preserved, got %#v", namespace)
+	}
+}
+
 func TestResponsesCompactionLikeInputUsesNormalResponsesPath(t *testing.T) {
 	var gotPath string
 	var upstreamRequest map[string]any

@@ -59,14 +59,29 @@ func applySystemPromptToMessages(messages []model.CanonicalMessage, injected str
 
 func applySystemPromptToResponseInputItems(items []map[string]any, injected string, position string) bool {
 	for i := range items {
-		role, _ := items[i]["role"].(string)
-		if !isInstructionRole(role) {
+		if !isResponsesInstructionPromptItem(items[i]) {
 			continue
 		}
 		items[i]["content"] = mergePromptIntoRawContent(items[i]["content"], injected, position)
 		return true
 	}
 	return false
+}
+
+func isResponsesInstructionPromptItem(item map[string]any) bool {
+	role, _ := item["role"].(string)
+	if !isInstructionRole(role) {
+		return false
+	}
+	itemType, _ := item["type"].(string)
+	if itemType == "additional_tools" {
+		return false
+	}
+	if itemType == "message" {
+		return true
+	}
+	_, hasContent := item["content"]
+	return hasContent
 }
 
 func mergePromptIntoCanonicalParts(parts []model.CanonicalContentPart, injected string, position string) []model.CanonicalContentPart {

@@ -102,6 +102,34 @@ func TestApplyProviderSystemPromptAppendsToResponsesInputSystemMessage(t *testin
 	}
 }
 
+func TestApplyProviderSystemPromptSkipsAdditionalToolsDeveloperItem(t *testing.T) {
+	req := model.CanonicalRequest{ResponseInputItems: []map[string]any{
+		{
+			"role":  "developer",
+			"type":  "additional_tools",
+			"tools": []map[string]any{{"name": "functions"}},
+		},
+		{
+			"role":    "developer",
+			"content": []map[string]any{{"type": "input_text", "text": "user system"}},
+		},
+	}}
+	provider := config.ProviderConfig{SystemPromptText: "provider system"}
+
+	applyProviderSystemPrompt(&req, provider)
+
+	if _, exists := req.ResponseInputItems[0]["content"]; exists {
+		t.Fatalf("expected additional_tools item to remain content-free, got %#v", req.ResponseInputItems[0])
+	}
+	content, _ := req.ResponseInputItems[1]["content"].([]map[string]any)
+	if len(content) != 2 {
+		t.Fatalf("expected provider prompt prepended to real developer message, got %#v", req.ResponseInputItems[1]["content"])
+	}
+	if content[0]["text"] != "provider system\n\n" || content[1]["text"] != "user system" {
+		t.Fatalf("unexpected developer content after prepend: %#v", content)
+	}
+}
+
 func TestApplyProviderSystemPromptCreatesInstructionsWhenRequestHasNoSystemPrompt(t *testing.T) {
 	req := model.CanonicalRequest{}
 	provider := config.ProviderConfig{SystemPromptText: "provider system"}
