@@ -545,7 +545,7 @@ GPT-5.6 的 `multi_agent` 是 Responses API 的服务端 beta，不是客户端�
 
 `-ultra` 是代理私有模式后缀，不是 `reasoning.effort`，也不会自动出现在 `/models`。它可与 effort、`-pro`、`-noprompt` 任意顺序组合，例如 `gpt-5.6-high-ultra-noprompt` 与 `gpt-5.6-noprompt-ultra-high` 等效；完整字面模型优先，因此真实存在的 `vendor-ultra` 不会被误拆。`-ultra` 保持私有，不作为自动模型列表或 capability 发现结果。
 
-根 `.env` 用 `ULTRA_MAX_CONCURRENT_SUBAGENTS=5` 设置默认并发数；provider 的同名字段留空时继承根值。`SUPPORTS_RESPONSES_MULTI_AGENT` 默认 `true`，只有确认某个 Responses 上游不支持 `responses_multi_agent=v1` 时才显式设为 `false`。客户端不能覆盖该并发数。
+根 `.env` 用 `ULTRA_MAX_CONCURRENT_SUBAGENTS=5` 设置默认并发数；provider 的同名字段留空时继承根值。`SUPPORTS_RESPONSES_MULTI_AGENT` 默认 `true`，只有确认某个 Responses 上游不支持 `responses_multi_agent=v1` 时才显式设为 `false`。客户端不能覆盖该并发数。根 `.env` 里的 `SUPPORTS_PROGRAMMATIC_TOOL_CALLING` 与 `SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL` 默认都是 `true`；provider 留空时继承根值，只有当前 provider 的真实上游明确不支持时才显式写 `false`。
 
 `-ultra` 只会在最终 `UPSTREAM_ENDPOINT_TYPE=responses` 且 provider capability 有效时注入真实 `multi_agent` 和 beta header。chat/anthropic 上游返回 `unsupported_upstream_feature`，并说明需要 Responses endpoint；provider 显式关闭 capability 时返回同一错误并提示设为 `SUPPORTS_RESPONSES_MULTI_AGENT=true`。两类失败都发生在请求上游前，不会降级成普通请求、Pro 或 effort。
 
@@ -562,7 +562,7 @@ GPT-5.6 的 `multi_agent` 是 Responses API 的服务端 beta，不是客户端�
 - Responses 与 Chat 上游在字段存在时保留同名布尔值。
 - Anthropic 上游把 `false` 映射为 `tool_choice.disable_parallel_tool_use=true`，把显式 `true` 映射为 `false`，同时保留 `auto` / `any` / 指定工具的 choice 语义。
 - Anthropic 下游的 `disable_parallel_tool_use` 反向映射为 OpenAI 的 `parallel_tool_calls`。
-- provider 必须显式设置 `SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL=true` 才允许 `false`；未声明时代理在请求上游前返回 `unsupported_upstream_feature`，不会静默让上游忽略。
+- `SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL` 在根 `.env` 默认是 `true`；provider 留空或不写时继承根值，显式 `false` 才会在客户端要求 `parallel_tool_calls=false` 时由代理本地返回 `unsupported_upstream_feature`，避免参数被上游静默忽略。
 - `tool_choice` 的 optional、required-any、required-named、none 仍是独立的选择约束。若目标协议无法同时表达“required-any/required-named 且最多一次”或其它“恰好一个”约束，代理在上游请求前返回 `unsupported_upstream_feature`，不放宽为 optional，也不改成 `tool_choice.type=none`。
 
 这不会把 `parallel_tool_calls=false` 改写成 `tool_choice.type="none"`，也不会重排、合并或拆分模型实际返回的工具调用。
@@ -826,7 +826,7 @@ TXT 摘要里会展示样本数、置信度、`runtime_ready`、平均 input/cac
 |---|---|---|
 | 上游连接 | `UPSTREAM_BASE_URL`、`UPSTREAM_API_KEY`、`UPSTREAM_ENDPOINT_TYPE` | 当前 provider 如何连上游 |
 | Anthropic / thinking | `ANTHROPIC_VERSION`、`ANTHROPIC_MAX_THINKING_BUDGET`、`UPSTREAM_THINKING_TAG_STYLE`、`UPSTREAM_XML_TOOL_CALL_STYLE`、`UPSTREAM_ANTHROPIC_CACHE_CONTROL` | Anthropic 上游版本、manual thinking 预算上限、chat 上游 thinking 标签策略、XML 工具调用兼容与 cache_control 改写 |
-| 能力开关 | `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES`、`SUPPORTS_RESPONSES_MULTI_AGENT`、`SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL` | 控制公开端口、Ultra multi-agent 与强制串行工具调用能力 |
+| 能力开关 | `SUPPORTS_CHAT`、`SUPPORTS_RESPONSES`、`SUPPORTS_MODELS`、`SUPPORTS_ANTHROPIC_MESSAGES`、`SUPPORTS_PROGRAMMATIC_TOOL_CALLING`、`SUPPORTS_RESPONSES_MULTI_AGENT`、`SUPPORTS_PARALLEL_TOOL_CALLS_CONTROL` | 控制公开端口、Programmatic Tool Calling、Ultra multi-agent 与强制串行工具调用能力；后两项留空时继承根 `.env` 默认值 |
 | Ultra 并发 | `ULTRA_MAX_CONCURRENT_SUBAGENTS` | 留空继承 root，显式正整数覆盖；客户端不可抬高 |
 | 非流 / timeout / retry | `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE`、`UPSTREAM_FIRST_BYTE_TIMEOUT`、`UPSTREAM_STREAM_OPEN_TIMEOUT`、`UPSTREAM_RETRY_COUNT`、`UPSTREAM_RETRY_DELAY` | provider 级运行时策略 |
 | 提示词与模型 | `SYSTEM_PROMPT_FILES`、`SYSTEM_PROMPT_POSITION`、`MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、`ENABLE_NOPROMPT_MODEL_SUFFIX` | 注入与模型能力；provider 级 noprompt 留空继承根配置 |
