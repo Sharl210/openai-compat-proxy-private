@@ -790,6 +790,17 @@ type reasoningSummaryTextPart struct {
 	text  string
 }
 
+func reasoningSummaryTextPartValue(part map[string]any) string {
+	if text := stringValue(part["text"]); text != "" {
+		return text
+	}
+	if text := stringValue(part["summary_text"]); text != "" {
+		return text
+	}
+	nested, _ := part["summary_text"].(map[string]any)
+	return stringValue(nested["text"])
+}
+
 func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTextPart {
 	var parts []reasoningSummaryTextPart
 	switch summary := item["summary"].(type) {
@@ -800,7 +811,7 @@ func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTe
 			if part == nil {
 				continue
 			}
-			parts = append(parts, reasoningSummaryTextPart{index: index, text: stringValue(part["text"])})
+			parts = append(parts, reasoningSummaryTextPart{index: index, text: reasoningSummaryTextPartValue(part)})
 		}
 	case []map[string]any:
 		parts = make([]reasoningSummaryTextPart, 0, len(summary))
@@ -808,7 +819,7 @@ func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTe
 			if part == nil {
 				continue
 			}
-			parts = append(parts, reasoningSummaryTextPart{index: index, text: stringValue(part["text"])})
+			parts = append(parts, reasoningSummaryTextPart{index: index, text: reasoningSummaryTextPartValue(part)})
 		}
 	}
 	return parts
