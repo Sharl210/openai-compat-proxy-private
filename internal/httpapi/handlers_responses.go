@@ -696,7 +696,7 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 				continue
 			}
 			portableProjection = true
-			if portableBlock := portableResponsesReasoningBlock(block); len(portableBlock) > 0 {
+			if portableBlock := portableResponsesReasoningBlock(block, upstreamEndpointType == config.UpstreamEndpointTypeChat); len(portableBlock) > 0 {
 				projectedBlocks = append(projectedBlocks, portableBlock)
 			}
 			changed = true
@@ -718,7 +718,7 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 			continue
 		}
 		portableProjection = true
-		if portableItem := portableResponsesReasoningBlock(item); len(portableItem) > 0 {
+		if portableItem := portableResponsesReasoningBlock(item, upstreamEndpointType == config.UpstreamEndpointTypeChat); len(portableItem) > 0 {
 			filteredItems = append(filteredItems, portableItem)
 		}
 	}
@@ -730,7 +730,7 @@ func isResponsesReasoningItem(block map[string]any) bool {
 	return stringValue(block["type"]) == "reasoning"
 }
 
-func portableResponsesReasoningBlock(block map[string]any) map[string]any {
+func portableResponsesReasoningBlock(block map[string]any, preserveSummary bool) map[string]any {
 	if hasOpaqueResponsesReasoningState(block) {
 		return nil
 	}
@@ -740,6 +740,15 @@ func portableResponsesReasoningBlock(block map[string]any) map[string]any {
 	}
 	if text := stringValue(block["text"]); text != "" {
 		portable["text"] = text
+	}
+	if preserveSummary && len(portable) == 1 {
+		var summary strings.Builder
+		for _, part := range reasoningSummaryTextPartsFromItem(block) {
+			summary.WriteString(part.text)
+		}
+		if summaryText := summary.String(); summaryText != "" {
+			portable["text"] = summaryText
+		}
 	}
 	if len(portable) == 1 {
 		return nil
