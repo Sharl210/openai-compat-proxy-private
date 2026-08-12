@@ -496,8 +496,7 @@ func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, su
 		h.reasoningTitleBoundary = false
 		return
 	}
-	state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}]
-	h.reasoningTitleBoundary = state != nil && state.hasTrailingBoldSpan()
+	h.reasoningTitleBoundary = h.reasoningSummaryPartText(itemID, summaryIndex) != ""
 }
 
 func (h *responseEventWriterHelper) clearReasoningFormatState(itemID string, summaryIndex int) {
