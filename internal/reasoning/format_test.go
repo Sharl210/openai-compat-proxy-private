@@ -257,6 +257,30 @@ func TestStreamFormatterDefersUnclosedAdjacentHeading(t *testing.T) {
 	}
 }
 
+func TestStreamFormatterEmitsEmptyBoldMarkerAsOneUnit(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("****"); got != "****" {
+		t.Fatalf("empty bold marker=%q, want one atomic marker", got)
+	}
+	if got := formatter.Finish(); got != "" {
+		t.Fatalf("finish=%q, want no duplicate marker", got)
+	}
+
+	formatter.Reset()
+	if got := formatter.Push("**第一标题**"); got != "**第一标题**" {
+		t.Fatalf("first title=%q, want first title unchanged", got)
+	}
+	if got := formatter.Push("*"); got != "" {
+		t.Fatalf("split title opener=%q, want deferred marker", got)
+	}
+	if got := formatter.Push("*第二标题"); got != "" {
+		t.Fatalf("split title body=%q, want deferred title", got)
+	}
+	if got := formatter.Push("**"); got != "\n\n**第二标题**" {
+		t.Fatalf("completed split title=%q, want separated title", got)
+	}
+}
+
 func TestStreamFormatterFlushesIncompleteAdjacentHeading(t *testing.T) {
 	var formatter StreamFormatter
 	if got := formatter.Push("**第一标题**"); got != "**第一标题**" {

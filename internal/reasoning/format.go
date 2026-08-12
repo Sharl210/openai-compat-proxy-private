@@ -97,7 +97,16 @@ func (formatter *StreamFormatter) drain(final bool) string {
 					formatter.discardPendingPrefix(endIndex)
 					continue
 				}
-				if !startsWithEmptyBoldSpan(pending) && !final {
+				if startsWithEmptyBoldSpan(pending) {
+					_, _ = output.Write(pending[:4])
+					formatter.lineStart = false
+					formatter.hasOutput = true
+					formatter.lastOutput = pending[3]
+					formatter.afterHeading = false
+					formatter.discardPendingPrefix(4)
+					continue
+				}
+				if !final {
 					break
 				}
 			}
@@ -122,7 +131,15 @@ func (formatter *StreamFormatter) drain(final bool) string {
 				formatter.discardPendingPrefix(endIndex)
 				continue
 			}
-			if !startsWithEmptyBoldSpan(pending) && !final {
+			if startsWithEmptyBoldSpan(pending) {
+				_, _ = output.Write(pending[:4])
+				formatter.lineStart = false
+				formatter.hasOutput = true
+				formatter.lastOutput = pending[3]
+				formatter.discardPendingPrefix(4)
+				continue
+			}
+			if !final {
 				break
 			}
 		}
@@ -195,7 +212,7 @@ func (formatter *StreamFormatter) completeBoldSpanEnd(text []byte) int {
 }
 
 func startsWithEmptyBoldSpan(text []byte) bool {
-	return len(text) >= 4 && text[2] == '*' && text[3] == '*'
+	return len(text) >= 4 && text[0] == '*' && text[1] == '*' && text[2] == '*' && text[3] == '*'
 }
 
 func FormatText(text string) string {
