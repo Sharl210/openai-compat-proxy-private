@@ -98,11 +98,12 @@ func (formatter *StreamFormatter) drain(final bool) string {
 					continue
 				}
 				if startsWithEmptyBoldSpan(pending) {
+					output.WriteString("\n\n")
 					_, _ = output.Write(pending[:4])
 					formatter.lineStart = false
 					formatter.hasOutput = true
 					formatter.lastOutput = pending[3]
-					formatter.afterHeading = false
+					formatter.afterHeading = true
 					formatter.discardPendingPrefix(4)
 					continue
 				}

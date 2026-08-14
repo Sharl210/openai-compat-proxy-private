@@ -848,7 +848,18 @@ func TestChatEventWriterAppendsUnemittedSummarySnapshotAcrossIndexes(t *testing.
 		`"reasoning_content":"\n\n**后续**"`,
 	)
 }
-
+func TestResponsesEventWriterSeparatesTitleAddedByAuthoritativeSnapshot(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "delta": "**标题**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "text": "**标题****后续**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_snapshot", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题****后续**"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`, `"delta":"\n\n**后续**"`)
+	if strings.Contains(body, `"delta":"**标题****后续**"`) {
+		t.Fatalf("authoritative snapshot retained adjacent titles: %s", body)
+	}
+}
 func TestChatEventWriterResetsSummaryAliasWhenItemIDIsReused(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{

@@ -157,6 +157,137 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 	}
 }
 
+func TestReasoningSummaryMultiStarBoundaryAcrossDownstreamStreamingEndpoints(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, nativeMultiStarReasoningSummaryEvents())
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+			SupportsChat:              true,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	testCases := []struct {
+		name      string
+		path      string
+		body      string
+		headers   map[string]string
+		fragments []string
+	}{
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: `{"model":"gpt-5","stream":true,"input":"hello"}`,
+			fragments: []string{
+				`"delta":"**A**"`,
+				`"delta":"\n\n****B`,
+				`"delta":"\n\n**C`,
+				`"delta":"\n\n****\n\n**D`,
+			},
+		},
+		{
+			name: "chat",
+			path: "/v1/chat/completions",
+			body: `{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`,
+			fragments: []string{
+				`"reasoning_content":"**A**"`,
+				`"reasoning_content":"\n\n****B`,
+				`"reasoning_content":"**C**"`,
+				`"reasoning_content":"\n\n****\n\n**D`,
+			},
+		},
+		{
+			name:    "anthropic",
+			path:    "/v1/messages",
+			body:    `{"model":"gpt-5","stream":true,"max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			headers: map[string]string{"anthropic-version": "2023-06-01"},
+			fragments: []string{
+				`"thinking":"**A**"`,
+				`"thinking":"\n\n****B`,
+				`"thinking":"**C**"`,
+				`"thinking":"\n\n****\n\n**D`,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
+			req.Header.Set("Content-Type", "application/json")
+			for name, value := range testCase.headers {
+				req.Header.Set(name, value)
+			}
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, fragment := range testCase.fragments {
+				if !strings.Contains(body, fragment) {
+					t.Fatalf("missing multi-star reasoning fragment %q in %s", fragment, body)
+				}
+			}
+			for _, raw := range []string{
+				`"delta":"**A******B**"`,
+				`"delta":"**C********D**"`,
+				`"reasoning_content":"**A******B**"`,
+				`"reasoning_content":"**C********D**"`,
+				`"thinking":"**A******B**"`,
+				`"thinking":"**C********D**"`,
+			} {
+				if strings.Contains(body, raw) {
+					t.Fatalf("multi-star reasoning title remained unsplit: %s", body)
+				}
+			}
+		})
+	}
+}
+
+func nativeMultiStarReasoningSummaryEvents() []string {
+	return []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_six\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_six\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_six\",\"summary_index\":0,\"delta\":\"**A**\"}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_six\",\"summary_index\":0,\"delta\":\"****B**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_six\",\"summary_index\":0,\"text\":\"**A******B**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_six\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**A******B**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_six\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**A******B**\"}]}}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_eight\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_eight\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_eight\",\"summary_index\":0,\"delta\":\"**C**\"}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_eight\",\"summary_index\":0,\"delta\":\"******D**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_eight\",\"summary_index\":0,\"text\":\"**C********D**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_eight\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**C********D**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_eight\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**C********D**\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	}
+}
+
 func TestResponsesStreamSeparatesTitleAfterPreviousSummaryPartText(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +

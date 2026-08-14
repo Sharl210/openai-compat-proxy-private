@@ -17,6 +17,8 @@ func TestFormatTextSeparatesBoldTitleFromFollowingContent(t *testing.T) {
 		{name: "title without body", input: "**标题**", want: "**标题**"},
 		{name: "adjacent bold titles", input: "**一****二**后续", want: "**一**\n\n**二**后续"},
 		{name: "adjacent bold titles without body", input: "**一****二**", want: "**一**\n\n**二**"},
+		{name: "six-star title boundary", input: "**A******B**", want: "**A**\n\n****B**"},
+		{name: "eight-star title boundary", input: "**A********B**", want: "**A**\n\n****\n\n**B**"},
 		{name: "continuous thinking titles", input: "**ssss****sssss****sdad**", want: "**ssss**\n\n**sssss**\n\n**sdad**"},
 		{name: "incomplete adjacent marker", input: "**标题****", want: "**标题****"},
 		{name: "existing newline", input: "**标题**\n正文", want: "**标题**\n正文"},
@@ -280,7 +282,41 @@ func TestStreamFormatterEmitsEmptyBoldMarkerAsOneUnit(t *testing.T) {
 		t.Fatalf("completed split title=%q, want separated title", got)
 	}
 }
+func TestStreamFormatterSplitsSixStarBoundaryAcrossChunks(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("**A**"); got != "**A**" {
+		t.Fatalf("first title=%q, want first title", got)
+	}
+	if got := formatter.Push("**"); got != "" {
+		t.Fatalf("deferred boundary=%q, want no output", got)
+	}
+	if got := formatter.Push("**B**"); got != "\n\n****B" {
+		t.Fatalf("six-star boundary=%q, want separator and retained stars", got)
+	}
+	if got := formatter.Finish(); got != "**" {
+		t.Fatalf("final marker=%q, want closing marker", got)
+	}
+}
 
+func TestStreamFormatterMatchesWholeTextAcrossChunkBoundaries(t *testing.T) {
+	for _, raw := range []string{"**A****B**", "**A****B****C**", "**A******B**", "**A********B**"} {
+		t.Run(raw, func(t *testing.T) {
+			want := FormatText(raw)
+			for first := 1; first < len(raw); first++ {
+				for second := first + 1; second < len(raw); second++ {
+					var formatter StreamFormatter
+					got := formatter.Push(raw[:first])
+					got += formatter.Push(raw[first:second])
+					got += formatter.Push(raw[second:])
+					got += formatter.Finish()
+					if got != want {
+						t.Fatalf("chunks [%d:%d] produced %q, want %q", first, second, got, want)
+					}
+				}
+			}
+		})
+	}
+}
 func TestStreamFormatterFlushesIncompleteAdjacentHeading(t *testing.T) {
 	var formatter StreamFormatter
 	if got := formatter.Push("**第一标题**"); got != "**第一标题**" {
