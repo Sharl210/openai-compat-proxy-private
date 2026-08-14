@@ -437,6 +437,87 @@ func TestResponsesStreamPreservesOpaqueTerminalReasoningSummary(t *testing.T) {
 	t.Fatalf("completed response omitted rs_opaque reasoning item: %s", body)
 }
 
+func TestResponsesStreamMergesFormattedSummaryIntoStreamedOpaqueTerminalItem(t *testing.T) {
+	const encryptedContent = "opaque-summary"
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_opaque_titles\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":0,\"delta\":\"**第一标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":0,\"text\":\"**第一标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**第一标题**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":1,\"delta\":\"**第二标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":1,\"text\":\"**第二标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"**第二标题**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":2,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":2,\"delta\":\"**第三标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":2,\"text\":\"**第三标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_opaque_titles\",\"summary_index\":2,\"part\":{\"type\":\"summary_text\",\"text\":\"**第三标题**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_opaque_titles\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**第一标题**\"},{\"type\":\"summary_text\",\"text\":\"**第二标题**\"},{\"type\":\"summary_text\",\"text\":\"**第三标题**\"}],\"encrypted_content\":\"" + encryptedContent + "\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**第一标题**"`,
+		`"delta":"\n\n**第二标题**"`,
+		`"delta":"\n\n**第三标题**"`,
+	)
+	wantSummary := []string{"**第一标题**", "\n\n**第二标题**", "\n\n**第三标题**"}
+
+	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+		item, _ := data["item"].(map[string]any)
+		return responseToolItemStateID(item) == "rs_opaque_titles"
+	})
+	item, _ := itemDone["item"].(map[string]any)
+	if got := stringValue(item["encrypted_content"]); got != encryptedContent {
+		t.Fatalf("output_item.done encrypted_content=%q, want %q", got, encryptedContent)
+	}
+	assertReasoningSummaryTexts(t, item, wantSummary)
+
+	completed := responseSSEEventData(t, body, "response.completed", func(map[string]any) bool { return true })
+	response, _ := completed["response"].(map[string]any)
+	output, _ := response["output"].([]any)
+	for _, rawItem := range output {
+		item, _ := rawItem.(map[string]any)
+		if responseToolItemStateID(item) != "rs_opaque_titles" {
+			continue
+		}
+		if got := stringValue(item["encrypted_content"]); got != encryptedContent {
+			t.Fatalf("response.completed encrypted_content=%q, want %q", got, encryptedContent)
+		}
+		assertReasoningSummaryTexts(t, item, wantSummary)
+		return
+	}
+	t.Fatalf("response.completed omitted rs_opaque_titles: %s", body)
+}
+
 func nativeReasoningSummaryTitleEvents() []string {
 	return []string{
 		"event: response.output_item.added\n" +

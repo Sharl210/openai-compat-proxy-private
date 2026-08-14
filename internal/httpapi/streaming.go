@@ -1889,9 +1889,6 @@ func (h *responseEventWriterHelper) markReasoningSummaryTextDone(itemID string, 
 }
 
 func (h *responseEventWriterHelper) mergeStoredReasoningSummary(itemID string, item map[string]any, hasStreamedParts bool) {
-	if hasStreamedParts && reasoningPayloadIsOpaque(item) {
-		return
-	}
 	parts := h.reasoningSummaryParts[itemID]
 	if len(parts) == 0 {
 		return
