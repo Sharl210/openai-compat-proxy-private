@@ -564,6 +564,60 @@ func TestAnthropicEventWriterSeparatesCrossDeltaReasoningTitles(t *testing.T) {
 	)
 }
 
+func TestChatEventWriterSeparatesTitleAroundEmptyBoldMarkerAcrossSummaryParts(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:   map[string]string{},
+		toolMeta:        map[string]map[string]string{},
+		toolIndex:       map[string]int{},
+		toolSent:        map[string]bool{},
+		pendingToolArgs: map[string]string{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	for _, event := range crossPartEmptyMarkerEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**第一标题**"`,
+		`"reasoning_content":"\n\n****"`,
+		`"reasoning_content":"\n\n**第二标题**"`,
+	)
+}
+
+func TestAnthropicEventWriterSeparatesTitleAroundEmptyBoldMarkerAcrossSummaryParts(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	for _, event := range crossPartEmptyMarkerEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"thinking":"**第一标题**"`,
+		`"thinking":"\n\n****"`,
+		`"thinking":"\n\n**第二标题**"`,
+	)
+}
+
 func TestResponsesEventWriterFlushesDeferredReasoningTitleBeforeText(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"summary": "**第一标题**"}},
@@ -772,6 +826,25 @@ func summaryTextDoneWithoutPartDoneEvents(secondTitleDeltas ...string) []upstrea
 		}}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	)
+	return events
+}
+
+func crossPartEmptyMarkerEvents(secondTitleDeltas ...string) []upstream.Event {
+	if len(secondTitleDeltas) == 0 {
+		secondTitleDeltas = []string{"****", "**第二标题**"}
+	}
+	events := []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_empty_marker", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "delta": "**第一标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "text": "**第一标题**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
+	}
+	for _, delta := range secondTitleDeltas {
+		events = append(events, upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 1, "delta": delta}})
+	}
+	events = append(events, upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}})
 	return events
 }
 

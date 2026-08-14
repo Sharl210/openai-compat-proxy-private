@@ -474,13 +474,17 @@ func (h *responseEventWriterHelper) consumeReasoningTitleBoundary(state *reasoni
 		return text
 	}
 	h.reasoningTitleBoundary = false
-	if preserve || !startsWithCompleteBoldSpan(text) {
+	if preserve || !startsWithCompleteOrEmptyBoldSpan(text) {
 		return text
 	}
 	formatted := "\n\n" + text
 	state.formatted.Reset()
 	state.formatted.WriteString(formatted)
 	return formatted
+}
+
+func startsWithCompleteOrEmptyBoldSpan(text string) bool {
+	return startsWithCompleteBoldSpan(text) || strings.HasPrefix(text, "****")
 }
 
 func startsWithCompleteBoldSpan(text string) bool {

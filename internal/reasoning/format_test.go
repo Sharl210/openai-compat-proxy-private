@@ -282,6 +282,22 @@ func TestStreamFormatterEmitsEmptyBoldMarkerAsOneUnit(t *testing.T) {
 		t.Fatalf("completed split title=%q, want separated title", got)
 	}
 }
+
+func TestStreamFormatterSeparatesTitleAroundEmptyBoldMarker(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("**A**"); got != "**A**" {
+		t.Fatalf("first title=%q, want first title", got)
+	}
+	if got := formatter.Push("****"); got != "\n\n****" {
+		t.Fatalf("empty marker=%q, want separator and marker", got)
+	}
+	if got := formatter.Push("**B**"); got != "\n\n**B**" {
+		t.Fatalf("second title=%q, want separator and second title", got)
+	}
+	if got := formatter.Finish(); got != "" {
+		t.Fatalf("finish=%q, want no duplicate output", got)
+	}
+}
 func TestStreamFormatterSplitsSixStarBoundaryAcrossChunks(t *testing.T) {
 	var formatter StreamFormatter
 	if got := formatter.Push("**A**"); got != "**A**" {

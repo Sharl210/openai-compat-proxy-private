@@ -135,6 +135,8 @@ func (formatter *StreamFormatter) drain(final bool) string {
 			if startsWithEmptyBoldSpan(pending) {
 				_, _ = output.Write(pending[:4])
 				formatter.lineStart = false
+				formatter.afterHeading = true
+				formatter.hasHeading = true
 				formatter.hasOutput = true
 				formatter.lastOutput = pending[3]
 				formatter.discardPendingPrefix(4)

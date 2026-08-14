@@ -288,6 +288,53 @@ func nativeMultiStarReasoningSummaryEvents() []string {
 	}
 }
 
+func TestResponsesStreamSeparatesTitleAroundEmptyBoldMarkerAcrossSummaryParts(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_empty_marker\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":0,\"delta\":\"**第一标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":0,\"text\":\"**第一标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**第一标题**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":1,\"delta\":\"****\"}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":1,\"delta\":\"**第二标题**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":1,\"text\":\"******第二标题**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_empty_marker\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"******第二标题**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_empty_marker\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**第一标题**\"},{\"type\":\"summary_text\",\"text\":\"******第二标题**\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(testResponsesConfig(upstream.URL))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"delta":"**第一标题**"`,
+		`"delta":"\n\n****"`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+	if strings.Contains(rec.Body.String(), `"delta":"******第二标题**"`) {
+		t.Fatalf("empty bold marker and title were not split: %s", rec.Body.String())
+	}
+}
+
 func TestResponsesStreamSeparatesTitleAfterPreviousSummaryPartText(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
