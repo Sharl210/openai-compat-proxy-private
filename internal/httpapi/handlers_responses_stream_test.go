@@ -253,6 +253,224 @@ func TestReasoningSummaryMultiStarBoundaryAcrossDownstreamStreamingEndpoints(t *
 	}
 }
 
+func TestResponsesStreamSeparatesFragmentedTitleAfterMultiStarItemBoundary(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "delta": "****B**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**A******B**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_next", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "delta": "**第二"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "delta": "标题**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_next", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**A**"`,
+		`"delta":"\n\n****B`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+	if strings.Contains(body, `"delta":"**第二标题**"`) {
+		t.Fatalf("fragmented title lost the previous reasoning item boundary: %s", body)
+	}
+}
+
+func TestResponsesStreamCarriesBoundaryFromFormattedTrailingTitle(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "正文**第一标题**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_next", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "delta": "**第二标题**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_next", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+
+	assertOrderedStreamFragments(t, body,
+		`"text":"正文\n**第一标题**"`,
+		`"delta":"\n\n**第二标题**"`,
+	)
+}
+
+func TestResponsesStreamReconcilesDeferredTitleFromOutputItemSnapshot(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_snapshot", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "delta": "**B"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_snapshot", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**A****B**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**A**"`,
+		`"delta":"\n\n**B**"`,
+		`"text":"**A**\n\n**B**"`,
+	)
+	if strings.Contains(body, `"delta":"**B"`) || strings.Contains(body, `"text":"**A****B"`) {
+		t.Fatalf("authoritative item snapshot did not close the deferred title: %s", body)
+	}
+}
+
+func TestResponsesStreamDoesNotCarryItemTitleBoundaryAcrossPlainText(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_title", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_text", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_text", "summary_index": 0, "delta": "普通正文"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_text", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "普通正文"}},
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_next", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "delta": "**第二标题**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_next", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+
+	assertOrderedStreamFragments(t, body,
+		`"delta":"普通正文"`,
+		`"delta":"**第二标题**"`,
+	)
+	if strings.Contains(body, `"delta":"\n\n普通正文"`) || strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+		t.Fatalf("reasoning item boundary leaked across plain text: %s", body)
+	}
+}
+
+func TestResponsesStreamClearsTitleBoundaryAcrossNonReasoningItems(t *testing.T) {
+	for _, itemType := range []string{"message", "compaction"} {
+		t.Run(itemType, func(t *testing.T) {
+			gapItem := map[string]any{"id": "gap", "type": itemType}
+			if itemType == "message" {
+				gapItem["role"] = "assistant"
+				gapItem["content"] = []any{}
+			} else {
+				gapItem["encrypted_content"] = "opaque-gap"
+				gapItem["summary"] = []any{}
+			}
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_title", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+				}}},
+				upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": gapItem}},
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": gapItem}},
+				upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_next", "type": "reasoning", "summary": []any{}}}},
+				upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+				upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_next", "summary_index": 0, "delta": "**第二标题**"}},
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_next", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+				}}},
+				upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+			)
+
+			if !strings.Contains(body, `"delta":"**第二标题**"`) {
+				t.Fatalf("missing next reasoning title delta: %s", body)
+			}
+			if strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+				t.Fatalf("title boundary crossed non-reasoning %s item: %s", itemType, body)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamClearsTitleBoundaryAcrossToolArgumentEvents(t *testing.T) {
+	testCases := []struct {
+		name  string
+		event string
+		data  map[string]any
+	}{
+		{
+			name:  "arguments_delta",
+			event: "response.function_call_arguments.delta",
+			data:  map[string]any{"item_id": "call_gap", "delta": "{}"},
+		},
+		{
+			name:  "arguments_done",
+			event: "response.function_call_arguments.done",
+			data:  map[string]any{"item_id": "call_gap", "arguments": "{}"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_before_tool", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+				}}},
+				upstream.Event{Event: testCase.event, Data: testCase.data},
+				upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_after_tool", "type": "reasoning", "summary": []any{}}}},
+				upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_after_tool", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+				upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_after_tool", "summary_index": 0, "delta": "**第二标题**"}},
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_after_tool", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+				}}},
+				upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+			)
+
+			assertOrderedStreamFragments(t, body, `"delta":"**第二标题**"`)
+			if strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+				t.Fatalf("title boundary crossed %s event: %s", testCase.event, body)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamClearsTitleBoundaryAcrossTextCompletionEvents(t *testing.T) {
+	testCases := []struct {
+		name  string
+		event string
+		data  map[string]any
+	}{
+		{
+			name:  "output_text_done",
+			event: "response.output_text.done",
+			data:  map[string]any{"item_id": "msg_gap", "content_index": 0, "text": "answer"},
+		},
+		{
+			name:  "content_part_done",
+			event: "response.content_part.done",
+			data:  map[string]any{"item_id": "msg_gap", "content_index": 0, "part": map[string]any{"type": "output_text", "text": "answer"}},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_before_text", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+				}}},
+				upstream.Event{Event: testCase.event, Data: testCase.data},
+				upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_after_text", "type": "reasoning", "summary": []any{}}}},
+				upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_after_text", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+				upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_after_text", "summary_index": 0, "delta": "**第二标题**"}},
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_after_text", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+				}}},
+				upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+			)
+
+			assertOrderedStreamFragments(t, body, `"delta":"**第二标题**"`)
+			if strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+				t.Fatalf("title boundary crossed %s event: %s", testCase.event, body)
+			}
+		})
+	}
+}
+
 func nativeMultiStarReasoningSummaryEvents() []string {
 	return []string{
 		"event: response.output_item.added\n" +
@@ -335,7 +553,7 @@ func TestResponsesStreamSeparatesTitleAroundEmptyBoldMarkerAcrossSummaryParts(t 
 	}
 }
 
-func TestResponsesStreamSeparatesTitleAfterPreviousSummaryPartText(t *testing.T) {
+func TestResponsesStreamPreservesTitleAfterPreviousSummaryPartText(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
 			"data: {\"item\":{\"id\":\"rs_part_boundary\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
@@ -372,10 +590,14 @@ func TestResponsesStreamSeparatesTitleAfterPreviousSummaryPartText(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
 	}
-	assertOrderedStreamFragments(t, rec.Body.String(),
+	body := rec.Body.String()
+	assertOrderedStreamFragments(t, body,
 		`"delta":"details"`,
-		`"delta":"\n\n**标题**"`,
+		`"delta":"**标题**"`,
 	)
+	if strings.Contains(body, `"delta":"\n\n**标题**"`) {
+		t.Fatalf("plain summary text incorrectly created a title boundary: %s", body)
+	}
 }
 
 func TestResponsesStreamPreservesOpaqueTerminalReasoningSummary(t *testing.T) {

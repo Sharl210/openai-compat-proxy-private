@@ -434,6 +434,31 @@ func TestReasoningTitleStateFlushesDeferredHeadingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestReasoningTextHasTrailingBoldSpan(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "single title", text: "**标题**", want: true},
+		{name: "single ASCII title", text: "**A**", want: true},
+		{name: "six star formatted tail", text: "**A**\n\n****B**", want: true},
+		{name: "eight star formatted tail", text: "**A**\n\n****\n\n**B**", want: true},
+		{name: "title followed by inline emphasis", text: "**标题**正文**强调**", want: false},
+		{name: "plain text", text: "普通正文", want: false},
+		{name: "empty marker", text: "****", want: false},
+		{name: "opaque-looking stars only", text: "********", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := reasoningTextHasTrailingBoldSpan(test.text); got != test.want {
+				t.Fatalf("reasoningTextHasTrailingBoldSpan(%q)=%t, want %t", test.text, got, test.want)
+			}
+		})
+	}
+}
+
 func TestResponsesEventWriterPreservesStandaloneSummaryTitleAtPartBoundary(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, standaloneSummaryTitleEvents()...)
 	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`)

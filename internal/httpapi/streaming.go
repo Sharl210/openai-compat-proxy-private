@@ -494,13 +494,95 @@ func startsWithCompleteBoldSpan(text string) bool {
 	end := strings.Index(text[2:], "**")
 	return end > 0
 }
+func reasoningTextHasTrailingBoldSpan(text string) bool {
+	lineStart := strings.LastIndexAny(text, "\r\n") + 1
+	tail := text[lineStart:]
+	if len(tail) < 5 || !strings.HasPrefix(tail, "**") {
+		return false
+	}
+	leadingStars := 0
+	for leadingStars < len(tail) && tail[leadingStars] == '*' {
+		leadingStars++
+	}
+	trailingStars := 0
+	for index := len(tail) - 1; index >= 0 && tail[index] == '*'; index-- {
+		trailingStars++
+	}
+	if leadingStars < 2 || trailingStars != 2 || leadingStars+trailingStars >= len(tail) {
+		return false
+	}
+	content := tail[leadingStars : len(tail)-trailingStars]
+	return content != "" && !strings.Contains(content, "**") && strings.Trim(content, "*") != ""
+}
+func isResponsesReasoningBoundaryEvent(event string, item map[string]any) bool {
+	if strings.HasPrefix(event, "response.reasoning") {
+		return true
+	}
+	if event != "response.output_item.added" && event != "response.output_item.done" {
+		return false
+	}
+	return stringValue(item["type"]) == "reasoning"
+}
 
 func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, summaryIndex int, preserve bool) {
 	if preserve || h.reasoningFormatStates == nil {
 		h.reasoningTitleBoundary = false
 		return
 	}
-	h.reasoningTitleBoundary = h.reasoningSummaryPartText(itemID, summaryIndex) != ""
+	state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}]
+	h.reasoningTitleBoundary = state != nil && state.hasTrailingBoldSpan()
+}
+func (h *responseEventWriterHelper) markReasoningItemTitleBoundary(itemID string, item map[string]any) {
+	if reasoningPayloadIsOpaque(item) {
+		h.reasoningTitleBoundary = false
+		return
+	}
+	var text strings.Builder
+	for _, part := range reasoningSummaryTextPartsFromItem(item) {
+		text.WriteString(part.text)
+	}
+	if text.Len() == 0 {
+		parts := h.reasoningSummaryParts[itemID]
+		indices := make([]int, 0, len(parts))
+		for summaryIndex := range parts {
+			indices = append(indices, summaryIndex)
+		}
+		sort.Ints(indices)
+		for _, summaryIndex := range indices {
+			text.WriteString(h.reasoningSummaryPartText(itemID, summaryIndex))
+		}
+	}
+	h.reasoningTitleBoundary = text.Len() > 0 && reasoningTextHasTrailingBoldSpan(text.String())
+}
+
+func (h *responseEventWriterHelper) reconcileReasoningItemSummary(itemID string, outputIndex int, item map[string]any) {
+	if h.downstreamType != "responses" || itemID == "" || item == nil || reasoningPayloadIsOpaque(item) || len(h.reasoningFormatStates) == 0 {
+		return
+	}
+	for _, part := range reasoningSummaryTextPartsFromItem(item) {
+		state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: part.index}]
+		if state == nil || part.text == "" {
+			continue
+		}
+		formattedDelta, formattedSnapshot, handled := h.formatReasoningContentSnapshot(itemID, part.index, part.text, false)
+		if !handled {
+			continue
+		}
+		h.ensureReasoningSummaryPartStarted(itemID, outputIndex, part.index)
+		if formattedSnapshot != "" {
+			h.setReasoningSummaryPartText(itemID, part.index, formattedSnapshot)
+		}
+		if formattedDelta == "" {
+			continue
+		}
+		h.addEvent("response.reasoning_summary_text.delta", map[string]any{
+			"item_id":                            itemID,
+			"output_index":                       outputIndex,
+			"summary_index":                      part.index,
+			"delta":                              formattedDelta,
+			aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+		})
+	}
 }
 
 func (h *responseEventWriterHelper) clearReasoningFormatState(itemID string, summaryIndex int) {
@@ -1676,6 +1758,7 @@ func (h *responseEventWriterHelper) closeReasoningLifecycle(itemID string) {
 	item["id"] = itemID
 	item["type"] = "reasoning"
 	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}))
+	h.markReasoningItemTitleBoundary(itemID, item)
 	delete(h.activeReasoningItems, itemID)
 	h.clearReasoningFormatItemStates(itemID)
 	if h.reasoningItemsClosed == nil {
@@ -1953,6 +2036,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	}
 
 	item, _ := evt.Data["item"].(map[string]any)
+	if h.downstreamType == "responses" && !isResponsesReasoningBoundaryEvent(evt.Event, item) {
+		h.reasoningTitleBoundary = false
+	}
 
 	switch evt.Event {
 	case "response.created":
@@ -1986,6 +2072,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.output_item.added", "response.output_item.done":
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" {
+			var rawReasoningItem map[string]any
+			if h.downstreamType == "responses" && evt.Event == "response.output_item.done" && item != nil {
+				rawReasoningItem = cloneJSONValueForResponse(item).(map[string]any)
+			}
+
 			h.associateReasoningFormatOutputItem(item)
 			if h.downstreamType == "responses" {
 				item = reasoningtext.FormatBlock(item)
@@ -2014,6 +2105,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 				_, hadReasoningItem := h.outputIndexForItem(itemID)
 				outputIndex := h.ensureReasoningLifecycleStarted(itemID, upstreamOutputIndex, item)
+				if rawReasoningItem != nil {
+					h.reconcileReasoningItemSummary(itemID, outputIndex, rawReasoningItem)
+				}
 				hasStreamedParts := len(h.reasoningSummaryParts[itemID]) > 0
 				summary := reasoningSummaryFromItem(item)
 				if summary == "" {
@@ -2028,6 +2122,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 					evt.Data["output_index"] = outputIndex
 				}
 				h.closeAllReasoningSummaryParts(itemID, outputIndex)
+				h.markReasoningItemTitleBoundary(itemID, item)
 				delete(h.activeReasoningItems, itemID)
 				h.reasoningItemsClosed[itemID] = true
 				if itemID == h.realReasoningItemID {
@@ -2049,6 +2144,9 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				h.resetReasoningFormatPhase()
 			}
 			break
+		}
+		if h.downstreamType == "responses" && itemType != "reasoning" {
+			h.reasoningTitleBoundary = false
 		}
 		if itemType == "compaction" && h.downstreamType == "responses" {
 			h.beginCompactionLifecycle()
