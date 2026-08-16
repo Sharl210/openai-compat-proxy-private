@@ -479,8 +479,10 @@ func (h *responseEventWriterHelper) consumeReasoningTitleBoundary(state *reasoni
 		return text
 	}
 	formatted := "\n\n" + text
-	state.formatted.Reset()
-	state.formatted.WriteString(formatted)
+	if state != nil {
+		state.formatted.Reset()
+		state.formatted.WriteString(formatted)
+	}
 	return formatted
 }
 
@@ -495,6 +497,7 @@ func startsWithCompleteBoldSpan(text string) bool {
 	end := strings.Index(text[2:], "**")
 	return end > 0
 }
+
 func reasoningTextHasTrailingBoldSpan(text string) bool {
 	lineStart := strings.LastIndexAny(text, "\r\n") + 1
 	tail := text[lineStart:]
@@ -515,6 +518,7 @@ func reasoningTextHasTrailingBoldSpan(text string) bool {
 	content := tail[leadingStars : len(tail)-trailingStars]
 	return content != "" && !strings.Contains(content, "**") && strings.Trim(content, "*") != ""
 }
+
 func isResponsesReasoningBoundaryEvent(event string, item map[string]any) bool {
 	if strings.HasPrefix(event, "response.reasoning") {
 		return true
@@ -533,6 +537,7 @@ func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, su
 	state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}]
 	h.reasoningTitleBoundary = state != nil && state.hasTrailingBoldSpan()
 }
+
 func (h *responseEventWriterHelper) markReasoningItemTitleBoundary(itemID string, item map[string]any) {
 	if reasoningPayloadIsOpaque(item) {
 		h.reasoningTitleBoundary = false
@@ -936,6 +941,50 @@ func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTe
 		}
 	}
 	return parts
+}
+
+func prependReasoningSummaryItemText(item map[string]any, prefix string) {
+	if item == nil || prefix == "" {
+		return
+	}
+	switch summary := item["summary"].(type) {
+	case []any:
+		for _, rawPart := range summary {
+			part, _ := rawPart.(map[string]any)
+			if prependReasoningSummaryPartText(part, prefix) {
+				return
+			}
+		}
+	case []map[string]any:
+		for _, part := range summary {
+			if prependReasoningSummaryPartText(part, prefix) {
+				return
+			}
+		}
+	}
+}
+
+func prependReasoningSummaryPartText(part map[string]any, prefix string) bool {
+	if part == nil {
+		return false
+	}
+	if text := stringValue(part["text"]); text != "" {
+		part["text"] = prefix + text
+		return true
+	}
+	switch summaryText := part["summary_text"].(type) {
+	case string:
+		if summaryText != "" {
+			part["summary_text"] = prefix + summaryText
+			return true
+		}
+	case map[string]any:
+		if text := stringValue(summaryText["text"]); text != "" {
+			summaryText["text"] = prefix + text
+			return true
+		}
+	}
+	return false
 }
 
 func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reasoningSummaryState, nextOrder *int, item map[string]any) []string {
@@ -2138,12 +2187,19 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 				hasStreamedParts := len(h.reasoningSummaryParts[itemID]) > 0
 				summary := reasoningSummaryFromItem(item)
-				if summary == "" {
+				boundaryConsumed := false
+				if summary == "" || reasoningPayloadIsOpaque(item) {
 					h.flushReasoningFormatItemStates(itemID)
 				}
 				if summary != "" && (!hadReasoningItem || h.reasoningSummaryPartStarted(itemID, 0)) {
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, 0)
+					formattedSummary := h.consumeReasoningTitleBoundary(nil, summary, reasoningPayloadIsOpaque(item))
+					boundaryConsumed = formattedSummary != summary
+					summary = formattedSummary
 					h.closeReasoningSummaryPartWithText(itemID, outputIndex, 0, summary)
+				}
+				if boundaryConsumed {
+					prependReasoningSummaryItemText(item, "\n\n")
 				}
 				h.mergeStoredReasoningSummary(itemID, item, hasStreamedParts)
 				if outputIndex, ok := h.outputIndexForItem(itemID); ok {

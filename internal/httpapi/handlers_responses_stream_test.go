@@ -740,6 +740,116 @@ func TestResponsesStreamMergesFormattedSummaryIntoStreamedOpaqueTerminalItem(t *
 	t.Fatalf("response.completed omitted rs_opaque_titles: %s", body)
 }
 
+func TestResponsesStreamSeparatesTitleAcrossSnapshotOnlyReasoningItems(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_snapshot_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_snapshot_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_snapshot_third", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第三标题**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"text":"**第一标题**"`,
+		`"text":"\n\n**第二标题**"`,
+		`"text":"\n\n**第三标题**"`,
+	)
+	for itemID, want := range map[string]string{"rs_snapshot_second": "\n\n**第二标题**", "rs_snapshot_third": "\n\n**第三标题**"} {
+		itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+			item, _ := data["item"].(map[string]any)
+			return responseToolItemStateID(item) == itemID
+		})
+		item, _ := itemDone["item"].(map[string]any)
+		assertReasoningSummaryTexts(t, item, []string{want})
+	}
+}
+
+func TestResponsesStreamPrefixesAdjacentSnapshotTitleForSummaryTextShapes(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		part    map[string]any
+		wantKey string
+	}{
+		{
+			name:    "string",
+			part:    map[string]any{"type": "summary_text", "summary_text": "**第二标题**"},
+			wantKey: "summary_text",
+		},
+		{
+			name:    "nested",
+			part:    map[string]any{"type": "summary_text", "summary_text": map[string]any{"text": "**第二标题**"}},
+			wantKey: "summary_text.text",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_snapshot_before_" + testCase.name, "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+				}}},
+				upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+					"id": "rs_snapshot_after_" + testCase.name, "type": "reasoning", "summary": []any{testCase.part},
+				}}},
+				upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+			)
+			assertOrderedStreamFragments(t, body, `"text":"**第一标题**"`, `"text":"\n\n**第二标题**"`)
+			itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+				item, _ := data["item"].(map[string]any)
+				return responseToolItemStateID(item) == "rs_snapshot_after_"+testCase.name
+			})
+			item, _ := itemDone["item"].(map[string]any)
+			parts := reasoningSummaryTextPartsFromItem(item)
+			if len(parts) != 1 || parts[0].text != "\n\n**第二标题**" {
+				t.Fatalf("summary part=%#v, want prefixed title in %s", parts, testCase.wantKey)
+			}
+			completed := responseSSEEventData(t, body, "response.completed", func(map[string]any) bool { return true })
+			response, _ := completed["response"].(map[string]any)
+			output, _ := response["output"].([]any)
+			foundCompleted := false
+			for _, rawItem := range output {
+				completedItem, _ := rawItem.(map[string]any)
+				if responseToolItemStateID(completedItem) != "rs_snapshot_after_"+testCase.name {
+					continue
+				}
+				foundCompleted = true
+				completedParts := reasoningSummaryTextPartsFromItem(completedItem)
+				if len(completedParts) != 1 || completedParts[0].text != "\n\n**第二标题**" {
+					t.Fatalf("completed summary part=%#v, want prefixed title in %s", completedParts, testCase.wantKey)
+				}
+			}
+			if !foundCompleted {
+				t.Fatalf("completed response omitted snapshot item %s: %s", testCase.name, body)
+			}
+		})
+	}
+}
+func TestResponsesStreamDoesNotCarryBoundaryAcrossOpaqueSummaryItem(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_visible_before", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_opaque_middle", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**保密标题**"}}, "encrypted_content": "opaque-middle",
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_visible_after", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_visible_after", "summary_index": 0, "delta": "**第三标题**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_visible_after", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第三标题**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body, `"text":"**第一标题**"`, `"text":"**保密标题**"`, `"delta":"**第三标题**"`)
+	if strings.Contains(body, `"delta":"\n\n**第三标题**"`) {
+		t.Fatalf("title boundary crossed opaque reasoning item: %s", body)
+	}
+	if !strings.Contains(body, `"encrypted_content":"opaque-middle"`) {
+		t.Fatalf("opaque reasoning payload was not preserved: %s", body)
+	}
+}
+
 func nativeReasoningSummaryTitleEvents() []string {
 	return []string{
 		"event: response.output_item.added\n" +
