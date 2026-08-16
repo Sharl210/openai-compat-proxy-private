@@ -143,9 +143,10 @@ type reasoningTextState struct {
 }
 
 type reasoningSummaryState struct {
-	reasoningText reasoningTextState
-	done          bool
-	order         int
+	reasoningText        reasoningTextState
+	done                 bool
+	order                int
+	titleBoundaryPending bool
 }
 
 type responsesToolItemState struct {
@@ -786,14 +787,41 @@ func formatStreamingReasoningSummary(states *map[reasoningSummaryKey]*reasoningS
 		state = &reasoningSummaryState{order: order}
 		(*states)[key] = state
 	}
+	inheritStreamingReasoningTitleBoundary(states, itemID, summaryIndex, state, preserve)
+	var delta string
 	if snapshot {
 		if state.done {
 			return ""
 		}
 		state.done = true
-		return formatStreamingReasoningSnapshot(&state.reasoningText, text, preserve)
+		delta = formatStreamingReasoningSnapshot(&state.reasoningText, text, preserve)
+	} else {
+		delta = formatStreamingReasoningDelta(&state.reasoningText, text, preserve)
 	}
-	return formatStreamingReasoningDelta(&state.reasoningText, text, preserve)
+	return consumeStreamingReasoningTitleBoundary(state, delta, preserve)
+}
+
+func inheritStreamingReasoningTitleBoundary(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string, summaryIndex int, state *reasoningSummaryState, preserve bool) {
+	if preserve || state == nil || state.titleBoundaryPending || summaryIndex <= 0 || state.reasoningText.raw.Len() > 0 || states == nil || *states == nil {
+		return
+	}
+	previous := (*states)[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex - 1}]
+	if previous != nil && previous.done && reasoningTextHasTrailingBoldSpan(previous.reasoningText.raw.String()) {
+		state.titleBoundaryPending = true
+	}
+}
+func consumeStreamingReasoningTitleBoundary(state *reasoningSummaryState, text string, preserve bool) string {
+	if state == nil || text == "" || !state.titleBoundaryPending {
+		return text
+	}
+	state.titleBoundaryPending = false
+	if preserve || !startsWithCompleteOrEmptyBoldSpan(text) {
+		return text
+	}
+	formatted := "\n\n" + text
+	state.reasoningText.formatted.Reset()
+	state.reasoningText.formatted.WriteString(formatted)
+	return formatted
 }
 
 func clearStreamingReasoningSummaryStates(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string) {
