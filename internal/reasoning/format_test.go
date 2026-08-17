@@ -135,6 +135,87 @@ func TestFormatBlockFormatsTypedSummaryParts(t *testing.T) {
 	}
 }
 
+func TestFormatBlockFormatsSummaryTextStringAndNestedObject(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		part map[string]any
+		text func(map[string]any) string
+	}{
+		{
+			name: "string",
+			part: map[string]any{"type": "summary_text", "summary_text": "**第一标题****第二标题**"},
+			text: func(part map[string]any) string { return part["summary_text"].(string) },
+		},
+		{
+			name: "nested",
+			part: map[string]any{"type": "summary_text", "summary_text": map[string]any{"text": "**第一标题****第二标题**", "metadata": "keep"}},
+			text: func(part map[string]any) string { return part["summary_text"].(map[string]any)["text"].(string) },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			block := map[string]any{"summary": []any{test.part}}
+			formatted := FormatBlock(block)
+			parts := formatted["summary"].([]any)
+			part := parts[0].(map[string]any)
+			if got := test.text(part); got != "**第一标题**\n\n**第二标题**" {
+				t.Fatalf("formatted summary=%q, want separated titles", got)
+			}
+			if test.name == "nested" && part["summary_text"].(map[string]any)["metadata"] != "keep" {
+				t.Fatalf("nested summary metadata was not preserved: %#v", part)
+			}
+			if got := test.text(test.part); got != "**第一标题****第二标题**" {
+				t.Fatalf("source summary mutated: %q", got)
+			}
+		})
+	}
+}
+
+func TestFormatBlockSeparatesTitleSequenceAcrossMixedSummaryTextFields(t *testing.T) {
+	block := map[string]any{
+		"summary": []any{
+			map[string]any{"type": "summary_text", "summary_text": "**第一标题**"},
+			map[string]any{"type": "summary_text", "summary_text": map[string]any{"text": "**第二标题**", "metadata": "keep"}},
+		},
+	}
+
+	formatted := FormatBlock(block)
+	parts := formatted["summary"].([]any)
+	first := parts[0].(map[string]any)["summary_text"].(string)
+	second := parts[1].(map[string]any)["summary_text"].(map[string]any)
+	if got := first + second["text"].(string); got != "**第一标题**\n\n**第二标题**" {
+		t.Fatalf("formatted summary=%q, want adjacent titles separated", got)
+	}
+	if second["metadata"] != "keep" {
+		t.Fatalf("nested summary metadata was not preserved: %#v", second)
+	}
+	if got := block["summary"].([]any)[0].(map[string]any)["summary_text"].(string); got != "**第一标题**" {
+		t.Fatalf("source summary mutated: %q", got)
+	}
+}
+
+func TestFormatBlockAppendsTailToSummaryTextWhenTextIsEmpty(t *testing.T) {
+	block := map[string]any{
+		"summary": []any{
+			map[string]any{"type": "summary_text", "summary_text": "**第一标题**"},
+			map[string]any{"type": "summary_text", "text": "", "summary_text": map[string]any{"text": "**第二", "metadata": "keep"}},
+		},
+	}
+
+	formatted := FormatBlock(block)
+	parts := formatted["summary"].([]any)
+	second := parts[1].(map[string]any)
+	nested := second["summary_text"].(map[string]any)
+	if got := nested["text"].(string); got != "**第二" {
+		t.Fatalf("formatted nested summary=%q, want tail preserved", got)
+	}
+	if got := second["text"].(string); got != "" {
+		t.Fatalf("empty text placeholder changed to %q", got)
+	}
+	if nested["metadata"] != "keep" {
+		t.Fatalf("nested summary metadata was not preserved: %#v", nested)
+	}
+}
+
 func TestFormatBlockSeparatesTitleSequenceAcrossSummaryParts(t *testing.T) {
 	block := map[string]any{
 		"summary": []any{

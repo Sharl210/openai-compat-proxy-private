@@ -3081,3 +3081,164 @@ func testResponsesConfigWithEndpointAndThinkingStyle(upstreamURL string, endpoin
 	}
 	return cfg
 }
+func TestResponsesStreamFormatsReasoningItemsOnlyPresentInTerminalOutput(t *testing.T) {
+	tests := []struct {
+		name           string
+		terminalEvent  string
+		seedEvents     []upstream.Event
+		part           map[string]any
+		protection     map[string]any
+		want           string
+		assertMetadata func(t *testing.T, part map[string]any)
+	}{
+		{
+			name:          "response completed text",
+			terminalEvent: "response.completed",
+			part:          map[string]any{"type": "summary_text", "text": "**第一标题****第二标题**"},
+			want:          "**第一标题**\n\n**第二标题**",
+		},
+		{
+			name:          "response done text",
+			terminalEvent: "response.done",
+			part:          map[string]any{"type": "summary_text", "text": "**第一标题****第二标题**"},
+			want:          "**第一标题**\n\n**第二标题**",
+		},
+		{
+			name:          "unmatched snapshot summary_text string",
+			terminalEvent: "response.completed",
+			seedEvents: []upstream.Event{
+				{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "msg_streamed", "type": "message", "role": "assistant", "content": []any{}}}},
+			},
+			part: map[string]any{"type": "summary_text", "summary_text": "**第一标题****第二标题**"},
+			want: "**第一标题**\n\n**第二标题**",
+		},
+		{
+			name:          "nested summary_text",
+			terminalEvent: "response.completed",
+			part:          map[string]any{"type": "summary_text", "summary_text": map[string]any{"text": "**第一标题****第二标题**", "metadata": "keep"}},
+			want:          "**第一标题**\n\n**第二标题**",
+			assertMetadata: func(t *testing.T, part map[string]any) {
+				t.Helper()
+				nested, _ := part["summary_text"].(map[string]any)
+				if nested["metadata"] != "keep" {
+					t.Fatalf("nested summary metadata=%#v, want preserved", nested)
+				}
+			},
+		},
+		{
+			name:          "empty text falls through to nested summary_text",
+			terminalEvent: "response.completed",
+			part:          map[string]any{"type": "summary_text", "text": "", "summary_text": map[string]any{"text": "**第一标题****第二标题**", "metadata": "keep"}},
+			want:          "**第一标题**\n\n**第二标题**",
+			assertMetadata: func(t *testing.T, part map[string]any) {
+				t.Helper()
+				nested, _ := part["summary_text"].(map[string]any)
+				if nested["metadata"] != "keep" {
+					t.Fatalf("nested summary metadata=%#v, want preserved", nested)
+				}
+			},
+		},
+		{
+			name:          "opaque reasoning remains byte exact",
+			terminalEvent: "response.completed",
+			part:          map[string]any{"type": "summary_text", "text": "**第一标题****第二标题**"},
+			protection:    map[string]any{"encrypted_content": "opaque-terminal"},
+			want:          "**第一标题****第二标题**",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			events := append([]upstream.Event(nil), test.seedEvents...)
+			item := map[string]any{"id": "rs_completed_only", "type": "reasoning", "summary": []any{test.part}}
+			for key, value := range test.protection {
+				item[key] = value
+			}
+			events = append(events, upstream.Event{Event: test.terminalEvent, Data: map[string]any{"response": map[string]any{"output": []any{item}}}})
+
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, events...)
+			terminal := responseSSEEventData(t, body, test.terminalEvent, func(map[string]any) bool { return true })
+			response, _ := terminal["response"].(map[string]any)
+			output, _ := response["output"].([]any)
+			if len(output) != 1 {
+				t.Fatalf("terminal output=%#v, want one reasoning item", output)
+			}
+			completedItem, _ := output[0].(map[string]any)
+			parts := reasoningSummaryTextPartsFromItem(completedItem)
+			if len(parts) != 1 || parts[0].text != test.want {
+				t.Fatalf("terminal reasoning summary=%#v, want %q", completedItem, test.want)
+			}
+			if test.assertMetadata != nil {
+				part, _ := completedItem["summary"].([]any)[0].(map[string]any)
+				test.assertMetadata(t, part)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamFormatsAdjacentTerminalReasoningItems(t *testing.T) {
+	tests := []struct {
+		name          string
+		terminalEvent string
+		output        []any
+		wantSecond    string
+	}{
+		{
+			name:          "response completed",
+			terminalEvent: "response.completed",
+			output: []any{
+				map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+				map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}}},
+			},
+			wantSecond: "\n\n**第二标题**",
+		},
+		{
+			name:          "response done",
+			terminalEvent: "response.done",
+			output: []any{
+				map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+				map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}}},
+			},
+			wantSecond: "\n\n**第二标题**",
+		},
+		{
+			name:          "message breaks boundary",
+			terminalEvent: "response.completed",
+			output: []any{
+				map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+				map[string]any{"id": "msg_gap", "type": "message", "role": "assistant", "content": []any{}},
+				map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}}},
+			},
+			wantSecond: "**第二标题**",
+		},
+		{
+			name:          "opaque reasoning breaks boundary",
+			terminalEvent: "response.completed",
+			output: []any{
+				map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+				map[string]any{"id": "rs_opaque", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "opaque"}}, "encrypted_content": "opaque-terminal"},
+				map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}}},
+			},
+			wantSecond: "**第二标题**",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: test.terminalEvent, Data: map[string]any{"response": map[string]any{"output": test.output}}},
+			)
+			terminal := responseSSEEventData(t, body, test.terminalEvent, func(map[string]any) bool { return true })
+			response, _ := terminal["response"].(map[string]any)
+			output, _ := response["output"].([]any)
+			if len(output) != len(test.output) {
+				t.Fatalf("terminal output=%#v, want %d items", output, len(test.output))
+			}
+			second := output[len(output)-1].(map[string]any)
+			parts := reasoningSummaryTextPartsFromItem(second)
+			if len(parts) != 1 || parts[0].text != test.wantSecond {
+				t.Fatalf("second terminal reasoning item=%#v, want %q", second, test.wantSecond)
+			}
+		})
+	}
+}

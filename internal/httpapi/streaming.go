@@ -543,22 +543,21 @@ func (h *responseEventWriterHelper) markReasoningItemTitleBoundary(itemID string
 		h.reasoningTitleBoundary = false
 		return
 	}
-	var text strings.Builder
-	for _, part := range reasoningSummaryTextPartsFromItem(item) {
-		text.WriteString(part.text)
-	}
-	if text.Len() == 0 {
+	text := reasoningSummaryTextFromItem(item)
+	if text == "" {
 		parts := h.reasoningSummaryParts[itemID]
 		indices := make([]int, 0, len(parts))
 		for summaryIndex := range parts {
 			indices = append(indices, summaryIndex)
 		}
 		sort.Ints(indices)
+		var summary strings.Builder
 		for _, summaryIndex := range indices {
-			text.WriteString(h.reasoningSummaryPartText(itemID, summaryIndex))
+			summary.WriteString(h.reasoningSummaryPartText(itemID, summaryIndex))
 		}
+		text = summary.String()
 	}
-	h.reasoningTitleBoundary = text.Len() > 0 && reasoningTextHasTrailingBoldSpan(text.String())
+	h.reasoningTitleBoundary = text != "" && reasoningTextHasTrailingBoldSpan(text)
 }
 
 func (h *responseEventWriterHelper) reconcileReasoningItemSummary(itemID string, outputIndex int, item map[string]any) {
@@ -919,6 +918,20 @@ func reasoningSummaryTextPartValue(part map[string]any) string {
 	return stringValue(nested["text"])
 }
 
+func reasoningSummaryTextFromItem(item map[string]any) string {
+	if item == nil {
+		return ""
+	}
+	if summary, ok := item["summary"].(string); ok {
+		return summary
+	}
+	var text strings.Builder
+	for _, part := range reasoningSummaryTextPartsFromItem(item) {
+		text.WriteString(part.text)
+	}
+	return text.String()
+}
+
 func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTextPart {
 	var parts []reasoningSummaryTextPart
 	switch summary := item["summary"].(type) {
@@ -945,6 +958,10 @@ func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTe
 
 func prependReasoningSummaryItemText(item map[string]any, prefix string) {
 	if item == nil || prefix == "" {
+		return
+	}
+	if summary, ok := item["summary"].(string); ok && summary != "" {
+		item["summary"] = prefix + summary
 		return
 	}
 	switch summary := item["summary"].(type) {
@@ -1203,10 +1220,10 @@ func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any
 	snapshot := h.responseOutputSnapshot()
 	rawItems, _ := rawOutput.([]any)
 	if len(rawItems) == 0 {
-		return trimResponseOutputTextLineEndings(snapshot)
+		return finalizeCompletedResponseOutput(snapshot)
 	}
 	if len(snapshot) == 0 {
-		return trimResponseOutputTextLineEndings(cloneJSONValueForResponse(rawItems).([]any))
+		return finalizeCompletedResponseOutput(cloneJSONValueForResponse(rawItems).([]any))
 	}
 
 	completeByID := make(map[string]map[string]any, len(snapshot))
@@ -1248,7 +1265,34 @@ func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any
 		}
 		merged = append(merged, combined)
 	}
-	return trimResponseOutputTextLineEndings(merged)
+	return finalizeCompletedResponseOutput(merged)
+}
+
+func finalizeCompletedResponseOutput(output []any) []any {
+	titleBoundary := false
+	for index, rawItem := range output {
+		item, _ := rawItem.(map[string]any)
+		if stringValue(item["type"]) != "reasoning" {
+			titleBoundary = false
+			continue
+		}
+		if reasoningPayloadIsOpaque(item) {
+			titleBoundary = false
+			continue
+		}
+		formatted := reasoningtext.FormatBlock(item)
+		if formatted == nil {
+			titleBoundary = false
+			continue
+		}
+		summary := reasoningSummaryTextFromItem(formatted)
+		if titleBoundary && startsWithCompleteOrEmptyBoldSpan(summary) {
+			prependReasoningSummaryItemText(formatted, "\n\n")
+		}
+		titleBoundary = reasoningTextHasTrailingBoldSpan(summary)
+		output[index] = formatted
+	}
+	return trimResponseOutputTextLineEndings(output)
 }
 
 func trimResponseOutputTextLineEndings(output []any) []any {

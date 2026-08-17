@@ -311,8 +311,7 @@ func FormatBlock(block map[string]any) map[string]any {
 			for key, value := range part {
 				formattedPart[key] = value
 			}
-			if text, ok := formattedPart["text"].(string); ok {
-				formattedPart["text"] = formatter.Push(text)
+			if formatSummaryPartText(formattedPart, &formatter) {
 				lastTextIndex = index
 			}
 			formattedParts[index] = formattedPart
@@ -332,14 +331,13 @@ func FormatBlock(block map[string]any) map[string]any {
 			for key, value := range part {
 				formattedPart[key] = value
 			}
-			if text, ok := formattedPart["text"].(string); ok {
-				formattedPart["text"] = formatter.Push(text)
+			if formatSummaryPartText(formattedPart, &formatter) {
 				lastTextIndex = index
 			}
 			formattedParts[index] = formattedPart
 		}
 		if tail := formatter.Finish(); tail != "" && lastTextIndex >= 0 {
-			formattedParts[lastTextIndex]["text"] = formattedParts[lastTextIndex]["text"].(string) + tail
+			appendSummaryPartText(formattedParts[lastTextIndex], tail)
 		}
 		formatted["summary"] = formattedParts
 	}
@@ -351,8 +349,49 @@ func appendSummaryFormatterTail(parts []any, index int, tail string) {
 		return
 	}
 	part, _ := parts[index].(map[string]any)
-	if part == nil {
+	appendSummaryPartText(part, tail)
+}
+
+func formatSummaryPartText(part map[string]any, formatter *StreamFormatter) bool {
+	if part == nil || formatter == nil {
+		return false
+	}
+	if text, ok := part["text"].(string); ok && text != "" {
+		part["text"] = formatter.Push(text)
+		return true
+	}
+	switch summaryText := part["summary_text"].(type) {
+	case string:
+		part["summary_text"] = formatter.Push(summaryText)
+		return true
+	case map[string]any:
+		if text, ok := summaryText["text"].(string); ok {
+			formatted := make(map[string]any, len(summaryText))
+			for key, value := range summaryText {
+				formatted[key] = value
+			}
+			formatted["text"] = formatter.Push(text)
+			part["summary_text"] = formatted
+			return true
+		}
+	}
+	return false
+}
+
+func appendSummaryPartText(part map[string]any, suffix string) {
+	if part == nil || suffix == "" {
 		return
 	}
-	part["text"] = part["text"].(string) + tail
+	if text, ok := part["text"].(string); ok && text != "" {
+		part["text"] = text + suffix
+		return
+	}
+	switch summaryText := part["summary_text"].(type) {
+	case string:
+		part["summary_text"] = summaryText + suffix
+	case map[string]any:
+		if text, ok := summaryText["text"].(string); ok {
+			summaryText["text"] = text + suffix
+		}
+	}
 }
