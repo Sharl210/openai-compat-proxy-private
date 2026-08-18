@@ -323,6 +323,42 @@ func TestResponsesStreamReconcilesDeferredTitleFromOutputItemSnapshot(t *testing
 		t.Fatalf("authoritative item snapshot did not close the deferred title: %s", body)
 	}
 }
+func TestResponsesStreamKeepsFormattedLaneWhenSnapshotRegroupsStars(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_regrouped", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_regrouped", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_regrouped", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_regrouped", "summary_index": 0, "delta": "****"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_regrouped", "summary_index": 0, "delta": "**B**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_regrouped", "summary_index": 0, "text": "**A******B**"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_regrouped", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**A******B**"}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_regrouped", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**A******B**"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	expected := "**A**\n\n****\n\n**B**"
+	textDone := responseSSEEventData(t, body, "response.reasoning_summary_text.done", func(data map[string]any) bool { return true })
+	if got := stringValue(textDone["text"]); got != expected {
+		t.Fatalf("text.done=%q, want append-only formatted lane %q", got, expected)
+	}
+	partDone := responseSSEEventData(t, body, "response.reasoning_summary_part.done", func(data map[string]any) bool { return true })
+	part, _ := partDone["part"].(map[string]any)
+	if got := stringValue(part["text"]); got != expected {
+		t.Fatalf("part.done=%q, want append-only formatted lane %q", got, expected)
+	}
+	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool { return true })
+	item, _ := itemDone["item"].(map[string]any)
+	assertReasoningSummaryTexts(t, item, []string{expected})
+	completed := responseSSEEventData(t, body, "response.completed", func(data map[string]any) bool { return true })
+	response, _ := completed["response"].(map[string]any)
+	output, _ := response["output"].([]any)
+	if len(output) != 1 {
+		t.Fatalf("completed output=%#v, want one reasoning item", output)
+	}
+	assertReasoningSummaryTexts(t, output[0].(map[string]any), []string{expected})
+	if strings.Contains(body, `"text":"**A******B**"`) {
+		t.Fatalf("regrouped snapshot leaked raw title bytes: %s", body)
+	}
+}
 
 func TestResponsesStreamDoesNotCarryItemTitleBoundaryAcrossPlainText(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,

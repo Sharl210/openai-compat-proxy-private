@@ -451,11 +451,18 @@ func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string
 	h.inheritReasoningTitleBoundary(itemID, summaryIndex, preserve)
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	delta, handled := state.formatSnapshot(snapshot, preserve)
-	if handled {
-		delta += state.finishAtBoundary()
+	if !handled {
+		if preserve {
+			return "", "", false
+		}
+		// A provider snapshot may group the same stars differently from deltas
+		// already emitted. Keep the append-only formatted lane authoritative.
+		delta = state.finishAtBoundary()
+		return delta, state.formatted.String(), true
 	}
+	delta += state.finishAtBoundary()
 	delta = h.consumeReasoningTitleBoundary(state, delta, preserve)
-	return delta, state.formatted.String(), handled
+	return delta, state.formatted.String(), true
 }
 
 func (h *responseEventWriterHelper) inheritReasoningTitleBoundary(itemID string, summaryIndex int, preserve bool) {
@@ -2239,6 +2246,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 				hasStreamedParts := len(h.reasoningSummaryParts[itemID]) > 0
 				summary := reasoningSummaryFromItem(item)
+				if !reasoningPayloadIsOpaque(item) {
+					if storedSummary := h.reasoningSummaryPartText(itemID, 0); storedSummary != "" {
+						summary = storedSummary
+					}
+				}
 				boundaryConsumed := false
 				if summary == "" || reasoningPayloadIsOpaque(item) {
 					h.flushReasoningFormatItemStates(itemID)
