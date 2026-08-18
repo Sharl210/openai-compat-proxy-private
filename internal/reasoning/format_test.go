@@ -414,6 +414,24 @@ func TestStreamFormatterMatchesWholeTextAcrossChunkBoundaries(t *testing.T) {
 		})
 	}
 }
+func TestStreamFormatterMatchesWholeTextForFragmentedStarRuns(t *testing.T) {
+	for starRun := 4; starRun <= 16; starRun++ {
+		raw := "**A" + strings.Repeat("*", starRun) + "B**"
+		want := FormatText(raw)
+		t.Run(raw, func(t *testing.T) {
+			var formatter StreamFormatter
+			var got strings.Builder
+			for _, character := range raw {
+				got.WriteString(formatter.Push(string(character)))
+			}
+			got.WriteString(formatter.Finish())
+			if got.String() != want {
+				t.Fatalf("fragmented star run produced %q, want %q", got.String(), want)
+			}
+		})
+	}
+}
+
 func TestStreamFormatterFlushesIncompleteAdjacentHeading(t *testing.T) {
 	var formatter StreamFormatter
 	if got := formatter.Push("**第一标题**"); got != "**第一标题**" {

@@ -516,6 +516,7 @@ func TestReasoningTextHasTrailingBoldSpan(t *testing.T) {
 		{name: "single ASCII title", text: "**A**", want: true},
 		{name: "six star formatted tail", text: "**A**\n\n****B**", want: true},
 		{name: "eight star formatted tail", text: "**A**\n\n****\n\n**B**", want: true},
+		{name: "empty marker after title", text: "**A**\n\n****", want: true},
 		{name: "title followed by inline emphasis", text: "**标题**正文**强调**", want: false},
 		{name: "plain text", text: "普通正文", want: false},
 		{name: "empty marker", text: "****", want: false},
@@ -548,10 +549,11 @@ func TestResponsesEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.
 func TestChatEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{
-		toolIDAliases:    map[string]string{},
-		toolMeta:         map[string]map[string]string{},
-		toolIndex:        map[string]int{},
-		toolSent:         map[string]bool{},
+		toolIDAliases: map[string]string{},
+		toolMeta:      map[string]map[string]string{},
+		toolIndex:     map[string]int{},
+		toolSent:      map[string]bool{},
+
 		pendingToolArgs:  map[string]string{},
 		thinkingTagStyle: "",
 	}
@@ -1102,5 +1104,27 @@ func assertOrderedStreamFragments(t *testing.T, body string, fragments ...string
 			t.Fatalf("missing stream fragment %q in %s", fragment, body)
 		}
 		searchStart += relativeIndex + len(fragment)
+	}
+}
+func TestResponsesEventWriterSeparatesTitleAfterEmptyMarkerAtItemBoundary(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "delta": "****"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**A******"}}}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_second", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_second", "summary_index": 0, "delta": "**B**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**B**"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**A**"`,
+		`"delta":"\n\n****"`,
+		`"delta":"\n\n**B**"`,
+	)
+	if strings.Contains(body, `"delta":"******B**"`) {
+		t.Fatalf("empty marker and next title remained adjacent: %s", body)
 	}
 }

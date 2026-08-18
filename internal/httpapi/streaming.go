@@ -500,7 +500,16 @@ func startsWithCompleteBoldSpan(text string) bool {
 
 func reasoningTextHasTrailingBoldSpan(text string) bool {
 	lineStart := strings.LastIndexAny(text, "\r\n") + 1
-	tail := text[lineStart:]
+	if !strings.HasPrefix(text[lineStart:], "**") {
+		return false
+	}
+	formatted := reasoningtext.FormatText(text)
+	formattedLineStart := strings.LastIndexAny(formatted, "\r\n") + 1
+	tail := formatted[formattedLineStart:]
+	if tail == "****" {
+		prefix := strings.TrimRight(formatted[:formattedLineStart], "\r\n")
+		return prefix != "" && reasoningTextHasTrailingBoldSpan(prefix)
+	}
 	if len(tail) < 5 || !strings.HasPrefix(tail, "**") {
 		return false
 	}
@@ -512,7 +521,7 @@ func reasoningTextHasTrailingBoldSpan(text string) bool {
 	for index := len(tail) - 1; index >= 0 && tail[index] == '*'; index-- {
 		trailingStars++
 	}
-	if leadingStars < 2 || trailingStars != 2 || leadingStars+trailingStars >= len(tail) {
+	if leadingStars < 2 || trailingStars < 2 || leadingStars+trailingStars >= len(tail) {
 		return false
 	}
 	content := tail[leadingStars : len(tail)-trailingStars]
@@ -804,7 +813,6 @@ func formatStreamingReasoningSummary(states *map[reasoningSummaryKey]*reasoningS
 	}
 	return consumeStreamingReasoningTitleBoundary(state, delta, preserve)
 }
-
 func inheritStreamingReasoningTitleBoundary(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string, summaryIndex int, state *reasoningSummaryState, preserve bool) {
 	if preserve || state == nil || state.titleBoundaryPending || summaryIndex <= 0 || state.reasoningText.raw.Len() > 0 || states == nil || *states == nil {
 		return
