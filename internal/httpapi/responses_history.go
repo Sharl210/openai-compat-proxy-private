@@ -1349,7 +1349,7 @@ func selectResponsesHistoryMessages(base []model.CanonicalMessage, assistant []m
 			}
 			snapshot = append(snapshot, msg)
 		case "assistant":
-			if len(msg.ToolCalls) > 0 {
+			if len(msg.ToolCalls) > 0 || msg.ReasoningContent != "" || len(msg.ReasoningBlocks) > 0 {
 				snapshot = append(snapshot, msg)
 			}
 		}
