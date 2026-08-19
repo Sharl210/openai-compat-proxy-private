@@ -142,10 +142,22 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootInfo os.FileInfo, va
 	}, nil
 }
 
+func applyRootProviderUpstreamAPIKeyDefault(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	for i := range cfg.Providers {
+		if !cfg.Providers[i].UpstreamAPIKeySet && cfg.Providers[i].UpstreamAPIKey == "" {
+			cfg.Providers[i].UpstreamAPIKey = cfg.UpstreamAPIKey
+		}
+	}
+}
+
 func applyRootProviderTokenDefaults(cfg *Config) {
 	if cfg == nil {
 		return
 	}
+	applyRootProviderUpstreamAPIKeyDefault(cfg)
 	for i := range cfg.Providers {
 		if !cfg.Providers[i].UpstreamMaxOutputTokensSet {
 			cfg.Providers[i].UpstreamMaxOutputTokens = cfg.UpstreamMaxOutputTokens

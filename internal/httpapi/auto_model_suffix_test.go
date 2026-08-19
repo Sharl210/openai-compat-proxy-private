@@ -10,7 +10,7 @@ import (
 	"openai-compat-proxy/internal/config"
 )
 
-func TestAdaptiveModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testing.T) {
+func TestAutoModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testing.T) {
 	entrypoints := []struct {
 		name       string
 		path       string
@@ -20,19 +20,19 @@ func TestAdaptiveModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testin
 		{
 			name:       "responses",
 			path:       "/v1/responses",
-			body:       `{"model":"client-noprompt-adaptive-pro-high","max_output_tokens":128,"input":"hello"}`,
+			body:       `{"model":"client-noprompt-auto-pro-high","max_output_tokens":128,"input":"hello"}`,
 			setHeaders: func(*http.Request) {},
 		},
 		{
 			name:       "chat",
 			path:       "/v1/chat/completions",
-			body:       `{"model":"client-high-pro-noprompt-adaptive","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
+			body:       `{"model":"client-high-pro-noprompt-auto","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
 			setHeaders: func(*http.Request) {},
 		},
 		{
 			name: "messages",
 			path: "/v1/messages",
-			body: `{"model":"client-pro-adaptive-high-noprompt","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
+			body: `{"model":"client-pro-auto-high-noprompt","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
 			setHeaders: func(req *http.Request) {
 				req.Header.Set("anthropic-version", "2023-06-01")
 			},
@@ -98,14 +98,14 @@ func TestAdaptiveModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testin
 				t.Fatalf("expected one upstream request, got %d", upstreamHits)
 			}
 			if got := upstreamPayload["model"]; got != "claude-opus-4-6" {
-				t.Fatalf("expected final mapped model without adaptive suffix, got %#v", upstreamPayload)
+				t.Fatalf("expected final mapped model without auto suffix, got %#v", upstreamPayload)
 			}
 			thinking, _ := upstreamPayload["thinking"].(map[string]any)
 			if thinking["type"] != "adaptive" {
-				t.Fatalf("expected native adaptive thinking, got %#v", upstreamPayload)
+				t.Fatalf("expected auto suffix to request native adaptive thinking, got %#v", upstreamPayload)
 			}
 			if _, exists := thinking["budget_tokens"]; exists {
-				t.Fatalf("adaptive suffix must not fall back to manual thinking, got %#v", upstreamPayload)
+				t.Fatalf("auto suffix must not fall back to manual thinking, got %#v", upstreamPayload)
 			}
 			outputConfig, _ := upstreamPayload["output_config"].(map[string]any)
 			if outputConfig["effort"] != "high" {
@@ -118,7 +118,7 @@ func TestAdaptiveModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testin
 	}
 }
 
-func TestAdaptiveModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *testing.T) {
+func TestAutoModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *testing.T) {
 	tests := []struct {
 		name             string
 		endpointType     string
@@ -133,7 +133,7 @@ func TestAdaptiveModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *test
 			endpointType:     config.UpstreamEndpointTypeResponses,
 			mappedModel:      "claude-opus-4-6",
 			path:             "/v1/messages",
-			body:             `{"model":"client-adaptive","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
+			body:             `{"model":"client-auto","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
 			setHeaders:       func(req *http.Request) { req.Header.Set("anthropic-version", "2023-06-01") },
 			expectedFragment: "requires UPSTREAM_ENDPOINT_TYPE=anthropic",
 		},
@@ -142,7 +142,7 @@ func TestAdaptiveModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *test
 			endpointType:     config.UpstreamEndpointTypeChat,
 			mappedModel:      "claude-opus-4-6",
 			path:             "/v1/responses",
-			body:             `{"model":"client-adaptive","input":"hello"}`,
+			body:             `{"model":"client-auto","input":"hello"}`,
 			setHeaders:       func(*http.Request) {},
 			expectedFragment: "requires UPSTREAM_ENDPOINT_TYPE=anthropic",
 		},
@@ -151,7 +151,7 @@ func TestAdaptiveModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *test
 			endpointType:     config.UpstreamEndpointTypeAnthropic,
 			mappedModel:      "claude-sonnet-4-5",
 			path:             "/v1/chat/completions",
-			body:             `{"model":"client-adaptive","messages":[{"role":"user","content":"hello"}]}`,
+			body:             `{"model":"client-auto","messages":[{"role":"user","content":"hello"}]}`,
 			setHeaders:       func(*http.Request) {},
 			expectedFragment: "not supported by final Anthropic model",
 		},
@@ -196,7 +196,7 @@ func TestAdaptiveModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *test
 				t.Fatalf("expected local 400, got %d body=%s", rec.Code, rec.Body.String())
 			}
 			if !strings.Contains(rec.Body.String(), "unsupported_upstream_feature") || !strings.Contains(rec.Body.String(), test.expectedFragment) {
-				t.Fatalf("expected clear adaptive preflight error, got %s", rec.Body.String())
+				t.Fatalf("expected clear auto preflight error, got %s", rec.Body.String())
 			}
 			if upstreamHits != 0 {
 				t.Fatalf("expected rejected request to make no upstream calls, got %d", upstreamHits)
@@ -205,7 +205,7 @@ func TestAdaptiveModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *test
 	}
 }
 
-func TestAdaptiveModelSuffixPreservesExactLiteralModelPrecedence(t *testing.T) {
+func TestAutoModelSuffixPreservesExactLiteralModelPrecedence(t *testing.T) {
 	upstreamHits := 0
 	var upstreamPayload map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,10 +229,10 @@ func TestAdaptiveModelSuffixPreservesExactLiteralModelPrecedence(t *testing.T) {
 			UpstreamAPIKey:       "test-key",
 			UpstreamEndpointType: config.UpstreamEndpointTypeResponses,
 			SupportsResponses:    true,
-			ManualModels:         []string{"vendor-adaptive", "vendor"},
+			ManualModels:         []string{"vendor-auto", "vendor"},
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"vendor-adaptive","input":"hello"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"vendor-auto","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -241,10 +241,10 @@ func TestAdaptiveModelSuffixPreservesExactLiteralModelPrecedence(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected exact literal model to remain routable, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if upstreamHits != 1 || upstreamPayload["model"] != "vendor-adaptive" {
-		t.Fatalf("expected exact literal model to bypass adaptive parsing, calls=%d payload=%#v", upstreamHits, upstreamPayload)
+	if upstreamHits != 1 || upstreamPayload["model"] != "vendor-auto" {
+		t.Fatalf("expected exact literal model to bypass auto parsing, calls=%d payload=%#v", upstreamHits, upstreamPayload)
 	}
 	if _, exists := upstreamPayload["thinking"]; exists {
-		t.Fatalf("exact literal model must not synthesize adaptive thinking, got %#v", upstreamPayload)
+		t.Fatalf("exact literal model must not synthesize auto thinking, got %#v", upstreamPayload)
 	}
 }

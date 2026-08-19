@@ -180,6 +180,78 @@ func TestResponsesEventWriterSeparatesFragmentedTitleAfterSummaryTextDoneWithout
 	)
 }
 
+func TestChatEventWriterSeparatesDoneOnlySummaryTitlesAcrossIndexes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolIDAliases: map[string]string{}, toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}, thinkingTagStyle: ""}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	for _, event := range doneOnlySummaryTitleEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	body := rec.Body.String()
+	assertOrderedStreamFragments(t, body, `"reasoning_content":"**第一标题**"`, `"reasoning_content":"\n\n**第二标题**"`)
+	if strings.Contains(body, `"reasoning_content":"**第一标题****第二标题**"`) {
+		t.Fatalf("done-only summary titles remained adjacent: %s", body)
+	}
+}
+
+func TestAnthropicEventWriterSeparatesDoneOnlySummaryTitlesAcrossIndexes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{pendingToolArgs: map[string]string{}, toolMeta: map[string]map[string]string{}, emittedToolItems: map[string]bool{}}
+	helper := &responseEventWriterHelper{downstreamType: "anthropic", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	for _, event := range doneOnlySummaryTitleEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	body := rec.Body.String()
+	assertOrderedStreamFragments(t, body, `"thinking":"**第一标题**"`, `"thinking":"\n\n**第二标题**"`)
+	if strings.Contains(body, `"thinking":"**第一标题****第二标题**"`) {
+		t.Fatalf("done-only summary titles remained adjacent: %s", body)
+	}
+}
+func TestChatEventWriterDoesNotSeparateTitleAfterInlineBoldSummary(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{toolIDAliases: map[string]string{}, toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{}}
+	helper := &responseEventWriterHelper{downstreamType: "chat", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	events := []upstream.Event{
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_inline", "summary_index": 0, "text": "正文**强调**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_inline", "summary_index": 1, "text": "**下一标题**"}},
+	}
+	for _, event := range events {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"reasoning_content":"\n\n**下一标题**"`) {
+		t.Fatalf("inline bold summary incorrectly inherited title boundary: %s", body)
+	}
+}
+func TestAnthropicEventWriterDoesNotSeparateTitleAfterInlineBoldSummary(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{pendingToolArgs: map[string]string{}, toolMeta: map[string]map[string]string{}, emittedToolItems: map[string]bool{}}
+	helper := &responseEventWriterHelper{downstreamType: "anthropic", upstreamEndpointType: config.UpstreamEndpointTypeResponses, toolIDAliases: map[string]string{}, toolItems: map[string]*responsesToolItemState{}}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	events := []upstream.Event{
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_inline", "summary_index": 0, "text": "正文**强调**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_inline", "summary_index": 1, "text": "**下一标题**"}},
+	}
+	for _, event := range events {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, `"thinking":"\n\n**下一标题**"`) {
+		t.Fatalf("inline bold summary incorrectly inherited title boundary: %s", body)
+	}
+}
+
 func TestResponsesEventWriterHandlesLateSummaryPartDoneAfterSummaryTextDone(t *testing.T) {
 	events := summaryTextDoneWithoutPartDoneEvents()
 	latePartDone := upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{
@@ -434,6 +506,32 @@ func TestReasoningTitleStateFlushesDeferredHeadingFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestReasoningTextHasTrailingBoldSpan(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "single title", text: "**标题**", want: true},
+		{name: "single ASCII title", text: "**A**", want: true},
+		{name: "six star formatted tail", text: "**A**\n\n****B**", want: true},
+		{name: "eight star formatted tail", text: "**A**\n\n****\n\n**B**", want: true},
+		{name: "empty marker after title", text: "**A**\n\n****", want: true},
+		{name: "title followed by inline emphasis", text: "**标题**正文**强调**", want: false},
+		{name: "plain text", text: "普通正文", want: false},
+		{name: "empty marker", text: "****", want: false},
+		{name: "opaque-looking stars only", text: "********", want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := reasoningTextHasTrailingBoldSpan(test.text); got != test.want {
+				t.Fatalf("reasoningTextHasTrailingBoldSpan(%q)=%t, want %t", test.text, got, test.want)
+			}
+		})
+	}
+}
+
 func TestResponsesEventWriterPreservesStandaloneSummaryTitleAtPartBoundary(t *testing.T) {
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses, standaloneSummaryTitleEvents()...)
 	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`)
@@ -451,10 +549,11 @@ func TestResponsesEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.
 func TestChatEventWriterFlushesDeferredReasoningTitleAtTerminal(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{
-		toolIDAliases:    map[string]string{},
-		toolMeta:         map[string]map[string]string{},
-		toolIndex:        map[string]int{},
-		toolSent:         map[string]bool{},
+		toolIDAliases: map[string]string{},
+		toolMeta:      map[string]map[string]string{},
+		toolIndex:     map[string]int{},
+		toolSent:      map[string]bool{},
+
 		pendingToolArgs:  map[string]string{},
 		thinkingTagStyle: "",
 	}
@@ -560,6 +659,60 @@ func TestAnthropicEventWriterSeparatesCrossDeltaReasoningTitles(t *testing.T) {
 	}
 	assertOrderedStreamFragments(t, rec.Body.String(),
 		`"thinking":"**第一标题**"`,
+		`"thinking":"\n\n**第二标题**"`,
+	)
+}
+
+func TestChatEventWriterSeparatesTitleAroundEmptyBoldMarkerAcrossSummaryParts(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		toolIDAliases:   map[string]string{},
+		toolMeta:        map[string]map[string]string{},
+		toolIndex:       map[string]int{},
+		toolSent:        map[string]bool{},
+		pendingToolArgs: map[string]string{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+	for _, event := range crossPartEmptyMarkerEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"reasoning_content":"**第一标题**"`,
+		`"reasoning_content":"\n\n****"`,
+		`"reasoning_content":"\n\n**第二标题**"`,
+	)
+}
+
+func TestAnthropicEventWriterSeparatesTitleAroundEmptyBoldMarkerAcrossSummaryParts(t *testing.T) {
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+	for _, event := range crossPartEmptyMarkerEvents() {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+	assertOrderedStreamFragments(t, rec.Body.String(),
+		`"thinking":"**第一标题**"`,
+		`"thinking":"\n\n****"`,
 		`"thinking":"\n\n**第二标题**"`,
 	)
 }
@@ -737,6 +890,19 @@ func emptyReasoningItemDoneEvents() []upstream.Event {
 	}
 }
 
+func doneOnlySummaryTitleEvents() []upstream.Event {
+	return []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_done_only", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_done_only", "summary_index": 0, "text": "**第一标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_done_only", "summary_index": 1, "text": "**第二标题**"}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_done_only", "type": "reasoning", "summary": []any{
+			map[string]any{"type": "summary_text", "text": "**第一标题**"},
+			map[string]any{"type": "summary_text", "text": "**第二标题**"},
+		}}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	}
+}
+
 func standaloneSummaryTitleEvents() []upstream.Event {
 	return []upstream.Event{
 		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_title", "type": "reasoning", "summary": []any{}}}},
@@ -772,6 +938,25 @@ func summaryTextDoneWithoutPartDoneEvents(secondTitleDeltas ...string) []upstrea
 		}}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	)
+	return events
+}
+
+func crossPartEmptyMarkerEvents(secondTitleDeltas ...string) []upstream.Event {
+	if len(secondTitleDeltas) == 0 {
+		secondTitleDeltas = []string{"****", "**第二标题**"}
+	}
+	events := []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_empty_marker", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "delta": "**第一标题**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "text": "**第一标题**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
+	}
+	for _, delta := range secondTitleDeltas {
+		events = append(events, upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_marker", "summary_index": 1, "delta": delta}})
+	}
+	events = append(events, upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}})
 	return events
 }
 
@@ -848,7 +1033,18 @@ func TestChatEventWriterAppendsUnemittedSummarySnapshotAcrossIndexes(t *testing.
 		`"reasoning_content":"\n\n**后续**"`,
 	)
 }
-
+func TestResponsesEventWriterSeparatesTitleAddedByAuthoritativeSnapshot(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "delta": "**标题**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_snapshot", "summary_index": 0, "text": "**标题****后续**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_snapshot", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题****后续**"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body, `"delta":"**标题**"`, `"delta":"\n\n**后续**"`)
+	if strings.Contains(body, `"delta":"**标题****后续**"`) {
+		t.Fatalf("authoritative snapshot retained adjacent titles: %s", body)
+	}
+}
 func TestChatEventWriterResetsSummaryAliasWhenItemIDIsReused(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{
@@ -908,5 +1104,55 @@ func assertOrderedStreamFragments(t *testing.T, body string, fragments ...string
 			t.Fatalf("missing stream fragment %q in %s", fragment, body)
 		}
 		searchStart += relativeIndex + len(fragment)
+	}
+}
+func TestResponsesEventWriterSeparatesTitleAfterEmptyMarkerAtItemBoundary(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_first", "summary_index": 0, "delta": "****"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**A******"}}}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_second", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_second", "summary_index": 0, "delta": "**B**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**B**"}}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**A**"`,
+		`"delta":"\n\n****"`,
+		`"delta":"\n\n**B**"`,
+	)
+	if strings.Contains(body, `"delta":"******B**"`) {
+		t.Fatalf("empty marker and next title remained adjacent: %s", body)
+	}
+}
+
+func TestResponsesEventWriterKeepsTitleBoundaryAcrossClosedEmptyMarkerPart(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_empty_part", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**A**"}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 1, "delta": "****"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": "****"}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 2, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 2, "delta": "**B**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_empty_part", "type": "reasoning", "summary": []any{
+			map[string]any{"type": "summary_text", "text": "**A**"},
+			map[string]any{"type": "summary_text", "text": "****"},
+			map[string]any{"type": "summary_text", "text": "**B**"},
+		}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**A**"`,
+		`"delta":"\n\n****"`,
+		`"delta":"\n\n**B**"`,
+	)
+	if strings.Contains(body, `"delta":"**B**"`) || strings.Contains(body, `"text":"**A******B**"`) {
+		t.Fatalf("closed empty marker part lost the next title boundary: %s", body)
 	}
 }

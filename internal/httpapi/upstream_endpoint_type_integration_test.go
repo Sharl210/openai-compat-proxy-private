@@ -3150,7 +3150,7 @@ func TestResponsesRouteRejectsRawOpaqueReasoningFieldsBeforeNonResponsesUpstream
 	}
 }
 
-func TestResponsesRouteDropsSummaryOnlyReasoningForMappedChatUpstream(t *testing.T) {
+func TestResponsesRoutePreservesSummaryOnlyReasoningForMappedChatUpstream(t *testing.T) {
 	var upstreamBody string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -3200,8 +3200,8 @@ func TestResponsesRouteDropsSummaryOnlyReasoningForMappedChatUpstream(t *testing
 			t.Fatalf("expected mapped chat payload to preserve %s, got %s", want, upstreamBody)
 		}
 	}
-	if strings.Contains(upstreamBody, "need tool output") || strings.Contains(upstreamBody, `"reasoning_content"`) {
-		t.Fatalf("expected mapped chat payload to omit unverifiable reasoning history, got %s", upstreamBody)
+	if !strings.Contains(upstreamBody, `"reasoning_content":"need tool output"`) {
+		t.Fatalf("expected mapped chat payload to preserve summary-only reasoning_content, got %s", upstreamBody)
 	}
 }
 

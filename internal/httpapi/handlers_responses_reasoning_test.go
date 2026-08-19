@@ -65,6 +65,23 @@ func TestResponsesNonStreamPreservesReasoningOutputItems(t *testing.T) {
 	}
 }
 
+func TestPortableResponsesReasoningBlockReadsNestedSummaryText(t *testing.T) {
+	block := map[string]any{
+		"type": "reasoning",
+		"summary": []any{
+			map[string]any{
+				"type":         "summary_text",
+				"summary_text": map[string]any{"text": "nested reasoning"},
+			},
+		},
+	}
+
+	portable := portableResponsesReasoningBlock(block, true)
+	if got := stringValue(portable["text"]); got != "nested reasoning" {
+		t.Fatalf("expected nested summary text to project to portable reasoning, got %#v", portable)
+	}
+}
+
 func TestResponsesStreamMovesTopLevelServiceTierIntoCompletedResponseObject(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +

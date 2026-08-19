@@ -81,6 +81,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		client := upstreamClientForProvider(r, providerID, providerCfg)
+		history := responsesHistoryFromRequest(r)
 		clientServiceTier := serviceTierFromTopLevelFields(canon.PreservedTopLevelFields)
 		clientReasoningParameters := clientToProxyReasoningParameters(clientReasoningProtocolMessages, clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix, canon.MaxOutputTokens)
 		clientReasoningEffort := clientToProxyReasoningEffort(clientModel, canon.Reasoning, provider.EnableReasoningEffortSuffix)
@@ -94,10 +95,23 @@ func handleAnthropicMessages() http.HandlerFunc {
 		}
 		applyProviderSystemPrompt(&canon, provider)
 		var reasoningModeFallback *reasoningModeFallbackCoordinator
+		historyScope := ""
 		intent, _ := proxyModelIntentFromRequest(r)
 		normalizeCanonicalModelAndReasoningForResolvedProxyModelIntent(&canon, resolvedModel, clientReasoningEffort, provider, providerCfg, intent)
+		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+			historyScope = responsesHistoryReplayScope(responsesHistoryReplayProvenance{
+				ProviderID:                providerID,
+				DownstreamEndpoint:        canonicalV1MessagesPath,
+				UpstreamEndpointType:      providerCfg.UpstreamEndpointType,
+				NormalizedUpstreamBaseURL: providerCfg.UpstreamBaseURL,
+				FinalUpstreamModel:        canon.Model,
+				CredentialFingerprint:     authorizationFingerprint(authorization),
+				InboundCallerFingerprint:  inboundCallerIdentityFromRequest(r),
+			})
+			canon.Messages = recoverAnthropicThinkingForAssistantToolCalls(history, canon.Messages, providerID, historyScope)
+		}
 		applyProviderMaxOutputTokens(&canon, provider)
-		if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
+		if err := applyAutoThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
 			return
 		}
@@ -188,7 +202,8 @@ func handleAnthropicMessages() http.HandlerFunc {
 			}
 			flusher := startSSE(w)
 			streamState := &anthropicStreamState{}
-			if err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState, providerCfg.UpstreamEndpointType, usageRecorder); err != nil {
+			result, err := writeAnthropicSSELive(ctx, stream, w, flusher, canon, streamState, providerCfg.UpstreamEndpointType, usageRecorder)
+			if err != nil {
 				var terminalFailure *aggregate.TerminalFailureError
 				if errors.As(err, &terminalFailure) {
 					_ = writeAnthropicTerminalFailure(w, flusher, streamState, canon.RequestID, terminalFailure.HealthFlag, terminalFailure.Message, nil)
@@ -200,6 +215,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 				}
 				_ = writeAnthropicTerminalFailure(w, flusher, streamState, canon.RequestID, "upstreamStreamBroken", err.Error(), nil)
 				return
+			}
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.SessionID, canon.Messages, result)
 			}
 			return
 		}
@@ -230,6 +248,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 			if len(result.UnsupportedContentTypes) > 0 {
 				errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported anthropic output content")
 				return
+			}
+			if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+				saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.SessionID, canon.Messages, result)
 			}
 			w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))
 			w.Header().Set(headerThisUsageCacheWriteTokens, formatThisUsageCacheWriteTokens(result.Usage))
@@ -288,6 +309,9 @@ func handleAnthropicMessages() http.HandlerFunc {
 		if len(result.UnsupportedContentTypes) > 0 {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "unsupported_output_mapping", "upstream returned unsupported anthropic output content")
 			return
+		}
+		if providerCfg.UpstreamEndpointType == config.UpstreamEndpointTypeAnthropic {
+			saveChatAnthropicThinkingHistory(history, providerID, historyScope, canon.SessionID, canon.Messages, result)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set(headerThisUsageTokens, formatThisUsageTokens(result.Usage))

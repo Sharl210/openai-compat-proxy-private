@@ -96,7 +96,7 @@ func handleChat() http.HandlerFunc {
 				})
 			}
 			applyProviderMaxOutputTokens(&canon, provider)
-			if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
+			if err := applyAutoThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
 				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
 				return
 			}

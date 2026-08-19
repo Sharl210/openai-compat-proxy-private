@@ -8,30 +8,30 @@ import (
 	"openai-compat-proxy/internal/model"
 )
 
-type unsupportedAdaptiveThinkingError string
+type unsupportedAutoThinkingError string
 
-func (err unsupportedAdaptiveThinkingError) Error() string {
+func (err unsupportedAutoThinkingError) Error() string {
 	return string(err)
 }
 
-func applyAdaptiveThinkingModelSuffix(req *model.CanonicalRequest, intent model.ProxyModelIntent, providerCfg config.Config) error {
-	if req == nil || !intent.HasAdaptive {
+func applyAutoThinkingModelSuffix(req *model.CanonicalRequest, intent model.ProxyModelIntent, providerCfg config.Config) error {
+	if req == nil || !intent.HasAuto {
 		return nil
 	}
 	if providerCfg.UpstreamEndpointType != config.UpstreamEndpointTypeAnthropic {
-		return unsupportedAdaptiveThinkingError(fmt.Sprintf("adaptive thinking requires UPSTREAM_ENDPOINT_TYPE=anthropic; current upstream endpoint type is %s", providerCfg.UpstreamEndpointType))
+		return unsupportedAutoThinkingError(fmt.Sprintf("auto thinking requires UPSTREAM_ENDPOINT_TYPE=anthropic; current upstream endpoint type is %s", providerCfg.UpstreamEndpointType))
 	}
 	if !supportsAnthropicAdaptiveThinking(req.Model) {
-		return unsupportedAdaptiveThinkingError(fmt.Sprintf("adaptive thinking is not supported by final Anthropic model %q", req.Model))
+		return unsupportedAutoThinkingError(fmt.Sprintf("auto thinking is not supported by final Anthropic model %q", req.Model))
 	}
 	if !canEnableAnthropicThinkingForMessages(req.Messages) {
-		return unsupportedAdaptiveThinkingError("adaptive thinking cannot be applied to unsigned reasoning replay")
+		return unsupportedAutoThinkingError("auto thinking cannot be applied to unsigned reasoning replay")
 	}
 	if req.Reasoning == nil {
 		req.Reasoning = &model.CanonicalReasoning{}
 	}
 	if strings.TrimSpace(req.Reasoning.Effort) == "none" {
-		return unsupportedAdaptiveThinkingError("adaptive thinking cannot be combined with reasoning effort none")
+		return unsupportedAutoThinkingError("auto thinking cannot be combined with reasoning effort none")
 	}
 	if req.Reasoning.Raw == nil {
 		req.Reasoning.Raw = map[string]any{}

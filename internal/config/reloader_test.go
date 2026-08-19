@@ -393,6 +393,67 @@ func TestRuntimeStoreRefreshAppliesHotReloadableDownstreamNonStreamStrategy(t *t
 	}
 }
 
+func TestRuntimeStorePreservesProviderUpstreamAPIKeyInheritanceAcrossStaticAndRefresh(t *testing.T) {
+	static := NewStaticRuntimeStore(Config{
+		UpstreamAPIKey:   "root-key",
+		Providers:        []ProviderConfig{{ID: "openai", Enabled: true}},
+	})
+	staticProvider, err := static.Active().Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("static ProviderByID error: %v", err)
+	}
+	if staticProvider.UpstreamAPIKey != "root-key" || staticProvider.UpstreamAPIKeySet {
+		t.Fatalf("expected static provider to inherit root key without setting marker, got key=%q/set=%v", staticProvider.UpstreamAPIKey, staticProvider.UpstreamAPIKeySet)
+	}
+
+	rootDir := t.TempDir()
+	providersDir := filepath.Join(rootDir, "providers")
+	if err := os.MkdirAll(providersDir, 0o755); err != nil {
+		t.Fatalf("mkdir providers dir: %v", err)
+	}
+	rootEnvPath := filepath.Join(rootDir, ".env")
+	providerEnvPath := filepath.Join(providersDir, "openai.env")
+	rootMTime := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	writeConfigFileWithMTime(t, rootEnvPath, "PROVIDERS_DIR="+providersDir+"\nDEFAULT_PROVIDER=openai\nUPSTREAM_API_KEY=root-key\n", rootMTime)
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nSUPPORTS_RESPONSES=true\n", rootMTime)
+
+	store, err := NewRuntimeStore(rootEnvPath)
+	if err != nil {
+		t.Fatalf("NewRuntimeStore error: %v", err)
+	}
+	provider, err := store.Active().Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("initial ProviderByID error: %v", err)
+	}
+	if provider.UpstreamAPIKey != "root-key" || provider.UpstreamAPIKeySet {
+		t.Fatalf("expected initial provider to inherit root key without setting marker, got key=%q/set=%v", provider.UpstreamAPIKey, provider.UpstreamAPIKeySet)
+	}
+
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nSUPPORTS_RESPONSES=true\nUPSTREAM_API_KEY=\n", rootMTime.Add(time.Minute))
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("refresh explicit empty provider key: %v", err)
+	}
+	provider, err = store.Active().Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("empty ProviderByID error: %v", err)
+	}
+	if provider.UpstreamAPIKey != "" || !provider.UpstreamAPIKeySet {
+		t.Fatalf("expected explicit empty provider key to remain empty/set, got key=%q/set=%v", provider.UpstreamAPIKey, provider.UpstreamAPIKeySet)
+	}
+
+	writeConfigFileWithMTime(t, providerEnvPath, "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nSUPPORTS_RESPONSES=true\nUPSTREAM_API_KEY=provider-key\n", rootMTime.Add(2*time.Minute))
+	if err := store.Refresh(); err != nil {
+		t.Fatalf("refresh provider key override: %v", err)
+	}
+	provider, err = store.Active().Config.ProviderByID("openai")
+	if err != nil {
+		t.Fatalf("override ProviderByID error: %v", err)
+	}
+	if provider.UpstreamAPIKey != "provider-key" || !provider.UpstreamAPIKeySet {
+		t.Fatalf("expected provider key to override root/set, got key=%q/set=%v", provider.UpstreamAPIKey, provider.UpstreamAPIKeySet)
+	}
+}
+
 func TestBuildRuntimeSnapshotInheritsRootUpstreamMaxOutputTokens(t *testing.T) {
 	rootDir := t.TempDir()
 	providersDir := filepath.Join(rootDir, "providers")

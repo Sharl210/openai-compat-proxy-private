@@ -17,6 +17,8 @@ func TestFormatTextSeparatesBoldTitleFromFollowingContent(t *testing.T) {
 		{name: "title without body", input: "**标题**", want: "**标题**"},
 		{name: "adjacent bold titles", input: "**一****二**后续", want: "**一**\n\n**二**后续"},
 		{name: "adjacent bold titles without body", input: "**一****二**", want: "**一**\n\n**二**"},
+		{name: "six-star title boundary", input: "**A******B**", want: "**A**\n\n****B**"},
+		{name: "eight-star title boundary", input: "**A********B**", want: "**A**\n\n****\n\n**B**"},
 		{name: "continuous thinking titles", input: "**ssss****sssss****sdad**", want: "**ssss**\n\n**sssss**\n\n**sdad**"},
 		{name: "incomplete adjacent marker", input: "**标题****", want: "**标题****"},
 		{name: "existing newline", input: "**标题**\n正文", want: "**标题**\n正文"},
@@ -130,6 +132,87 @@ func TestFormatBlockFormatsTypedSummaryParts(t *testing.T) {
 	}
 	if parts[1] != nil {
 		t.Fatalf("expected nil typed summary part preserved, got %#v", parts[1])
+	}
+}
+
+func TestFormatBlockFormatsSummaryTextStringAndNestedObject(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		part map[string]any
+		text func(map[string]any) string
+	}{
+		{
+			name: "string",
+			part: map[string]any{"type": "summary_text", "summary_text": "**第一标题****第二标题**"},
+			text: func(part map[string]any) string { return part["summary_text"].(string) },
+		},
+		{
+			name: "nested",
+			part: map[string]any{"type": "summary_text", "summary_text": map[string]any{"text": "**第一标题****第二标题**", "metadata": "keep"}},
+			text: func(part map[string]any) string { return part["summary_text"].(map[string]any)["text"].(string) },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			block := map[string]any{"summary": []any{test.part}}
+			formatted := FormatBlock(block)
+			parts := formatted["summary"].([]any)
+			part := parts[0].(map[string]any)
+			if got := test.text(part); got != "**第一标题**\n\n**第二标题**" {
+				t.Fatalf("formatted summary=%q, want separated titles", got)
+			}
+			if test.name == "nested" && part["summary_text"].(map[string]any)["metadata"] != "keep" {
+				t.Fatalf("nested summary metadata was not preserved: %#v", part)
+			}
+			if got := test.text(test.part); got != "**第一标题****第二标题**" {
+				t.Fatalf("source summary mutated: %q", got)
+			}
+		})
+	}
+}
+
+func TestFormatBlockSeparatesTitleSequenceAcrossMixedSummaryTextFields(t *testing.T) {
+	block := map[string]any{
+		"summary": []any{
+			map[string]any{"type": "summary_text", "summary_text": "**第一标题**"},
+			map[string]any{"type": "summary_text", "summary_text": map[string]any{"text": "**第二标题**", "metadata": "keep"}},
+		},
+	}
+
+	formatted := FormatBlock(block)
+	parts := formatted["summary"].([]any)
+	first := parts[0].(map[string]any)["summary_text"].(string)
+	second := parts[1].(map[string]any)["summary_text"].(map[string]any)
+	if got := first + second["text"].(string); got != "**第一标题**\n\n**第二标题**" {
+		t.Fatalf("formatted summary=%q, want adjacent titles separated", got)
+	}
+	if second["metadata"] != "keep" {
+		t.Fatalf("nested summary metadata was not preserved: %#v", second)
+	}
+	if got := block["summary"].([]any)[0].(map[string]any)["summary_text"].(string); got != "**第一标题**" {
+		t.Fatalf("source summary mutated: %q", got)
+	}
+}
+
+func TestFormatBlockAppendsTailToSummaryTextWhenTextIsEmpty(t *testing.T) {
+	block := map[string]any{
+		"summary": []any{
+			map[string]any{"type": "summary_text", "summary_text": "**第一标题**"},
+			map[string]any{"type": "summary_text", "text": "", "summary_text": map[string]any{"text": "**第二", "metadata": "keep"}},
+		},
+	}
+
+	formatted := FormatBlock(block)
+	parts := formatted["summary"].([]any)
+	second := parts[1].(map[string]any)
+	nested := second["summary_text"].(map[string]any)
+	if got := nested["text"].(string); got != "**第二" {
+		t.Fatalf("formatted nested summary=%q, want tail preserved", got)
+	}
+	if got := second["text"].(string); got != "" {
+		t.Fatalf("empty text placeholder changed to %q", got)
+	}
+	if nested["metadata"] != "keep" {
+		t.Fatalf("nested summary metadata was not preserved: %#v", nested)
 	}
 }
 
@@ -254,6 +337,98 @@ func TestStreamFormatterDefersUnclosedAdjacentHeading(t *testing.T) {
 	}
 	if got := formatter.Finish(); got != "" {
 		t.Fatalf("finish=%q, want no duplicate output", got)
+	}
+}
+
+func TestStreamFormatterEmitsEmptyBoldMarkerAsOneUnit(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("****"); got != "****" {
+		t.Fatalf("empty bold marker=%q, want one atomic marker", got)
+	}
+	if got := formatter.Finish(); got != "" {
+		t.Fatalf("finish=%q, want no duplicate marker", got)
+	}
+
+	formatter.Reset()
+	if got := formatter.Push("**第一标题**"); got != "**第一标题**" {
+		t.Fatalf("first title=%q, want first title unchanged", got)
+	}
+	if got := formatter.Push("*"); got != "" {
+		t.Fatalf("split title opener=%q, want deferred marker", got)
+	}
+	if got := formatter.Push("*第二标题"); got != "" {
+		t.Fatalf("split title body=%q, want deferred title", got)
+	}
+	if got := formatter.Push("**"); got != "\n\n**第二标题**" {
+		t.Fatalf("completed split title=%q, want separated title", got)
+	}
+}
+
+func TestStreamFormatterSeparatesTitleAroundEmptyBoldMarker(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("**A**"); got != "**A**" {
+		t.Fatalf("first title=%q, want first title", got)
+	}
+	if got := formatter.Push("****"); got != "\n\n****" {
+		t.Fatalf("empty marker=%q, want separator and marker", got)
+	}
+	if got := formatter.Push("**B**"); got != "\n\n**B**" {
+		t.Fatalf("second title=%q, want separator and second title", got)
+	}
+	if got := formatter.Finish(); got != "" {
+		t.Fatalf("finish=%q, want no duplicate output", got)
+	}
+}
+func TestStreamFormatterSplitsSixStarBoundaryAcrossChunks(t *testing.T) {
+	var formatter StreamFormatter
+	if got := formatter.Push("**A**"); got != "**A**" {
+		t.Fatalf("first title=%q, want first title", got)
+	}
+	if got := formatter.Push("**"); got != "" {
+		t.Fatalf("deferred boundary=%q, want no output", got)
+	}
+	if got := formatter.Push("**B**"); got != "\n\n****B" {
+		t.Fatalf("six-star boundary=%q, want separator and retained stars", got)
+	}
+	if got := formatter.Finish(); got != "**" {
+		t.Fatalf("final marker=%q, want closing marker", got)
+	}
+}
+
+func TestStreamFormatterMatchesWholeTextAcrossChunkBoundaries(t *testing.T) {
+	for _, raw := range []string{"**A****B**", "**A****B****C**", "**A******B**", "**A********B**"} {
+		t.Run(raw, func(t *testing.T) {
+			want := FormatText(raw)
+			for first := 1; first < len(raw); first++ {
+				for second := first + 1; second < len(raw); second++ {
+					var formatter StreamFormatter
+					got := formatter.Push(raw[:first])
+					got += formatter.Push(raw[first:second])
+					got += formatter.Push(raw[second:])
+					got += formatter.Finish()
+					if got != want {
+						t.Fatalf("chunks [%d:%d] produced %q, want %q", first, second, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+func TestStreamFormatterMatchesWholeTextForFragmentedStarRuns(t *testing.T) {
+	for starRun := 4; starRun <= 16; starRun++ {
+		raw := "**A" + strings.Repeat("*", starRun) + "B**"
+		want := FormatText(raw)
+		t.Run(raw, func(t *testing.T) {
+			var formatter StreamFormatter
+			var got strings.Builder
+			for _, character := range raw {
+				got.WriteString(formatter.Push(string(character)))
+			}
+			got.WriteString(formatter.Finish())
+			if got.String() != want {
+				t.Fatalf("fragmented star run produced %q, want %q", got.String(), want)
+			}
+		})
 	}
 }
 

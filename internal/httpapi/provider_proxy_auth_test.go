@@ -87,7 +87,7 @@ func TestProviderScopedProxyAPIKeyOverrideAndDefaultLegacyFallback(t *testing.T)
 	_ = requestID
 }
 
-func TestProviderScopedProxyAPIKeyOverrideEmptyAllowsAuthorizationPassthrough(t *testing.T) {
+func TestProviderBlankUpstreamAPIKeyIgnoresClientAuthorization(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -98,29 +98,29 @@ func TestProviderScopedProxyAPIKeyOverrideEmptyAllowsAuthorizationPassthrough(t 
 	defer upstream.Close()
 
 	server := NewServer(config.Config{
-		ProxyAPIKey:          "root-secret",
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
 		Providers: []config.ProviderConfig{{
-			ID:                     "openai",
-			Enabled:                true,
-			UpstreamBaseURL:        upstream.URL,
-			SupportsResponses:      true,
-			ProxyAPIKeyOverride:    "empty",
-			ProxyAPIKeyOverrideSet: true,
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamBaseURL:   upstream.URL,
+			UpstreamAPIKey:    "",
+			UpstreamAPIKeySet: true,
+			SupportsResponses: true,
 		}},
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer real-upstream-token")
+	req.Header.Set("Authorization", "Bearer client-token")
+	req.Header.Set("X-Upstream-Authorization", "Bearer request-token")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected passthrough auth request to succeed, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("blank upstream key request = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if gotAuth != "Bearer real-upstream-token" {
-		t.Fatalf("expected upstream authorization passthrough, got %q", gotAuth)
+	if gotAuth != "" {
+		t.Fatalf("blank upstream key must not send authorization, got %q", gotAuth)
 	}
 }
 

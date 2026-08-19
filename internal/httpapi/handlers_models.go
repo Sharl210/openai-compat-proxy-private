@@ -205,7 +205,8 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		if id != "" {
-			if provider.HidesModel(id) || !modelSelectedByManualPatterns(provider, id) {
+			manualMatch := manualModelMatches(provider, id)
+			if provider.HidesModel(id) && !manualMatch {
 				continue
 			}
 			upstreamBaseIDs = append(upstreamBaseIDs, id)
@@ -245,7 +246,7 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 	expanded = expandReasoningModeModelIDs(expanded, provider)
 	filteredExpanded := make([]string, 0, len(expanded))
 	for _, id := range expanded {
-		if provider.HidesModel(id) {
+		if provider.HidesModel(id) && !manualModelMatches(provider, id) {
 			continue
 		}
 		filteredExpanded = append(filteredExpanded, id)
@@ -350,20 +351,25 @@ func cloneModelEntry(entry map[string]any) map[string]any {
 	}
 	return cloned
 }
-
-func modelSelectedByManualPatterns(provider config.ProviderConfig, modelID string) bool {
-	if !hasRegexManualModelPattern(provider) {
-		return true
+func manualModelMatches(provider config.ProviderConfig, modelID string) bool {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return false
 	}
 	for _, pattern := range provider.ManualModels {
-		if config.ManualReasonSuffixBasePatternMatches(pattern, modelID) {
-			return true
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
 		}
-		if config.ModelPatternMatches(pattern, modelID) {
+		if config.ManualReasonSuffixBasePatternMatches(pattern, modelID) || config.ModelPatternMatches(pattern, modelID) {
 			return true
 		}
 	}
 	return false
+}
+
+func modelSelectedByManualPatterns(provider config.ProviderConfig, modelID string) bool {
+	return manualModelMatches(provider, modelID)
 }
 
 func hasRegexManualModelPattern(provider config.ProviderConfig) bool {

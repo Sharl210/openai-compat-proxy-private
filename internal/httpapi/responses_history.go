@@ -898,18 +898,29 @@ func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStor
 	recovered := append([]model.CanonicalMessage(nil), messages...)
 	for messageIndex := range recovered {
 		message := &recovered[messageIndex]
-		if message.Role != "assistant" || len(message.ToolCalls) == 0 || len(message.ReasoningBlocks) > 0 {
+		if message.Role != "assistant" || (len(message.ToolCalls) == 0 && len(message.OrderedContent) == 0) || len(message.ReasoningBlocks) > 0 {
+			continue
+		}
+		toolCalls := append([]model.CanonicalToolCall(nil), message.ToolCalls...)
+		if len(toolCalls) == 0 {
+			for _, block := range message.OrderedContent {
+				if block.Type == "tool_use" && block.ToolCall.ID != "" {
+					toolCalls = append(toolCalls, block.ToolCall)
+				}
+			}
+		}
+		if len(toolCalls) == 0 {
 			continue
 		}
 
 		var serverBlocks []map[string]any
-		sequenceHash := assistantToolCallSequenceHash(message.ToolCalls)
+		sequenceHash := assistantToolCallSequenceHash(toolCalls)
 		if sequenceHash == "" {
 			continue
 		}
 		matched := true
 		seenToolCallIDs := map[string]struct{}{}
-		for _, candidate := range message.ToolCalls {
+		for _, candidate := range toolCalls {
 			if strings.TrimSpace(candidate.ID) == "" {
 				matched = false
 				break
