@@ -13,21 +13,22 @@ import (
 )
 
 type request struct {
-	Model             string          `json:"model"`
-	Stream            bool            `json:"stream"`
-	StreamOptions     *streamOptions  `json:"stream_options"`
-	Messages          []message       `json:"messages"`
-	Tools             []tool          `json:"tools"`
-	ToolChoice        any             `json:"tool_choice"`
-	ParallelToolCalls *bool           `json:"parallel_tool_calls"`
-	ReasoningEffort   string          `json:"reasoning_effort"`
-	Reasoning         map[string]any  `json:"reasoning"`
-	Temperature       *float64        `json:"temperature"`
-	TopP              *float64        `json:"top_p"`
-	MaxTokens         *int            `json:"max_tokens"`
-	StopRaw           json.RawMessage `json:"stop"`
-	N                 *int            `json:"n"`
-	Raw               json.RawMessage `json:"-"`
+	Model               string          `json:"model"`
+	Stream              bool            `json:"stream"`
+	StreamOptions       *streamOptions  `json:"stream_options"`
+	Messages            []message       `json:"messages"`
+	Tools               []tool          `json:"tools"`
+	ToolChoice          any             `json:"tool_choice"`
+	ParallelToolCalls   *bool           `json:"parallel_tool_calls"`
+	ReasoningEffort     string          `json:"reasoning_effort"`
+	Reasoning           map[string]any  `json:"reasoning"`
+	Temperature         *float64        `json:"temperature"`
+	TopP                *float64        `json:"top_p"`
+	MaxTokens           *int            `json:"max_tokens"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens"`
+	StopRaw             json.RawMessage `json:"stop"`
+	N                   *int            `json:"n"`
+	Raw                 json.RawMessage `json:"-"`
 }
 
 type streamOptions struct {
@@ -86,6 +87,10 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		return model.CanonicalRequest{}, errors.New("n > 1 is not supported")
 	}
 
+	maxOutputTokens := req.MaxTokens
+	if req.MaxCompletionTokens != nil {
+		maxOutputTokens = req.MaxCompletionTokens
+	}
 	canon := model.CanonicalRequest{
 		Model:                   req.Model,
 		Stream:                  req.Stream,
@@ -93,7 +98,7 @@ func DecodeRequest(r io.Reader) (model.CanonicalRequest, error) {
 		IncludeUsage:            req.StreamOptions != nil && req.StreamOptions.IncludeUsage,
 		Temperature:             req.Temperature,
 		TopP:                    req.TopP,
-		MaxOutputTokens:         req.MaxTokens,
+		MaxOutputTokens:         maxOutputTokens,
 		ParallelToolCalls:       req.ParallelToolCalls,
 		ReasoningModeOrigin:     model.ReasoningModeOriginNone,
 	}
@@ -230,7 +235,7 @@ func collectUnhandledTopLevelFields(raw map[string]any) map[string]any {
 	}
 	known := map[string]struct{}{
 		"model": {}, "stream": {}, "stream_options": {}, "messages": {}, "tools": {}, "tool_choice": {}, "parallel_tool_calls": {},
-		"reasoning_effort": {}, "reasoning": {}, "temperature": {}, "top_p": {}, "max_tokens": {}, "stop": {}, "n": {},
+		"reasoning_effort": {}, "reasoning": {}, "temperature": {}, "top_p": {}, "max_tokens": {}, "max_completion_tokens": {}, "stop": {}, "n": {},
 	}
 	fields := map[string]any{}
 	for key, value := range raw {
