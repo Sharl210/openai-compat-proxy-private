@@ -31,6 +31,38 @@ func TestLoadProviderFileParsesMasqueradeClientVersion(t *testing.T) {
 	}
 }
 
+func TestLoadProviderFileTracksUpstreamAPIKeyPresenceIncludingEmpty(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		wantKey    string
+		wantSet    bool
+	}{
+		{name: "unset", wantSet: false},
+		{name: "explicit empty", line: "UPSTREAM_API_KEY=", wantSet: true},
+		{name: "explicit non-empty", line: "UPSTREAM_API_KEY=provider-key", wantKey: "provider-key", wantSet: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "provider.env")
+			contents := "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://upstream.example.com\n"
+			if tt.line != "" {
+				contents += tt.line + "\n"
+			}
+			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+				t.Fatalf("write provider file: %v", err)
+			}
+			provider, err := loadProviderFile(path)
+			if err != nil {
+				t.Fatalf("load provider file: %v", err)
+			}
+			if provider.UpstreamAPIKey != tt.wantKey || provider.UpstreamAPIKeySet != tt.wantSet {
+				t.Fatalf("expected upstream key %q/set=%v, got %q/set=%v", tt.wantKey, tt.wantSet, provider.UpstreamAPIKey, provider.UpstreamAPIKeySet)
+			}
+		})
+	}
+}
+
 func TestLoadProviderFileParsesReasoningSummaryDetail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "provider.env")
 	if err := os.WriteFile(path, []byte(strings.Join([]string{

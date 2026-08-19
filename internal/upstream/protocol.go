@@ -2018,7 +2018,11 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		}
 		if len(msg.OrderedContent) > 0 {
 			pendingToolResults = appendPendingToolResults(pendingToolResults)
-			content := buildAnthropicOrderedContent(msg.OrderedContent)
+			content := make([]any, 0, len(msg.ReasoningBlocks)+len(msg.OrderedContent))
+			if msg.Role == "assistant" {
+				content = append(content, cloneAnySliceOfMaps(msg.ReasoningBlocks)...)
+			}
+			content = append(content, buildAnthropicOrderedContent(msg.OrderedContent)...)
 			for _, block := range msg.OrderedContent {
 				if block.Type == "tool_result" && block.ToolCallID != "" {
 					emittedOrderedToolResults[block.ToolCallID] = struct{}{}

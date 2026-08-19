@@ -1301,10 +1301,11 @@ func finalizeCompletedResponseOutput(output []any) []any {
 			continue
 		}
 		summary := reasoningSummaryTextFromItem(formatted)
+		emptyMarker := strings.TrimSpace(summary) == "****"
 		if titleBoundary && startsWithCompleteOrEmptyBoldSpan(summary) {
 			prependReasoningSummaryItemText(formatted, "\n\n")
 		}
-		titleBoundary = reasoningTextHasTrailingBoldSpan(summary)
+		titleBoundary = reasoningTextHasTrailingBoldSpan(summary) || (titleBoundary && emptyMarker)
 		output[index] = formatted
 	}
 	return trimResponseOutputTextLineEndings(output)
@@ -3350,7 +3351,7 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
@@ -3371,11 +3372,12 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		requestID:            req.RequestID,
 	}
 	writer := NewAnthropicEventWriter(w, flusher, state, helper, usageRecorder)
+	collector := aggregate.NewCollector()
 	if err := writeSSEPadding(w, flusher); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	if err := startAnthropicUnreasonedPlaceholder(w, flusher, state); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realThinkingSeen },
@@ -3387,19 +3389,24 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		},
 		func() error { return writeSSEHeartbeat(w, flusher, state.terminalSeen) },
 		func(evt upstream.Event) error {
+			collector.Accept(evt)
 			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
 	if err != nil && !state.terminalSeen {
-		return err
+		return aggregate.Result{}, err
 	}
 	if !state.terminalSeen {
-		return io.ErrUnexpectedEOF
+		return aggregate.Result{}, io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return nil
+		return aggregate.Result{}, nil
 	}
-	return nil
+	result, err := collector.Result()
+	if err != nil {
+		return aggregate.Result{}, err
+	}
+	return result, nil
 }
 
 func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState) error {

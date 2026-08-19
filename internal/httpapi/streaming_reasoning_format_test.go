@@ -1128,3 +1128,31 @@ func TestResponsesEventWriterSeparatesTitleAfterEmptyMarkerAtItemBoundary(t *tes
 		t.Fatalf("empty marker and next title remained adjacent: %s", body)
 	}
 }
+
+func TestResponsesEventWriterKeepsTitleBoundaryAcrossClosedEmptyMarkerPart(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_empty_part", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 0, "delta": "**A**"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**A**"}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 1, "delta": "****"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 1, "part": map[string]any{"type": "summary_text", "text": "****"}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 2, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_empty_part", "summary_index": 2, "delta": "**B**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{"id": "rs_empty_part", "type": "reasoning", "summary": []any{
+			map[string]any{"type": "summary_text", "text": "**A**"},
+			map[string]any{"type": "summary_text", "text": "****"},
+			map[string]any{"type": "summary_text", "text": "**B**"},
+		}}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body,
+		`"delta":"**A**"`,
+		`"delta":"\n\n****"`,
+		`"delta":"\n\n**B**"`,
+	)
+	if strings.Contains(body, `"delta":"**B**"`) || strings.Contains(body, `"text":"**A******B**"`) {
+		t.Fatalf("closed empty marker part lost the next title boundary: %s", body)
+	}
+}

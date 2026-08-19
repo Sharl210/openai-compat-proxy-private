@@ -16,6 +16,7 @@ type ProxyModelIntentAxes struct {
 	EnableReasoningEffort bool
 	EnablePro             bool
 	EnableAdaptive        bool
+	EnableAuto            bool
 	EnableNoPrompt        bool
 	EnableUltra           bool
 }
@@ -25,6 +26,7 @@ type ProxyModelIntent struct {
 	ReasoningEffort  string
 	ReasoningMode    string
 	HasAdaptive      bool
+	HasAuto          bool
 	HasNoPrompt      bool
 	HasUltra         bool
 	HasModelMapAlias bool
@@ -43,6 +45,9 @@ func (intent ProxyModelIntent) CanonicalModel() string {
 	if intent.HasAdaptive {
 		modelName += "-adaptive"
 	}
+	if intent.HasAuto {
+		modelName += "-auto"
+	}
 	if intent.HasUltra {
 		modelName += "-ultra"
 	}
@@ -51,7 +56,6 @@ func (intent ProxyModelIntent) CanonicalModel() string {
 	}
 	return modelName
 }
-
 func ParseProxyModelIntent(modelName string, candidates []string, axes ProxyModelIntentAxes) (ProxyModelIntent, bool) {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
@@ -91,6 +95,7 @@ func HasProxyModelIntentTail(modelName string) bool {
 		EnableReasoningEffort: true,
 		EnablePro:             true,
 		EnableAdaptive:        true,
+		EnableAuto:            true,
 		EnableNoPrompt:        true,
 		EnableUltra:           true,
 	}
@@ -133,6 +138,7 @@ func parseProxyModelIntentTail(candidate string, tail string, axes ProxyModelInt
 	seenEffort := false
 	seenPro := false
 	seenAdaptive := false
+	seenAuto := false
 	seenNoPrompt := false
 	seenUltra := false
 	for tail != "" {
@@ -163,6 +169,15 @@ func parseProxyModelIntentTail(candidate string, tail string, axes ProxyModelInt
 			intent.HasAdaptive = true
 			seenAdaptive = true
 			tail = strings.TrimPrefix(tail, "-adaptive")
+			continue
+		}
+		if axes.EnableAuto && strings.HasPrefix(tail, "-auto") {
+			if seenAuto {
+				return ProxyModelIntent{}, false
+			}
+			intent.HasAuto = true
+			seenAuto = true
+			tail = strings.TrimPrefix(tail, "-auto")
 			continue
 		}
 		if axes.EnableUltra && strings.HasPrefix(tail, "-ultra") {

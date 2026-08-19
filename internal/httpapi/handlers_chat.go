@@ -104,6 +104,7 @@ func handleChat() http.HandlerFunc {
 			applyProxyModelIntentReasoningMode(r, &canon)
 			enforceSuffixReasoningModePrecedence(&canon)
 			applyDefaultProReasoningMode(&canon, providerCfg)
+			applyAutoReasoningModelSuffix(&canon, intent)
 			canon, reasoningModeFallback, err = prepareReasoningModeFallback(canon, provider, providerCfg, reasoningModeFallbackKeyForRequest(r, providerID, providerCfg, canon.Model, authorization))
 			if err != nil {
 				var unsupportedMode unsupportedReasoningModeError

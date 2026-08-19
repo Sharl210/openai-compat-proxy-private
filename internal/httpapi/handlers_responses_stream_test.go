@@ -3238,6 +3238,16 @@ func TestResponsesStreamFormatsAdjacentTerminalReasoningItems(t *testing.T) {
 			wantSecond: "\n\n**第二标题**",
 		},
 		{
+			name:          "empty marker between reasoning items",
+			terminalEvent: "response.completed",
+			output: []any{
+				map[string]any{"id": "rs_first", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}}},
+				map[string]any{"id": "rs_marker", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "****"}}},
+				map[string]any{"id": "rs_second", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第二标题**"}}},
+			},
+			wantSecond: "\n\n**第二标题**",
+		},
+		{
 			name:          "message breaks boundary",
 			terminalEvent: "response.completed",
 			output: []any{
