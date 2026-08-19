@@ -4,6 +4,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	reasoningtext "openai-compat-proxy/internal/reasoning"
 )
 
 const reasoningChunkTailLimit = 10
@@ -15,16 +17,16 @@ type reasoningChunkContextStore struct {
 
 var requestReasoningChunkContexts = reasoningChunkContextStore{tails: make(map[string]string)}
 
-func (s *reasoningChunkContextStore) appendAndFormat(requestID, chunk string, preserve bool) string {
+func (s *reasoningChunkContextStore) formatForSend(requestID, chunk string, preserve bool) string {
 	if s == nil || requestID == "" || chunk == "" || preserve {
 		return chunk
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := s.tails[requestID]
-	formatted := chunk
-	if !strings.HasPrefix(chunk, "\n\n") && previous != "" && strings.HasSuffix(previous, "**") && startsWithCompleteBoldSpan(chunk) {
-		formatted = "\n\n" + chunk
+	formatted := reasoningtext.FormatText(chunk)
+	if !strings.HasPrefix(formatted, "\n\n") && previous != "" && strings.HasSuffix(previous, "**") && startsWithCompleteBoldSpan(formatted) {
+		formatted = "\n\n" + formatted
 	}
 	s.tails[requestID] = lastReasoningRunes(formatted, reasoningChunkTailLimit)
 	return formatted

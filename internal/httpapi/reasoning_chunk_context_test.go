@@ -2,18 +2,19 @@ package httpapi
 
 import "testing"
 
-func TestReasoningChunkContextStoreIsRequestScopedAndRuneSafe(t *testing.T) {
+func TestReasoningChunkContextStoreFormatsEveryChunkForImmediateSend(t *testing.T) {
 	store := reasoningChunkContextStore{tails: make(map[string]string)}
-	if got := store.appendAndFormat("req-a", "**标题一**", false); got != "**标题一**" {
-		t.Fatalf("first chunk = %q", got)
+	chunks := []string{"第一段正文", "第二段正文", "**标题一**", "**标题二**", "最后一段正文"}
+	want := []string{"第一段正文", "第二段正文", "**标题一**", "\n\n**标题二**", "最后一段正文"}
+	for index, chunk := range chunks {
+		if got := store.formatForSend("req-a", chunk, false); got != want[index] {
+			t.Fatalf("chunk %d = %q, want %q", index, got, want[index])
+		}
 	}
-	if got := store.appendAndFormat("req-a", "**标题二**", false); got != "\n\n**标题二**" {
-		t.Fatalf("adjacent title chunk = %q", got)
-	}
-	if got := store.appendAndFormat("req-b", "**标题二**", false); got != "**标题二**" {
+	if got := store.formatForSend("req-b", "**标题二**", false); got != "**标题二**" {
 		t.Fatalf("different request was affected: %q", got)
 	}
-	if got := store.appendAndFormat("", "**标题三**", false); got != "**标题三**" {
+	if got := store.formatForSend("", "**标题三**", false); got != "**标题三**" {
 		t.Fatalf("empty request ID changed chunk: %q", got)
 	}
 	store.record("req-a", "中文标题尾部", false)
@@ -31,10 +32,10 @@ func TestReasoningChunkContextStoreIsRequestScopedAndRuneSafe(t *testing.T) {
 func TestReasoningChunkContextStorePreservesOpaqueAndExistingSeparators(t *testing.T) {
 	store := reasoningChunkContextStore{tails: make(map[string]string)}
 	store.record("req", "**标题一**", false)
-	if got := store.appendAndFormat("req", "**opaque**", true); got != "**opaque**" {
+	if got := store.formatForSend("req", "**opaque**", true); got != "**opaque**" {
 		t.Fatalf("opaque chunk changed: %q", got)
 	}
-	if got := store.appendAndFormat("req", "\n\n**标题二**", false); got != "\n\n**标题二**" {
+	if got := store.formatForSend("req", "\n\n**标题二**", false); got != "\n\n**标题二**" {
 		t.Fatalf("existing separator duplicated: %q", got)
 	}
 }

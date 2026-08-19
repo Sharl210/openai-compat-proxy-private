@@ -3747,7 +3747,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				state.thinkingSignature = signature
 			}
 		}
-		delta := requestReasoningChunkContexts.appendAndFormat(state.messageID, formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data)), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.formatForSend(state.messageID, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -4526,7 +4526,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			state.reasoningText.reset()
 			state.reasoningTextActive = true
 		}
-		delta := requestReasoningChunkContexts.appendAndFormat(state.requestID, formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data)), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.formatForSend(state.requestID, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
