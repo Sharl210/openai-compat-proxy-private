@@ -300,13 +300,9 @@ MODEL_MAP=<<provider1>>model-a:<<provider2>>gpt-5.6-terra
 
 - `X-Upstream-Authorization: Bearer <real-upstream-key>`
 
-`UPSTREAM_API_KEY=empty` 是显式关闭上游鉴权的保留 sentinel：匹配时忽略大小写和首尾空白，例如 `UPSTREAM_API_KEY= Empty ` 与 `empty` 等效。命中后代理不会向上游发送 `Authorization` 或 `x-api-key`，也不会复用下游的 `Authorization` / `X-API-Key` 作为上游 key。
+`UPSTREAM_API_KEY=` 留空表示当前作用域不需要上游鉴权。留空时，代理不会读取 `X-Upstream-Authorization`，不会复用客户端 `Authorization`、`X-API-Key` 或 `x-api-key`，也不会向上游发送 `Authorization` / `x-api-key`。不需要填写 `empty` 或其它英文占位词；`empty` 现在只会被当作普通真实 key。
 
-普通空值 `UPSTREAM_API_KEY=` 的语义不变，仍允许动态选择 key。如果请求里没有 `X-Upstream-Authorization`：
-
-- 当当前路由**不要求代理鉴权**时，`Authorization` 可能直接作为上游鉴权透传
-- 对 Anthropic / Claude 风格客户端，当当前路由**不要求代理鉴权**时，`X-API-Key` / `x-api-key` 也可以直接作为上游 key
-- 否则回退到 provider 自己的非空 `UPSTREAM_API_KEY`
+provider 文件没有 `UPSTREAM_API_KEY` 字段时继承根配置；provider 文件存在该字段但值为空时，空值会覆盖根配置并关闭当前 provider 的上游鉴权。需要鉴权时直接填写真实 key。
 
 ---
 

@@ -9,13 +9,11 @@ import (
 )
 
 var ErrUnauthorized = errors.New("unauthorized")
-var ErrMissingUpstreamAuth = errors.New("missing upstream authorization")
 
-// UpstreamAPIKeyDisablesAuth reports whether a provider explicitly disables
-// upstream authentication with the reserved UPSTREAM_API_KEY=empty value.
-// The sentinel is case-insensitive and ignores surrounding whitespace.
-func UpstreamAPIKeyDisablesAuth(value string) bool {
-	return strings.EqualFold(strings.TrimSpace(value), "empty")
+// UpstreamAuthenticationDisabled reports whether the resolved upstream key is
+// blank, which explicitly means that no upstream authentication is needed.
+func UpstreamAuthenticationDisabled(value string) bool {
+	return strings.TrimSpace(value) == ""
 }
 
 func ValidateProxyAuth(r *http.Request, proxyKey string) error {
@@ -79,7 +77,7 @@ func allowQueryProxyKey(r *http.Request) bool {
 }
 
 func ResolveUpstreamAuthorization(r *http.Request, cfg config.Config) (string, error) {
-	if UpstreamAPIKeyDisablesAuth(cfg.UpstreamAPIKey) {
+	if UpstreamAuthenticationDisabled(cfg.UpstreamAPIKey) {
 		return "", nil
 	}
 	if value := strings.TrimSpace(r.Header.Get("X-Upstream-Authorization")); value != "" {
@@ -98,9 +96,5 @@ func ResolveUpstreamAuthorization(r *http.Request, cfg config.Config) (string, e
 		}
 	}
 
-	if cfg.UpstreamAPIKey != "" {
-		return "Bearer " + cfg.UpstreamAPIKey, nil
-	}
-
-	return "", ErrMissingUpstreamAuth
+	return "Bearer " + cfg.UpstreamAPIKey, nil
 }

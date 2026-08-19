@@ -29,23 +29,23 @@ func TestAuthModeForUpstreamLegacyRouteUsesServerDefaultKey(t *testing.T) {
 	}
 }
 
-func TestAuthModeForUpstreamProviderEmptyOverrideUsesAuthorizationPassthrough(t *testing.T) {
+func TestAuthModeForUpstreamBlankProviderKeyDisablesAuthorizationPassthrough(t *testing.T) {
 	cfg := config.Config{
 		ProxyAPIKey:     "root-secret",
 		DefaultProvider: "openai",
 		Providers: []config.ProviderConfig{{
-			ID:                     "openai",
-			Enabled:                true,
-			ProxyAPIKeyOverride:    "empty",
-			ProxyAPIKeyOverrideSet: true,
+			ID:                "openai",
+			Enabled:           true,
+			UpstreamAPIKey:    "",
+			UpstreamAPIKeySet: true,
 		}},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	req.Header.Set("Authorization", "Bearer real-upstream-token")
 	req = req.Clone(withRouteInfo(req.Context(), routeInfo{ProviderID: "openai", Legacy: false}))
 
-	if got := authModeForUpstream(req, cfg); got != "authorization_passthrough" {
-		t.Fatalf("expected provider route with empty override to passthrough authorization, got %q", got)
+	if got := authModeForUpstream(req, cfg); got != "disabled" {
+		t.Fatalf("blank provider upstream key must disable auth, got %q", got)
 	}
 }
 
@@ -60,22 +60,22 @@ func TestAuthModeForUpstreamPrefersXUpstreamAuthorization(t *testing.T) {
 	}
 }
 
-func TestAuthModeForUpstreamProviderEmptyOverrideUsesXAPIKeyPassthrough(t *testing.T) {
+func TestAuthModeForUpstreamBlankProviderKeyDisablesXAPIKeyPassthrough(t *testing.T) {
 	cfg := config.Config{
 		ProxyAPIKey:     "root-secret",
 		DefaultProvider: "claude",
 		Providers: []config.ProviderConfig{{
-			ID:                     "claude",
-			Enabled:                true,
-			ProxyAPIKeyOverride:    "empty",
-			ProxyAPIKeyOverrideSet: true,
+			ID:                "claude",
+			Enabled:           true,
+			UpstreamAPIKey:    "",
+			UpstreamAPIKeySet: true,
 		}},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/claude/v1/messages", nil)
 	req.Header.Set("x-api-key", "real-upstream-token")
 	req = req.Clone(withRouteInfo(req.Context(), routeInfo{ProviderID: "claude", Legacy: false}))
 
-	if got := authModeForUpstream(req, cfg); got != "x_api_key_passthrough" {
-		t.Fatalf("expected provider route with empty override to passthrough x-api-key, got %q", got)
+	if got := authModeForUpstream(req, cfg); got != "disabled" {
+		t.Fatalf("blank provider upstream key must ignore x-api-key passthrough, got %q", got)
 	}
 }

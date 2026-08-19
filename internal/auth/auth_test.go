@@ -17,25 +17,44 @@ func TestValidateProxyAuthForProviderDoesNotAllowDeletedRequestStatusQueryKey(t 
 	}
 }
 
-func TestResolveUpstreamAuthorizationUsesXAPIKeyWhenProxyAuthDisabled(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/claude/v1/messages", nil)
-	req.Header.Set("x-api-key", "real-upstream-token")
-
-	got, err := ResolveUpstreamAuthorization(req, config.Config{})
-	if err != nil {
-		t.Fatalf("expected x-api-key passthrough, got error: %v", err)
-	}
-	if got != "Bearer real-upstream-token" {
-		t.Fatalf("expected x-api-key to become bearer upstream auth, got %q", got)
+func TestResolveUpstreamAuthorizationBlankKeyDisablesAllAuthSources(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		header string
+		value  string
+	}{
+		{name: "x upstream authorization", header: "X-Upstream-Authorization", value: "Bearer explicit"},
+		{name: "authorization", header: "Authorization", value: "Bearer client-token"},
+		{name: "x api key", header: "X-API-Key", value: "client-key"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/claude/v1/messages", nil)
+			req.Header.Set(testCase.header, testCase.value)
+			got, err := ResolveUpstreamAuthorization(req, config.Config{})
+			if err != nil || got != "" {
+				t.Fatalf("blank upstream key must disable auth, got authorization=%q error=%v", got, err)
+			}
+		})
 	}
 }
 
-func TestResolveUpstreamAuthorizationDoesNotUseXAPIKeyWhenItMatchesProxyKey(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/claude/v1/messages", nil)
-	req.Header.Set("x-api-key", "proxy-secret")
+func TestResolveUpstreamAuthorizationUsesConfiguredKeyAndExplicitOverride(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	got, err := ResolveUpstreamAuthorization(req, config.Config{UpstreamAPIKey: "server-key"})
+	if err != nil || got != "Bearer server-key" {
+		t.Fatalf("configured upstream key = %q, %v", got, err)
+	}
+	req.Header.Set("X-Upstream-Authorization", "Bearer request-key")
+	got, err = ResolveUpstreamAuthorization(req, config.Config{UpstreamAPIKey: "server-key"})
+	if err != nil || got != "Bearer request-key" {
+		t.Fatalf("explicit upstream override = %q, %v", got, err)
+	}
+}
 
-	_, err := ResolveUpstreamAuthorization(req, config.Config{ProxyAPIKey: "proxy-secret"})
-	if err != ErrMissingUpstreamAuth {
-		t.Fatalf("expected missing upstream auth when x-api-key only matches proxy key, got %v", err)
+func TestResolveUpstreamAuthorizationTreatsEmptyWordAsLiteralKey(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	got, err := ResolveUpstreamAuthorization(req, config.Config{UpstreamAPIKey: "empty"})
+	if err != nil || got != "Bearer empty" {
+		t.Fatalf("empty word must no longer be a sentinel, got authorization=%q error=%v", got, err)
 	}
 }
