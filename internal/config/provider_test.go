@@ -33,10 +33,10 @@ func TestLoadProviderFileParsesMasqueradeClientVersion(t *testing.T) {
 
 func TestLoadProviderFileTracksUpstreamAPIKeyPresenceIncludingEmpty(t *testing.T) {
 	tests := []struct {
-		name       string
-		line       string
-		wantKey    string
-		wantSet    bool
+		name    string
+		line    string
+		wantKey string
+		wantSet bool
 	}{
 		{name: "unset", wantSet: false},
 		{name: "explicit empty", line: "UPSTREAM_API_KEY=", wantSet: true},
@@ -734,6 +734,20 @@ func TestResolveModelSupportsRegexCaptures(t *testing.T) {
 	}
 	if effort != "" {
 		t.Fatalf("expected no effort override for regex mapping, got %q", effort)
+	}
+}
+
+func TestResolveModelSupportsCopilotWorkRegexAliasWithoutTypo(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")}}
+
+	if got := p.ResolveModel("quectel", false); got != "quectel-max" {
+		t.Fatalf("expected quectel regex alias to resolve base model, got %q", got)
+	}
+	if got := p.ResolveModel("quectel-pro", false); got != "quectel-pro-max" {
+		t.Fatalf("expected quectel regex alias to preserve suffix text, got %q", got)
+	}
+	if got := p.ResolveModel("quetecl", false); got != "quetecl" {
+		t.Fatalf("expected misspelled quetecl model to remain unchanged, got %q", got)
 	}
 }
 
