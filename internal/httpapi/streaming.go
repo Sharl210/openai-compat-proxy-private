@@ -443,6 +443,7 @@ func (h *responseEventWriterHelper) formatReasoningContentDelta(itemID string, s
 	h.inheritReasoningTitleBoundary(itemID, summaryIndex, preserve)
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	formatted := state.formatDelta(delta, preserve)
+	requestReasoningChunkContexts.record(h.requestID, formatted, preserve)
 	return h.consumeReasoningTitleBoundary(state, formatted, preserve)
 }
 
@@ -2708,6 +2709,7 @@ func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
 }
 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc, initialState *responsesStreamState) (aggregate.Result, error) {
+	defer requestReasoningChunkContexts.delete(req.RequestID)
 	state := cloneResponsesStreamState(initialState, req.RequestID, upstreamEndpointType)
 	state.modelName = req.Model
 	collector := aggregate.NewCollector()
@@ -3094,6 +3096,7 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 }
 
 func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
+	defer requestReasoningChunkContexts.delete(req.RequestID)
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
@@ -3480,7 +3483,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				state.thinkingSignature = signature
 			}
 		}
-		delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.appendAndFormat(state.messageID, formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data)), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -3843,6 +3846,7 @@ func usageNumberAsFloatForStreaming(v any) (float64, bool) {
 
 type chatStreamState struct {
 	chunkID               string
+	requestID             string
 	modelName             string
 	roleSent              bool
 	textStarted           bool
@@ -3867,8 +3871,10 @@ type chatStreamState struct {
 }
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
+	defer requestReasoningChunkContexts.delete(req.RequestID)
 	state := chatStreamState{
 		chunkID:          "chatcmpl_proxy",
+		requestID:        req.RequestID,
 		modelName:        req.Model,
 		toolIDAliases:    map[string]string{},
 		toolMeta:         map[string]map[string]string{},
@@ -4256,7 +4262,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			state.reasoningText.reset()
 			state.reasoningTextActive = true
 		}
-		delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.appendAndFormat(state.requestID, formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data)), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
