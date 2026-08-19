@@ -833,7 +833,7 @@ func defaultFallbackAllowsUnconfiguredProxyTail(provider config.ProviderConfig, 
 }
 
 func parseProviderProxyModelIntentForRouting(provider config.ProviderConfig, modelName string, rootNoPrompt bool, rootReasoningMode bool) (model.ProxyModelIntent, bool) {
-	if intent, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(modelName, rootNoPrompt, rootReasoningMode, provider.VisibleModelIDs()); parsed && (intent.ReasoningMode != "" || intent.HasAdaptive || intent.HasAuto || intent.HasNoPrompt || intent.HasUltra) {
+	if intent, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(modelName, rootNoPrompt, rootReasoningMode, provider.VisibleModelIDs()); parsed && (intent.ReasoningMode != "" || intent.HasAuto || intent.HasNoPrompt || intent.HasUltra) {
 		return intent, true
 	}
 	return provider.ParseProxyModelIntentWithReasoningMode(modelName, rootNoPrompt, rootReasoningMode)

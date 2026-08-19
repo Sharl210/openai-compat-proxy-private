@@ -227,7 +227,7 @@ V1_MODEL_MAP=model-a:<<provider1>>gpt-5.6-terra
 MODEL_MAP=<<provider1>>model-a:<<provider2>>gpt-5.6-terra
 ```
 
-`model-a:<<provider1>>gpt-5.6-terra` 会把请求路由到 `provider1.env` 中的 `gpt-5.6-terra`；source 侧的提供商标记限定该映射由指定 provider 负责，target 侧的提供商标记指定最终路由目标。`<<provider_id>>` 会在模型解析前剥离，因此可以和 `#re:`、`$0-$9` 捕获替换、reasoning suffix、`-pro`、`-auto`、`-adaptive`、`-ultra`、`-noprompt` 任意组合。完整组合示例：
+`model-a:<<provider1>>gpt-5.6-terra` 会把请求路由到 `provider1.env` 中的 `gpt-5.6-terra`；source 侧的提供商标记限定该映射由指定 provider 负责，target 侧的提供商标记指定最终路由目标。`<<provider_id>>` 会在模型解析前剥离，因此可以和 `#re:`、`$0-$9` 捕获替换、reasoning suffix、`-pro`、`-auto`、`-ultra`、`-noprompt` 任意组合。完整组合示例：
 
 ```env
 <<p0>>#re:alias-(.*):<<p1>>gpt-$1-high
@@ -510,18 +510,15 @@ REASONING_SUMMARY_DETAIL=detailed
 REASONING_SUMMARY_DETAIL=
 ```
 
-### 3.9 推理参数清除 `-auto`
+### 3.9 Anthropic 自动推理 `-auto`
 
-`-auto` 是独立的代理私有 suffix，可与 effort、`-pro`、`-adaptive`、`-noprompt`、`-ultra` 任意顺序组合。例如 `model-high-pro-auto-noprompt` 与 `model-noprompt-auto-pro-high` 等效；完整字面模型仍优先。
+`-auto` 是独立于 `reasoning.effort` 与 `-pro` 的代理私有 intent，可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序组合。例如 `model-noprompt-auto-pro-high` 会保留 `high`，同时请求 Anthropic 原生 adaptive thinking。完整字面模型优先，真实存在的 `vendor-auto` 不会被拆成代理后缀。
 
-它会穿过 root `V1_MODEL_MAP` 与 provider `MODEL_MAP`，但不会进入最终上游模型名。命中后代理清空 canonical reasoning、origin 和 raw passthrough 中的全部 reasoning/thinking 参数，因此 Responses、Chat 和 Anthropic 上游都不会收到 reasoning、reasoning_effort、thinking 或 output_config 等推理字段。`model-high-auto` 的结果是清除 `high`，不是另选一个 effort。
-
-`-auto` 与 `-adaptive` 互斥；它也不会根据最终模型能力自行开启推理。它表达的是“本次请求不发送任何推理参数”，不是自动推理档位或 capability 探测。
-
+它会穿过 root `V1_MODEL_MAP` 与 provider `MODEL_MAP`，但不会进入最终上游 `model`。只有最终 `UPSTREAM_ENDPOINT_TYPE=anthropic` 且最终模型支持 adaptive thinking 时，代理才发送 `thinking:{"type":"adaptive"}`；存在 effort 时同时发送对应的 `output_config.effort`。其它最终协议、最终模型不支持、与 `-none` 冲突或存在未签名 reasoning replay 时，代理会在请求上游前返回本地 `400 unsupported_upstream_feature`，不会退回 manual thinking 或其它 effort。`-auto` 不依赖 `/models` 展示。
 
 ### 3.10 推理模式 `-pro`
 
-推理模式与已有的推理强度是两条独立轴：强度使用 `-low`、`-high` 等 suffix，模式使用唯一的 `-pro` suffix。两者可与 `-auto`、`-noprompt`、`-ultra` 任意顺序叠加；`model-low-pro` 与 `model-pro-low` 等效，`model-high-auto-pro` 会清除全部推理参数而不会发送 `pro`。`-noprompt` 仍只是代理标记，不参与上游模型映射。
+推理模式与已有的推理强度是两条独立轴：强度使用 `-low`、`-high` 等 suffix，模式使用唯一的 `-pro` suffix。两者可与 `-auto`、`-noprompt`、`-ultra` 任意顺序叠加；`model-low-pro` 与 `model-pro-low` 等效。`-noprompt` 仍只是代理标记，不参与上游模型映射。
 
 根配置默认启用 `ENABLE_REASONING_MODE_SUFFIX=true` 和 `DEFAULT_PRO_REASONING_MODE=true`。最终优先级是：客户端 `-pro` > 根级默认 Pro > 客户端请求体 `reasoning.mode`。例如 `model-pro` 同时传 `{"reasoning":{"mode":"standard"}}`，最终仍请求 `pro`；默认 Pro 只在没有更高优先级来源时注入。
 
@@ -556,13 +553,8 @@ GPT-5.6 的 `multi_agent` 是 Responses API 的服务端 beta，不是客户端�
 
 `-ultra` 只会在最终 `UPSTREAM_ENDPOINT_TYPE=responses` 且 provider capability 有效时注入真实 `multi_agent` 和 beta header。chat/anthropic 上游返回 `unsupported_upstream_feature`，并说明需要 Responses endpoint；provider 显式关闭 capability 时返回同一错误并提示设为 `SUPPORTS_RESPONSES_MULTI_AGENT=true`。两类失败都发生在请求上游前，不会降级成普通请求、Pro 或 effort。
 
-### 3.12 Anthropic adaptive thinking `-adaptive`
 
-`-adaptive` 是独立于 `reasoning.effort` 与 `-pro` 的代理私有 intent，可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序组合，但不能与 `-auto` 同时使用；例如 `model-noprompt-adaptive-pro-high` 会在保留 `high` 的同时请求 native adaptive thinking。完整字面模型优先，真实存在的 `vendor-adaptive` 不会被拆成代理后缀。
-
-它会穿过 root `V1_MODEL_MAP` 与 provider `MODEL_MAP`，但不会进入最终上游 `model`。只有最终 `UPSTREAM_ENDPOINT_TYPE=anthropic` 且最终模型支持 adaptive thinking 时，代理才发送 `thinking:{"type":"adaptive"}`；存在 effort 时同时发送对应的 `output_config.effort`。其它最终协议、最终模型不支持，或和 `-none` 冲突时，代理会在请求上游前返回本地 `400 unsupported_upstream_feature`，不会退回 manual thinking 或 `xhigh`。`-adaptive` 不依赖 `/models` 展示，`-ultra` 的 Responses-only 限制仍独立生效。
-
-### 3.13 工具并行控制
+### 3.12 工具并行控制
 
 `parallel_tool_calls` 表示客户端是否允许模型并行调用工具，和 `tool_choice` 的 optional / required-any / required-named / none 选择约束完全独立。字段未传表示未指定；显式 `true` 只表示允许，不承诺模型一定会并行；显式 `false` 是必须保真的“最多一次”控制。
 
@@ -608,13 +600,12 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
 - `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-none/-minimal/-low/-medium/-high/-xhigh/-max`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
 - `-ultra` 始终作为代理私有 multi-agent 模式后缀解析，可与其它代理后缀交错；它不是 reasoning tier，不会由 `/models` 自动生成或展示
-- `-auto` 始终作为代理私有“清除推理参数”后缀解析，可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序交错；它穿过 root/provider 映射但不进入上游模型名，且与 `-adaptive` 互斥
-- `-adaptive` 始终作为 Anthropic 原生 thinking 的代理私有后缀解析；它不属于 reasoning effort 或 mode，也不会由 `/models` 自动生成或展示；不能与 `-auto` 同时使用
+- `-auto` 始终作为 Anthropic 自动推理的代理私有后缀解析；可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序交错，穿过 root/provider 映射但不进入上游模型名
 - `ENABLE_NOPROMPT_MODEL_SUFFIX=true` 后解析 `-noprompt` 代理层标记，用来跳过 provider prompt 注入
 
 这些变量的实际含义：
 
-- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-pro`、`-auto`、`-adaptive`、`-ultra`、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-auto-noprompt-vip` 会先还原为内部 `gpt-5.5-low-auto-noprompt`，再按 `low`、`-auto` 和 `-noprompt` 继续处理。模板中禁止使用 `<<` 或 `>>`；这两个分隔符专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记 `<<provider_id>>`，配置保存或热加载时命中即校验失败。
+- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-pro`、`-auto`、`-ultra`、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-auto-noprompt-vip` 会先还原为内部 `gpt-5.5-low-auto-noprompt`，再按 `low`、`-auto` 和 `-noprompt` 继续处理。模板中禁止使用 `<<` 或 `>>`；这两个分隔符专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记 `<<provider_id>>`，配置保存或热加载时命中即校验失败。
 
 - `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。这一项里“冒号左侧为原始模型”和“冒号右侧为原始模型”要分开看：
   - 左侧 source 是原始模型 base 时，表示这条 base source 锁定整个客户端推理家族集合。例如 `MODEL_MAP=client-gpt:upstream-gpt` 会覆盖 `model=client-gpt`、`model=client-gpt-high`、`model=client-gpt-low`，也覆盖 `model=client-gpt` + `reasoning.effort=high` / `reasoning_effort=high` / Anthropic `thinking/output_config` 表达的 high；最终发往 `upstream-gpt`，effort 按客户端 suffix 或请求体参数保留。
@@ -631,7 +622,7 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
 - `ENABLE_NOPROMPT_MODEL_SUFFIX`：允许像 `model-noprompt`、`model-low-noprompt` 这样的请求跳过 provider 级 `SYSTEM_PROMPT_FILES` 注入；根级默认开启，provider 级同名字段留空时继承根配置，显式 `true/false` 时覆盖根配置；`-noprompt` 会先从模型名剥离，不会出现在上游模型名里，也不会自动额外出现在 `/models` 列表里，除非你在 `MANUAL_MODELS` 里把这个字面模型写出来
 - `-ultra`：始终可识别的代理私有 mode suffix。它在最终 Responses 上游且 provider 未显式关闭 `SUPPORTS_RESPONSES_MULTI_AGENT` 时，固定注入 `multi_agent.enabled=true` 和 provider 配置的并发数；它不参与 MODEL_MAP routing key，也不属于 reasoning family。
-- `-adaptive`：始终可识别的代理私有 intent suffix。它与 effort、`-pro`、`-noprompt`、`-ultra` 分别解析，root/provider 映射只保留该 intent、不会把它送进最终上游模型名。代理只按最终 `UPSTREAM_ENDPOINT_TYPE` 与最终 Anthropic 模型能力决定是否发送 native adaptive thinking；不满足条件时在上游请求前返回本地 400，不根据 `/models` 展示结果判断，也不回退为 manual thinking 或 `xhigh`。
+- `-auto`：始终可识别的 Anthropic 自动推理 intent suffix。它与 effort、`-pro`、`-noprompt`、`-ultra` 分别解析，root/provider 映射只保留该 intent、不会把它送进最终上游模型名。代理只按最终 `UPSTREAM_ENDPOINT_TYPE` 与最终 Anthropic 模型能力决定是否发送 native adaptive thinking；不满足条件时在上游请求前返回本地 400，不根据 `/models` 展示结果判断，也不回退为 manual thinking 或其它 effort。
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 翻译成 Anthropic 合法请求体字段 `thinking` / `output_config`，默认 `true`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。这个开关为 `false` 时，代理不做 Anthropic 风格转换，而是把客户端侧 `reasoning` / `reasoning_effort` 原样透传给上游；如果上游不兼容，应由上游明确返回错误，代理不会静默丢弃推理参数。内部档位是 `none/minimal/low/medium/high/xhigh/max`：`none` 关闭 thinking；旧式 manual thinking 会按 `ANTHROPIC_MAX_THINKING_BUDGET` 动态分配预算，并被 `max_tokens - 1` 夹紧；Claude adaptive thinking 原生支持 `max`，所以 `max` 会保留为 `output_config.effort=max`，而发往 OpenAI 风格上游时会降级成 `xhigh`。
 - `ANTHROPIC_MAX_THINKING_BUDGET`：控制 manual Anthropic `thinking.budget_tokens` 的最高预算，根级默认 `32000`，provider 留空继承、显式设置覆盖。Anthropic 官方只约束 `budget_tokens >= 1024` 且普通 manual thinking 下必须小于 `max_tokens`，没有公布全局独立最大值；`32000` 是通用工程默认值，不是官方 hard cap。举例：默认 32000 时，`minimal/low/medium/high/xhigh/max` 的 manual 预算分别约为 `2000/4000/8000/16000/32000/32000`，如果请求 `max_tokens=12000`，最终预算会被夹到 `11999`。
 

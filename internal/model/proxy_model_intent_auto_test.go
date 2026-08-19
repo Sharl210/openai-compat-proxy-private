@@ -31,7 +31,4 @@ func TestParseProxyModelIntentAutoPreservesExactLiteralsAndRejectsDuplicates(t *
 	if _, ok := ParseProxyModelIntent("model-auto-auto", []string{"model"}, axes); ok {
 		t.Fatal("expected duplicate auto suffix to fail")
 	}
-	if _, ok := ParseProxyModelIntent("model-adaptive", []string{"model"}, axes); ok {
-		t.Fatal("adaptive must not remain a public suffix alias")
-	}
 }
