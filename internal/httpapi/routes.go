@@ -484,6 +484,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			} else if resolvedID, modelForProvider, matched := snapshot.ResolveDefaultProviderSelectionForRequestEffort(rootIntent.BaseModel, rootIntent.ReasoningEffort); matched {
 				providerID = resolvedID
 				resolvedModel = modelForProvider
+				selectedProxyIntent.BaseModel = modelForProvider
 				usedRootMappedProviderSelection = true
 			}
 		} else {
@@ -556,7 +557,6 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		if provider.HidesModel(intent.CanonicalModel()) {
 			return config.ProviderConfig{}, config.Config{}, "", internalModel, false, nil
 		}
-		sourceIntent := intent
 		if mappedIntent, mapped := provider.ResolveMappedProxyModelIntent(intent); mapped {
 			intent = mappedIntent
 			*r = *r.Clone(withProviderModelMapApplied(withProxyModelIntent(r.Context(), intent)))
@@ -576,7 +576,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		if provider.HidesModel(intent.CanonicalModel()) {
 			return config.ProviderConfig{}, config.Config{}, "", internalModel, false, nil
 		}
-		resolvedModel = config.ProxyModelIntentRoutingModel(sourceIntent)
+		resolvedModel = config.ProxyModelIntentRoutingModel(intent)
 		*r = *r.Clone(withProxyModelIntent(r.Context(), intent))
 	} else if provider.HasProxyModelIntentCandidatePrefix(internalModel) ||
 		provider.HidesModel(internalModel) ||
