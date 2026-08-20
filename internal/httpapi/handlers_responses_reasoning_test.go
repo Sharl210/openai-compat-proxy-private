@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"openai-compat-proxy/internal/config"
 	"openai-compat-proxy/internal/testutil"
 )
 
@@ -79,6 +80,104 @@ func TestPortableResponsesReasoningBlockReadsNestedSummaryText(t *testing.T) {
 	portable := portableResponsesReasoningBlock(block, true)
 	if got := stringValue(portable["text"]); got != "nested reasoning" {
 		t.Fatalf("expected nested summary text to project to portable reasoning, got %#v", portable)
+	}
+}
+
+func TestPortableResponsesReasoningBlockProjectsSummaryTextWithoutOpaqueState(t *testing.T) {
+	portable := portableResponsesReasoningBlock(map[string]any{
+		"type":    "reasoning",
+		"summary": []any{map[string]any{"type": "summary_text", "text": "portable reasoning"}},
+	}, true)
+	if got := stringValue(portable["text"]); got != "portable reasoning" {
+		t.Fatalf("expected summary text to remain portable, got %#v", portable)
+	}
+}
+
+func TestPortableResponsesReasoningBlockRejectsOpaqueState(t *testing.T) {
+	portable := portableResponsesReasoningBlock(map[string]any{
+		"type":              "reasoning",
+		"summary":           []any{map[string]any{"type": "summary_text", "text": "untrusted reasoning"}},
+		"encrypted_content": "enc_should_not_leave_scope",
+		"signature":         "sig_should_not_leave_scope",
+	}, true)
+	if portable != nil {
+		t.Fatalf("opaque state must not project across protocols: %#v", portable)
+	}
+}
+
+func TestResponsesHistoryReasoningSummaryProjectsToChatReasoningContent(t *testing.T) {
+	var upstreamBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_deepseek","object":"chat.completion","created":1,"model":"deepseek/deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:             "deepseek",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		Providers: []config.ProviderConfig{{
+			ID:                   "deepseek",
+			Enabled:              true,
+			UpstreamBaseURL:      upstream.URL,
+			UpstreamAPIKey:       "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeChat,
+			SupportsResponses:    true,
+			SupportsChat:         true,
+		}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"deepseek/deepseek-v4-flash",
+		"include":["reasoning.encrypted_content"],
+		"input":[
+			{"role":"user","content":"查天气"},
+			{"type":"reasoning","id":"rs_chat_reasoning","summary":[{"type":"summary_text","text":"先分析天气"}]},
+			{"role":"assistant","content":"准备查询天气"},
+			{"type":"function_call","call_id":"call_weather","name":"search_web","arguments":"{\"query\":\"桂林天气\"}"},
+			{"type":"function_call_output","call_id":"call_weather","output":"{\"ok\":true}"}
+		]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected DeepSeek history replay to reach Chat upstream, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	messages, _ := upstreamBody["messages"].([]any)
+	var assistantToolCall map[string]any
+	for _, rawMessage := range messages {
+		message, _ := rawMessage.(map[string]any)
+		if len(message) == 0 {
+			continue
+		}
+		if toolCalls, _ := message["tool_calls"].([]any); len(toolCalls) == 1 {
+			assistantToolCall = message
+			break
+		}
+	}
+	if assistantToolCall == nil {
+		t.Fatalf("expected assistant tool-call message in Chat upstream payload, got %#v", upstreamBody)
+	}
+	if got := stringValue(assistantToolCall["reasoning_content"]); got != "先分析天气" {
+		t.Fatalf("expected matching assistant tool call to retain reasoning_content, got %#v", assistantToolCall)
+	}
+	encoded, err := json.Marshal(upstreamBody)
+	if err != nil {
+		t.Fatalf("marshal upstream payload: %v", err)
+	}
+	if strings.Contains(string(encoded), "encrypted_content") || strings.Contains(string(encoded), "signature") {
+		t.Fatalf("optional encrypted reasoning include must not fabricate opaque state: %s", encoded)
 	}
 }
 

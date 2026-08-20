@@ -49,6 +49,8 @@ type initialResponsesRequest struct {
 
 func handleResponses() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		requestID := w.Header().Get("X-Request-Id")
+		defer requestReasoningChunkContexts.delete(requestID)
 		prepared, ok := prepareResponsesRequest(w, r, false)
 		if !ok {
 			return

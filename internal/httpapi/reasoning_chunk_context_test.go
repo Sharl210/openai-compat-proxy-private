@@ -29,13 +29,55 @@ func TestReasoningChunkContextStoreFormatsEveryChunkForImmediateSend(t *testing.
 	}
 }
 
+func TestReasoningChunkContextStoreRetainsFormatterAcrossArbitraryStarBoundaries(t *testing.T) {
+	store := reasoningChunkContextStore{tails: make(map[string]string)}
+	state := &reasoningTextState{}
+	chunks := []string{"**标题一**", "*", "*标题二", "**", "**标题三**"}
+	want := []string{"**标题一**", "", "", "\n\n**标题二**", "\n\n**标题三**"}
+	for index, chunk := range chunks {
+		if got := store.formatStreamingDelta("req-a", state, chunk, false); got != want[index] {
+			t.Fatalf("chunk %d = %q, want %q", index, got, want[index])
+		}
+	}
+}
+
 func TestReasoningChunkContextStorePreservesOpaqueAndExistingSeparators(t *testing.T) {
 	store := reasoningChunkContextStore{tails: make(map[string]string)}
-	store.record("req", "**标题一**", false)
-	if got := store.formatForSend("req", "**opaque**", true); got != "**opaque**" {
+	state := &reasoningTextState{}
+	if got := store.formatStreamingDelta("req", state, "**标题一**", false); got != "**标题一**" {
+		t.Fatalf("first title = %q", got)
+	}
+	if got := store.formatStreamingDelta("req", state, "**opaque**", true); got != "**opaque**" {
 		t.Fatalf("opaque chunk changed: %q", got)
 	}
-	if got := store.formatForSend("req", "\n\n**标题二**", false); got != "\n\n**标题二**" {
+	if got := store.formatStreamingDelta("req", state, "**标题二**", false); got != "**标题二**" {
+		t.Fatalf("opaque chunk leaked a title boundary: %q", got)
+	}
+	store.record("req", "**标题二**", false)
+	if got := store.formatForSend("req", "\n\n**标题三**", false); got != "\n\n**标题三**" {
 		t.Fatalf("existing separator duplicated: %q", got)
+	}
+}
+
+func TestReasoningChunkContextStoreMaintainsIndependentRequestTails(t *testing.T) {
+	store := reasoningChunkContextStore{tails: make(map[string]string)}
+	if got := store.formatForSend("req-a", "**第一标题**", false); got != "**第一标题**" {
+		t.Fatalf("first request initial title = %q", got)
+	}
+	if got := store.formatForSend("req-b", "**另一标题**", false); got != "**另一标题**" {
+		t.Fatalf("second request initial title = %q", got)
+	}
+	if got := store.formatForSend("req-a", "**第二标题**", false); got != "\n\n**第二标题**" {
+		t.Fatalf("first request lost its own title boundary: %q", got)
+	}
+	if got := store.formatForSend("req-b", "正文", false); got != "正文" {
+		t.Fatalf("second request inherited another request boundary: %q", got)
+	}
+	store.delete("req-a")
+	if got := store.formatForSend("req-a", "**重启标题**", false); got != "**重启标题**" {
+		t.Fatalf("deleted request kept stale context: %q", got)
+	}
+	if _, ok := store.tail("req-a"); !ok {
+		t.Fatal("expected restarted request to record a fresh tail")
 	}
 }

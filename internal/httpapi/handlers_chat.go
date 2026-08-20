@@ -19,6 +19,7 @@ func handleChat() http.HandlerFunc {
 		r, sessionID := ensureProxySessionID(r, w)
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
+		defer requestReasoningChunkContexts.delete(requestID)
 
 		canon, err := chatadapter.DecodeRequest(r.Body)
 		if err != nil {

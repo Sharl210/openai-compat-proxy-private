@@ -2176,6 +2176,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	item, _ := evt.Data["item"].(map[string]any)
 	if h.downstreamType == "responses" && !isResponsesReasoningBoundaryEvent(evt.Event, item) {
 		h.reasoningTitleBoundary = false
+		requestReasoningChunkContexts.delete(h.requestID)
 	}
 
 	switch evt.Event {
@@ -3443,6 +3444,10 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	var closeThinkingBlock func() error
 	var flushPendingThinking func() error
+	item, _ := evt.Data["item"].(map[string]any)
+	if state != nil && !isResponsesReasoningBoundaryEvent(evt.Event, item) {
+		requestReasoningChunkContexts.delete(state.messageID)
+	}
 	startMessage := func() error {
 		if state.messageStarted {
 			return nil
@@ -3747,7 +3752,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				state.thinkingSignature = signature
 			}
 		}
-		delta := requestReasoningChunkContexts.formatForSend(state.messageID, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.formatStreamingDelta(state.messageID, &state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -4320,6 +4325,10 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	if state.toolIDAliases == nil {
 		state.toolIDAliases = map[string]string{}
 	}
+	item, _ := evt.Data["item"].(map[string]any)
+	if !isResponsesReasoningBoundaryEvent(evt.Event, item) {
+		requestReasoningChunkContexts.delete(state.requestID)
+	}
 	ensureRoleSent := func() error {
 		if state.roleSent {
 			return nil
@@ -4526,7 +4535,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			state.reasoningText.reset()
 			state.reasoningTextActive = true
 		}
-		delta := requestReasoningChunkContexts.formatForSend(state.requestID, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.formatStreamingDelta(state.requestID, &state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
