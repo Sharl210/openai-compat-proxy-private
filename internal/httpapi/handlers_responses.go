@@ -596,10 +596,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	applyProviderMaxOutputTokens(&canon, provider)
-	if err := applyAutoThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
-		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
-		return nil, false
-	}
+	applyAutoReasoningModelSuffix(&canon, intent)
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 	applyProxyModelIntentReasoningMode(r, &canon)
 	enforceSuffixReasoningModePrecedence(&canon)
@@ -618,6 +615,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
 		return nil, false
 	}
+	applyAutoReasoningModelSuffix(&canon, intent)
 	applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
 	if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)

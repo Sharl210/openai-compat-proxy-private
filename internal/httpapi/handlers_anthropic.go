@@ -111,10 +111,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			canon.Messages = recoverAnthropicThinkingForAssistantToolCalls(history, canon.Messages, providerID, historyScope)
 		}
 		applyProviderMaxOutputTokens(&canon, provider)
-		if err := applyAutoThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
-			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
-			return
-		}
+		applyAutoReasoningModelSuffix(&canon, intent)
 		finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 		applyProxyModelIntentReasoningMode(r, &canon)
 		enforceSuffixReasoningModePrecedence(&canon)
@@ -134,6 +131,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 			return
 		}
 		applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+		applyAutoReasoningModelSuffix(&canon, intent)
 		applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
 		if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
 			errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)

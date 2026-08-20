@@ -8,7 +8,19 @@ import (
 	"testing"
 
 	"openai-compat-proxy/internal/config"
+	"openai-compat-proxy/internal/model"
 )
+
+func TestApplyAutoReasoningModelSuffixClearsAllClientReasoning(t *testing.T) {
+	req := &model.CanonicalRequest{
+		Reasoning:           &model.CanonicalReasoning{Effort: "high", Mode: model.ReasoningModePro, Summary: "detailed", Raw: map[string]any{"effort": "high", "mode": "pro", "summary": "detailed", "thinking": map[string]any{"type": "enabled"}, "output_config": map[string]any{"effort": "high"}}},
+		ReasoningModeOrigin: model.ReasoningModeOriginSuffix, PassThroughRawReasoning: true,
+	}
+	applyAutoReasoningModelSuffix(req, model.ProxyModelIntent{HasAuto: true})
+	if req.Reasoning != nil || req.ReasoningModeOrigin != model.ReasoningModeOriginNone || req.PassThroughRawReasoning {
+		t.Fatalf("auto must clear all reasoning controls, got %#v", req)
+	}
+}
 
 func TestAutoModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testing.T) {
 	entrypoints := []struct {
@@ -100,106 +112,13 @@ func TestAutoModelSuffixUsesFinalAnthropicMappingAcrossEntrypoints(t *testing.T)
 			if got := upstreamPayload["model"]; got != "claude-opus-4-6" {
 				t.Fatalf("expected final mapped model without auto suffix, got %#v", upstreamPayload)
 			}
-			thinking, _ := upstreamPayload["thinking"].(map[string]any)
-			if thinking["type"] != "adaptive" {
-				t.Fatalf("expected auto suffix to request native adaptive thinking, got %#v", upstreamPayload)
-			}
-			if _, exists := thinking["budget_tokens"]; exists {
-				t.Fatalf("auto suffix must not fall back to manual thinking, got %#v", upstreamPayload)
-			}
-			outputConfig, _ := upstreamPayload["output_config"].(map[string]any)
-			if outputConfig["effort"] != "high" {
-				t.Fatalf("expected composed reasoning effort high, got %#v", upstreamPayload)
+			for _, field := range []string{"reasoning", "reasoning_effort", "thinking", "output_config"} {
+				if _, exists := upstreamPayload[field]; exists {
+					t.Fatalf("auto must not send %s upstream, got %#v", field, upstreamPayload)
+				}
 			}
 			if got := rec.Header().Get(headerClientToProxyNoPrompt); got != "true" {
 				t.Fatalf("expected composed noprompt suffix to remain active, got %q", got)
-			}
-		})
-	}
-}
-
-func TestAutoModelSuffixRejectsUnsupportedFinalTargetsBeforeUpstream(t *testing.T) {
-	tests := []struct {
-		name             string
-		endpointType     string
-		mappedModel      string
-		path             string
-		body             string
-		setHeaders       func(*http.Request)
-		expectedFragment string
-	}{
-		{
-			name:             "messages to responses upstream",
-			endpointType:     config.UpstreamEndpointTypeResponses,
-			mappedModel:      "claude-opus-4-6",
-			path:             "/v1/messages",
-			body:             `{"model":"client-auto","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}`,
-			setHeaders:       func(req *http.Request) { req.Header.Set("anthropic-version", "2023-06-01") },
-			expectedFragment: "requires UPSTREAM_ENDPOINT_TYPE=anthropic",
-		},
-		{
-			name:             "responses to chat upstream",
-			endpointType:     config.UpstreamEndpointTypeChat,
-			mappedModel:      "claude-opus-4-6",
-			path:             "/v1/responses",
-			body:             `{"model":"client-auto","input":"hello"}`,
-			setHeaders:       func(*http.Request) {},
-			expectedFragment: "requires UPSTREAM_ENDPOINT_TYPE=anthropic",
-		},
-		{
-			name:             "unsupported final anthropic model",
-			endpointType:     config.UpstreamEndpointTypeAnthropic,
-			mappedModel:      "claude-sonnet-4-5",
-			path:             "/v1/chat/completions",
-			body:             `{"model":"client-auto","messages":[{"role":"user","content":"hello"}]}`,
-			setHeaders:       func(*http.Request) {},
-			expectedFragment: "not supported by final Anthropic model",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			upstreamHits := 0
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				upstreamHits++
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"unexpected"}`))
-			}))
-			defer upstream.Close()
-
-			server := NewServer(config.Config{
-				DefaultProvider:      "provider",
-				EnableLegacyV1Routes: true,
-				Providers: []config.ProviderConfig{{
-					ID:                        "provider",
-					Enabled:                   true,
-					UpstreamBaseURL:           upstream.URL,
-					UpstreamAPIKey:            "test-key",
-					UpstreamEndpointType:      test.endpointType,
-					SupportsResponses:         true,
-					SupportsChat:              true,
-					SupportsAnthropicMessages: true,
-					ManualModels:              []string{test.mappedModel},
-					ModelMap: []config.ModelMapEntry{
-						config.NewModelMapEntry("client", test.mappedModel),
-					},
-				}},
-			})
-			req := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
-			req.Header.Set("Content-Type", "application/json")
-			test.setHeaders(req)
-			rec := httptest.NewRecorder()
-
-			server.ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("expected local 400, got %d body=%s", rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), "unsupported_upstream_feature") || !strings.Contains(rec.Body.String(), test.expectedFragment) {
-				t.Fatalf("expected clear auto preflight error, got %s", rec.Body.String())
-			}
-			if upstreamHits != 0 {
-				t.Fatalf("expected rejected request to make no upstream calls, got %d", upstreamHits)
 			}
 		})
 	}
