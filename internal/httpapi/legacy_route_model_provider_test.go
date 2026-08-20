@@ -190,6 +190,35 @@ func TestLegacyResponsesRouteProviderMapEffortTargetUsesBaseModelUpstream(t *tes
 	}
 }
 
+func TestLegacyResponsesRouteRootMapThenProviderMaxEffortUsesBaseUpstream(t *testing.T) {
+	upstream := newResponsesProviderUpstream(t, "copilot-work")
+	defer upstream.Close()
+	cfg := config.Config{
+		DefaultProvider: "copilot-work", EnableLegacyV1Routes: true,
+		V1ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("deepseek-v4-flash", "<<copilot-work>>quectel-github-copilot/QDeepseekV4/deepseek-v4-flash")},
+		Providers: []config.ProviderConfig{{
+			ID: "copilot-work", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true,
+			EnableReasoningEffortSuffix: true, ManualModels: []string{"#re:quectel.*"},
+			ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+		}},
+	}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"deepseek-v4-flash","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root/provider mapping to route, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected base upstream model, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "max" {
+		t.Fatalf("expected mapped max effort, got %q", got)
+	}
+}
+
 func TestLegacyResponsesRouteRootQualifiedSourceUsesExplicitRequestEffort(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()
