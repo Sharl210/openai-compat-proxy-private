@@ -102,11 +102,10 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 				`"reasoning_content":"**标题**"`,
 				`"reasoning_content":"\n\n**后续**"`,
 				`"reasoning_content":"\n\n**第三标题**"`,
-				`"reasoning_content":"**第四标题**"`,
+				`"reasoning_content":"\n\n**第四标题**"`,
 			},
 			unwantedRaw: []string{
 				`"reasoning_content":"**标题****后续**"`,
-				`"reasoning_content":"\n\n**第四标题**"`,
 			},
 		},
 		{
@@ -120,11 +119,10 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 				`"thinking":"**标题**"`,
 				`"thinking":"\n\n**后续**"`,
 				`"thinking":"\n\n**第三标题**"`,
-				`"thinking":"**第四标题**"`,
+				`"thinking":"\n\n**第四标题**"`,
 			},
 			unwantedRaw: []string{
 				`"thinking":"**标题****后续**"`,
-				`"thinking":"\n\n**第四标题**"`,
 			},
 		},
 	}
@@ -153,6 +151,73 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 			if testCase.name == "responses" {
 				assertResponsesReasoningSummaryTerminalSnapshots(t, body)
 			}
+		})
+	}
+}
+
+func TestReasoningSummaryEmptyBoldMarkerAcrossItemBoundaryAcrossDownstreamStreamingEndpoints(t *testing.T) {
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_first\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_first\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_first\",\"summary_index\":0,\"delta\":\"**第一标题**\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_first\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**第一标题**\"}]}}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_second\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_second\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_second\",\"summary_index\":0,\"delta\":\"****第二标题**\"}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_second\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"****第二标题**\"}]}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+			SupportsChat:              true,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	for _, testCase := range []struct {
+		name         string
+		path         string
+		body         string
+		header       map[string]string
+		first        string
+		secondPrefix string
+		secondTail   string
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"gpt-5","stream":true,"input":"hello"}`, first: `"delta":"**第一标题**"`, secondPrefix: `"delta":"\n\n****第二标题"`, secondTail: `"delta":"**"`},
+		{name: "chat", path: "/v1/chat/completions", body: `{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`, first: `"reasoning_content":"**第一标题**"`, secondPrefix: `"reasoning_content":"\n\n****第二标题"`, secondTail: `"reasoning_content":"**"`},
+		{name: "anthropic", path: "/v1/messages", body: `{"model":"gpt-5","stream":true,"max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`, header: map[string]string{"anthropic-version": "2023-06-01"}, first: `"thinking":"**第一标题**"`, secondPrefix: `"thinking":"\n\n****第二标题"`, secondTail: `"thinking":"**"`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
+			req.Header.Set("Content-Type", "application/json")
+			for name, value := range testCase.header {
+				req.Header.Set(name, value)
+			}
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+			}
+			assertOrderedStreamFragments(t, rec.Body.String(), testCase.first, testCase.secondPrefix, testCase.secondTail)
 		})
 	}
 }
@@ -201,7 +266,7 @@ func TestReasoningSummaryMultiStarBoundaryAcrossDownstreamStreamingEndpoints(t *
 			fragments: []string{
 				`"reasoning_content":"**A**"`,
 				`"reasoning_content":"\n\n****B`,
-				`"reasoning_content":"**C**"`,
+				`"reasoning_content":"\n\n**C**"`,
 				`"reasoning_content":"\n\n****\n\n**D`,
 			},
 		},
@@ -213,7 +278,7 @@ func TestReasoningSummaryMultiStarBoundaryAcrossDownstreamStreamingEndpoints(t *
 			fragments: []string{
 				`"thinking":"**A**"`,
 				`"thinking":"\n\n****B`,
-				`"thinking":"**C**"`,
+				`"thinking":"\n\n**C**"`,
 				`"thinking":"\n\n****\n\n**D`,
 			},
 		},
@@ -465,7 +530,7 @@ func TestResponsesStreamClearsTitleBoundaryAcrossToolArgumentEvents(t *testing.T
 	}
 }
 
-func TestResponsesStreamClearsTitleBoundaryAcrossTextCompletionEvents(t *testing.T) {
+func TestResponsesStreamClearsTitleBoundaryAcrossNonReasoningOutputEvents(t *testing.T) {
 	testCases := []struct {
 		name  string
 		event string
@@ -477,9 +542,24 @@ func TestResponsesStreamClearsTitleBoundaryAcrossTextCompletionEvents(t *testing
 			data:  map[string]any{"item_id": "msg_gap", "content_index": 0, "text": "answer"},
 		},
 		{
+			name:  "content_part_added",
+			event: "response.content_part.added",
+			data:  map[string]any{"item_id": "msg_gap", "content_index": 0, "part": map[string]any{"type": "output_text", "text": ""}},
+		},
+		{
 			name:  "content_part_done",
 			event: "response.content_part.done",
 			data:  map[string]any{"item_id": "msg_gap", "content_index": 0, "part": map[string]any{"type": "output_text", "text": "answer"}},
+		},
+		{
+			name:  "refusal_delta",
+			event: "response.refusal.delta",
+			data:  map[string]any{"delta": "refused"},
+		},
+		{
+			name:  "refusal_done",
+			event: "response.refusal.done",
+			data:  map[string]any{"refusal": "refused"},
 		},
 	}
 
@@ -504,6 +584,17 @@ func TestResponsesStreamClearsTitleBoundaryAcrossTextCompletionEvents(t *testing
 				t.Fatalf("title boundary crossed %s event: %s", testCase.event, body)
 			}
 		})
+	}
+}
+
+func TestResponsesStreamKeepsTitleBoundaryAcrossLifecycleMetadata(t *testing.T) {
+	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+		upstream.Event{Event: "response.in_progress", Data: map[string]any{"response": map[string]any{"id": "resp_metadata", "status": "in_progress"}}},
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第二标题**"}},
+	)
+	if !strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+		t.Fatalf("lifecycle metadata cleared direct reasoning title boundary: %s", body)
 	}
 }
 
@@ -883,6 +974,46 @@ func TestResponsesStreamDoesNotCarryBoundaryAcrossOpaqueSummaryItem(t *testing.T
 	}
 	if !strings.Contains(body, `"encrypted_content":"opaque-middle"`) {
 		t.Fatalf("opaque reasoning payload was not preserved: %s", body)
+	}
+}
+
+func TestResponsesStreamDoesNotCarryReasoningTitleBoundaryAcrossTextOrTool(t *testing.T) {
+	tests := []struct {
+		name   string
+		middle upstream.Event
+	}{
+		{name: "text", middle: upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "answer"}}},
+		{name: "tool", middle: upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requestReasoningChunkContexts.delete("req-responses-lane")
+			body := renderResponsesWriterEventsWithRequestID(t, "req-responses-lane", config.UpstreamEndpointTypeResponses,
+				upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+				test.middle,
+				upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第二标题**"}},
+			)
+			if strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
+				t.Fatalf("reasoning title boundary crossed %s lane: %s", test.name, body)
+			}
+			if !strings.Contains(body, `"delta":"**第二标题**"`) {
+				t.Fatalf("missing unprefixed second title after %s lane: %s", test.name, body)
+			}
+		})
+	}
+}
+func TestResponsesStreamTerminalEventClearsReasoningChunkContextAfterFlush(t *testing.T) {
+	const requestID = "req-responses-terminal"
+	requestReasoningChunkContexts.delete(requestID)
+	body := renderResponsesWriterEventsWithRequestID(t, requestID, config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	if !strings.Contains(body, `"delta":"**第一标题**"`) {
+		t.Fatalf("expected reasoning delta before terminal event, got %s", body)
+	}
+	if _, ok := requestReasoningChunkContexts.tail(requestID); ok {
+		t.Fatalf("terminal event left request context behind")
 	}
 }
 
@@ -3080,9 +3211,13 @@ func testResponsesConfig(upstreamURL string) config.Config {
 }
 
 func renderResponsesWriterEvents(t *testing.T, endpointType string, events ...upstream.Event) string {
+	return renderResponsesWriterEventsWithRequestID(t, "", endpointType, events...)
+}
+
+func renderResponsesWriterEventsWithRequestID(t *testing.T, requestID, endpointType string, events ...upstream.Event) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	state := newResponsesStreamState("", endpointType)
+	state := newResponsesStreamState(requestID, endpointType)
 	writer := &ResponsesEventWriter{w: rec, flusher: nil}
 	for _, evt := range events {
 		if err := writeResponsesEvent(writer, state, evt, nil); err != nil {

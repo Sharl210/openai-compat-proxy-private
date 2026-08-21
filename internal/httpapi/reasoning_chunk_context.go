@@ -8,13 +8,17 @@ import (
 
 const reasoningChunkTailLimit = 10
 
-type reasoningChunkContextStore struct {
-	mu         sync.Mutex
-	tails      map[string]string
-	titleReady map[string]bool
+type reasoningChunkContext struct {
+	tail                     string
+	tailStartsAtLineBoundary bool
 }
 
-var requestReasoningChunkContexts = reasoningChunkContextStore{tails: make(map[string]string)}
+type reasoningChunkContextStore struct {
+	mu       sync.Mutex
+	contexts map[string]reasoningChunkContext
+}
+
+var requestReasoningChunkContexts = reasoningChunkContextStore{contexts: make(map[string]reasoningChunkContext)}
 
 func (s *reasoningChunkContextStore) formatForSend(requestID, chunk string, preserve bool) string {
 	if s == nil || requestID == "" {
@@ -23,24 +27,30 @@ func (s *reasoningChunkContextStore) formatForSend(requestID, chunk string, pres
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if preserve {
-		delete(s.tails, requestID)
-		delete(s.titleReady, requestID)
+		delete(s.contexts, requestID)
 		return chunk
 	}
 	if chunk == "" {
 		return chunk
 	}
-	previousTitle := s.titleReady[requestID]
+	previous := s.contexts[requestID]
 	formatted := chunk
-	if !strings.HasPrefix(formatted, "\n\n") && previousTitle && startsWithCompleteBoldSpan(formatted) {
+	if !strings.HasPrefix(formatted, "\n\n") && previous.hasTrailingStandaloneTitle() && startsWithCompleteOrEmptyBoldSpan(formatted) {
 		formatted = "\n\n" + formatted
 	}
 	s.setLocked(requestID, formatted)
 	return formatted
 }
-
 func (s *reasoningChunkContextStore) formatStreamingDelta(requestID string, state *reasoningTextState, delta string, preserve bool) string {
-	return s.formatForSend(requestID, formatStreamingReasoningDelta(state, delta, preserve), preserve)
+	return s.formatStateDelta(requestID, state, formatStreamingReasoningDelta(state, delta, preserve), preserve)
+}
+
+func (s *reasoningChunkContextStore) formatStateDelta(requestID string, state *reasoningTextState, delta string, preserve bool) string {
+	formatted := s.formatForSend(requestID, delta, preserve)
+	if formatted != delta && state != nil {
+		state.replaceFormattedSuffix(delta, formatted)
+	}
+	return formatted
 }
 
 func (s *reasoningChunkContextStore) record(requestID, chunk string, preserve bool) {
@@ -49,26 +59,40 @@ func (s *reasoningChunkContextStore) record(requestID, chunk string, preserve bo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if preserve {
-		delete(s.tails, requestID)
-		delete(s.titleReady, requestID)
-		return
-	}
-	if chunk == "" {
+	if preserve || chunk == "" {
+		delete(s.contexts, requestID)
 		return
 	}
 	s.setLocked(requestID, chunk)
 }
 
 func (s *reasoningChunkContextStore) setLocked(requestID, chunk string) {
-	if s.tails == nil {
-		s.tails = make(map[string]string)
+	if s.contexts == nil {
+		s.contexts = make(map[string]reasoningChunkContext)
 	}
-	if s.titleReady == nil {
-		s.titleReady = make(map[string]bool)
+	previous, hadPrevious := s.contexts[requestID]
+	window := chunk
+	windowStartsAtLineBoundary := true
+	if hadPrevious {
+		window = previous.tail + chunk
+		windowStartsAtLineBoundary = previous.tailStartsAtLineBoundary
 	}
-	s.tails[requestID] = lastReasoningRunes(chunk, reasoningChunkTailLimit)
-	s.titleReady[requestID] = reasoningTextHasTrailingBoldSpan(chunk)
+	tail := lastReasoningRunes(window, reasoningChunkTailLimit)
+	if start := len(window) - len(tail); start > 0 {
+		windowStartsAtLineBoundary = window[start-1] == '\n' || window[start-1] == '\r'
+	}
+	s.contexts[requestID] = reasoningChunkContext{
+		tail:                     tail,
+		tailStartsAtLineBoundary: windowStartsAtLineBoundary,
+	}
+}
+
+func (context reasoningChunkContext) hasTrailingStandaloneTitle() bool {
+	if !reasoningTextHasTrailingBoldSpan(context.tail) {
+		return false
+	}
+	lineStart := strings.LastIndexAny(context.tail, "\r\n") + 1
+	return context.tailStartsAtLineBoundary || lineStart > 0
 }
 
 func (s *reasoningChunkContextStore) delete(requestID string) {
@@ -76,8 +100,7 @@ func (s *reasoningChunkContextStore) delete(requestID string) {
 		return
 	}
 	s.mu.Lock()
-	delete(s.tails, requestID)
-	delete(s.titleReady, requestID)
+	delete(s.contexts, requestID)
 	s.mu.Unlock()
 }
 
@@ -87,8 +110,8 @@ func (s *reasoningChunkContextStore) tail(requestID string) (string, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tail, ok := s.tails[requestID]
-	return tail, ok
+	context, ok := s.contexts[requestID]
+	return context.tail, ok
 }
 
 func lastReasoningRunes(text string, limit int) string {
