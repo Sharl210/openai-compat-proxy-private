@@ -1008,6 +1008,7 @@ func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) [
 			continue
 		}
 		retained := make([]map[string]any, 0, len(blocks))
+		portableText := ""
 		removed := false
 		for _, block := range blocks {
 			blockType := stringValue(block["type"])
@@ -1016,6 +1017,7 @@ func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) [
 				removed = true
 			case blockType == "reasoning" && hasOpaqueResponsesReasoningState(block):
 				removed = true
+				portableText += portableResponsesReasoningTextFromOpaqueBlock(block)
 			default:
 				retained = append(retained, block)
 			}
@@ -1024,9 +1026,27 @@ func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) [
 			continue
 		}
 		stripped[index].ReasoningBlocks = retained
-		stripped[index].ReasoningContent = ""
+		stripped[index].ReasoningContent = portableText
 	}
 	return stripped
+}
+
+func portableResponsesReasoningTextFromOpaqueBlock(block map[string]any) string {
+	if len(block) == 0 {
+		return ""
+	}
+	clean := cloneResponsesHistoryDynamicMap(block)
+	delete(clean, "encrypted_content")
+	delete(clean, "signature")
+	delete(clean, "opaque")
+	portable := portableResponsesReasoningBlock(clean, true)
+	if len(portable) == 0 {
+		return ""
+	}
+	if thinking := stringValue(portable["thinking"]); thinking != "" {
+		return thinking
+	}
+	return stringValue(portable["text"])
 }
 
 func assistantToolCallSequenceHash(toolCalls []model.CanonicalToolCall) string {
