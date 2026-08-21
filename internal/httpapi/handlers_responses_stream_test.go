@@ -155,6 +155,129 @@ func TestReasoningSummaryTitleBoundaryAcrossDownstreamStreamingEndpoints(t *test
 	}
 }
 
+func TestReasoningSummaryTitleBoundaryAcrossEncryptedSummaryItemsAcrossDownstreamStreamingEndpoints(t *testing.T) {
+	// Production codex-style upstreams pair encrypted_content with a readable
+	// summary and emit title-only summary parts. The readable summaries must
+	// participate in direct title adjacency on all three downstream ports,
+	// while the encrypted bytes stay untouched.
+	upstream := testutil.NewStreamingUpstream(t, []string{
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_a\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":0,\"delta\":\"**标题甲**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":0,\"text\":\"**标题甲**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**标题甲**\"}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":1,\"delta\":\"**标题乙**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":1,\"text\":\"**标题乙**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_a\",\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"**标题乙**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_a\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题甲**\"},{\"type\":\"summary_text\",\"text\":\"**标题乙**\"}],\"encrypted_content\":\"enc-a\"}}\n\n",
+		"event: response.output_item.added\n" +
+			"data: {\"item\":{\"id\":\"rs_b\",\"type\":\"reasoning\",\"summary\":[]}}\n\n",
+		"event: response.reasoning_summary_part.added\n" +
+			"data: {\"item_id\":\"rs_b\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+		"event: response.reasoning_summary_text.delta\n" +
+			"data: {\"item_id\":\"rs_b\",\"summary_index\":0,\"delta\":\"**标题丙**\"}\n\n",
+		"event: response.reasoning_summary_text.done\n" +
+			"data: {\"item_id\":\"rs_b\",\"summary_index\":0,\"text\":\"**标题丙**\"}\n\n",
+		"event: response.reasoning_summary_part.done\n" +
+			"data: {\"item_id\":\"rs_b\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"**标题丙**\"}}\n\n",
+		"event: response.output_item.done\n" +
+			"data: {\"item\":{\"id\":\"rs_b\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"**标题丙**\"}],\"encrypted_content\":\"enc-b\"}}\n\n",
+		"event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+	})
+	defer upstream.Close()
+
+	server := NewServer(config.Config{
+		DefaultProvider:      "openai",
+		EnableLegacyV1Routes: true,
+		Providers: []config.ProviderConfig{{
+			ID:                        "openai",
+			Enabled:                   true,
+			UpstreamBaseURL:           upstream.URL,
+			UpstreamAPIKey:            "test-key",
+			UpstreamEndpointType:      config.UpstreamEndpointTypeResponses,
+			SupportsChat:              true,
+			SupportsResponses:         true,
+			SupportsAnthropicMessages: true,
+		}},
+	})
+
+	testCases := []struct {
+		name      string
+		path      string
+		body      string
+		headers   map[string]string
+		fragments []string
+	}{
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: `{"model":"gpt-5","stream":true,"input":"hello"}`,
+			fragments: []string{
+				`"delta":"**标题甲**"`,
+				`"delta":"\n\n**标题乙**"`,
+				`"delta":"\n\n**标题丙**"`,
+			},
+		},
+		{
+			name: "chat",
+			path: "/v1/chat/completions",
+			body: `{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`,
+			fragments: []string{
+				`"reasoning_content":"**标题甲**"`,
+				`"reasoning_content":"\n\n**标题乙**"`,
+				`"reasoning_content":"\n\n**标题丙**"`,
+			},
+		},
+		{
+			name: "anthropic",
+			path: "/v1/messages",
+			body: `{"model":"gpt-5","stream":true,"max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			headers: map[string]string{
+				"anthropic-version": "2023-06-01",
+			},
+			fragments: []string{
+				`"thinking":"**标题甲**"`,
+				`"thinking":"\n\n**标题乙**"`,
+				`"thinking":"\n\n**标题丙**"`,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
+			req.Header.Set("Content-Type", "application/json")
+			for name, value := range testCase.headers {
+				req.Header.Set(name, value)
+			}
+			rec := httptest.NewRecorder()
+
+			server.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d, body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			assertOrderedStreamFragments(t, body, testCase.fragments...)
+			if strings.Contains(body, `"delta":"\n\n**标题甲**"`) || strings.Contains(body, `"reasoning_content":"\n\n**标题甲**"`) || strings.Contains(body, `"thinking":"\n\n**标题甲**"`) {
+				t.Fatalf("spurious separator before first title: %s", body)
+			}
+		})
+	}
+}
+
 func TestReasoningSummaryEmptyBoldMarkerAcrossItemBoundaryAcrossDownstreamStreamingEndpoints(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_item.added\n" +
@@ -954,12 +1077,15 @@ func TestResponsesStreamPrefixesAdjacentSnapshotTitleForSummaryTextShapes(t *tes
 	}
 }
 func TestResponsesStreamDoesNotCarryBoundaryAcrossOpaqueSummaryItem(t *testing.T) {
+	// A reasoning item with encrypted content and NO readable summary is truly
+	// opaque: it isolates the title boundary even though the envelope carries
+	// encrypted content.
 	body := renderResponsesWriterEvents(t, config.UpstreamEndpointTypeResponses,
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
 			"id": "rs_visible_before", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
 		}}},
 		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
-			"id": "rs_opaque_middle", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**保密标题**"}}, "encrypted_content": "opaque-middle",
+			"id": "rs_opaque_middle", "type": "reasoning", "summary": []any{}, "encrypted_content": "opaque-middle",
 		}}},
 		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_visible_after", "type": "reasoning", "summary": []any{}}}},
 		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_visible_after", "summary_index": 0, "delta": "**第三标题**"}},
@@ -968,12 +1094,94 @@ func TestResponsesStreamDoesNotCarryBoundaryAcrossOpaqueSummaryItem(t *testing.T
 		}}},
 		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
 	)
-	assertOrderedStreamFragments(t, body, `"text":"**第一标题**"`, `"text":"**保密标题**"`, `"delta":"**第三标题**"`)
+	assertOrderedStreamFragments(t, body, `"text":"**第一标题**"`, `"text":"**第三标题**"`)
 	if strings.Contains(body, `"delta":"\n\n**第三标题**"`) {
-		t.Fatalf("title boundary crossed opaque reasoning item: %s", body)
+		t.Fatalf("title boundary crossed truly opaque reasoning item: %s", body)
 	}
 	if !strings.Contains(body, `"encrypted_content":"opaque-middle"`) {
 		t.Fatalf("opaque reasoning payload was not preserved: %s", body)
+	}
+}
+
+func TestResponsesStreamCarriesTitleBoundaryAcrossEncryptedItemWithReadableSummary(t *testing.T) {
+	// codex-style upstreams pair encrypted_content with a readable summary.
+	// The readable summary participates in title adjacency: each directly
+	// adjacent complete title (including the encrypted item's own summary and
+	// the following item) receives the separator.
+	requestReasoningChunkContexts.delete("req-responses-lane-enc")
+	body := renderResponsesWriterEventsWithRequestID(t, "req-responses-lane-enc", config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_visible_before", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第一标题**"}},
+		}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_enc_middle", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**保密标题**"}}, "encrypted_content": "opaque-middle",
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_visible_after", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_visible_after", "summary_index": 0, "delta": "**第三标题**"}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_visible_after", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**第三标题**"}},
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	assertOrderedStreamFragments(t, body, `"text":"**第一标题**"`, `"text":"\n\n**保密标题**"`, `"delta":"\n\n**第三标题**"`)
+	if !strings.Contains(body, `"delta":"\n\n**第三标题**"`) {
+		t.Fatalf("title boundary did not cross encrypted item with readable summary: %s", body)
+	}
+	if !strings.Contains(body, `"encrypted_content":"opaque-middle"`) {
+		t.Fatalf("opaque reasoning payload was not preserved: %s", body)
+	}
+}
+
+func TestResponsesStreamSeparatesTitlesAcrossEncryptedSummaryItems(t *testing.T) {
+	// Two consecutive codex-style items (encrypted_content + readable
+	// summary), each streamed as one title-only part: the second item's first
+	// delta must be prefixed with \n\n and the terminal snapshots must stay
+	// consistent.
+	requestReasoningChunkContexts.delete("req-responses-lane-enc-two")
+	body := renderResponsesWriterEventsWithRequestID(t, "req-responses-lane-enc-two", config.UpstreamEndpointTypeResponses,
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_a", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "delta": "**标题甲**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "text": "**标题甲**"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题甲**"}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_a", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题甲**"}}, "encrypted_content": "enc-a",
+		}}},
+		upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_b", "type": "reasoning", "summary": []any{}}}},
+		upstream.Event{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		upstream.Event{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "delta": "**标题乙**"}},
+		upstream.Event{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "text": "**标题乙**"}},
+		upstream.Event{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题乙**"}}},
+		upstream.Event{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_b", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题乙**"}}, "encrypted_content": "enc-b",
+		}}},
+		upstream.Event{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	)
+	if !strings.Contains(body, `"delta":"**标题甲**"`) {
+		t.Fatalf("missing first title delta: %s", body)
+	}
+	if !strings.Contains(body, `"delta":"\n\n**标题乙**"`) {
+		t.Fatalf("missing cross-item separator before second title: %s", body)
+	}
+	if strings.Contains(body, `"delta":"\n\n**标题甲**"`) {
+		t.Fatalf("spurious separator before first title: %s", body)
+	}
+	itemDoneA := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+		item, _ := data["item"].(map[string]any)
+		return responseToolItemStateID(item) == "rs_a"
+	})
+	itemA, _ := itemDoneA["item"].(map[string]any)
+	assertReasoningSummaryTexts(t, itemA, []string{"**标题甲**"})
+
+	itemDoneB := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+		item, _ := data["item"].(map[string]any)
+		return responseToolItemStateID(item) == "rs_b"
+	})
+	itemB, _ := itemDoneB["item"].(map[string]any)
+	assertReasoningSummaryTexts(t, itemB, []string{"\n\n**标题乙**"})
+
+	if !strings.Contains(body, `"encrypted_content":"enc-a"`) || !strings.Contains(body, `"encrypted_content":"enc-b"`) {
+		t.Fatalf("encrypted payloads were not preserved: %s", body)
 	}
 }
 
