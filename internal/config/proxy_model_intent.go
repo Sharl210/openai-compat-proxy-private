@@ -124,6 +124,12 @@ func modelMapTargetProviderID(entry ModelMapEntry, useSourceProviderAsTarget boo
 }
 
 func mergeProxyModelIntentMapTarget(source model.ProxyModelIntent, target model.ProxyModelIntent) model.ProxyModelIntent {
+	if source.ReasoningEffort != "" && target.ReasoningEffort != "" {
+		suffix := "-" + source.ReasoningEffort
+		if strings.HasSuffix(target.BaseModel, suffix) && strings.TrimSuffix(target.BaseModel, suffix) == source.BaseModel {
+			target.BaseModel = strings.TrimSuffix(target.BaseModel, suffix)
+		}
+	}
 	source.BaseModel = target.BaseModel
 	if target.ReasoningEffort != "" {
 		source.ReasoningEffort = target.ReasoningEffort

@@ -19,6 +19,7 @@ func handleAnthropicMessages() http.HandlerFunc {
 		r, sessionID := ensureProxySessionID(r, w)
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
+		defer requestReasoningChunkContexts.delete(requestID)
 		if strings.TrimSpace(r.Header.Get("anthropic-version")) == "" {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", "missing anthropic-version header")
