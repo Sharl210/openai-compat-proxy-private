@@ -102,6 +102,117 @@ func TestAnthropicEventWriterFormatsNativeReasoningSummaryPartsAcrossIndexes(t *
 	}
 }
 
+func TestChatEventWriterSeparatesTitlesAcrossEncryptedSummaryItems(t *testing.T) {
+	requestReasoningChunkContexts.delete("req-chat-enc")
+	defer requestReasoningChunkContexts.delete("req-chat-enc")
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		requestID:        "req-chat-enc",
+		toolIDAliases:    map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		toolIndex:        map[string]int{},
+		toolSent:         map[string]bool{},
+		pendingToolArgs:  map[string]string{},
+		thinkingTagStyle: "",
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "chat",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewChatEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_a", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "delta": "**标题甲**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "text": "**标题甲**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题甲**"}}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_a", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题甲**"}}, "encrypted_content": "enc-a",
+		}}},
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_b", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "delta": "**标题乙**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "text": "**标题乙**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题乙**"}}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_b", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题乙**"}}, "encrypted_content": "enc-b",
+		}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	} {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"reasoning_content":"**标题甲**"`) || !strings.Contains(body, `"reasoning_content":"\n\n**标题乙**"`) {
+		t.Fatalf("expected cross-item separator for encrypted+summary items on Chat, got %s", body)
+	}
+	if strings.Contains(body, `"reasoning_content":"\n\n**标题甲**"`) {
+		t.Fatalf("spurious separator before first Chat title: %s", body)
+	}
+	if strings.Contains(body, internalReasoningFormatItemIDKey) {
+		t.Fatalf("internal formatting key leaked to Chat output: %s", body)
+	}
+}
+
+func TestAnthropicEventWriterSeparatesTitlesAcrossEncryptedSummaryItems(t *testing.T) {
+	requestReasoningChunkContexts.delete("req-anthropic-enc")
+	defer requestReasoningChunkContexts.delete("req-anthropic-enc")
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{
+		messageID:        "req-anthropic-enc",
+		pendingToolArgs:  map[string]string{},
+		toolMeta:         map[string]map[string]string{},
+		emittedToolItems: map[string]bool{},
+	}
+	helper := &responseEventWriterHelper{
+		downstreamType:       "anthropic",
+		upstreamEndpointType: config.UpstreamEndpointTypeResponses,
+		toolIDAliases:        map[string]string{},
+		toolItems:            map[string]*responsesToolItemState{},
+	}
+	writer := NewAnthropicEventWriter(rec, nil, state, helper, nil)
+
+	for _, event := range []upstream.Event{
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_a", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "delta": "**标题甲**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "text": "**标题甲**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_a", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题甲**"}}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_a", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题甲**"}}, "encrypted_content": "enc-a",
+		}}},
+		{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "rs_b", "type": "reasoning", "summary": []any{}}}},
+		{Event: "response.reasoning_summary_part.added", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": ""}}},
+		{Event: "response.reasoning_summary_text.delta", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "delta": "**标题乙**"}},
+		{Event: "response.reasoning_summary_text.done", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "text": "**标题乙**"}},
+		{Event: "response.reasoning_summary_part.done", Data: map[string]any{"item_id": "rs_b", "summary_index": 0, "part": map[string]any{"type": "summary_text", "text": "**标题乙**"}}},
+		{Event: "response.output_item.done", Data: map[string]any{"item": map[string]any{
+			"id": "rs_b", "type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "**标题乙**"}}, "encrypted_content": "enc-b",
+		}}},
+		{Event: "response.completed", Data: map[string]any{"response": map[string]any{}}},
+	} {
+		if err := writer.WriteEvent(event.Event, event.Data); err != nil {
+			t.Fatalf("writer.WriteEvent(%s): %v", event.Event, err)
+		}
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"thinking":"**标题甲**"`) || !strings.Contains(body, `"thinking":"\n\n**标题乙**"`) {
+		t.Fatalf("expected cross-item separator for encrypted+summary items on Anthropic, got %s", body)
+	}
+	if strings.Contains(body, `"thinking":"\n\n**标题甲**"`) {
+		t.Fatalf("spurious separator before first Anthropic title: %s", body)
+	}
+	if strings.Contains(body, internalReasoningFormatItemIDKey) {
+		t.Fatalf("internal formatting key leaked to Anthropic output: %s", body)
+	}
+}
+
 func TestChatEventWriterSeparatesTitlesWhenSummaryTextDoneHasNoPartDone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	state := &chatStreamState{
@@ -280,8 +391,18 @@ func TestResponsesEventWriterPreservesOpaqueReasoningWhenSummaryTextDoneHasNoPar
 	if strings.Contains(body, `"delta":"\n\n**第二标题**"`) {
 		t.Fatalf("opaque reasoning delta was reformatted: %s", body)
 	}
-	if !strings.Contains(body, `"text":"**第一标题****第二标题**"`) {
-		t.Fatalf("opaque reasoning snapshot changed, got %s", body)
+	// The delta events themselves carry encrypted content, so the streamed
+	// parts stay raw. The terminal snapshot must preserve each part's original
+	// bytes without inserting a title separator or joining parts into a
+	// reformatted string.
+	itemDone := responseSSEEventData(t, body, "response.output_item.done", func(data map[string]any) bool {
+		item, _ := data["item"].(map[string]any)
+		return responseToolItemStateID(item) == "rs_missing_part_done"
+	})
+	item, _ := itemDone["item"].(map[string]any)
+	assertReasoningSummaryTexts(t, item, []string{"**第一标题**", "**第二标题**"})
+	if strings.Contains(body, `\n\n**第二标题**`) {
+		t.Fatalf("opaque reasoning snapshot inserted a separator: %s", body)
 	}
 }
 
@@ -850,11 +971,21 @@ func TestFormatStreamingReasoningItemSummarySupportsTypedOpaqueParts(t *testing.
 		t.Fatalf("typed summary=%#v, want formatted title sequence", got)
 	}
 
+	// An item that carries a readable summary is formatted even when its
+	// envelope also carries encrypted content; only summary-less opaque
+	// payloads stay untouched.
 	states = map[reasoningSummaryKey]*reasoningSummaryState{}
 	nextOrder = 0
 	item["encrypted_content"] = "enc_payload"
-	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, item); len(got) != 1 || got[0] != "**第一标题****第二标题**" {
-		t.Fatalf("typed opaque summary=%#v, want original bytes", got)
+	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, item); len(got) != 1 || got[0] != "**第一标题**\n\n**第二标题**" {
+		t.Fatalf("typed encrypted+summary=%#v, want formatted title sequence", got)
+	}
+
+	states = map[reasoningSummaryKey]*reasoningSummaryState{}
+	nextOrder = 0
+	opaqueItem := map[string]any{"id": "rs_opaque", "summary": []any{}, "encrypted_content": "enc_payload"}
+	if got := formatStreamingReasoningItemSummary(&states, &nextOrder, opaqueItem); len(got) != 0 {
+		t.Fatalf("summary-less opaque item=%#v, want no projected deltas", got)
 	}
 }
 

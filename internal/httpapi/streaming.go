@@ -605,8 +605,9 @@ func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, su
 }
 
 func (h *responseEventWriterHelper) markReasoningItemTitleBoundary(itemID string, item map[string]any) {
-	if reasoningPayloadIsOpaque(item) {
+	if reasoningItemOpaqueWithoutSummary(item) {
 		h.reasoningTitleBoundary = false
+		requestReasoningChunkContexts.delete(h.requestID)
 		return
 	}
 	text := reasoningSummaryTextFromItem(item)
@@ -627,7 +628,7 @@ func (h *responseEventWriterHelper) markReasoningItemTitleBoundary(itemID string
 }
 
 func (h *responseEventWriterHelper) reconcileReasoningItemSummary(itemID string, outputIndex int, item map[string]any) {
-	if h.downstreamType != "responses" || itemID == "" || item == nil || reasoningPayloadIsOpaque(item) || len(h.reasoningFormatStates) == 0 {
+	if h.downstreamType != "responses" || itemID == "" || item == nil || reasoningItemOpaqueWithoutSummary(item) || len(h.reasoningFormatStates) == 0 {
 		return
 	}
 	for _, part := range reasoningSummaryTextPartsFromItem(item) {
@@ -798,6 +799,27 @@ func reasoningPayloadIsOpaque(value any) bool {
 		}
 	}
 	return false
+}
+
+// isResponsesReasoningOutputItemEvent reports whether the event is a reasoning
+// output_item lifecycle event. Such items participate in title adjacency via
+// their readable summary even when their envelope also carries encrypted or
+// signed content, so they must not reset the title boundary merely because the
+// envelope is opaque.
+func isResponsesReasoningOutputItemEvent(event string, item map[string]any) bool {
+	if event != "response.output_item.added" && event != "response.output_item.done" {
+		return false
+	}
+	return item != nil && stringValue(item["type"]) == "reasoning"
+}
+
+// reasoningItemOpaqueWithoutSummary reports whether a reasoning item carries
+// no readable summary text at all (a purely opaque payload). Only such items
+// isolate the title boundary; items with a readable summary participate in
+// direct title adjacency even when the item also carries encrypted or signed
+// content.
+func reasoningItemOpaqueWithoutSummary(item map[string]any) bool {
+	return reasoningPayloadIsOpaque(item) && reasoningSummaryTextFromItem(item) == ""
 }
 
 func formatReasoningEventBlocks(data map[string]any) {
@@ -1087,7 +1109,7 @@ func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reason
 }
 
 func formatStreamingReasoningItemSummaryForRequest(requestID string, states *map[reasoningSummaryKey]*reasoningSummaryState, nextOrder *int, item map[string]any) []string {
-	if reasoningPayloadIsOpaque(item) {
+	if reasoningItemOpaqueWithoutSummary(item) {
 		requestReasoningChunkContexts.delete(requestID)
 	}
 	parts := reasoningSummaryTextPartsFromItem(item)
@@ -1100,14 +1122,14 @@ func formatStreamingReasoningItemSummaryForRequest(requestID string, states *map
 		for _, part := range parts {
 			summary.WriteString(part.text)
 		}
-		if delta := formatStreamingReasoningSummaryForRequest(requestID, states, nextOrder, itemID, 0, summary.String(), true, reasoningPayloadIsOpaque(item)); delta != "" {
+		if delta := formatStreamingReasoningSummaryForRequest(requestID, states, nextOrder, itemID, 0, summary.String(), true, reasoningItemOpaqueWithoutSummary(item)); delta != "" {
 			return []string{delta}
 		}
 		return nil
 	}
 	deltas := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if delta := formatStreamingReasoningSummaryForRequest(requestID, states, nextOrder, itemID, part.index, part.text, true, reasoningPayloadIsOpaque(item)); delta != "" {
+		if delta := formatStreamingReasoningSummaryForRequest(requestID, states, nextOrder, itemID, part.index, part.text, true, reasoningItemOpaqueWithoutSummary(item)); delta != "" {
 			deltas = append(deltas, delta)
 		}
 	}
@@ -2247,7 +2269,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			defer requestReasoningChunkContexts.delete(h.requestID)
 		} else if isResponsesNonReasoningLaneEvent(evt.Event, item) {
 			h.finishResponsesReasoningAtBoundary()
-		} else if reasoningPayloadIsOpaque(evt.Data) {
+		} else if reasoningPayloadIsOpaque(evt.Data) && !isResponsesReasoningOutputItemEvent(evt.Event, item) {
 			requestReasoningChunkContexts.delete(h.requestID)
 			h.reasoningTitleBoundary = false
 		}
@@ -2323,18 +2345,18 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 				hasStreamedParts := len(h.reasoningSummaryParts[itemID]) > 0
 				summary := reasoningSummaryFromItem(item)
-				if !reasoningPayloadIsOpaque(item) {
+				if !reasoningItemOpaqueWithoutSummary(item) {
 					if storedSummary := h.reasoningSummaryPartText(itemID, 0); storedSummary != "" {
 						summary = storedSummary
 					}
 				}
 				boundaryConsumed := false
-				if summary == "" || reasoningPayloadIsOpaque(item) {
+				if summary == "" || reasoningItemOpaqueWithoutSummary(item) {
 					h.flushReasoningFormatItemStates(itemID)
 				}
 				if summary != "" && (!hadReasoningItem || h.reasoningSummaryPartStarted(itemID, 0)) {
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, 0)
-					formattedSummary := h.consumeReasoningTitleBoundary(nil, summary, reasoningPayloadIsOpaque(item))
+					formattedSummary := h.consumeReasoningTitleBoundary(nil, summary, reasoningItemOpaqueWithoutSummary(item))
 					boundaryConsumed = formattedSummary != summary
 					summary = formattedSummary
 					h.closeReasoningSummaryPartWithText(itemID, outputIndex, 0, summary)
@@ -3523,7 +3545,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 	var closeThinkingBlock func() error
 	var flushPendingThinking func() error
 	item, _ := evt.Data["item"].(map[string]any)
-	clearReasoningBoundary := isResponsesNonReasoningLaneEvent(evt.Event, item) || reasoningPayloadIsOpaque(evt.Data)
+	clearReasoningBoundary := isResponsesNonReasoningLaneEvent(evt.Event, item) || (reasoningPayloadIsOpaque(evt.Data) && !isResponsesReasoningOutputItemEvent(evt.Event, item))
 	if state != nil && isResponsesTerminalEvent(evt.Event) {
 		defer requestReasoningChunkContexts.delete(state.messageID)
 	}
@@ -4415,7 +4437,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		state.toolIDAliases = map[string]string{}
 	}
 	item, _ := evt.Data["item"].(map[string]any)
-	clearReasoningBoundary := isResponsesNonReasoningLaneEvent(evt.Event, item) || reasoningPayloadIsOpaque(evt.Data)
+	clearReasoningBoundary := isResponsesNonReasoningLaneEvent(evt.Event, item) || (reasoningPayloadIsOpaque(evt.Data) && !isResponsesReasoningOutputItemEvent(evt.Event, item))
 	if isResponsesTerminalEvent(evt.Event) {
 		defer requestReasoningChunkContexts.delete(state.requestID)
 	}
