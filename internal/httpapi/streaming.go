@@ -143,9 +143,10 @@ type reasoningTextState struct {
 }
 
 type reasoningSummaryState struct {
-	reasoningText reasoningTextState
-	done          bool
-	order         int
+	reasoningText        reasoningTextState
+	done                 bool
+	order                int
+	titleBoundaryPending bool
 }
 
 type responsesToolItemState struct {
@@ -387,6 +388,20 @@ func (state *reasoningTextState) formatDelta(delta string, preserve bool) string
 	return formattedDelta
 }
 
+func (state *reasoningTextState) replaceFormattedSuffix(before, after string) {
+	if state == nil || before == "" || before == after {
+		return
+	}
+	formatted := state.formatted.String()
+	if !strings.HasSuffix(formatted, before) {
+		return
+	}
+	state.formatted.Reset()
+	state.formatted.Grow(len(formatted) - len(before) + len(after))
+	state.formatted.WriteString(formatted[:len(formatted)-len(before)])
+	state.formatted.WriteString(after)
+}
+
 func (state *reasoningTextState) finish() string {
 	if state == nil || state.preserving {
 		return ""
@@ -443,18 +458,27 @@ func (h *responseEventWriterHelper) formatReasoningContentDelta(itemID string, s
 	h.inheritReasoningTitleBoundary(itemID, summaryIndex, preserve)
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	formatted := state.formatDelta(delta, preserve)
-	return h.consumeReasoningTitleBoundary(state, formatted, preserve)
+	formatted = h.consumeReasoningTitleBoundary(state, formatted, preserve)
+	return requestReasoningChunkContexts.formatStateDelta(h.requestID, state, formatted, preserve)
 }
 
 func (h *responseEventWriterHelper) formatReasoningContentSnapshot(itemID string, summaryIndex int, snapshot string, preserve bool) (string, string, bool) {
 	h.inheritReasoningTitleBoundary(itemID, summaryIndex, preserve)
 	state := h.reasoningFormatState(itemID, summaryIndex)
 	delta, handled := state.formatSnapshot(snapshot, preserve)
-	if handled {
-		delta += state.finishAtBoundary()
+	if !handled {
+		if preserve {
+			return "", "", false
+		}
+		// A provider snapshot may group the same stars differently from deltas
+		// already emitted. Keep the append-only formatted lane authoritative.
+		delta = requestReasoningChunkContexts.formatStateDelta(h.requestID, state, state.finishAtBoundary(), false)
+		return delta, state.formatted.String(), true
 	}
+	delta += state.finishAtBoundary()
 	delta = h.consumeReasoningTitleBoundary(state, delta, preserve)
-	return delta, state.formatted.String(), handled
+	delta = requestReasoningChunkContexts.formatStateDelta(h.requestID, state, delta, preserve)
+	return delta, state.formatted.String(), true
 }
 
 func (h *responseEventWriterHelper) inheritReasoningTitleBoundary(itemID string, summaryIndex int, preserve bool) {
@@ -474,13 +498,19 @@ func (h *responseEventWriterHelper) consumeReasoningTitleBoundary(state *reasoni
 		return text
 	}
 	h.reasoningTitleBoundary = false
-	if preserve || !startsWithCompleteBoldSpan(text) {
+	if preserve || !startsWithCompleteOrEmptyBoldSpan(text) {
 		return text
 	}
 	formatted := "\n\n" + text
-	state.formatted.Reset()
-	state.formatted.WriteString(formatted)
+	if state != nil {
+		state.formatted.Reset()
+		state.formatted.WriteString(formatted)
+	}
 	return formatted
+}
+
+func startsWithCompleteOrEmptyBoldSpan(text string) bool {
+	return startsWithCompleteBoldSpan(text) || strings.HasPrefix(text, "****")
 }
 
 func startsWithCompleteBoldSpan(text string) bool {
@@ -491,6 +521,80 @@ func startsWithCompleteBoldSpan(text string) bool {
 	return end > 0
 }
 
+func reasoningTextHasTrailingBoldSpan(text string) bool {
+	lineStart := strings.LastIndexAny(text, "\r\n") + 1
+	if !strings.HasPrefix(text[lineStart:], "**") {
+		return false
+	}
+	formatted := reasoningtext.FormatText(text)
+	formattedLineStart := strings.LastIndexAny(formatted, "\r\n") + 1
+	tail := formatted[formattedLineStart:]
+	if tail == "****" {
+		prefix := strings.TrimRight(formatted[:formattedLineStart], "\r\n")
+		return prefix != "" && reasoningTextHasTrailingBoldSpan(prefix)
+	}
+	if len(tail) < 5 || !strings.HasPrefix(tail, "**") {
+		return false
+	}
+	leadingStars := 0
+	for leadingStars < len(tail) && tail[leadingStars] == '*' {
+		leadingStars++
+	}
+	trailingStars := 0
+	for index := len(tail) - 1; index >= 0 && tail[index] == '*'; index-- {
+		trailingStars++
+	}
+	if leadingStars < 2 || trailingStars < 2 || leadingStars+trailingStars >= len(tail) {
+		return false
+	}
+	content := tail[leadingStars : len(tail)-trailingStars]
+	return content != "" && !strings.Contains(content, "**") && strings.Trim(content, "*") != ""
+}
+
+func isResponsesReasoningBoundaryEvent(event string, item map[string]any) bool {
+	if strings.HasPrefix(event, "response.reasoning") {
+		return true
+	}
+	if event != "response.output_item.added" && event != "response.output_item.done" {
+		return false
+	}
+	return stringValue(item["type"]) == "reasoning"
+}
+
+func isResponsesNonReasoningLaneEvent(event string, item map[string]any) bool {
+	if isResponsesTerminalEvent(event) || isResponsesReasoningBoundaryEvent(event, item) {
+		return false
+	}
+	switch event {
+	case "response.created", "response.in_progress":
+		return false
+	default:
+		return true
+	}
+}
+
+func isResponsesTerminalEvent(event string) bool {
+	switch event {
+	case "response.completed", "response.done", "error", "response.failed", "response.incomplete":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *responseEventWriterHelper) finishResponsesReasoningAtBoundary() {
+	if h == nil || h.downstreamType != "responses" {
+		return
+	}
+	h.flushReasoningFormatStates()
+	h.closeAllReasoningLifecycles()
+	h.clearReasoningFormatStates()
+	h.resetReasoningFormatPhase()
+	h.reasoningTitleBoundary = false
+	h.closeSyntheticReasoning()
+	requestReasoningChunkContexts.delete(h.requestID)
+}
+
 func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, summaryIndex int, preserve bool) {
 	if preserve || h.reasoningFormatStates == nil {
 		h.reasoningTitleBoundary = false
@@ -498,6 +602,59 @@ func (h *responseEventWriterHelper) markReasoningTitleBoundary(itemID string, su
 	}
 	state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex}]
 	h.reasoningTitleBoundary = state != nil && state.hasTrailingBoldSpan()
+}
+
+func (h *responseEventWriterHelper) markReasoningItemTitleBoundary(itemID string, item map[string]any) {
+	if reasoningItemOpaqueWithoutSummary(item) {
+		h.reasoningTitleBoundary = false
+		requestReasoningChunkContexts.delete(h.requestID)
+		return
+	}
+	text := reasoningSummaryTextFromItem(item)
+	if text == "" {
+		parts := h.reasoningSummaryParts[itemID]
+		indices := make([]int, 0, len(parts))
+		for summaryIndex := range parts {
+			indices = append(indices, summaryIndex)
+		}
+		sort.Ints(indices)
+		var summary strings.Builder
+		for _, summaryIndex := range indices {
+			summary.WriteString(h.reasoningSummaryPartText(itemID, summaryIndex))
+		}
+		text = summary.String()
+	}
+	h.reasoningTitleBoundary = text != "" && reasoningTextHasTrailingBoldSpan(text)
+}
+
+func (h *responseEventWriterHelper) reconcileReasoningItemSummary(itemID string, outputIndex int, item map[string]any) {
+	if h.downstreamType != "responses" || itemID == "" || item == nil || reasoningItemOpaqueWithoutSummary(item) || len(h.reasoningFormatStates) == 0 {
+		return
+	}
+	for _, part := range reasoningSummaryTextPartsFromItem(item) {
+		state := h.reasoningFormatStates[reasoningSummaryKey{itemID: itemID, summaryIndex: part.index}]
+		if state == nil || part.text == "" {
+			continue
+		}
+		formattedDelta, formattedSnapshot, handled := h.formatReasoningContentSnapshot(itemID, part.index, part.text, false)
+		if !handled {
+			continue
+		}
+		h.ensureReasoningSummaryPartStarted(itemID, outputIndex, part.index)
+		if formattedSnapshot != "" {
+			h.setReasoningSummaryPartText(itemID, part.index, formattedSnapshot)
+		}
+		if formattedDelta == "" {
+			continue
+		}
+		h.addEvent("response.reasoning_summary_text.delta", map[string]any{
+			"item_id":                            itemID,
+			"output_index":                       outputIndex,
+			"summary_index":                      part.index,
+			"delta":                              formattedDelta,
+			aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream,
+		})
+	}
 }
 
 func (h *responseEventWriterHelper) clearReasoningFormatState(itemID string, summaryIndex int) {
@@ -515,7 +672,7 @@ func (h *responseEventWriterHelper) flushReasoningFormatState(key reasoningSumma
 	if state == nil {
 		return
 	}
-	delta := state.finish()
+	delta := requestReasoningChunkContexts.formatStateDelta(h.requestID, state, state.finish(), state.preserving)
 	if delta == "" {
 		return
 	}
@@ -644,6 +801,27 @@ func reasoningPayloadIsOpaque(value any) bool {
 	return false
 }
 
+// isResponsesReasoningOutputItemEvent reports whether the event is a reasoning
+// output_item lifecycle event. Such items participate in title adjacency via
+// their readable summary even when their envelope also carries encrypted or
+// signed content, so they must not reset the title boundary merely because the
+// envelope is opaque.
+func isResponsesReasoningOutputItemEvent(event string, item map[string]any) bool {
+	if event != "response.output_item.added" && event != "response.output_item.done" {
+		return false
+	}
+	return item != nil && stringValue(item["type"]) == "reasoning"
+}
+
+// reasoningItemOpaqueWithoutSummary reports whether a reasoning item carries
+// no readable summary text at all (a purely opaque payload). Only such items
+// isolate the title boundary; items with a readable summary participate in
+// direct title adjacency even when the item also carries encrypted or signed
+// content.
+func reasoningItemOpaqueWithoutSummary(item map[string]any) bool {
+	return reasoningPayloadIsOpaque(item) && reasoningSummaryTextFromItem(item) == ""
+}
+
 func formatReasoningEventBlocks(data map[string]any) {
 	if part, ok := data["part"].(map[string]any); ok {
 		data["part"] = reasoningtext.FormatBlock(part)
@@ -681,6 +859,10 @@ func formatStreamingReasoningSnapshot(state *reasoningTextState, snapshot string
 }
 
 func formatStreamingReasoningSummary(states *map[reasoningSummaryKey]*reasoningSummaryState, nextOrder *int, itemID string, summaryIndex int, text string, snapshot, preserve bool) string {
+	return formatStreamingReasoningSummaryForRequest("", states, nextOrder, itemID, summaryIndex, text, snapshot, preserve)
+}
+
+func formatStreamingReasoningSummaryForRequest(requestID string, states *map[reasoningSummaryKey]*reasoningSummaryState, nextOrder *int, itemID string, summaryIndex int, text string, snapshot, preserve bool) string {
 	if text == "" {
 		return ""
 	}
@@ -701,14 +883,41 @@ func formatStreamingReasoningSummary(states *map[reasoningSummaryKey]*reasoningS
 		state = &reasoningSummaryState{order: order}
 		(*states)[key] = state
 	}
+	inheritStreamingReasoningTitleBoundary(states, itemID, summaryIndex, state, preserve)
+	var delta string
 	if snapshot {
 		if state.done {
 			return ""
 		}
 		state.done = true
-		return formatStreamingReasoningSnapshot(&state.reasoningText, text, preserve)
+		delta = formatStreamingReasoningSnapshot(&state.reasoningText, text, preserve)
+	} else {
+		delta = formatStreamingReasoningDelta(&state.reasoningText, text, preserve)
 	}
-	return formatStreamingReasoningDelta(&state.reasoningText, text, preserve)
+	delta = consumeStreamingReasoningTitleBoundary(state, delta, preserve)
+	return requestReasoningChunkContexts.formatStateDelta(requestID, &state.reasoningText, delta, preserve)
+}
+func inheritStreamingReasoningTitleBoundary(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string, summaryIndex int, state *reasoningSummaryState, preserve bool) {
+	if preserve || state == nil || state.titleBoundaryPending || summaryIndex <= 0 || state.reasoningText.raw.Len() > 0 || states == nil || *states == nil {
+		return
+	}
+	previous := (*states)[reasoningSummaryKey{itemID: itemID, summaryIndex: summaryIndex - 1}]
+	if previous != nil && previous.done && reasoningTextHasTrailingBoldSpan(previous.reasoningText.raw.String()) {
+		state.titleBoundaryPending = true
+	}
+}
+func consumeStreamingReasoningTitleBoundary(state *reasoningSummaryState, text string, preserve bool) string {
+	if state == nil || text == "" || !state.titleBoundaryPending {
+		return text
+	}
+	state.titleBoundaryPending = false
+	if preserve || !startsWithCompleteOrEmptyBoldSpan(text) {
+		return text
+	}
+	formatted := "\n\n" + text
+	state.reasoningText.formatted.Reset()
+	state.reasoningText.formatted.WriteString(formatted)
+	return formatted
 }
 
 func clearStreamingReasoningSummaryStates(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string) {
@@ -723,6 +932,10 @@ func clearStreamingReasoningSummaryStates(states *map[reasoningSummaryKey]*reaso
 }
 
 func finishStreamingReasoningSummaryStates(states *map[reasoningSummaryKey]*reasoningSummaryState) []string {
+	return finishStreamingReasoningSummaryStatesForRequest("", states)
+}
+
+func finishStreamingReasoningSummaryStatesForRequest(requestID string, states *map[reasoningSummaryKey]*reasoningSummaryState) []string {
 	if states == nil || len(*states) == 0 {
 		return nil
 	}
@@ -747,7 +960,7 @@ func finishStreamingReasoningSummaryStates(states *map[reasoningSummaryKey]*reas
 		if state == nil {
 			continue
 		}
-		if delta := state.reasoningText.finish(); delta != "" {
+		if delta := requestReasoningChunkContexts.formatStateDelta(requestID, &state.reasoningText, state.reasoningText.finish(), state.reasoningText.preserving); delta != "" {
 			deltas = append(deltas, delta)
 		}
 	}
@@ -755,6 +968,10 @@ func finishStreamingReasoningSummaryStates(states *map[reasoningSummaryKey]*reas
 }
 
 func finishStreamingReasoningSummaryItemStates(states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string) []string {
+	return finishStreamingReasoningSummaryItemStatesForRequest("", states, itemID)
+}
+
+func finishStreamingReasoningSummaryItemStatesForRequest(requestID string, states *map[reasoningSummaryKey]*reasoningSummaryState, itemID string) []string {
 	if states == nil || len(*states) == 0 || itemID == "" {
 		return nil
 	}
@@ -778,7 +995,7 @@ func finishStreamingReasoningSummaryItemStates(states *map[reasoningSummaryKey]*
 		if state == nil {
 			continue
 		}
-		if delta := state.reasoningText.finishAtBoundary(); delta != "" {
+		if delta := requestReasoningChunkContexts.formatStateDelta(requestID, &state.reasoningText, state.reasoningText.finishAtBoundary(), state.reasoningText.preserving); delta != "" {
 			deltas = append(deltas, delta)
 		}
 	}
@@ -788,6 +1005,31 @@ func finishStreamingReasoningSummaryItemStates(states *map[reasoningSummaryKey]*
 type reasoningSummaryTextPart struct {
 	index int
 	text  string
+}
+
+func reasoningSummaryTextPartValue(part map[string]any) string {
+	if text := stringValue(part["text"]); text != "" {
+		return text
+	}
+	if text := stringValue(part["summary_text"]); text != "" {
+		return text
+	}
+	nested, _ := part["summary_text"].(map[string]any)
+	return stringValue(nested["text"])
+}
+
+func reasoningSummaryTextFromItem(item map[string]any) string {
+	if item == nil {
+		return ""
+	}
+	if summary, ok := item["summary"].(string); ok {
+		return summary
+	}
+	var text strings.Builder
+	for _, part := range reasoningSummaryTextPartsFromItem(item) {
+		text.WriteString(part.text)
+	}
+	return text.String()
 }
 
 func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTextPart {
@@ -800,7 +1042,7 @@ func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTe
 			if part == nil {
 				continue
 			}
-			parts = append(parts, reasoningSummaryTextPart{index: index, text: stringValue(part["text"])})
+			parts = append(parts, reasoningSummaryTextPart{index: index, text: reasoningSummaryTextPartValue(part)})
 		}
 	case []map[string]any:
 		parts = make([]reasoningSummaryTextPart, 0, len(summary))
@@ -808,13 +1050,68 @@ func reasoningSummaryTextPartsFromItem(item map[string]any) []reasoningSummaryTe
 			if part == nil {
 				continue
 			}
-			parts = append(parts, reasoningSummaryTextPart{index: index, text: stringValue(part["text"])})
+			parts = append(parts, reasoningSummaryTextPart{index: index, text: reasoningSummaryTextPartValue(part)})
 		}
 	}
 	return parts
 }
 
+func prependReasoningSummaryItemText(item map[string]any, prefix string) {
+	if item == nil || prefix == "" {
+		return
+	}
+	if summary, ok := item["summary"].(string); ok && summary != "" {
+		item["summary"] = prefix + summary
+		return
+	}
+	switch summary := item["summary"].(type) {
+	case []any:
+		for _, rawPart := range summary {
+			part, _ := rawPart.(map[string]any)
+			if prependReasoningSummaryPartText(part, prefix) {
+				return
+			}
+		}
+	case []map[string]any:
+		for _, part := range summary {
+			if prependReasoningSummaryPartText(part, prefix) {
+				return
+			}
+		}
+	}
+}
+
+func prependReasoningSummaryPartText(part map[string]any, prefix string) bool {
+	if part == nil {
+		return false
+	}
+	if text := stringValue(part["text"]); text != "" {
+		part["text"] = prefix + text
+		return true
+	}
+	switch summaryText := part["summary_text"].(type) {
+	case string:
+		if summaryText != "" {
+			part["summary_text"] = prefix + summaryText
+			return true
+		}
+	case map[string]any:
+		if text := stringValue(summaryText["text"]); text != "" {
+			summaryText["text"] = prefix + text
+			return true
+		}
+	}
+	return false
+}
+
 func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reasoningSummaryState, nextOrder *int, item map[string]any) []string {
+	return formatStreamingReasoningItemSummaryForRequest("", states, nextOrder, item)
+}
+
+func formatStreamingReasoningItemSummaryForRequest(requestID string, states *map[reasoningSummaryKey]*reasoningSummaryState, nextOrder *int, item map[string]any) []string {
+	if reasoningItemOpaqueWithoutSummary(item) {
+		requestReasoningChunkContexts.delete(requestID)
+	}
 	parts := reasoningSummaryTextPartsFromItem(item)
 	if len(parts) == 0 {
 		return nil
@@ -825,14 +1122,14 @@ func formatStreamingReasoningItemSummary(states *map[reasoningSummaryKey]*reason
 		for _, part := range parts {
 			summary.WriteString(part.text)
 		}
-		if delta := formatStreamingReasoningSummary(states, nextOrder, itemID, 0, summary.String(), true, reasoningPayloadIsOpaque(item)); delta != "" {
+		if delta := formatStreamingReasoningSummaryForRequest(requestID, states, nextOrder, itemID, 0, summary.String(), true, reasoningItemOpaqueWithoutSummary(item)); delta != "" {
 			return []string{delta}
 		}
 		return nil
 	}
 	deltas := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if delta := formatStreamingReasoningSummary(states, nextOrder, itemID, part.index, part.text, true, reasoningPayloadIsOpaque(item)); delta != "" {
+		if delta := formatStreamingReasoningSummaryForRequest(requestID, states, nextOrder, itemID, part.index, part.text, true, reasoningItemOpaqueWithoutSummary(item)); delta != "" {
 			deltas = append(deltas, delta)
 		}
 	}
@@ -1030,10 +1327,10 @@ func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any
 	snapshot := h.responseOutputSnapshot()
 	rawItems, _ := rawOutput.([]any)
 	if len(rawItems) == 0 {
-		return trimResponseOutputTextLineEndings(snapshot)
+		return finalizeCompletedResponseOutput(snapshot)
 	}
 	if len(snapshot) == 0 {
-		return trimResponseOutputTextLineEndings(cloneJSONValueForResponse(rawItems).([]any))
+		return finalizeCompletedResponseOutput(cloneJSONValueForResponse(rawItems).([]any))
 	}
 
 	completeByID := make(map[string]map[string]any, len(snapshot))
@@ -1075,7 +1372,35 @@ func (h *responseEventWriterHelper) completedResponseOutput(rawOutput any) []any
 		}
 		merged = append(merged, combined)
 	}
-	return trimResponseOutputTextLineEndings(merged)
+	return finalizeCompletedResponseOutput(merged)
+}
+
+func finalizeCompletedResponseOutput(output []any) []any {
+	titleBoundary := false
+	for index, rawItem := range output {
+		item, _ := rawItem.(map[string]any)
+		if stringValue(item["type"]) != "reasoning" {
+			titleBoundary = false
+			continue
+		}
+		if reasoningPayloadIsOpaque(item) {
+			titleBoundary = false
+			continue
+		}
+		formatted := reasoningtext.FormatBlock(item)
+		if formatted == nil {
+			titleBoundary = false
+			continue
+		}
+		summary := reasoningSummaryTextFromItem(formatted)
+		emptyMarker := strings.TrimSpace(summary) == "****"
+		if titleBoundary && startsWithCompleteOrEmptyBoldSpan(summary) {
+			prependReasoningSummaryItemText(formatted, "\n\n")
+		}
+		titleBoundary = reasoningTextHasTrailingBoldSpan(summary) || (titleBoundary && emptyMarker)
+		output[index] = formatted
+	}
+	return trimResponseOutputTextLineEndings(output)
 }
 
 func trimResponseOutputTextLineEndings(output []any) []any {
@@ -1662,6 +1987,7 @@ func (h *responseEventWriterHelper) closeReasoningLifecycle(itemID string) {
 	item["id"] = itemID
 	item["type"] = "reasoning"
 	h.addEvent("response.output_item.done", h.outputItemEventData(item, map[string]any{"item": item, aggregate.InternalReasoningSourceKey: aggregate.ReasoningSourceUpstream}))
+	h.markReasoningItemTitleBoundary(itemID, item)
 	delete(h.activeReasoningItems, itemID)
 	h.clearReasoningFormatItemStates(itemID)
 	if h.reasoningItemsClosed == nil {
@@ -1875,9 +2201,6 @@ func (h *responseEventWriterHelper) markReasoningSummaryTextDone(itemID string, 
 }
 
 func (h *responseEventWriterHelper) mergeStoredReasoningSummary(itemID string, item map[string]any, hasStreamedParts bool) {
-	if hasStreamedParts && reasoningPayloadIsOpaque(item) {
-		return
-	}
 	parts := h.reasoningSummaryParts[itemID]
 	if len(parts) == 0 {
 		return
@@ -1940,8 +2263,17 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	if h.toolIDAliases == nil {
 		h.toolIDAliases = map[string]string{}
 	}
-
 	item, _ := evt.Data["item"].(map[string]any)
+	if h.downstreamType == "responses" {
+		if isResponsesTerminalEvent(evt.Event) {
+			defer requestReasoningChunkContexts.delete(h.requestID)
+		} else if isResponsesNonReasoningLaneEvent(evt.Event, item) {
+			h.finishResponsesReasoningAtBoundary()
+		} else if reasoningPayloadIsOpaque(evt.Data) && !isResponsesReasoningOutputItemEvent(evt.Event, item) {
+			requestReasoningChunkContexts.delete(h.requestID)
+			h.reasoningTitleBoundary = false
+		}
+	}
 
 	switch evt.Event {
 	case "response.created":
@@ -1975,6 +2307,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.output_item.added", "response.output_item.done":
 		itemType, _ := item["type"].(string)
 		if itemType == "reasoning" {
+			var rawReasoningItem map[string]any
+			if h.downstreamType == "responses" && evt.Event == "response.output_item.done" && item != nil {
+				rawReasoningItem = cloneJSONValueForResponse(item).(map[string]any)
+			}
+
 			h.associateReasoningFormatOutputItem(item)
 			if h.downstreamType == "responses" {
 				item = reasoningtext.FormatBlock(item)
@@ -2003,20 +2340,36 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				}
 				_, hadReasoningItem := h.outputIndexForItem(itemID)
 				outputIndex := h.ensureReasoningLifecycleStarted(itemID, upstreamOutputIndex, item)
+				if rawReasoningItem != nil {
+					h.reconcileReasoningItemSummary(itemID, outputIndex, rawReasoningItem)
+				}
 				hasStreamedParts := len(h.reasoningSummaryParts[itemID]) > 0
 				summary := reasoningSummaryFromItem(item)
-				if summary == "" {
+				if !reasoningItemOpaqueWithoutSummary(item) {
+					if storedSummary := h.reasoningSummaryPartText(itemID, 0); storedSummary != "" {
+						summary = storedSummary
+					}
+				}
+				boundaryConsumed := false
+				if summary == "" || reasoningItemOpaqueWithoutSummary(item) {
 					h.flushReasoningFormatItemStates(itemID)
 				}
 				if summary != "" && (!hadReasoningItem || h.reasoningSummaryPartStarted(itemID, 0)) {
 					h.ensureReasoningSummaryPartStarted(itemID, outputIndex, 0)
+					formattedSummary := h.consumeReasoningTitleBoundary(nil, summary, reasoningItemOpaqueWithoutSummary(item))
+					boundaryConsumed = formattedSummary != summary
+					summary = formattedSummary
 					h.closeReasoningSummaryPartWithText(itemID, outputIndex, 0, summary)
+				}
+				if boundaryConsumed {
+					prependReasoningSummaryItemText(item, "\n\n")
 				}
 				h.mergeStoredReasoningSummary(itemID, item, hasStreamedParts)
 				if outputIndex, ok := h.outputIndexForItem(itemID); ok {
 					evt.Data["output_index"] = outputIndex
 				}
 				h.closeAllReasoningSummaryParts(itemID, outputIndex)
+				h.markReasoningItemTitleBoundary(itemID, item)
 				delete(h.activeReasoningItems, itemID)
 				h.reasoningItemsClosed[itemID] = true
 				if itemID == h.realReasoningItemID {
@@ -2038,6 +2391,11 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 				h.resetReasoningFormatPhase()
 			}
 			break
+		}
+		if h.downstreamType == "responses" && itemType != "reasoning" {
+			h.reasoningTitleBoundary = false
+			requestReasoningChunkContexts.delete(h.requestID)
+			h.closeRealReasoningLifecycle()
 		}
 		if itemType == "compaction" && h.downstreamType == "responses" {
 			h.beginCompactionLifecycle()
@@ -2102,6 +2460,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			}
 		}
 	case "response.output_text.delta":
+		requestReasoningChunkContexts.delete(h.requestID)
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
@@ -2290,6 +2649,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 	case "response.completed":
 		h.terminalSeen = true
 		h.flushSuccessfulTextTailBuffers()
+
 		if compatCompleteToolArgs {
 			h.flushPendingFunctionCalls()
 		}
@@ -2331,6 +2691,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 		}
 	case "response.done":
 		h.terminalSeen = true
+
 		h.flushSuccessfulTextTailBuffers()
 		h.flushReasoningFormatStates()
 		h.closeAllReasoningLifecycles()
@@ -2386,6 +2747,7 @@ func doProcessResponseEvent(h *responseEventWriterHelper, evt upstream.Event) (p
 			}
 		} else {
 			evt.Data["health_flag"] = terminalFailure.HealthFlag
+
 			evt.Data["message"] = terminalFailure.Message
 		}
 		h.closeAllReasoningLifecycles()
@@ -2708,6 +3070,7 @@ func shouldEmitSyntheticResponsesCreated(upstreamEndpointType string) bool {
 }
 
 func writeResponsesSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc, initialState *responsesStreamState) (aggregate.Result, error) {
+	defer requestReasoningChunkContexts.delete(req.RequestID)
 	state := cloneResponsesStreamState(initialState, req.RequestID, upstreamEndpointType)
 	state.modelName = req.Model
 	collector := aggregate.NewCollector()
@@ -2800,9 +3163,7 @@ func writeResponsesEvent(writer EventWriter, state *responsesStreamState, evt up
 		requestID:                  state.requestID,
 		upstreamEndpointType:       state.upstreamEndpointType,
 		terminalSeen:               state.terminalSeen,
-		terminalFailure:            state.terminalFailure,
 	})
-
 	result, err := doProcessResponseEvent(h, evt)
 	if err != nil {
 		return err
@@ -3093,7 +3454,8 @@ func responseStreamPayload(event string, data map[string]any) ([]byte, error) {
 	return json.Marshal(clone)
 }
 
-func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, upstreamEndpointType string, usageRecorder usageRecorderFunc) error {
+func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, state *anthropicStreamState, upstreamEndpointType string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
+	defer requestReasoningChunkContexts.delete(req.RequestID)
 	if state == nil {
 		state = &anthropicStreamState{}
 	}
@@ -3114,11 +3476,12 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		requestID:            req.RequestID,
 	}
 	writer := NewAnthropicEventWriter(w, flusher, state, helper, usageRecorder)
+	collector := aggregate.NewCollector()
 	if err := writeSSEPadding(w, flusher); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	if err := startAnthropicUnreasonedPlaceholder(w, flusher, state); err != nil {
-		return err
+		return aggregate.Result{}, err
 	}
 	err := streamLiveWithSyntheticTicks(ctx, stream.Consume,
 		func() bool { return state.textStarted || state.realThinkingSeen },
@@ -3130,19 +3493,24 @@ func writeAnthropicSSELive(ctx context.Context, stream *upstream.EventStream, w 
 		},
 		func() error { return writeSSEHeartbeat(w, flusher, state.terminalSeen) },
 		func(evt upstream.Event) error {
+			collector.Accept(evt)
 			return writer.WriteEvent(evt.Event, evt.Data)
 		},
 	)
 	if err != nil && !state.terminalSeen {
-		return err
+		return aggregate.Result{}, err
 	}
 	if !state.terminalSeen {
-		return io.ErrUnexpectedEOF
+		return aggregate.Result{}, io.ErrUnexpectedEOF
 	}
 	if state.terminalFailure != nil {
-		return nil
+		return aggregate.Result{}, nil
 	}
-	return nil
+	result, err := collector.Result()
+	if err != nil {
+		return aggregate.Result{}, err
+	}
+	return result, nil
 }
 
 func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState) error {
@@ -3176,6 +3544,11 @@ func startAnthropicUnreasonedPlaceholder(w http.ResponseWriter, flusher http.Flu
 func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *anthropicStreamState, evt upstream.Event, usageRecorder usageRecorderFunc) error {
 	var closeThinkingBlock func() error
 	var flushPendingThinking func() error
+	item, _ := evt.Data["item"].(map[string]any)
+	clearReasoningBoundary := isResponsesNonReasoningLaneEvent(evt.Event, item) || (reasoningPayloadIsOpaque(evt.Data) && !isResponsesReasoningOutputItemEvent(evt.Event, item))
+	if state != nil && isResponsesTerminalEvent(evt.Event) {
+		defer requestReasoningChunkContexts.delete(state.messageID)
+	}
 	startMessage := func() error {
 		if state.messageStarted {
 			return nil
@@ -3287,8 +3660,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		return nil
 	}
 	flushPendingThinking = func() error {
-		deltas := []string{state.reasoningText.finish()}
-		deltas = append(deltas, finishStreamingReasoningSummaryStates(&state.reasoningSummaries)...)
+		deltas := []string{requestReasoningChunkContexts.formatStateDelta(state.messageID, &state.reasoningText, state.reasoningText.finish(), state.reasoningText.preserving)}
+		deltas = append(deltas, finishStreamingReasoningSummaryStatesForRequest(state.messageID, &state.reasoningSummaries)...)
 		for _, delta := range deltas {
 			if delta == "" {
 				continue
@@ -3406,6 +3779,15 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 		return nil
 	}
 
+	if clearReasoningBoundary {
+		if err := flushPendingThinking(); err != nil {
+			return err
+		}
+		state.reasoningText.reset()
+		state.reasoningSummaries = nil
+		requestReasoningChunkContexts.delete(state.messageID)
+	}
+
 	switch evt.Event {
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
@@ -3419,7 +3801,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			return startToolBlock(item)
 		}
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
-			for _, summary := range formatStreamingReasoningItemSummary(&state.reasoningSummaries, &state.reasoningSummaryOrder, item) {
+			for _, summary := range formatStreamingReasoningItemSummaryForRequest(state.messageID, &state.reasoningSummaries, &state.reasoningSummaryOrder, item) {
 				state.realThinkingSeen = true
 				if err := startThinkingBlock(); err != nil {
 					return err
@@ -3434,8 +3816,8 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			}
 			if evt.Event == "response.output_item.done" {
 				itemID := reasoningFormatItemID(item)
-				deltas := []string{state.reasoningText.finish()}
-				deltas = append(deltas, finishStreamingReasoningSummaryItemStates(&state.reasoningSummaries, itemID)...)
+				deltas := []string{requestReasoningChunkContexts.formatStateDelta(state.messageID, &state.reasoningText, state.reasoningText.finish(), state.reasoningText.preserving)}
+				deltas = append(deltas, finishStreamingReasoningSummaryItemStatesForRequest(state.messageID, &state.reasoningSummaries, itemID)...)
 				for _, delta := range deltas {
 					if delta == "" {
 						continue
@@ -3480,7 +3862,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				state.thinkingSignature = signature
 			}
 		}
-		delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.formatStreamingDelta(state.messageID, &state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -3507,7 +3889,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 			summaryIndex = 0
 		}
 		summaryIndex = reasoningFormatSummaryIndex(evt.Data, summaryIndex)
-		delta := formatStreamingReasoningSummary(&state.reasoningSummaries, &state.reasoningSummaryOrder, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done", reasoningPayloadIsOpaque(evt.Data))
+		delta := formatStreamingReasoningSummaryForRequest(state.messageID, &state.reasoningSummaries, &state.reasoningSummaryOrder, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done", reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realThinkingSeen = true
 			if err := startThinkingBlock(); err != nil {
@@ -3549,6 +3931,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				"name":    meta["name"],
 			})
 		}
+
 	case "response.completed", "response.done":
 		state.terminalSeen = true
 		state.textTail.Discard()
@@ -3572,6 +3955,7 @@ func writeAnthropicEvent(w http.ResponseWriter, flusher http.Flusher, state *ant
 				"output_tokens": 0,
 			}
 		}
+
 		if err := writeAnthropicSSEEvent(w, flusher, "message_delta", map[string]any{
 			"type":  "message_delta",
 			"delta": map[string]any{"stop_reason": stopReason},
@@ -3843,6 +4227,7 @@ func usageNumberAsFloatForStreaming(v any) (float64, bool) {
 
 type chatStreamState struct {
 	chunkID               string
+	requestID             string
 	modelName             string
 	roleSent              bool
 	textStarted           bool
@@ -3867,8 +4252,10 @@ type chatStreamState struct {
 }
 
 func writeChatSSELive(ctx context.Context, stream *upstream.EventStream, w http.ResponseWriter, flusher http.Flusher, req model.CanonicalRequest, upstreamEndpointType string, thinkingTagStyle string, usageRecorder usageRecorderFunc) (aggregate.Result, error) {
+	defer requestReasoningChunkContexts.delete(req.RequestID)
 	state := chatStreamState{
 		chunkID:          "chatcmpl_proxy",
+		requestID:        req.RequestID,
 		modelName:        req.Model,
 		toolIDAliases:    map[string]string{},
 		toolMeta:         map[string]map[string]string{},
@@ -4045,10 +4432,14 @@ func chatStreamFinishReason(state *chatStreamState, data map[string]any) string 
 func shouldBufferChatToolArguments(name string) bool {
 	return name == "attempt_completion"
 }
-
 func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStreamState, evt upstream.Event, includeUsage bool, usageRecorder usageRecorderFunc) error {
 	if state.toolIDAliases == nil {
 		state.toolIDAliases = map[string]string{}
+	}
+	item, _ := evt.Data["item"].(map[string]any)
+	clearReasoningBoundary := isResponsesNonReasoningLaneEvent(evt.Event, item) || (reasoningPayloadIsOpaque(evt.Data) && !isResponsesReasoningOutputItemEvent(evt.Event, item))
+	if isResponsesTerminalEvent(evt.Event) {
+		defer requestReasoningChunkContexts.delete(state.requestID)
 	}
 	ensureRoleSent := func() error {
 		if state.roleSent {
@@ -4110,8 +4501,8 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		return nil
 	}
 	flushPendingReasoning := func() error {
-		deltas := []string{state.reasoningText.finish()}
-		deltas = append(deltas, finishStreamingReasoningSummaryStates(&state.reasoningSummaries)...)
+		deltas := []string{requestReasoningChunkContexts.formatStateDelta(state.requestID, &state.reasoningText, state.reasoningText.finish(), state.reasoningText.preserving)}
+		deltas = append(deltas, finishStreamingReasoningSummaryStatesForRequest(state.requestID, &state.reasoningSummaries)...)
 		for _, delta := range deltas {
 			if delta == "" {
 				continue
@@ -4126,6 +4517,16 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 		}
 		return nil
 	}
+	if clearReasoningBoundary {
+		if err := flushPendingReasoning(); err != nil {
+			return err
+		}
+		state.reasoningText.reset()
+		state.reasoningSummaries = nil
+		state.reasoningTextActive = false
+		requestReasoningChunkContexts.delete(state.requestID)
+	}
+
 	switch evt.Event {
 	case "response.created":
 		if response, _ := evt.Data["response"].(map[string]any); response != nil {
@@ -4139,7 +4540,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	case "response.output_item.added", "response.output_item.done":
 		item, _ := evt.Data["item"].(map[string]any)
 		if itemType, _ := item["type"].(string); itemType == "reasoning" {
-			for _, reasoningContent := range formatStreamingReasoningItemSummary(&state.reasoningSummaries, &state.reasoningSummaryOrder, item) {
+			for _, reasoningContent := range formatStreamingReasoningItemSummaryForRequest(state.requestID, &state.reasoningSummaries, &state.reasoningSummaryOrder, item) {
 				state.realReasoningSeen = true
 				if err := ensureRoleSent(); err != nil {
 					return err
@@ -4150,8 +4551,8 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			}
 			if evt.Event == "response.output_item.done" {
 				itemID := reasoningFormatItemID(item)
-				deltas := []string{state.reasoningText.finish()}
-				deltas = append(deltas, finishStreamingReasoningSummaryItemStates(&state.reasoningSummaries, itemID)...)
+				deltas := []string{requestReasoningChunkContexts.formatStateDelta(state.requestID, &state.reasoningText, state.reasoningText.finish(), state.reasoningText.preserving)}
+				deltas = append(deltas, finishStreamingReasoningSummaryItemStatesForRequest(state.requestID, &state.reasoningSummaries, itemID)...)
 				for _, delta := range deltas {
 					if delta == "" {
 						continue
@@ -4256,7 +4657,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			state.reasoningText.reset()
 			state.reasoningTextActive = true
 		}
-		delta := formatStreamingReasoningDelta(&state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
+		delta := requestReasoningChunkContexts.formatStreamingDelta(state.requestID, &state.reasoningText, reasoningContentRawValue(evt.Data), reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
@@ -4273,7 +4674,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			summaryIndex = 0
 		}
 		summaryIndex = reasoningFormatSummaryIndex(evt.Data, summaryIndex)
-		delta := formatStreamingReasoningSummary(&state.reasoningSummaries, &state.reasoningSummaryOrder, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done", reasoningPayloadIsOpaque(evt.Data))
+		delta := formatStreamingReasoningSummaryForRequest(state.requestID, &state.reasoningSummaries, &state.reasoningSummaryOrder, itemID, summaryIndex, reasoningContentRawValue(evt.Data), evt.Event == "response.reasoning_summary_text.done", reasoningPayloadIsOpaque(evt.Data))
 		if delta != "" {
 			state.realReasoningSeen = true
 			if err := ensureRoleSent(); err != nil {
@@ -4317,6 +4718,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 			return err
 		}
 	case "response.completed", "response.done":
+
 		state.terminalSeen = true
 		if err := flushPendingReasoning(); err != nil {
 			return err
@@ -4368,6 +4770,7 @@ func writeChatEvent(w http.ResponseWriter, flusher http.Flusher, state *chatStre
 	case "error", "response.failed", "response.incomplete":
 		state.terminalSeen = true
 		if err := flushPendingReasoning(); err != nil {
+
 			return err
 		}
 		state.reasoningText.reset()

@@ -115,6 +115,29 @@ func TestProviderConfigResolveMappedProxyModelIntent_appliesOnlyOneMap(t *testin
 		t.Fatalf("expected client-private axes to remain attached, got %#v", intent)
 	}
 }
+func TestProviderConfigResolveMappedProxyModelIntentCollapsesCapturedSourceEffort(t *testing.T) {
+	provider := ProviderConfig{
+		ModelMap: []ModelMapEntry{NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+	}
+	baseModel := "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash"
+	for _, sourceEffort := range []string{"high", "max"} {
+		t.Run(sourceEffort, func(t *testing.T) {
+			intent, mapped := provider.ResolveMappedProxyModelIntent(model.ProxyModelIntent{
+				BaseModel:       baseModel,
+				ReasoningEffort: sourceEffort,
+			})
+			if !mapped {
+				t.Fatal("expected regex MODEL_MAP to resolve")
+			}
+			if intent.BaseModel != baseModel || intent.ReasoningEffort != "max" {
+				t.Fatalf("expected captured source effort to stay out of upstream model and target max effort to win, got %#v", intent)
+			}
+			if got := ProxyModelIntentRoutingModel(intent); got != baseModel+"-max" {
+				t.Fatalf("expected routing model %q, got %q", baseModel+"-max", got)
+			}
+		})
+	}
+}
 
 func TestProviderConfigResolveExternalProxyModelIntentKeepsManualCandidatesAlongsideRealtimeModels(t *testing.T) {
 	provider := ProviderConfig{

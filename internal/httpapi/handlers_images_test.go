@@ -281,7 +281,7 @@ func TestImagesEditsPassesThroughMultipartAndMappedModel(t *testing.T) {
 	}
 }
 
-func TestImagesVariationsPassesThroughMultipartAndUpstreamAuthPassthrough(t *testing.T) {
+func TestImagesVariationsBlankUpstreamKeyDoesNotForwardClientAuth(t *testing.T) {
 	var gotPath string
 	var gotAuth string
 	var gotBody string
@@ -307,6 +307,8 @@ func TestImagesVariationsPassesThroughMultipartAndUpstreamAuthPassthrough(t *tes
 			ID:                     "openai",
 			Enabled:                true,
 			UpstreamBaseURL:        upstream.URL,
+			UpstreamAPIKey:         "",
+			UpstreamAPIKeySet:      true,
 			ProxyAPIKeyOverride:    "empty",
 			ProxyAPIKeyOverrideSet: true,
 			ModelMap: []config.ModelMapEntry{
@@ -341,8 +343,8 @@ func TestImagesVariationsPassesThroughMultipartAndUpstreamAuthPassthrough(t *tes
 	if gotPath != "/images/variations" {
 		t.Fatalf("expected upstream path /images/variations, got %q", gotPath)
 	}
-	if gotAuth != "Bearer real-upstream-token" {
-		t.Fatalf("expected upstream auth passthrough, got %q", gotAuth)
+	if gotAuth != "" {
+		t.Fatalf("blank upstream key must not forward client authorization, got %q", gotAuth)
 	}
 	if !strings.Contains(gotBody, `filename="sample.png"`) || !strings.Contains(gotBody, "variation-png-data") {
 		t.Fatalf("expected variation file passthrough, got %s", gotBody)

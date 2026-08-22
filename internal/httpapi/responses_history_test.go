@@ -1259,3 +1259,14 @@ func TestResponsesHistoryPreviousResponseIDStillComesFromPreservedTopLevelFields
 		t.Fatalf("expected previous_response_id to come only from preserved top-level fields, got %q", got)
 	}
 }
+
+func TestSelectResponsesHistoryMessagesKeepsReasoningOnlyAssistant(t *testing.T) {
+	base := []model.CanonicalMessage{
+		{Role: "user", Parts: []model.CanonicalContentPart{{Type: "text", Text: "weather"}}},
+		{Role: "assistant", ReasoningContent: "先分析请求"},
+	}
+	selected := selectResponsesHistoryMessages(base, nil)
+	if len(selected) != 2 || selected[1].ReasoningContent != "先分析请求" {
+		t.Fatalf("expected reasoning-only assistant history to survive, got %#v", selected)
+	}
+}

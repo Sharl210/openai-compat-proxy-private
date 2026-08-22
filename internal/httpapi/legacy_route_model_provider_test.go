@@ -163,6 +163,187 @@ func TestLegacyResponsesRouteRootModelMapTargetQualifierSelectsConfiguredProvide
 	}
 }
 
+func TestLegacyResponsesRouteProviderMapEffortTargetUsesBaseModelUpstream(t *testing.T) {
+	upstream := newResponsesProviderUpstream(t, "copilot-work")
+	defer upstream.Close()
+	cfg := testLegacyModelRoutingConfig(upstream.URL, upstream.URL)
+	cfg.DefaultProvider = "copilot-work"
+	cfg.Providers = []config.ProviderConfig{{
+		ID: "copilot-work", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key",
+		UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true,
+		EnableReasoningEffortSuffix: true, ManualModels: []string{"#re:quectel.*"},
+		ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+	}}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected provider max target to route, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected base model upstream, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "max" {
+		t.Fatalf("expected max reasoning effort upstream, got %q", got)
+	}
+}
+
+func TestLegacyResponsesRouteRootMapThenProviderMaxEffortUsesBaseUpstream(t *testing.T) {
+	upstream := newResponsesProviderUpstream(t, "copilot-work")
+	defer upstream.Close()
+	cfg := config.Config{
+		DefaultProvider: "copilot-work", EnableLegacyV1Routes: true,
+		V1ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("deepseek-v4-flash", "<<copilot-work>>quectel-github-copilot/QDeepseekV4/deepseek-v4-flash")},
+		Providers: []config.ProviderConfig{{
+			ID: "copilot-work", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true,
+			EnableReasoningEffortSuffix: true, ManualModels: []string{"#re:quectel.*"},
+			ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+		}},
+	}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"deepseek-v4-flash","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root/provider mapping to route, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected base upstream model, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "max" {
+		t.Fatalf("expected mapped max effort, got %q", got)
+	}
+}
+func TestLegacyResponsesRouteRootMapThenProviderMaxEffortWithExplicitRequestEffortUsesBaseUpstream(t *testing.T) {
+	upstream := newResponsesProviderUpstream(t, "copilot-work")
+	defer upstream.Close()
+	cfg := config.Config{
+		DefaultProvider: "copilot-work", EnableLegacyV1Routes: true,
+		V1ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("deepseek-v4-flash", "<<copilot-work>>quectel-github-copilot/QDeepseekV4/deepseek-v4-flash")},
+		Providers: []config.ProviderConfig{{
+			ID: "copilot-work", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true,
+			EnableReasoningEffortSuffix: true, ManualModels: []string{"#re:quectel.*"},
+			ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+		}},
+	}
+	server := NewServer(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"deepseek-v4-flash","reasoning":{"effort":"max","summary":"auto"},"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected explicit-effort root/provider mapping to route, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected base upstream model, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "max" {
+		t.Fatalf("expected max effort, got %q", got)
+	}
+}
+func TestLegacyResponsesRouteProductionDeepSeekModelSuffixMatrix(t *testing.T) {
+	upstream := newResponsesProviderUpstream(t, "copilot-work")
+	defer upstream.Close()
+	cfg := config.Config{
+		DefaultProvider: "copilot-work", EnableLegacyV1Routes: true,
+		EnableReasoningModeSuffixSet: true, EnableReasoningModeSuffix: true,
+		V1ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("deepseek-v4-flash", "<<copilot-work>>quectel-github-copilot/QDeepseekV4/deepseek-v4-flash")},
+		Providers: []config.ProviderConfig{{
+			ID: "copilot-work", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "test-key",
+			UpstreamEndpointType: config.UpstreamEndpointTypeResponses, SupportsResponses: true,
+			EnableReasoningEffortSuffix: true, ManualModels: []string{"#re:quectel.*"},
+			ModelMap: []config.ModelMapEntry{config.NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+		}},
+	}
+	server := NewServer(cfg)
+	for _, modelName := range []string{
+		"deepseek-v4-flash",
+		"deepseek-v4-flash-max",
+		"deepseek-v4-flash-high",
+		"deepseek-v4-flash-pro",
+		"deepseek-v4-flash-auto",
+	} {
+		t.Run(modelName, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"`+modelName+`","instructions":"system","tools":[{"type":"function","name":"search_web","description":"search","parameters":{"type":"object"}}],"input":"hello"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected production model shape to route, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get(headerProxyToUpstreamModel); got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+				t.Fatalf("expected base upstream model, got %q", got)
+			}
+		})
+	}
+}
+func TestLegacyResponsesRouteRootMapTargetTemplateRebindsProviderIntent(t *testing.T) {
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"chatcmpl_qwen","object":"chat.completion","created":1,"model":"quectel-github-copilot/Qwen37plus/qwen3.7-plus","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstream.Close()
+
+	baseModel := "quectel-github-copilot/Qwen37plus/qwen3.7-plus"
+	server := NewServer(config.Config{
+		DefaultProvider:             "copilot-work",
+		EnableLegacyV1Routes:        true,
+		DownstreamNonStreamStrategy: config.DownstreamNonStreamStrategyUpstreamNonStream,
+		V1ModelMap: []config.ModelMapEntry{
+			config.NewModelMapEntry("gpt-5.6-luna", "[copilot]"+baseModel),
+		},
+		Providers: []config.ProviderConfig{{
+			ID:                          "copilot-work",
+			Enabled:                     true,
+			UpstreamBaseURL:             upstream.URL,
+			UpstreamAPIKey:              "test-key",
+			UpstreamEndpointType:        config.UpstreamEndpointTypeChat,
+			SupportsResponses:           true,
+			EnableReasoningEffortSuffix: true,
+			ModelIDTemplate:             "[copilot]{{model}}",
+			ManualModels:                []string{"#re:quectel.*"},
+			ModelMap:                    []config.ModelMapEntry{config.NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")},
+		}},
+	})
+	defer server.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-luna","reasoning":{"effort":"max","summary":"auto"},"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root model template target to route, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Provider-Name"); got != "copilot-work" {
+		t.Fatalf("expected copilot-work provider, got %q", got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != baseModel {
+		t.Fatalf("expected upstream base model %q, got %q", baseModel, got)
+	}
+	if got := rec.Header().Get(headerProxyToUpstreamReasoningEffort); got != "max" {
+		t.Fatalf("expected upstream max reasoning effort, got %q", got)
+	}
+	if !strings.Contains(upstreamBody, `"model":"`+baseModel+`"`) || strings.Contains(upstreamBody, `"model":"[copilot]`) {
+		t.Fatalf("expected template marker to be stripped before upstream request, got %s", upstreamBody)
+	}
+	if !strings.Contains(upstreamBody, `"effort":"max"`) {
+		t.Fatalf("expected max reasoning effort in upstream request, got %s", upstreamBody)
+	}
+}
+
 func TestLegacyResponsesRouteRootQualifiedSourceUsesExplicitRequestEffort(t *testing.T) {
 	alpha := newResponsesProviderUpstream(t, "alpha")
 	defer alpha.Close()

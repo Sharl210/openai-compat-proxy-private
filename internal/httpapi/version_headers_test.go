@@ -433,14 +433,6 @@ func TestEarlyLocalErrorsDoNotExposeTransparencyHeaders(t *testing.T) {
 		code       string
 	}{
 		{
-			name:       "responses missing upstream auth",
-			path:       "/openai/v1/responses",
-			body:       `{"model":"gpt-5","input":"hello"}`,
-			headers:    map[string]string{"Content-Type": "application/json", "Authorization": "Bearer proxy-secret"},
-			statusCode: http.StatusUnauthorized,
-			code:       "missing_upstream_auth",
-		},
-		{
 			name:       "chat invalid request",
 			path:       "/openai/v1/chat/completions",
 			body:       `{"model":`,

@@ -345,6 +345,62 @@ func TestChatStreamDropsPendingTextLineEndingsOnFailure(t *testing.T) {
 	}
 }
 
+func TestChatStreamDoesNotCarryReasoningTitleBoundaryAcrossTextOrTool(t *testing.T) {
+	tests := []struct {
+		name   string
+		middle upstream.Event
+	}{
+		{name: "text", middle: upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "answer"}}},
+		{name: "tool", middle: upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}}}},
+		{name: "message", middle: upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "msg_1", "type": "message", "role": "assistant", "content": []any{}}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requestReasoningChunkContexts.delete("req-chat-lane")
+			rec := httptest.NewRecorder()
+			state := &chatStreamState{
+				chunkID: "chatcmpl_lane", requestID: "req-chat-lane",
+				toolIDAliases: map[string]string{}, toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{},
+			}
+			for _, event := range []upstream.Event{
+				{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+				test.middle,
+				{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第二标题**"}},
+			} {
+				if err := writeChatEvent(rec, nil, state, event, false, nil); err != nil {
+					t.Fatalf("writeChatEvent(%s): %v", event.Event, err)
+				}
+			}
+			if strings.Contains(rec.Body.String(), `"reasoning_content":"\n\n**第二标题**"`) {
+				t.Fatalf("reasoning title boundary crossed %s lane: %s", test.name, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"reasoning_content":"**第二标题**"`) {
+				t.Fatalf("missing unprefixed second title after %s lane: %s", test.name, rec.Body.String())
+			}
+		})
+	}
+}
+func TestChatStreamTerminalEventClearsReasoningChunkContextAfterFlush(t *testing.T) {
+	const requestID = "req-chat-terminal"
+	requestReasoningChunkContexts.delete(requestID)
+	rec := httptest.NewRecorder()
+	state := &chatStreamState{
+		chunkID: "chatcmpl_terminal", requestID: requestID,
+		toolIDAliases: map[string]string{}, toolMeta: map[string]map[string]string{}, toolIndex: map[string]int{}, toolSent: map[string]bool{}, pendingToolArgs: map[string]string{},
+	}
+	for _, event := range []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+		{Event: "response.completed", Data: map[string]any{}},
+	} {
+		if err := writeChatEvent(rec, nil, state, event, false, nil); err != nil {
+			t.Fatalf("writeChatEvent(%s): %v", event.Event, err)
+		}
+	}
+	if _, ok := requestReasoningChunkContexts.tail(requestID); ok {
+		t.Fatal("terminal event left request context behind")
+	}
+}
+
 func TestChatStreamChunksCarryIDAndModel(t *testing.T) {
 	upstream := testutil.NewStreamingUpstream(t, []string{
 		"event: response.output_text.delta\n" +

@@ -341,8 +341,8 @@ func TestProviderSelectionForLegacyModelMapAliasRoutesWithoutVisibleModel(t *tes
 	if !ok {
 		t.Fatalf("expected static MODEL_MAP alias provider selection to succeed without adding it to visible models")
 	}
-	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "client-alias" {
-		t.Fatalf("expected openai/client-alias selection before provider mapping, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
+	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "upstream-real" {
+		t.Fatalf("expected static MODEL_MAP alias to resolve its final upstream model, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
 	}
 	_ = server
 }
@@ -374,8 +374,8 @@ func TestProviderSelectionForTaggedLegacyModelMapAliasRoutesWithoutVisibleModel(
 	if !ok {
 		t.Fatalf("expected tagged static MODEL_MAP alias provider selection to succeed without adding it to visible models")
 	}
-	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "client-alias" {
-		t.Fatalf("expected openai/client-alias selection before provider mapping, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
+	if providerID != "openai" || provider.ID != "openai" || resolvedModel != "upstream-real" {
+		t.Fatalf("expected tagged static MODEL_MAP alias to resolve its final upstream model, got providerID=%q provider=%q model=%q", providerID, provider.ID, resolvedModel)
 	}
 	_ = server
 }
