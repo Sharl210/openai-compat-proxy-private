@@ -244,3 +244,52 @@ func TestAdminUIAppScriptShowsHotReloadValidationFailureInModal(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminUIAppScriptRendersCommaListFieldsAsRowEditor(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"renderEnvListEditor(entry, sourceIndex)",
+		"data-field=\"value-list\"",
+		"env-list-add-btn",
+		"env-list-del-btn",
+		"collectEnvListValue(index)",
+		"normalizeEnvListValueForSave(trimmed)",
+		"RAW_MODEL_NAME_REPLACE",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected app script to include comma-list row editor behavior %q, got %s", want, body)
+		}
+	}
+}
+
+func TestAdminUIAppScriptNormalizesCommaListValuesOnSave(t *testing.T) {
+	server := newAdminUITestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/_admin/assets/app.js", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected app script 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"function splitEnvListValue(value)",
+		"function joinEnvListValue(items)",
+		".filter((item) => item !== '')",
+		"isEnvListKey(key)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected app script to include comma-list normalization helpers %q, got %s", want, body)
+		}
+	}
+}

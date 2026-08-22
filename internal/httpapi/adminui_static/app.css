@@ -1195,6 +1195,46 @@ button { cursor: pointer; }
 }
 .env-value-row { margin-top: 6px; }
 
+.env-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.env-list-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+}
+.env-list-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.env-list-del-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  margin-top: 3px;
+  border: 1px solid rgba(120, 60, 60, 0.35);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger, #d9534f);
+  font-size: 15px;
+  cursor: pointer;
+}
+.env-list-del-btn:hover {
+  background: rgba(217, 83, 79, 0.12);
+}
+.env-list-actions {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+}
+.env-list-add-btn {
+  align-self: flex-start;
+}
+
 .env-card {
   width: 100%;
   min-width: 0;

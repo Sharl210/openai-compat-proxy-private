@@ -38,6 +38,56 @@ const fileSearchStorageKeys = {
   contentHistory: 'admin-file-search-content-history',
   sizeSettings: 'admin-file-search-size-settings',
 };
+
+// 这些配置键的值是逗号分隔的多条目列表（与配置解析器按逗号切分一致）。
+// 管理台结构化编辑器会把这些字段渲染成逐条一行的列表编辑，保存时再拼回单行逗号值。
+const envListKeys = new Set([
+  'DEFAULT_PROVIDER',
+  'DEFAULT_PRO_REASONING_MODE_EXCLUDED_MODELS',
+  'V1_MODEL_MAP',
+  'MODEL_MAP',
+  'MANUAL_MODELS',
+  'HIDDEN_MODELS',
+  'UPSTREAM_MAX_OUTPUT_TOKENS',
+  'MODEL_LIMIT_CONTEXT_TOKENS',
+  'SYSTEM_PROMPT_FILES',
+  'REASONING_MODE_PRO_CAPABILITY_RULES',
+  'RAW_MODEL_NAME_REPLACE',
+]);
+
+function isEnvListKey(key) {
+  return envListKeys.has(String(key || '').trim());
+}
+
+function splitEnvListValue(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim());
+}
+
+function joinEnvListValue(items) {
+  return items.map((item) => String(item || '').trim()).join(',');
+}
+
+// 保存时过滤空条目（与配置解析器忽略空逗号项一致）。
+function normalizeEnvListValueForSave(value) {
+  return splitEnvListValue(value)
+    .filter((item) => item !== '')
+    .join(',');
+}
+
+// 从 DOM 中收集某个条目（按 data-index）当前所有列表行的值并拼成逗号值。
+// 编辑中保留空行，避免清空某行时行结构塌缩；保存时由 formatEnvValueForSave 过滤空条目。
+function collectEnvListValue(index) {
+  const editor = document.querySelector(`[data-list-editor="${index}"]`);
+  if (!editor) {
+    return '';
+  }
+  const items = Array.from(editor.querySelectorAll('textarea[data-field="value-list"]')).map(
+    (textarea) => textarea.value
+  );
+  return joinEnvListValue(items);
+}
 const fileSearchSizeUnits = [
   { value: 'B', factor: 1 },
   { value: 'KB', factor: 1024 },
@@ -1224,6 +1274,43 @@ function bindEvents() {
       });
     }
     envContainer.querySelectorAll('.env-comment-block').forEach(bindEnvCommentBlock);
+    envContainer.querySelectorAll('[data-list-editor]').forEach((editor) => {
+      const index = Number(editor.dataset.listEditor);
+      const addBtn = editor.querySelector('.env-list-add-btn');
+      if (addBtn) {
+        addBtn.addEventListener('click', () => {
+          const entry = state.currentFile.env_entries[index];
+          if (!entry) {
+            return;
+          }
+          const items = splitEnvListValue(entry.value);
+          items.push('');
+          entry.value = joinEnvListValue(items);
+          state.currentFile.dirty = true;
+          state.lastSaveFeedback = null;
+          syncEnvSourceFromStructured();
+          updateDirtyBadge();
+          render();
+        });
+      }
+      editor.querySelectorAll('.env-list-del-btn').forEach((delBtn) => {
+        delBtn.addEventListener('click', () => {
+          const entry = state.currentFile.env_entries[index];
+          if (!entry) {
+            return;
+          }
+          const itemIndex = Number(delBtn.dataset.itemIndex);
+          const items = splitEnvListValue(entry.value);
+          items.splice(itemIndex, 1);
+          entry.value = joinEnvListValue(items);
+          state.currentFile.dirty = true;
+          state.lastSaveFeedback = null;
+          syncEnvSourceFromStructured();
+          updateDirtyBadge();
+          render();
+        });
+      });
+    });
     const tailInput = document.getElementById('env-tail-lines');
     if (tailInput) {
       autoSizeTextarea(tailInput);
@@ -1272,6 +1359,10 @@ function handleEnvInput(event) {
   }
   if (field === 'value') {
     entry.value = target.value;
+    syncEnvSourceFromStructured();
+  }
+  if (field === 'value-list') {
+    entry.value = collectEnvListValue(index);
     syncEnvSourceFromStructured();
   }
   if (field === 'leading') {
@@ -1612,10 +1703,35 @@ function renderEnvEntry(entry, index, sourceIndex = index) {
           <pre class="env-comment-block" tabindex="0" aria-label="环境变量说明" style="${escapeAttr(envCommentZoomStyle())}">${escapeHtml((entry.leading_lines || []).join('\n'))}</pre>
         ` : ''}
         <div class="env-value-row">
-          <textarea class="env-value-input auto-resize no-wrap-editor" rows="1" name="env-value-${sourceIndex}" data-index="${sourceIndex}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>
+          ${isEnvListKey(entry.key) ? renderEnvListEditor(entry, sourceIndex) : `
+          <textarea class="env-value-input auto-resize no-wrap-editor" rows="1" name="env-value-${sourceIndex}" data-index="${sourceIndex}" data-field="value" spellcheck="false" wrap="off">${escapeHtml(entry.value || '')}</textarea>`}
         </div>
       </div>
     </section>
+  `;
+}
+
+function renderEnvListEditor(entry, sourceIndex) {
+  const items = splitEnvListValue(entry.value);
+  if (items.length === 0) {
+    items.push('');
+  }
+  const rows = items
+    .map(
+      (item, itemIndex) => `
+      <div class="env-list-row">
+        <textarea class="env-value-input auto-resize no-wrap-editor env-list-input" rows="1" name="env-value-${sourceIndex}" data-index="${sourceIndex}" data-field="value-list" data-item-index="${itemIndex}" spellcheck="false" wrap="off">${escapeHtml(item || '')}</textarea>
+        <button type="button" class="env-list-del-btn" data-index="${sourceIndex}" data-item-index="${itemIndex}" aria-label="删除条目" title="删除条目">×</button>
+      </div>`
+    )
+    .join('');
+  return `
+    <div class="env-list-editor" data-list-editor="${sourceIndex}">
+      ${rows}
+      <div class="env-list-actions">
+        <button type="button" class="env-list-add-btn secondary-btn material-tonal-button" data-index="${sourceIndex}">＋ 添加条目</button>
+      </div>
+    </div>
   `;
 }
 
@@ -2464,6 +2580,9 @@ function formatEnvValueForSave(key, value) {
   const trimmed = String(value ?? '').trim();
   if (key === 'LISTEN_ADDR' && /^:\d+$/.test(trimmed)) {
     return trimmed.slice(1);
+  }
+  if (isEnvListKey(key)) {
+    return normalizeEnvListValueForSave(trimmed);
   }
   return value || '';
 }
