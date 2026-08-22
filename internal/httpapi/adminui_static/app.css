@@ -1850,3 +1850,67 @@ button { cursor: pointer; }
   padding: 14px;
   font-size: 13px;
 }
+
+/* ===== 提供商行模型列表按钮（三态） ===== */
+.tree-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tree-item-row .tree-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tree-item-row.provider-env-row .tree-item-trailing {
+  display: none;
+}
+.tree-item-model-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding-right: 10px;
+}
+.model-list-mini-btn {
+  border: 1px solid var(--border-color, #c8c8c8);
+  background: #f0f0f0;
+  color: #888;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.model-list-mini-btn:hover {
+  background: #e2e2e2;
+}
+/* 灰 = 未点击（默认） */
+.model-list-mini-btn.model-list-idle {
+  background: #f0f0f0;
+  color: #888;
+  border-color: #d0d0d0;
+}
+/* 绿 = 已加载 */
+.model-list-mini-btn.model-list-ok {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #81c784;
+}
+/* 红 = 报错 */
+.model-list-mini-btn.model-list-error {
+  background: #fdecea;
+  color: #c62828;
+  border-color: #e57373;
+}
+.model-list-mini-error {
+  font-size: 11px;
+  color: #c62828;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-model-list-card {
+  margin-top: 12px;
+}
