@@ -227,7 +227,7 @@ V1_MODEL_MAP=model-a:<<provider1>>gpt-5.6-terra
 MODEL_MAP=<<provider1>>model-a:<<provider2>>gpt-5.6-terra
 ```
 
-`model-a:<<provider1>>gpt-5.6-terra` 会把请求路由到 `provider1.env` 中的 `gpt-5.6-terra`；source 侧的提供商标记限定该映射由指定 provider 负责，target 侧的提供商标记指定最终路由目标。`<<provider_id>>` 会在模型解析前剥离，因此可以和 `#re:`、`$0-$9` 捕获替换、reasoning suffix、`-pro`、`-adaptive`、`-ultra`、`-noprompt` 任意组合。完整组合示例：
+`model-a:<<provider1>>gpt-5.6-terra` 会把请求路由到 `provider1.env` 中的 `gpt-5.6-terra`；source 侧的提供商标记限定该映射由指定 provider 负责，target 侧的提供商标记指定最终路由目标。`<<provider_id>>` 会在模型解析前剥离，因此可以和 `#re:`、`$0-$9` 捕获替换、reasoning suffix、`-pro`、`-auto`、`-ultra`、`-noprompt` 任意组合。完整组合示例：
 
 ```env
 <<p0>>#re:alias-(.*):<<p1>>gpt-$1-high
@@ -300,11 +300,9 @@ MODEL_MAP=<<provider1>>model-a:<<provider2>>gpt-5.6-terra
 
 - `X-Upstream-Authorization: Bearer <real-upstream-key>`
 
-如果请求里没有 `X-Upstream-Authorization`：
+`UPSTREAM_API_KEY=` 留空表示当前作用域不需要上游鉴权。留空时，代理不会读取 `X-Upstream-Authorization`，不会复用客户端 `Authorization`、`X-API-Key` 或 `x-api-key`，也不会向上游发送 `Authorization` / `x-api-key`。不需要填写 `empty` 或其它英文占位词；`empty` 现在只会被当作普通真实 key。
 
-- 当当前路由**不要求代理鉴权**时，`Authorization` 可能直接作为上游鉴权透传
-- 对 Anthropic / Claude 风格客户端，当当前路由**不要求代理鉴权**时，`X-API-Key` / `x-api-key` 也可以直接作为上游 key
-- 否则回退到 provider 自己的 `UPSTREAM_API_KEY`
+provider 文件没有 `UPSTREAM_API_KEY` 字段时继承根配置；provider 文件存在该字段但值为空时，空值会覆盖根配置并关闭当前 provider 的上游鉴权。需要鉴权时直接填写真实 key。
 
 ---
 
@@ -409,6 +407,8 @@ UPSTREAM_ENDPOINT_TYPE=responses
 
 `DOWNSTREAM_NON_STREAM_STRATEGY` / `DOWNSTREAM_NON_STREAM_STRATEGY_OVERRIDE` 支持：
 
+
+对 `/v1/messages` 的 DeepSeek Anthropic history follow-up，`upstream_non_stream`、`proxy_buffer` 聚合流和 live SSE 三条非流处理策略都会保留服务端返回的 reasoning 与 tool history，供下一轮 Anthropic history 续接；切换策略不会把这两类历史降级成纯文本。
 - `proxy_buffer`：下游非流时，代理继续向上游请求 SSE，再本地聚合
 - `upstream_non_stream`：下游非流时，代理直接向上游请求非流 JSON
 - `UPSTREAM_THINKING_TAG_STYLE=true/false`：当 `UPSTREAM_ENDPOINT_TYPE=chat` 时，决定是否把 `<think>` / `<thinking>` / `<reasoning>` 标签拆成 reasoning 内容
@@ -510,11 +510,15 @@ REASONING_SUMMARY_DETAIL=detailed
 REASONING_SUMMARY_DETAIL=
 ```
 
-这个字段当前支持热加载。
+### 3.9 Anthropic 自动推理 `-auto`
 
-### 3.9 推理模式 `-pro`
+`-auto` 是独立于 `reasoning.effort` 与 `-pro` 的代理私有 intent，可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序组合。例如 `model-noprompt-auto-pro-high` 会保留 `high`，同时请求 Anthropic 原生 adaptive thinking。完整字面模型优先，真实存在的 `vendor-auto` 不会被拆成代理后缀。
 
-推理模式与已有的推理强度是两条独立轴：强度使用 `-low`、`-high` 等 suffix，模式使用唯一的 `-pro` suffix。两者可任意顺序叠加，`model-low-pro` 与 `model-pro-low` 等效；`-noprompt` 仍只是代理标记，不参与上游模型映射。
+它会穿过 root `V1_MODEL_MAP` 与 provider `MODEL_MAP`，但不会进入最终上游 `model`。只有最终 `UPSTREAM_ENDPOINT_TYPE=anthropic` 且最终模型支持 adaptive thinking 时，代理才发送 `thinking:{"type":"adaptive"}`；存在 effort 时同时发送对应的 `output_config.effort`。其它最终协议、最终模型不支持、与 `-none` 冲突或存在未签名 reasoning replay 时，代理会在请求上游前返回本地 `400 unsupported_upstream_feature`，不会退回 manual thinking 或其它 effort。`-auto` 不依赖 `/models` 展示。
+
+### 3.10 推理模式 `-pro`
+
+推理模式与已有的推理强度是两条独立轴：强度使用 `-low`、`-high` 等 suffix，模式使用唯一的 `-pro` suffix。两者可与 `-auto`、`-noprompt`、`-ultra` 任意顺序叠加；`model-low-pro` 与 `model-pro-low` 等效。`-noprompt` 仍只是代理标记，不参与上游模型映射。
 
 根配置默认启用 `ENABLE_REASONING_MODE_SUFFIX=true` 和 `DEFAULT_PRO_REASONING_MODE=true`。最终优先级是：客户端 `-pro` > 根级默认 Pro > 客户端请求体 `reasoning.mode`。例如 `model-pro` 同时传 `{"reasoning":{"mode":"standard"}}`，最终仍请求 `pro`；默认 Pro 只在没有更高优先级来源时注入。
 
@@ -541,7 +545,7 @@ REASONING_MODE_PRO_CAPABILITY_RULES=#re:gpt-.*:supported,gpt-legacy:unsupported
 
 GPT-5.6 的 `multi_agent` 是 Responses API 的服务端 beta，不是客户端接收字段后自动启动的本地能力。请求必须携带 `multi_agent.enabled`、`max_concurrent_subagents` 和 `responses_multi_agent=v1` beta；支持该能力的 Responses 上游负责 root/subagent 编排。客户端只消费带 agent 标识的事件，并执行自己声明的 function tools 后回传结果。
 
-### 3.10 Ultra multi-agent `-ultra`
+### 3.11 Ultra multi-agent `-ultra`
 
 `-ultra` 是代理私有模式后缀，不是 `reasoning.effort`，也不会自动出现在 `/models`。它可与 effort、`-pro`、`-noprompt` 任意顺序组合，例如 `gpt-5.6-high-ultra-noprompt` 与 `gpt-5.6-noprompt-ultra-high` 等效；完整字面模型优先，因此真实存在的 `vendor-ultra` 不会被误拆。`-ultra` 保持私有，不作为自动模型列表或 capability 发现结果。
 
@@ -549,11 +553,6 @@ GPT-5.6 的 `multi_agent` 是 Responses API 的服务端 beta，不是客户端�
 
 `-ultra` 只会在最终 `UPSTREAM_ENDPOINT_TYPE=responses` 且 provider capability 有效时注入真实 `multi_agent` 和 beta header。chat/anthropic 上游返回 `unsupported_upstream_feature`，并说明需要 Responses endpoint；provider 显式关闭 capability 时返回同一错误并提示设为 `SUPPORTS_RESPONSES_MULTI_AGENT=true`。两类失败都发生在请求上游前，不会降级成普通请求、Pro 或 effort。
 
-### 3.11 Anthropic adaptive thinking `-adaptive`
-
-`-adaptive` 是独立于 `reasoning.effort` 与 `-pro` 的代理私有 intent，可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序组合；例如 `model-noprompt-adaptive-pro-high` 会在保留 `high` 的同时请求 native adaptive thinking。完整字面模型优先，真实存在的 `vendor-adaptive` 不会被拆成代理后缀。
-
-它会穿过 root `V1_MODEL_MAP` 与 provider `MODEL_MAP`，但不会进入最终上游 `model`。只有最终 `UPSTREAM_ENDPOINT_TYPE=anthropic` 且最终模型支持 adaptive thinking 时，代理才发送 `thinking:{"type":"adaptive"}`；存在 effort 时同时发送对应的 `output_config.effort`。其它最终协议、最终模型不支持，或和 `-none` 冲突时，代理会在请求上游前返回本地 `400 unsupported_upstream_feature`，不会退回 manual thinking 或 `xhigh`。`-adaptive` 不依赖 `/models` 展示，`-ultra` 的 Responses-only 限制仍独立生效。
 
 ### 3.12 工具并行控制
 
@@ -601,15 +600,13 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
 - `ENABLE_REASONING_EFFORT_SUFFIX=true` 后解析 `-none/-minimal/-low/-medium/-high/-xhigh/-max`
 - `EXPOSE_REASONING_SUFFIX_MODELS=true` 后在 `/models` 里暴露 suffix 变体
 - `-ultra` 始终作为代理私有 multi-agent 模式后缀解析，可与其它代理后缀交错；它不是 reasoning tier，不会由 `/models` 自动生成或展示
-- `-adaptive` 始终作为 Anthropic 原生 thinking 的代理私有后缀解析；它不属于 reasoning effort 或 mode，也不会由 `/models` 自动生成或展示
+- `-auto` 始终作为 Anthropic 自动推理的代理私有后缀解析；可与 effort、`-pro`、`-noprompt`、`-ultra` 任意顺序交错，穿过 root/provider 映射但不进入上游模型名
 - `ENABLE_NOPROMPT_MODEL_SUFFIX=true` 后解析 `-noprompt` 代理层标记，用来跳过 provider prompt 注入
-- `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING=true` 时，把 suffix 或请求体里解析出的 effort 自动映射到 Anthropic thinking
 
 这些变量的实际含义：
 
-- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-noprompt-vip` 会先还原为内部 `gpt-5.5-low-noprompt`，再按 `low` 和 `-noprompt` 继续处理。模板中禁止使用 `<<` 或 `>>`；这两个分隔符专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记 `<<provider_id>>`，配置保存或热加载时命中即校验失败。
-- `MODEL_ID_TEMPLATE_ROOT_ONLY`：旧兼容字段，仍可解析，但不再改变运行行为。只要 `MODEL_ID_TEMPLATE` 不是默认 `{{model}}`，该 provider 的所有外部入口都展示并接受模板后的模型 ID；raw provider ID 只存在于 provider 内部配置和上游请求链路中，不作为外部模型 ID 使用。
-- `RAW_MODEL_NAME_REPLACE`：上游原始模型名的**最终字符串替换**规则，provider 级，逗号分隔、按顺序逐条应用（每条作用于上一条的结果）。它是代理发给上游前的最后一道模型名改写：在 `MODEL_MAP` / `V1_MODEL_MAP` 映射、reasoning suffix、`-noprompt` 等全部解析完成之后、构造上游请求体之前执行；这道门之前的组件（包括 `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、`MODEL_LIMIT_CONTEXT_TOKENS`、`UPSTREAM_MAX_OUTPUT_TOKENS`）看到的仍是替换前的名字，不需要为兼容本字段做任何改动。支持两种规则格式：字面量替换 `old:new`（替换模型名中所有出现的 `old`）与正则替换 `#re:pattern:replacement`（Go regexp 替换所有匹配，`replacement` 支持 `$0-$9` 捕获占位与 `\$` 字面美元，`$10` 及以上保持字面值）。例如 `RAW_MODEL_NAME_REPLACE=old:new,#re:x+(\d+)$:$1` 会把 `xxx123` 先替换 `old` 为 `new` 再剥掉前导 `x` 得到 `123`；正则按子串匹配，不要求匹配整个模型名（与 `MODEL_MAP` 的 `#re:` 全串匹配不同）。值中禁止使用 `<<` 或 `>>`（专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记）。留空表示不启用替换；该字段可热加载，修改后无需重启。最终发给上游的模型名同时反映在 `X-Proxy-To-Upstream-Model` 透明度头与 `proxyToUpstreamRequest` 日志中。
+- `MODEL_ID_TEMPLATE`：provider 对外模型 ID 模板，默认 `{{model}}`，表示不改名。模板必须且只能包含一个 `{{model}}` 占位符，占位符代表 provider 内部原始模型名。例如 `MODEL_ID_TEMPLATE=packy-{{model}}` 会把内部 `gpt-5.5` 对外暴露成 `packy-gpt-5.5`，客户端也必须按 `packy-gpt-5.5` 请求；裸 `/v1/*`、无 `/v1` 裸别名、默认分组标签模式和显式 `/{providerId}/v1/*` 都只接受模板后的对外 ID，不再接受 `gpt-5.5` 这种 raw provider ID。代理最终选中该 provider 后会先还原成 `gpt-5.5`，再继续执行 provider `MODEL_MAP`、`MANUAL_MODELS`、`HIDDEN_MODELS`、reasoning suffix、`-pro`、`-auto`、`-ultra`、`-noprompt` 和上游模型限制，所以上游仍收到原始模型或映射后的最终模型。模板可以带前后缀，例如 `MODEL_ID_TEMPLATE=packy-{{model}}-vip` 时，客户端请求 `packy-gpt-5.5-low-auto-noprompt-vip` 会先还原为内部 `gpt-5.5-low-auto-noprompt`，再按 `low`、`-auto` 和 `-noprompt` 继续处理。模板中禁止使用 `<<` 或 `>>`；这两个分隔符专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记 `<<provider_id>>`，配置保存或热加载时命中即校验失败。
+- `RAW_MODEL_NAME_REPLACE`：最终上游模型名的**字符串替换**，provider 级，写法与 `MODEL_MAP` 完全一致（逗号分隔、字面量或 `#re:` 正则、`$0-$9` 捕获），但语义是纯粹的字符串替换：不解析 reasoning suffix、`-pro/-auto/-ultra`、`-noprompt`，不涉及推理家族、provider 标记或任何模型语义，就是把最终模型名这个字符串按规则改一遍。作用范围：请求链路在 `MODEL_MAP` 等全部解析完成之后、真正发给上游之前对最终上游模型名做最后一层改写（`X-Proxy-To-Upstream-Model` 透明度头与 `proxyToUpstreamRequest` 日志显示的也是改写后的名字）；模型展示中 `/models` 列表的模型名同样应用本替换，与请求链路上游见到的名字保持一致。规则格式：字面量替换 `old:new`（把模型名中所有出现的 `old` 替换为 `new`，例如 `quectel-github-copilot/:relay/`），正则替换 `#re:pattern:replacement`（与 `MODEL_MAP` 的 `#re:` 写法一致，Go regexp 全串匹配，`replacement` 支持 `$0-$9` 捕获占位与 `\$` 字面美元，`$10` 及以上保持字面值）。例如 `RAW_MODEL_NAME_REPLACE=#re:.*quectel-github-copilot/(.*):$1` 会把 `quectel-github-copilot/QDeepseekV4/deepseek-v4-flash` 替换成 `QDeepseekV4/deepseek-v4-flash` 再发上游。值中禁止使用 `<<` 或 `>>`（专用于 `MODEL_MAP` / `V1_MODEL_MAP` 的 provider 标记）。留空表示不启用替换；该字段可热加载，修改后无需重启。
 
 - `MODEL_MAP`：请求时模型映射。`source:target` 的左侧 source 匹配客户端请求给代理层的模型名，右侧 target 是代理准备发给上游的模型名；source 可以是字面量，也可以用 `#re:` Go regexp 全字符串匹配，target 可用 `$0-$9` 引用正则捕获。这一项里“冒号左侧为原始模型”和“冒号右侧为原始模型”要分开看：
   - 左侧 source 是原始模型 base 时，表示这条 base source 锁定整个客户端推理家族集合。例如 `MODEL_MAP=client-gpt:upstream-gpt` 会覆盖 `model=client-gpt`、`model=client-gpt-high`、`model=client-gpt-low`，也覆盖 `model=client-gpt` + `reasoning.effort=high` / `reasoning_effort=high` / Anthropic `thinking/output_config` 表达的 high；最终发往 `upstream-gpt`，effort 按客户端 suffix 或请求体参数保留。
@@ -620,13 +617,13 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
   - 右侧 target 一旦写成带 suffix 的模型，target suffix 就优先于客户端显式请求参数。例如 `MODEL_MAP=client-gpt-high:upstream-gpt-low` 遇到 `model=client-gpt` + `reasoning.effort=high` 时，仍会发往 `upstream-gpt`，但最终 effort 会被定板成 `low`；同理 `MODEL_MAP=gpt-5.4:gpt-5.4-xhigh` 遇到 `model=gpt-5.4` + `reasoning.effort=none` 时，最终也会按 `xhigh` 发给上游。只有右侧 target 是不带 suffix 的 base 模型时，客户端显式请求参数才继续生效。这些配置层 suffix 语义不受 `ENABLE_REASONING_EFFORT_SUFFIX` 限制。
   - 相同 source 多条规则时，越靠后优先级越高；后写的规则覆盖前面同 source 规则。例如 `MODEL_MAP=client-gpt:upstream-a,client-gpt:upstream-b` 最终命中 `upstream-b`。
   - 不同 source 规则不做链式递归映射，始终只对客户端原始请求模型做一次匹配。例如 `MODEL_MAP=model-a:model-c,model-c:model-d` 时，请求 `model-a` 只会得到 `model-c`，不会继续推出 `model-d`。
-- `MANUAL_MODELS`：补齐 `/models` 展示并提供静态模型候选。这里仍写 provider 内部原始模型名；如果配置了 `MODEL_ID_TEMPLATE`，代理会把它包装成对外模型 ID。静态模型名会作为字面模型展示；`#re:` 只从上游 `/models` 返回的原始模型列表里扩展；`#reason_suffix:model` 会为 base model 手动生成推理后缀家族。它不把 `/models` 成员资格变成请求准入门，也不参与请求时 MODEL_MAP 的 reasoning 等效匹配。
-- `HIDDEN_MODELS`：隐藏 `/models` 中的模型，同时是独立的显式请求拒绝规则。它支持字面量、`#re:` 和 `#reason_suffix` family marker；`#re:` 是普通 Go regexp，不理解 suffix 语义边界。它不通过 `/models` 列表间接决定路由，而是在最终直接模型或映射目标命中时拒绝请求。
+`MANUAL_MODELS`：补齐当前 provider 的 `/models` 展示并提供静态模型候选。这里仍写 provider 内部原始模型名；如果配置了 `MODEL_ID_TEMPLATE`，代理会把它包装成对外模型 ID。原生 `/models` 中未被隐藏的模型继续保留；`#re:` 只从**当前 provider**上游 `/models` 返回的原始模型列表中筛选命中项，再把命中项并入当前 provider 的展示集合，去重后输出，不会把未命中的原生模型删掉，也不会影响其它 provider。静态模型名仍可作为明确候选加入，但不会把其它 provider 的模型导入当前 provider。它不把 `/models` 成员资格变成请求准入门，也不参与请求时 `MODEL_MAP` 的 reasoning 等效匹配。
+`HIDDEN_MODELS`：隐藏当前 provider `/models` 中的模型，同时是独立的显式请求拒绝规则。它支持字面量、`#re:` 和 `#reason_suffix` family marker；`#re:` 是普通 Go regexp。最终展示集合是当前 provider 原生列表中未被隐藏的模型，与 `MANUAL_MODELS` 从该原生列表命中的模型的并集、去重；同一模型同时命中两者时，`MANUAL_MODELS` 优先。因此 `HIDDEN_MODELS=#re:.*` 配合 `MANUAL_MODELS=#re:2.*` 会只重新展示当前 provider 原生列表中命中的 `2`、`2.4` 等模型。它不通过 `/models` 列表间接决定路由，而是在最终直接模型或映射目标命中时拒绝请求。
 - `ENABLE_REASONING_EFFORT_SUFFIX`：只控制客户端能不能用 `model-high` 这类模型名后缀表达推理强度；它不限制 `MODEL_MAP` source/target 里的配置层 suffix，也不限制请求体里显式传入的 reasoning effort。
 - `EXPOSE_REASONING_SUFFIX_MODELS`：只控制 `/models` 是否把这些后缀变体展示给客户端，不控制客户端显式请求 suffix 模型的能力
 - `ENABLE_NOPROMPT_MODEL_SUFFIX`：允许像 `model-noprompt`、`model-low-noprompt` 这样的请求跳过 provider 级 `SYSTEM_PROMPT_FILES` 注入；根级默认开启，provider 级同名字段留空时继承根配置，显式 `true/false` 时覆盖根配置；`-noprompt` 会先从模型名剥离，不会出现在上游模型名里，也不会自动额外出现在 `/models` 列表里，除非你在 `MANUAL_MODELS` 里把这个字面模型写出来
 - `-ultra`：始终可识别的代理私有 mode suffix。它在最终 Responses 上游且 provider 未显式关闭 `SUPPORTS_RESPONSES_MULTI_AGENT` 时，固定注入 `multi_agent.enabled=true` 和 provider 配置的并发数；它不参与 MODEL_MAP routing key，也不属于 reasoning family。
-- `-adaptive`：始终可识别的代理私有 intent suffix。它与 effort、`-pro`、`-noprompt`、`-ultra` 分别解析，root/provider 映射只保留该 intent、不会把它送进最终上游模型名。代理只按最终 `UPSTREAM_ENDPOINT_TYPE` 与最终 Anthropic 模型能力决定是否发送 native adaptive thinking；不满足条件时在上游请求前返回本地 400，不根据 `/models` 展示结果判断，也不回退为 manual thinking 或 `xhigh`。
+- `-auto`：始终可识别的 Anthropic 自动推理 intent suffix。它与 effort、`-pro`、`-noprompt`、`-ultra` 分别解析，root/provider 映射只保留该 intent、不会把它送进最终上游模型名。代理只按最终 `UPSTREAM_ENDPOINT_TYPE` 与最终 Anthropic 模型能力决定是否发送 native adaptive thinking；不满足条件时在上游请求前返回本地 400，不根据 `/models` 展示结果判断，也不回退为 manual thinking 或其它 effort。
 - `MAP_REASONING_SUFFIX_TO_ANTHROPIC_THINKING`：当上游是 anthropic 协议时，把最终解析出的 effort 翻译成 Anthropic 合法请求体字段 `thinking` / `output_config`，默认 `true`。effort 可以来自客户端模型名后缀、请求体显式参数，或 `MODEL_MAP` 的 source/target suffix；其中只有客户端模型名后缀入口受 `ENABLE_REASONING_EFFORT_SUFFIX` 控制。这个开关为 `false` 时，代理不做 Anthropic 风格转换，而是把客户端侧 `reasoning` / `reasoning_effort` 原样透传给上游；如果上游不兼容，应由上游明确返回错误，代理不会静默丢弃推理参数。内部档位是 `none/minimal/low/medium/high/xhigh/max`：`none` 关闭 thinking；旧式 manual thinking 会按 `ANTHROPIC_MAX_THINKING_BUDGET` 动态分配预算，并被 `max_tokens - 1` 夹紧；Claude adaptive thinking 原生支持 `max`，所以 `max` 会保留为 `output_config.effort=max`，而发往 OpenAI 风格上游时会降级成 `xhigh`。
 - `ANTHROPIC_MAX_THINKING_BUDGET`：控制 manual Anthropic `thinking.budget_tokens` 的最高预算，根级默认 `32000`，provider 留空继承、显式设置覆盖。Anthropic 官方只约束 `budget_tokens >= 1024` 且普通 manual thinking 下必须小于 `max_tokens`，没有公布全局独立最大值；`32000` 是通用工程默认值，不是官方 hard cap。举例：默认 32000 时，`minimal/low/medium/high/xhigh/max` 的 manual 预算分别约为 `2000/4000/8000/16000/32000/32000`，如果请求 `max_tokens=12000`，最终预算会被夹到 `11999`。
 
@@ -641,7 +638,7 @@ token estimator 以最终发给上游的 provider、上游协议、模型和 can
 - `MODEL_MAP` 的 source suffix 等效只作用于映射阶段，不改变模型列表。举例：`MODEL_MAP=client-gpt-high:upstream-gpt` 不会让 `/models` 出现 `client-gpt-high`；如果要展示它，仍要写 `MANUAL_MODELS=client-gpt-high`。
 - `#reason_suffix:model` 是手动 family 展示例外：即使 `ENABLE_REASONING_EFFORT_SUFFIX=false` 或 `EXPOSE_REASONING_SUFFIX_MODELS=false`，它仍会把该 base model 的推理后缀家族加入 `/models`。但它生成的是一个批量 family，不等同于每个档位都被静态手动添加，所以 `HIDDEN_MODELS` 仍可按独立规则隐藏或拒绝其中某个具体档位；例如 `HIDDEN_MODELS=gpt-5.5-minimal` 只作用于 `minimal`，`HIDDEN_MODELS=#reason_suffix:gpt-5.5` 作用于整组 family。若 `MANUAL_MODELS` 和 `HIDDEN_MODELS` 同时写了同一个 `#reason_suffix:gpt-5.5`，手动展示优先；极端情况下，如果 `ENABLE_REASONING_EFFORT_SUFFIX=false` 且 `MANUAL_MODELS` 同时写了 `#reason_suffix:gpt-5.5` 和字面 `gpt-5.5-low`，字面模型优先，`gpt-5.5-low` 会按 provider 原生模型处理；如果 `ENABLE_REASONING_EFFORT_SUFFIX=true`，同名 suffix 仍按可解析推理后缀处理。
 - `HIDDEN_MODELS` 的 `#re:` 是按完整模型名做普通 Go regexp 匹配，不理解“模型名”和“后缀强度”的语义边界；因此 `#re:.*mini.*` 会同时隐藏 `gpt-5.4-mini` 和 `gpt-5.5-minimal`。如果只想隐藏 `mini` 模型而保留 `-minimal` 推理强度，建议写成更精确的规则，例如 `#re:.*(^|-|:)mini($|-|\.).*`，或者直接列出要隐藏的字面模型。
-- `MANUAL_MODELS` 与 `HIDDEN_MODELS` 同时命中时按“粒度优先，其次手动优先”处理：手动大范围 family 遇到隐藏小范围档位时，隐藏小范围优先；手动和隐藏是同一范围时，手动优先；隐藏是大范围 family 而手动是小范围字面模型时，手动小范围优先。例如 `MANUAL_MODELS=#reason_suffix:gpt-5.5` + `HIDDEN_MODELS=gpt-5.5-minimal` 会隐藏 `minimal`；两边都写 `#reason_suffix:gpt-5.5` 时 family 仍显示；`MANUAL_MODELS=gpt-5.5-minimal` + `HIDDEN_MODELS=#reason_suffix:gpt-5.5` 时 `minimal` 仍显示。
+- 模型展示以最终模型 ID 为单位合并：同一个最终模型 ID 同时命中 `MANUAL_MODELS` 与 `HIDDEN_MODELS` 时，`MANUAL_MODELS` 优先。`MANUAL_MODELS` 正则只是从当前 provider 原生 `/models` 中批量添加命中项，不会把未命中的原生模型删除；只有另行配置的 `HIDDEN_MODELS` 才负责隐藏。典型白名单配置是 `HIDDEN_MODELS=#re:.*` + `MANUAL_MODELS=#re:<需要保留的模型>`。
 - `#reason_suffix` 与 `#re:` 可以共存，但顺序必须是 `#reason_suffix:#re:<pattern>`；先写 `#re:#reason_suffix:...` 不会被当作合法组合，因为正则筛选应先作用在上游 `/models` 返回的原始 base model 集合上，然后再对匹配到的每个 base model 展开推理后缀家族。这里的 `#re:` 不会匹配代理层自己生成的模型名、`MODEL_MAP` alias 或其它手动静态模型。`#reason_suffix:-minimal` 这种写法表示只处理所有可见 base model 的 `minimal` 档位，可用于手动补出或隐藏一个全局档位。
 - 对全局推理后缀开关来说，`HIDDEN_MODELS` 始终是更细粒度的显式限制：即使 `ENABLE_REASONING_EFFORT_SUFFIX=true` 允许显式解析 suffix，或 `EXPOSE_REASONING_SUFFIX_MODELS=true` 把 suffix 加进 `/models`，`HIDDEN_MODELS=#reason_suffix:-minimal`、`HIDDEN_MODELS=gpt-5.5-minimal`、`HIDDEN_MODELS=#reason_suffix:gpt-5.5` 仍然可以分别隐藏并拒绝某个档位、某个模型档位或整组 family。
 - `-noprompt` 是另一个代理层后缀：默认开启时，`gpt-5.5-noprompt` 会按 `gpt-5.5` 路由，`gpt-5.5-low-noprompt` 会按 `gpt-5.5-low` 路由并保留 `low` 推理强度，同时跳过 provider prompt 注入；provider 级 `ENABLE_NOPROMPT_MODEL_SUFFIX=false` 会让该 provider 把 `-noprompt` 当普通模型名处理；`HIDDEN_MODELS=gpt-5.5-noprompt` 可作为该变体的显式隐藏与拒绝规则；响应头 `X-Client-To-Proxy-NoPrompt: true` 表示该标记已生效，`false` 表示客户端带了 `-noprompt` 但有效配置关闭了该能力，`X-Proxy-To-Upstream-Model` 仍显示最终发给上游的模型名。

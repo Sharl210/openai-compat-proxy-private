@@ -30,6 +30,29 @@ func TestDecodeRequestRecordsBodyReasoningMode(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestPrefersMaxCompletionTokensWithoutPreservingDuplicateLimit(t *testing.T) {
+	canon, err := DecodeRequest(strings.NewReader(`{"model":"gpt-5.6","max_tokens":8192,"max_completion_tokens":4096,"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 4096 {
+		t.Fatalf("expected max_completion_tokens to win, got %#v", canon.MaxOutputTokens)
+	}
+	if _, ok := canon.PreservedTopLevelFields["max_completion_tokens"]; ok {
+		t.Fatalf("max_completion_tokens must not survive as a duplicate upstream field: %#v", canon.PreservedTopLevelFields)
+	}
+}
+
+func TestDecodeRequestAcceptsMaxCompletionTokensWithoutMaxTokens(t *testing.T) {
+	canon, err := DecodeRequest(strings.NewReader(`{"model":"gpt-5.6","max_completion_tokens":4096,"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if canon.MaxOutputTokens == nil || *canon.MaxOutputTokens != 4096 {
+		t.Fatalf("expected max_completion_tokens to populate canonical output limit, got %#v", canon.MaxOutputTokens)
+	}
+}
+
 func TestDecodeRequestAcceptsAssistantNullContentWithToolCalls(t *testing.T) {
 	req := `{
 		"model":"gpt-5",

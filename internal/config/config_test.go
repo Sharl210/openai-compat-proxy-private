@@ -1156,6 +1156,49 @@ func TestRuntimeSnapshotResolveDefaultProviderSelectionStripsNoPromptRegardlessO
 	}
 }
 
+func TestBuildRuntimeSnapshotDistinguishesProviderUpstreamAPIKeyStates(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerLine string
+		wantKey      string
+		wantSet      bool
+	}{
+		{name: "provider unset inherits root", wantKey: "root-key", wantSet: false},
+		{name: "provider explicit empty stays empty", providerLine: "UPSTREAM_API_KEY=", wantKey: "", wantSet: true},
+		{name: "provider non-empty overrides root", providerLine: "UPSTREAM_API_KEY=provider-key", wantKey: "provider-key", wantSet: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			providersDir := filepath.Join(rootDir, "providers")
+			if err := os.MkdirAll(providersDir, 0o700); err != nil {
+				t.Fatalf("mkdir providers dir: %v", err)
+			}
+			rootPath := filepath.Join(rootDir, ".env")
+			root := "PROVIDERS_DIR=" + providersDir + "\nDEFAULT_PROVIDER=openai\nUPSTREAM_API_KEY=root-key\n"
+			if err := os.WriteFile(rootPath, []byte(root), 0o600); err != nil {
+				t.Fatalf("write root env: %v", err)
+			}
+			provider := "PROVIDER_ID=openai\nPROVIDER_ENABLED=true\nUPSTREAM_BASE_URL=https://example.test\nSUPPORTS_RESPONSES=true\n" + tt.providerLine + "\n"
+			if err := os.WriteFile(filepath.Join(providersDir, "openai.env"), []byte(provider), 0o600); err != nil {
+				t.Fatalf("write provider env: %v", err)
+			}
+
+			snapshot, err := BuildRuntimeSnapshot(rootPath)
+			if err != nil {
+				t.Fatalf("BuildRuntimeSnapshot error: %v", err)
+			}
+			providerCfg, err := snapshot.Config.ProviderByID("openai")
+			if err != nil {
+				t.Fatalf("ProviderByID error: %v", err)
+			}
+			if providerCfg.UpstreamAPIKey != tt.wantKey || providerCfg.UpstreamAPIKeySet != tt.wantSet {
+				t.Fatalf("expected provider key %q/set=%v, got %q/set=%v", tt.wantKey, tt.wantSet, providerCfg.UpstreamAPIKey, providerCfg.UpstreamAPIKeySet)
+			}
+		})
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

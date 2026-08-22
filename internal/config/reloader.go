@@ -32,6 +32,7 @@ func NewRuntimeStore(rootEnvPath string) (*RuntimeStore, error) {
 func NewStaticRuntimeStore(cfg Config) *RuntimeStore {
 	store := &RuntimeStore{}
 	normalizeRuntimeConfigDefaults(&cfg)
+	applyRootProviderUpstreamAPIKeyDefault(&cfg)
 	ids, owners, visible, taggedOwners, taggedVisible, rawIDs, taggedRawIDs, _ := buildDefaultOverlayModelIndex(cfg)
 	store.active.Store(&RuntimeSnapshot{
 		Config:                     cfg,

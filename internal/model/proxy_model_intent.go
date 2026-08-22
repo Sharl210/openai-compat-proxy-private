@@ -15,7 +15,7 @@ var reasoningEfforts = []string{
 type ProxyModelIntentAxes struct {
 	EnableReasoningEffort bool
 	EnablePro             bool
-	EnableAdaptive        bool
+	EnableAuto            bool
 	EnableNoPrompt        bool
 	EnableUltra           bool
 }
@@ -24,7 +24,7 @@ type ProxyModelIntent struct {
 	BaseModel        string
 	ReasoningEffort  string
 	ReasoningMode    string
-	HasAdaptive      bool
+	HasAuto          bool
 	HasNoPrompt      bool
 	HasUltra         bool
 	HasModelMapAlias bool
@@ -40,8 +40,8 @@ func (intent ProxyModelIntent) CanonicalModel() string {
 	if intent.ReasoningMode == "pro" {
 		modelName += "-pro"
 	}
-	if intent.HasAdaptive {
-		modelName += "-adaptive"
+	if intent.HasAuto {
+		modelName += "-auto"
 	}
 	if intent.HasUltra {
 		modelName += "-ultra"
@@ -51,7 +51,6 @@ func (intent ProxyModelIntent) CanonicalModel() string {
 	}
 	return modelName
 }
-
 func ParseProxyModelIntent(modelName string, candidates []string, axes ProxyModelIntentAxes) (ProxyModelIntent, bool) {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
@@ -90,7 +89,7 @@ func HasProxyModelIntentTail(modelName string) bool {
 	axes := ProxyModelIntentAxes{
 		EnableReasoningEffort: true,
 		EnablePro:             true,
-		EnableAdaptive:        true,
+		EnableAuto:            true,
 		EnableNoPrompt:        true,
 		EnableUltra:           true,
 	}
@@ -132,7 +131,7 @@ func parseProxyModelIntentTail(candidate string, tail string, axes ProxyModelInt
 	}
 	seenEffort := false
 	seenPro := false
-	seenAdaptive := false
+	seenAuto := false
 	seenNoPrompt := false
 	seenUltra := false
 	for tail != "" {
@@ -156,13 +155,13 @@ func parseProxyModelIntentTail(candidate string, tail string, axes ProxyModelInt
 			tail = strings.TrimPrefix(tail, "-pro")
 			continue
 		}
-		if axes.EnableAdaptive && strings.HasPrefix(tail, "-adaptive") {
-			if seenAdaptive {
+		if axes.EnableAuto && strings.HasPrefix(tail, "-auto") {
+			if seenAuto {
 				return ProxyModelIntent{}, false
 			}
-			intent.HasAdaptive = true
-			seenAdaptive = true
-			tail = strings.TrimPrefix(tail, "-adaptive")
+			intent.HasAuto = true
+			seenAuto = true
+			tail = strings.TrimPrefix(tail, "-auto")
 			continue
 		}
 		if axes.EnableUltra && strings.HasPrefix(tail, "-ultra") {

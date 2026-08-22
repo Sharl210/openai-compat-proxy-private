@@ -1056,6 +1056,31 @@ func TestDecodeRequestPreservesRealReasoningFromProxyReasoningBeforeConsecutiveT
 	}
 }
 
+func TestDecodeRequestMergesReasoningTextAndToolCallIntoOneAssistantTurn(t *testing.T) {
+	req := `{
+		"model":"deepseek-v4-flash",
+		"input":[
+			{"role":"user","content":"查天气"},
+			{"type":"reasoning","id":"rs_chat_reasoning","summary":[{"type":"summary_text","text":"先分析天气请求"}]},
+			{"role":"assistant","content":"准备查询天气"},
+			{"type":"function_call","call_id":"call_weather","name":"search_web","arguments":"{\"query\":\"桂林天气\"}"},
+			{"type":"function_call_output","call_id":"call_weather","output":"{\"ok\":true}"}
+		]
+	}`
+
+	canon, err := DecodeRequest(strings.NewReader(req))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if len(canon.Messages) != 3 {
+		t.Fatalf("expected user, merged assistant turn, and tool result, got %#v", canon.Messages)
+	}
+	assistant := canon.Messages[1]
+	if assistant.ReasoningContent != "先分析天气请求" || len(assistant.Parts) != 1 || assistant.Parts[0].Text != "准备查询天气" || len(assistant.ToolCalls) != 1 {
+		t.Fatalf("expected reasoning, visible text, and tool call in one assistant turn, got %#v", assistant)
+	}
+}
+
 func TestDecodeRequestPreservesProxyReasoningStateWithoutSummaryOrEncryption(t *testing.T) {
 	// Given
 	var received map[string]any

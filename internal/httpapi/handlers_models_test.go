@@ -448,11 +448,8 @@ func TestRewriteModelsBodyExpandsManualReasonSuffixRegexFamily(t *testing.T) {
 				t.Fatalf("expected %q to expose %q, got %#v", manual, want, ids)
 			}
 		}
-		if contains(ids, "gpt-4.1") {
-			t.Fatalf("expected %q to filter unmatched upstream base gpt-4.1, got %#v", manual, ids)
-		}
-		if contains(ids, "gpt-4.1-low") {
-			t.Fatalf("expected %q not to expand unmatched gpt-4.1 family, got %#v", manual, ids)
+		if !contains(ids, "gpt-4.1") {
+			t.Fatalf("expected unmatched upstream base to remain visible, got %#v", ids)
 		}
 	})
 }
@@ -851,7 +848,7 @@ func TestRewriteModelsBodyHidesModelsConfiguredInHiddenModels(t *testing.T) {
 	}
 }
 
-func TestRewriteModelsBodyExpandsRegexManualModelsFromUpstreamList(t *testing.T) {
+func TestRewriteModelsBodyKeepsAllProviderModelsAndAddsRegexMatches(t *testing.T) {
 	body := []byte(`{"object":"list","data":[{"id":"1","object":"model"},{"id":"2","object":"model"},{"id":"2.4","object":"model"},{"id":"5","object":"model"}]}`)
 	provider := config.ProviderConfig{ManualModels: []string{"#re:2.*"}}
 
@@ -866,8 +863,32 @@ func TestRewriteModelsBodyExpandsRegexManualModelsFromUpstreamList(t *testing.T)
 		entry, _ := item.(map[string]any)
 		ids = append(ids, entry["id"].(string))
 	}
-	if contains(ids, "1") || contains(ids, "5") || !contains(ids, "2") || !contains(ids, "2.4") {
-		t.Fatalf("expected regex manual pattern to expose only matching upstream models 2 and 2.4, got %#v", ids)
+	for _, want := range []string{"1", "2", "2.4", "5"} {
+		if !contains(ids, want) {
+			t.Fatalf("expected provider native model %q to remain visible, got %#v", want, ids)
+		}
+	}
+}
+
+func TestRewriteModelsBodyManualRegexOverridesHiddenRegexWithinProvider(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"alpha-1","object":"model"},{"id":"beta-1","object":"model"},{"id":"other","object":"model"}]}`)
+	provider := config.ProviderConfig{
+		ManualModels: []string{"#re:^(alpha|beta)-.*"},
+		HiddenModels: []string{"#re:.*"},
+	}
+	rewritten := rewriteModelsBody(body, provider)
+	var payload map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("decode rewritten models body: %v", err)
+	}
+	data, _ := payload["data"].([]any)
+	ids := make([]string, 0, len(data))
+	for _, item := range data {
+		entry, _ := item.(map[string]any)
+		ids = append(ids, entry["id"].(string))
+	}
+	if len(ids) != 2 || !contains(ids, "alpha-1") || !contains(ids, "beta-1") || contains(ids, "other") {
+		t.Fatalf("expected manual regex union to override hidden regex only for matching native models, got %#v", ids)
 	}
 }
 
@@ -899,7 +920,6 @@ func TestRewriteModelsBodyKeepsManualModelsEvenWhenHiddenRegexMatches(t *testing
 		ManualModels: []string{"manual-alpha"},
 		HiddenModels: []string{"#re:.*"},
 	}
-
 	rewritten := rewriteModelsBody(body, provider)
 	var payload map[string]any
 	if err := json.Unmarshal(rewritten, &payload); err != nil {
@@ -914,6 +934,41 @@ func TestRewriteModelsBodyKeepsManualModelsEvenWhenHiddenRegexMatches(t *testing
 	if len(ids) != 1 || ids[0] != "manual-alpha" {
 		t.Fatalf("expected manual model to remain visible, got %#v", ids)
 	}
+}
+
+func TestManualModelsRegexIsScopedToSelectedProvider(t *testing.T) {
+	newUpstream := func(models string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":` + models + `}`))
+		}))
+	}
+	alpha := newUpstream(`[{"id":"alpha-keep","object":"model"},{"id":"alpha-hide","object":"model"}]`)
+	defer alpha.Close()
+	beta := newUpstream(`[{"id":"beta-keep","object":"model"},{"id":"beta-other","object":"model"}]`)
+	defer beta.Close()
+	server := NewServer(config.Config{
+		DefaultProvider: "alpha,beta",
+		Providers: []config.ProviderConfig{
+			{ID: "alpha", Enabled: true, UpstreamBaseURL: alpha.URL, UpstreamAPIKey: "key", SupportsModels: true, ManualModels: []string{"#re:alpha-keep"}, HiddenModels: []string{"#re:.*"}},
+			{ID: "beta", Enabled: true, UpstreamBaseURL: beta.URL, UpstreamAPIKey: "key", SupportsModels: true},
+		},
+	})
+	assertModels := func(path string, want []string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		ids := decodeModelIDsFromBody(t, rec.Body.Bytes())
+		if !reflect.DeepEqual(ids, want) {
+			t.Fatalf("%s models=%v want=%v", path, ids, want)
+		}
+	}
+	assertModels("/alpha/v1/models", []string{"alpha-keep"})
+	assertModels("/beta/v1/models", []string{"beta-keep", "beta-other"})
 }
 
 func contains(values []string, want string) bool {
@@ -939,4 +994,49 @@ func decodeModelIDsFromBody(t *testing.T, body []byte) []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+func TestRewriteModelsBodyAppliesRawModelNameReplace(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash","object":"model","owned_by":"copilot"}]}`)
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "{{model}}",
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "#re:.*quectel-github-copilot/(.*):$1"),
+	}
+
+	rewritten := rewriteModelsBodyForRoute(body, provider, false)
+	ids := decodeModelIDsFromBody(t, rewritten)
+	if len(ids) != 1 || ids[0] != "QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected replaced display id, got %#v", ids)
+	}
+}
+
+func TestRewriteModelsBodyAppliesRawModelNameReplaceAfterTemplate(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash","object":"model","owned_by":"copilot"}]}`)
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "packy-{{model}}",
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "quectel-github-copilot/:relay/"),
+	}
+
+	rewritten := rewriteModelsBodyForRoute(body, provider, false)
+	ids := decodeModelIDsFromBody(t, rewritten)
+	if len(ids) != 1 || ids[0] != "packy-relay/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected template then literal replace display id, got %#v", ids)
+	}
+}
+
+func TestConfiguredModelsFallbackBodyAppliesRawModelNameReplace(t *testing.T) {
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "{{model}}",
+		ManualModels:             []string{"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash"},
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "#re:.*quectel-github-copilot/(.*):$1"),
+	}
+
+	body, ok := configuredModelsFallbackBody(provider)
+	if !ok {
+		t.Fatalf("expected fallback body")
+	}
+	ids := decodeModelIDsFromBody(t, body)
+	if len(ids) != 1 || ids[0] != "QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected replaced fallback display id, got %#v", ids)
+	}
 }

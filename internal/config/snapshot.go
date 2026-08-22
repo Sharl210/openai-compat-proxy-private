@@ -142,10 +142,22 @@ func buildRuntimeSnapshotFromValues(rootEnvPath string, rootInfo os.FileInfo, va
 	}, nil
 }
 
+func applyRootProviderUpstreamAPIKeyDefault(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	for i := range cfg.Providers {
+		if !cfg.Providers[i].UpstreamAPIKeySet && cfg.Providers[i].UpstreamAPIKey == "" {
+			cfg.Providers[i].UpstreamAPIKey = cfg.UpstreamAPIKey
+		}
+	}
+}
+
 func applyRootProviderTokenDefaults(cfg *Config) {
 	if cfg == nil {
 		return
 	}
+	applyRootProviderUpstreamAPIKeyDefault(cfg)
 	for i := range cfg.Providers {
 		if !cfg.Providers[i].UpstreamMaxOutputTokensSet {
 			cfg.Providers[i].UpstreamMaxOutputTokens = cfg.UpstreamMaxOutputTokens
@@ -221,7 +233,7 @@ func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []s
 		visibleByProvider[id] = visible
 		externalByProvider[id] = make(map[string]string, len(visible))
 		for _, modelID := range visible {
-			externalID := provider.ExternalModelID(modelID, true)
+			externalID := provider.ApplyRawModelNameReplace(provider.ExternalModelID(modelID, true))
 			externalByProvider[id][modelID] = externalID
 			modelCount[externalID]++
 			taggedID := formatTaggedModelID(id, externalID)

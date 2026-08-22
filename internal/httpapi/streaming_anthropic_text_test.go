@@ -66,6 +66,56 @@ func TestAnthropicProjectionDropsBlankOnlyTerminalText(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamDoesNotCarryReasoningTitleBoundaryAcrossTextOrTool(t *testing.T) {
+	tests := []struct {
+		name   string
+		middle upstream.Event
+	}{
+		{name: "text", middle: upstream.Event{Event: "response.output_text.delta", Data: map[string]any{"delta": "answer"}}},
+		{name: "tool", middle: upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}}}},
+		{name: "message", middle: upstream.Event{Event: "response.output_item.added", Data: map[string]any{"item": map[string]any{"id": "msg_1", "type": "message", "role": "assistant", "content": []any{}}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requestReasoningChunkContexts.delete("req-anthropic-lane")
+			rec := httptest.NewRecorder()
+			state := &anthropicStreamState{messageID: "req-anthropic-lane", pendingToolArgs: map[string]string{}, toolMeta: map[string]map[string]string{}, emittedToolItems: map[string]bool{}}
+			for _, event := range []upstream.Event{
+				{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+				test.middle,
+				{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第二标题**"}},
+			} {
+				if err := writeAnthropicEvent(rec, nil, state, event, nil); err != nil {
+					t.Fatalf("writeAnthropicEvent(%s): %v", event.Event, err)
+				}
+			}
+			if strings.Contains(rec.Body.String(), `"thinking":"\n\n**第二标题**"`) {
+				t.Fatalf("reasoning title boundary crossed %s lane: %s", test.name, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"thinking":"**第二标题**"`) {
+				t.Fatalf("missing unprefixed second title after %s lane: %s", test.name, rec.Body.String())
+			}
+		})
+	}
+}
+func TestAnthropicStreamTerminalEventClearsReasoningChunkContextAfterFlush(t *testing.T) {
+	const requestID = "req-anthropic-terminal"
+	requestReasoningChunkContexts.delete(requestID)
+	rec := httptest.NewRecorder()
+	state := &anthropicStreamState{messageID: requestID, pendingToolArgs: map[string]string{}, toolMeta: map[string]map[string]string{}, emittedToolItems: map[string]bool{}}
+	for _, event := range []upstream.Event{
+		{Event: "response.reasoning.delta", Data: map[string]any{"delta": "**第一标题**"}},
+		{Event: "response.completed", Data: map[string]any{}},
+	} {
+		if err := writeAnthropicEvent(rec, nil, state, event, nil); err != nil {
+			t.Fatalf("writeAnthropicEvent(%s): %v", event.Event, err)
+		}
+	}
+	if _, ok := requestReasoningChunkContexts.tail(requestID); ok {
+		t.Fatal("terminal event left request context behind")
+	}
+}
+
 type flushRecorder struct{ *httptest.ResponseRecorder }
 
 func (f flushRecorder) Flush() {}

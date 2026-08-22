@@ -19,6 +19,7 @@ func handleChat() http.HandlerFunc {
 		r, sessionID := ensureProxySessionID(r, w)
 		setNormalizationVersionHeader(w)
 		requestID := w.Header().Get("X-Request-Id")
+		defer requestReasoningChunkContexts.delete(requestID)
 
 		canon, err := chatadapter.DecodeRequest(r.Body)
 		if err != nil {
@@ -96,10 +97,7 @@ func handleChat() http.HandlerFunc {
 				})
 			}
 			applyProviderMaxOutputTokens(&canon, provider)
-			if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
-				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
-				return
-			}
+			applyAutoReasoningModelSuffix(&canon, intent)
 			finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 			applyProxyModelIntentReasoningMode(r, &canon)
 			enforceSuffixReasoningModePrecedence(&canon)
@@ -119,6 +117,7 @@ func handleChat() http.HandlerFunc {
 				return
 			}
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
+			applyAutoReasoningModelSuffix(&canon, intent)
 			applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
 			if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
 				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)

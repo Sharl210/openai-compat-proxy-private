@@ -20,6 +20,7 @@ type ProviderConfig struct {
 	Enabled                                bool
 	UpstreamBaseURL                        string
 	UpstreamAPIKey                         string
+	UpstreamAPIKeySet                      bool
 	OpenAIServiceTier                      string
 	AnthropicMaxThinkingBudget             int
 	AnthropicMaxThinkingBudgetSet          bool
@@ -240,6 +241,7 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.UpstreamBaseURL = value
 		case "UPSTREAM_API_KEY":
 			provider.UpstreamAPIKey = value
+			provider.UpstreamAPIKeySet = true
 		case "UPSTREAM_ENDPOINT_TYPE":
 			normalized, err := normalizeUpstreamEndpointType(value)
 			if err != nil {

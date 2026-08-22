@@ -17,6 +17,9 @@ func authHeaderForResolvedProviderUpstream(r *http.Request, cfg config.Config, p
 
 func authModeForUpstream(r *http.Request, cfg config.Config) string {
 	cfg = effectiveUpstreamAuthConfig(r, cfg)
+	if auth.UpstreamAuthenticationDisabled(cfg.UpstreamAPIKey) {
+		return "disabled"
+	}
 	if r.Header.Get("X-Upstream-Authorization") != "" {
 		return "x_upstream_authorization"
 	}

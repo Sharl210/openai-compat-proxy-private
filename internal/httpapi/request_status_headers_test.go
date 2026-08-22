@@ -307,27 +307,27 @@ func TestUnauthorizedResponsesRequestDoesNotExposeStatusCheckHeaders(t *testing.
 	}
 }
 
-func TestResponsesMissingUpstreamAuthMarksFailedTerminalStatus(t *testing.T) {
+func TestResponsesBlankUpstreamKeyAllowsUnauthenticatedUpstream(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.completed\n" +
+			"data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+	}))
+	defer upstream.Close()
 	server := NewServer(config.Config{
 		DefaultProvider:      "openai",
 		EnableLegacyV1Routes: true,
-		Providers: []config.ProviderConfig{{
-			ID:                "openai",
-			Enabled:           true,
-			UpstreamBaseURL:   "https://example.test",
-			SupportsResponses: true,
-		}},
+		Providers:            []config.ProviderConfig{{ID: "openai", Enabled: true, UpstreamBaseURL: upstream.URL, UpstreamAPIKey: "", UpstreamAPIKeySet: true, SupportsResponses: true}},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-
 	server.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || gotAuth != "" {
+		t.Fatalf("blank upstream key request = %d auth=%q body=%s", rec.Code, gotAuth, rec.Body.String())
 	}
-	_ = rec.Header().Get("X-Request-Id")
 }
 
 func TestAnthropicInvalidRequestMarksFailedTerminalStatus(t *testing.T) {

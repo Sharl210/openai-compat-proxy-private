@@ -133,6 +133,9 @@ func loadFromLookup(lookup func(string) (string, bool)) Config {
 	if value, ok := lookup("PROXY_API_KEY"); ok && value != "" {
 		cfg.ProxyAPIKey = value
 	}
+	if value, ok := lookup("UPSTREAM_API_KEY"); ok {
+		cfg.UpstreamAPIKey = value
+	}
 	if value, ok := lookup("PROVIDERS_DIR"); ok && value != "" {
 		cfg.ProvidersDir = value
 	}
@@ -852,6 +855,7 @@ func (c *Config) applyStartupOnlyFrom(previous Config) {
 
 func (c Config) hotReloadableRootEquals(other Config) bool {
 	return c.ProxyAPIKey == other.ProxyAPIKey &&
+		c.UpstreamAPIKey == other.UpstreamAPIKey &&
 		c.ProvidersDir == other.ProvidersDir &&
 		c.DefaultProvider == other.DefaultProvider &&
 		modelMapEntriesEqual(c.V1ModelMap, other.V1ModelMap) &&

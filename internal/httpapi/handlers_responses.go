@@ -49,6 +49,8 @@ type initialResponsesRequest struct {
 
 func handleResponses() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		requestID := w.Header().Get("X-Request-Id")
+		defer requestReasoningChunkContexts.delete(requestID)
 		prepared, ok := prepareResponsesRequest(w, r, false)
 		if !ok {
 			return
@@ -576,6 +578,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 	}
 	if portableHistoryRestored {
 		canon.Messages = stripCrossScopeNativeAnthropicThinking(canon.Messages)
+		portableReasoningProjection = projectClientResponsesReasoning(&canon, providerCfg.UpstreamEndpointType) || portableReasoningProjection
 	}
 	compactHistoryRestored := compact && nonResponsesUpstream && previousHistoryRestored
 	if compactHistoryRestored {
@@ -596,10 +599,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		}
 	}
 	applyProviderMaxOutputTokens(&canon, provider)
-	if err := applyAdaptiveThinkingModelSuffix(&canon, intent, providerCfg); err != nil {
-		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
-		return nil, false
-	}
+	applyAutoReasoningModelSuffix(&canon, intent)
 	finalizeAnthropicReasoningForUpstream(&canon, provider, providerCfg)
 	applyProxyModelIntentReasoningMode(r, &canon)
 	enforceSuffixReasoningModePrecedence(&canon)
@@ -618,6 +618,7 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
 		return nil, false
 	}
+	applyAutoReasoningModelSuffix(&canon, intent)
 	applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
 	if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
@@ -696,7 +697,7 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 				continue
 			}
 			portableProjection = true
-			if portableBlock := portableResponsesReasoningBlock(block); len(portableBlock) > 0 {
+			if portableBlock := portableResponsesReasoningBlock(block, upstreamEndpointType == config.UpstreamEndpointTypeChat); len(portableBlock) > 0 {
 				projectedBlocks = append(projectedBlocks, portableBlock)
 			}
 			changed = true
@@ -718,7 +719,7 @@ func projectClientResponsesReasoning(canon *model.CanonicalRequest, upstreamEndp
 			continue
 		}
 		portableProjection = true
-		if portableItem := portableResponsesReasoningBlock(item); len(portableItem) > 0 {
+		if portableItem := portableResponsesReasoningBlock(item, upstreamEndpointType == config.UpstreamEndpointTypeChat); len(portableItem) > 0 {
 			filteredItems = append(filteredItems, portableItem)
 		}
 	}
@@ -730,21 +731,59 @@ func isResponsesReasoningItem(block map[string]any) bool {
 	return stringValue(block["type"]) == "reasoning"
 }
 
-func portableResponsesReasoningBlock(block map[string]any) map[string]any {
-	if hasOpaqueResponsesReasoningState(block) {
+func portableResponsesReasoningBlock(block map[string]any, preserveSummary bool) map[string]any {
+	if hasOpaqueResponsesReasoningState(block) || reasoningPayloadIsOpaque(block) {
 		return nil
 	}
 	portable := map[string]any{"type": "reasoning"}
 	if thinking := stringValue(block["thinking"]); thinking != "" {
 		portable["thinking"] = thinking
+		return portable
 	}
-	if text := stringValue(block["text"]); text != "" {
-		portable["text"] = text
+	for _, key := range []string{"text", "reasoning_content", "content"} {
+		if text := stringValue(block[key]); text != "" {
+			portable["text"] = text
+			return portable
+		}
+	}
+	if preserveSummary {
+		if summary := portableResponsesReasoningSummaryText(block["summary"]); summary != "" {
+			portable["text"] = summary
+		}
 	}
 	if len(portable) == 1 {
 		return nil
 	}
 	return portable
+}
+
+func portableResponsesReasoningSummaryText(raw any) string {
+	switch summary := raw.(type) {
+	case string:
+		return summary
+	case map[string]any:
+		if text := stringValue(summary["text"]); text != "" {
+			return text
+		}
+		if text := portableResponsesReasoningSummaryText(summary["summary_text"]); text != "" {
+			return text
+		}
+		return stringValue(summary["thinking"])
+	case []any:
+		var text strings.Builder
+		for _, part := range summary {
+			text.WriteString(portableResponsesReasoningSummaryText(part))
+		}
+		return text.String()
+	case []map[string]any:
+		var text strings.Builder
+		for _, part := range summary {
+			text.WriteString(portableResponsesReasoningSummaryText(part))
+		}
+		return text.String()
+	default:
+		return ""
+	}
 }
 
 func hasOpaqueResponsesReasoningState(block map[string]any) bool {

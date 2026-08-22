@@ -420,21 +420,48 @@ func mergeAdjacentResponsesReasoningToolMessages(messages []model.CanonicalMessa
 		return messages
 	}
 	merged := make([]model.CanonicalMessage, 0, len(messages))
-	for idx := 0; idx < len(messages); idx++ {
-		msg := messages[idx]
-		if isStandaloneResponsesReasoningMessage(msg) && idx+1 < len(messages) && canMergeResponsesReasoningIntoToolMessage(messages[idx+1]) {
-			next := messages[idx+1]
-			next.ReasoningBlocks = append(cloneMapSlice(msg.ReasoningBlocks), next.ReasoningBlocks...)
-			if next.ReasoningContent == "" {
-				next.ReasoningContent = msg.ReasoningContent
-			}
-			merged = append(merged, next)
+	for idx := 0; idx < len(messages); {
+		if !isStandaloneResponsesReasoningMessage(messages[idx]) {
+			merged = append(merged, messages[idx])
 			idx++
 			continue
 		}
-		merged = append(merged, msg)
+		end := idx + 1
+		for end < len(messages) && isMergeableResponsesAssistantTurnPart(messages[end]) {
+			end++
+		}
+		if end == idx+1 || !responsesAssistantRunHasToolCall(messages[idx+1:end]) {
+			merged = append(merged, messages[idx])
+			idx++
+			continue
+		}
+		combined := messages[idx]
+		for _, part := range messages[idx+1 : end] {
+			combined.Parts = append(combined.Parts, part.Parts...)
+			combined.ToolCalls = append(combined.ToolCalls, part.ToolCalls...)
+			combined.OrderedContent = append(combined.OrderedContent, part.OrderedContent...)
+			combined.ReasoningBlocks = append(combined.ReasoningBlocks, cloneMapSlice(part.ReasoningBlocks)...)
+			if combined.ReasoningContent == "" {
+				combined.ReasoningContent = part.ReasoningContent
+			}
+		}
+		merged = append(merged, combined)
+		idx = end
 	}
 	return mergeResponsesParallelToolCallRounds(merged)
+}
+
+func isMergeableResponsesAssistantTurnPart(msg model.CanonicalMessage) bool {
+	return msg.Role == "assistant" && msg.ToolCallID == ""
+}
+
+func responsesAssistantRunHasToolCall(messages []model.CanonicalMessage) bool {
+	for _, msg := range messages {
+		if len(msg.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeResponsesParallelToolCallRounds(messages []model.CanonicalMessage) []model.CanonicalMessage {

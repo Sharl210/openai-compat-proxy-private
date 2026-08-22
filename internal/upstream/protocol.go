@@ -1798,8 +1798,9 @@ func buildAnthropicRequestBody(req model.CanonicalRequest, masqueradeTarget stri
 		}
 	}
 	if len(req.Tools) > 0 {
-		tools := make([]any, 0, len(req.Tools))
-		for _, tool := range sortedCanonicalTools(req.Tools) {
+		anthropicTools := expandAnthropicNamespaceTools(req.Tools)
+		tools := make([]any, 0, len(anthropicTools))
+		for _, tool := range sortedCanonicalTools(anthropicTools) {
 			tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": normalizeAnthropicToolInputSchema(tool)})
 		}
 		payload["tools"] = tools
@@ -2017,7 +2018,11 @@ func buildAnthropicMessages(req model.CanonicalRequest) []any {
 		}
 		if len(msg.OrderedContent) > 0 {
 			pendingToolResults = appendPendingToolResults(pendingToolResults)
-			content := buildAnthropicOrderedContent(msg.OrderedContent)
+			content := make([]any, 0, len(msg.ReasoningBlocks)+len(msg.OrderedContent))
+			if msg.Role == "assistant" {
+				content = append(content, cloneAnySliceOfMaps(msg.ReasoningBlocks)...)
+			}
+			content = append(content, buildAnthropicOrderedContent(msg.OrderedContent)...)
 			for _, block := range msg.OrderedContent {
 				if block.Type == "tool_result" && block.ToolCallID != "" {
 					emittedOrderedToolResults[block.ToolCallID] = struct{}{}

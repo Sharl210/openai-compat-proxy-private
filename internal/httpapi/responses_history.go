@@ -898,18 +898,29 @@ func recoverAnthropicThinkingForAssistantToolCalls(history *responsesHistoryStor
 	recovered := append([]model.CanonicalMessage(nil), messages...)
 	for messageIndex := range recovered {
 		message := &recovered[messageIndex]
-		if message.Role != "assistant" || len(message.ToolCalls) == 0 || len(message.ReasoningBlocks) > 0 {
+		if message.Role != "assistant" || (len(message.ToolCalls) == 0 && len(message.OrderedContent) == 0) || len(message.ReasoningBlocks) > 0 {
+			continue
+		}
+		toolCalls := append([]model.CanonicalToolCall(nil), message.ToolCalls...)
+		if len(toolCalls) == 0 {
+			for _, block := range message.OrderedContent {
+				if block.Type == "tool_use" && block.ToolCall.ID != "" {
+					toolCalls = append(toolCalls, block.ToolCall)
+				}
+			}
+		}
+		if len(toolCalls) == 0 {
 			continue
 		}
 
 		var serverBlocks []map[string]any
-		sequenceHash := assistantToolCallSequenceHash(message.ToolCalls)
+		sequenceHash := assistantToolCallSequenceHash(toolCalls)
 		if sequenceHash == "" {
 			continue
 		}
 		matched := true
 		seenToolCallIDs := map[string]struct{}{}
-		for _, candidate := range message.ToolCalls {
+		for _, candidate := range toolCalls {
 			if strings.TrimSpace(candidate.ID) == "" {
 				matched = false
 				break
@@ -997,6 +1008,7 @@ func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) [
 			continue
 		}
 		retained := make([]map[string]any, 0, len(blocks))
+		portableText := ""
 		removed := false
 		for _, block := range blocks {
 			blockType := stringValue(block["type"])
@@ -1005,6 +1017,7 @@ func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) [
 				removed = true
 			case blockType == "reasoning" && hasOpaqueResponsesReasoningState(block):
 				removed = true
+				portableText += portableResponsesReasoningTextFromOpaqueBlock(block)
 			default:
 				retained = append(retained, block)
 			}
@@ -1013,9 +1026,27 @@ func stripCrossScopeNativeAnthropicThinking(messages []model.CanonicalMessage) [
 			continue
 		}
 		stripped[index].ReasoningBlocks = retained
-		stripped[index].ReasoningContent = ""
+		stripped[index].ReasoningContent = portableText
 	}
 	return stripped
+}
+
+func portableResponsesReasoningTextFromOpaqueBlock(block map[string]any) string {
+	if len(block) == 0 {
+		return ""
+	}
+	clean := cloneResponsesHistoryDynamicMap(block)
+	delete(clean, "encrypted_content")
+	delete(clean, "signature")
+	delete(clean, "opaque")
+	portable := portableResponsesReasoningBlock(clean, true)
+	if len(portable) == 0 {
+		return ""
+	}
+	if thinking := stringValue(portable["thinking"]); thinking != "" {
+		return thinking
+	}
+	return stringValue(portable["text"])
 }
 
 func assistantToolCallSequenceHash(toolCalls []model.CanonicalToolCall) string {
@@ -1349,7 +1380,7 @@ func selectResponsesHistoryMessages(base []model.CanonicalMessage, assistant []m
 			}
 			snapshot = append(snapshot, msg)
 		case "assistant":
-			if len(msg.ToolCalls) > 0 {
+			if len(msg.ToolCalls) > 0 || msg.ReasoningContent != "" || len(msg.ReasoningBlocks) > 0 {
 				snapshot = append(snapshot, msg)
 			}
 		}
