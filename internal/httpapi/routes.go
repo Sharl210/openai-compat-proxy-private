@@ -329,6 +329,26 @@ func withDefaultOverlayDiscovery(ctx context.Context, discovery defaultOverlayDi
 	return context.WithValue(ctx, defaultOverlayDiscoveryKey, discovery)
 }
 
+// overlayDiscoveryRequestedMatches 判断 discovery 的请求模型名与路由层 canonicalModel 是否匹配。
+// 根 V1_MODEL_MAP 的 source（如 deepseek-v4-flash）可能与 discovery 反查时的带模板标签名
+// （如 [copilot]deepseek-v4-flash）不一致；允许对 discovery.ProviderID 的模板做拆包比较。
+func overlayDiscoveryRequestedMatches(snapshot *config.RuntimeSnapshot, discovery defaultOverlayDiscovery, canonicalModel string) bool {
+	if discovery.RequestedModelID == canonicalModel {
+		return true
+	}
+	if snapshot == nil || strings.TrimSpace(discovery.ProviderID) == "" {
+		return false
+	}
+	provider, err := snapshot.Config.ProviderByID(discovery.ProviderID)
+	if err != nil {
+		return false
+	}
+	if internal, ok := provider.InternalModelID(discovery.RequestedModelID, true); ok && internal == canonicalModel {
+		return true
+	}
+	return false
+}
+
 func defaultOverlayDiscoveryFromRequest(r *http.Request) (defaultOverlayDiscovery, bool) {
 	if r == nil {
 		return defaultOverlayDiscovery{}, false
@@ -449,7 +469,7 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 		}
 	}
 	if info.Legacy && canonicalModel != "" {
-		if discovery, discovered := defaultOverlayDiscoveryFromRequest(r); discovered && discovery.ProviderID != "" && discovery.RequestedModelID == canonicalModel {
+		if discovery, discovered := defaultOverlayDiscoveryFromRequest(r); discovered && discovery.ProviderID != "" && overlayDiscoveryRequestedMatches(snapshot, discovery, canonicalModel) {
 			if discovery.InvalidProxyTail {
 				return config.ProviderConfig{}, config.Config{}, "", canonicalModel, false, nil
 			}
@@ -627,8 +647,24 @@ func resolveDefaultOverlayDiscoveryBeforeProviderSelection(r *http.Request, cano
 		if strings.TrimSpace(rootIntent.TargetProviderID) != "" {
 			return
 		}
-		if _, _, _, configured := configuredDefaultProviderSelection(snapshot, rootIntent.CanonicalModel(), providerSelectionEffortFromRouteContext(r)); !configured {
-			_, _ = resolveDefaultOverlayDiscoveryForModel(r, snapshot, rootIntent.CanonicalModel())
+		canonical := rootIntent.CanonicalModel()
+		_, _, _, configured := configuredDefaultProviderSelection(snapshot, canonical, providerSelectionEffortFromRouteContext(r))
+		if !configured {
+			_, _ = resolveDefaultOverlayDiscoveryForModel(r, snapshot, canonical)
+			return
+		}
+		// 配置级命中但模型名可能是 RAW_MODEL_NAME_REPLACE 替换后的伪原始名
+		// （存在 RAW 规则且命中 MANUAL_MODELS）时，仍需实时 /models 反查还原完整原始名，
+		// 否则会把伪原始名直接发上游导致 400。
+		for _, pid := range snapshot.DefaultProviderIDs {
+			provider, err := snapshot.Config.ProviderByID(pid)
+			if err != nil || !provider.Enabled {
+				continue
+			}
+			if len(provider.RawModelNameReplaceRules) > 0 && manualModelMatches(provider, canonical) {
+				_, _ = resolveDefaultOverlayDiscoveryForModel(r, snapshot, canonical)
+				break
+			}
 		}
 		return
 	}
