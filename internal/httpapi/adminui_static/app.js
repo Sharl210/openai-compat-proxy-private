@@ -1787,8 +1787,12 @@ function renderModelListSection() {
 }
 
 function renderModelListBody(list, providerID) {
-  if (!list || list.error) {
-    return `<div class="model-list-status">${escapeHtml(list?.error || '模型列表不可用')}</div>`;
+  if (!list) {
+    return `<div class="model-list-status">模型列表不可用</div>`;
+  }
+  const hasData = (list.rawModels && list.rawModels.length > 0) || (list.mappedModels && list.mappedModels.length > 0);
+  if (list.error && !hasData) {
+    return `<div class="model-list-status">${escapeHtml(list.error)}</div>`;
   }
   const tab = list.tab || 'mapped';
   const filter = (list.filter || '').toLowerCase();
@@ -1798,6 +1802,7 @@ function renderModelListBody(list, providerID) {
   );
   return `
     <div class="model-list-body">
+      ${list.error ? `<div class="model-list-status">${escapeHtml(list.error)}</div>` : ''}
       <div class="model-list-filter-row">
         <input id="model-list-filter" type="text" class="text-input model-list-filter" placeholder="过滤模型…" value="${escapeAttr(list.filter || '')}">
         <div class="pane-switch" data-pane="${tab}">
