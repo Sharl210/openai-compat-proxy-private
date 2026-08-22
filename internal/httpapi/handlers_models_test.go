@@ -1040,3 +1040,19 @@ func TestConfiguredModelsFallbackBodyAppliesRawModelNameReplace(t *testing.T) {
 		t.Fatalf("expected replaced fallback display id, got %#v", ids)
 	}
 }
+
+func TestRewriteModelsBodyReplacesBeforeTemplate(t *testing.T) {
+	// 替换必须作用于 MODEL_ID_TEMPLATE 的 {{model}} 占位符内部（原始模型名），
+	// 再套模板前缀；不能用 .* 把模板前缀一起吃掉。
+	body := []byte(`{"object":"list","data":[{"id":"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash","object":"model","owned_by":"copilot"}]}`)
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "packy-{{model}}",
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "#re:.*quectel-github-copilot/(.*):$1"),
+	}
+
+	rewritten := rewriteModelsBodyForRoute(body, provider, false)
+	ids := decodeModelIDsFromBody(t, rewritten)
+	if len(ids) != 1 || ids[0] != "packy-QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected replace before template (prefix preserved), got %#v", ids)
+	}
+}

@@ -258,7 +258,7 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 	entries := make([]map[string]any, 0, len(expanded))
 	seenExternalIDs := make(map[string]struct{}, len(expanded))
 	for _, id := range expanded {
-		externalID := provider.ApplyRawModelNameReplace(provider.ExternalModelID(id, rootRoute))
+		externalID := provider.ExternalModelID(provider.ApplyRawModelNameReplace(id), rootRoute)
 		if externalID == "" {
 			continue
 		}
@@ -326,7 +326,7 @@ func configuredModelsFallbackBodyForRoute(provider config.ProviderConfig, rootRo
 			continue
 		}
 		entries = append(entries, map[string]any{
-			"id":     provider.ApplyRawModelNameReplace(provider.ExternalModelID(id, rootRoute)),
+			"id":     provider.ExternalModelID(provider.ApplyRawModelNameReplace(id), rootRoute),
 			"object": "model",
 		})
 	}
