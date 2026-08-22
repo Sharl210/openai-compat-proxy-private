@@ -962,7 +962,7 @@ func fetchLatestDefaultOverlay(snapshot *config.RuntimeSnapshot) ([]string, map[
 		visibleByProvider[id] = visible
 		externalByProvider[id] = make(map[string]string, len(visible))
 		for _, modelID := range visible {
-			externalID := provider.ApplyRawModelNameReplace(provider.ExternalModelID(modelID, true))
+			externalID := provider.ExternalModelID(provider.ApplyRawModelNameReplace(modelID), true)
 			externalByProvider[id][modelID] = externalID
 			modelCount[externalID]++
 			taggedID := taggedModelID(id, externalID)
