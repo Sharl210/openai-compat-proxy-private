@@ -607,22 +607,6 @@ func providerSelectionForModelRequest(r *http.Request, canonicalModel string) (c
 			resolvedModel = internalModel
 		}
 	}
-	// 请求方向还原：客户端可能用替换后的伪原始名请求（与 /models 展示一致）。
-	// 若当前模型名是某原始名应用 RAW_MODEL_NAME_REPLACE 的结果，则还原成原始名发上游。
-	// 注意：intent.BaseModel 也必须同步还原，否则下游 normalize 会优先用 intent 里的伪原始名。
-	if reversed := provider.ReverseRawModelNameReplace(resolvedModel); reversed != resolvedModel &&
-		provider.ApplyRawModelNameReplace(reversed) == resolvedModel {
-		resolvedModel = reversed
-		// intent.BaseModel 也必须同步还原：handler 的 normalize 会优先用 intent 的
-		// BaseModel 作为最终上游模型名，若不还原会把伪原始名发往上游。
-		if existingIntent, ok := proxyModelIntentFromRequest(r); ok {
-			if reversedIntent := provider.ReverseRawModelNameReplace(existingIntent.BaseModel); reversedIntent != existingIntent.BaseModel &&
-				provider.ApplyRawModelNameReplace(reversedIntent) == existingIntent.BaseModel {
-				existingIntent.BaseModel = reversedIntent
-				*r = *r.Clone(withProxyModelIntent(r.Context(), existingIntent))
-			}
-		}
-	}
 	return provider, providerConfigForID(snapshot, providerID), providerID, resolvedModel, true, nil
 }
 
@@ -713,8 +697,24 @@ func resolveDefaultOverlayDiscoveryForModel(r *http.Request, snapshot *config.Ru
 			}
 		}
 	} else if !mayContainProxyIntent {
-		if _, _, _, configured := configuredDefaultProviderSelection(snapshot, modelName, providerSelectionEffortFromRouteContext(r)); configured {
-			return false, nil
+		// 配置级路由命中时：仅当存在 RAW_MODEL_NAME_REPLACE 规则且模型名命中 MANUAL_MODELS
+		// （伪原始名场景，需要实时反查还原原始名）才继续；否则配置级路由已足够，提前返回
+		// 避免实时拉上游 /models 干扰确定性配置路由。
+		needRealtime := false
+		for _, pid := range snapshot.DefaultProviderIDs {
+			provider, err := snapshot.Config.ProviderByID(pid)
+			if err != nil || !provider.Enabled {
+				continue
+			}
+			if len(provider.RawModelNameReplaceRules) > 0 && manualModelMatches(provider, modelName) {
+				needRealtime = true
+				break
+			}
+		}
+		if !needRealtime {
+			if _, _, _, configured := configuredDefaultProviderSelection(snapshot, modelName, providerSelectionEffortFromRouteContext(r)); configured {
+				return false, nil
+			}
 		}
 	}
 	discovery, err, resolved := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, modelName)
