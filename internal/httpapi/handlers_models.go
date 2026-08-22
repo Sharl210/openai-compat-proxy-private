@@ -134,13 +134,16 @@ func buildDefaultOverlayModelEntriesFromProviders(ctx context.Context, r *http.R
 			if strings.TrimSpace(id) == "" {
 				continue
 			}
-			if _, exists := entriesByID[id]; !exists {
-				orderedIDs = append(orderedIDs, id)
+			// 展示名应用 RAW_MODEL_NAME_REPLACE，与请求链上最终上游模型名一致。
+			displayID := provider.ApplyRawModelNameReplace(id)
+			entry["id"] = displayID
+			if _, exists := entriesByID[displayID]; !exists {
+				orderedIDs = append(orderedIDs, displayID)
 			}
 			if _, hasOwner := entry["owned_by"]; !hasOwner {
 				entry["owned_by"] = providerID
 			}
-			entriesByID[id] = entry
+			entriesByID[displayID] = entry
 		}
 	}
 	if !anySource {
@@ -255,7 +258,7 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 	entries := make([]map[string]any, 0, len(expanded))
 	seenExternalIDs := make(map[string]struct{}, len(expanded))
 	for _, id := range expanded {
-		externalID := provider.ExternalModelID(id, rootRoute)
+		externalID := provider.ApplyRawModelNameReplace(provider.ExternalModelID(id, rootRoute))
 		if externalID == "" {
 			continue
 		}
@@ -323,7 +326,7 @@ func configuredModelsFallbackBodyForRoute(provider config.ProviderConfig, rootRo
 			continue
 		}
 		entries = append(entries, map[string]any{
-			"id":     provider.ExternalModelID(id, rootRoute),
+			"id":     provider.ApplyRawModelNameReplace(provider.ExternalModelID(id, rootRoute)),
 			"object": "model",
 		})
 	}

@@ -995,3 +995,48 @@ func decodeModelIDsFromBody(t *testing.T, body []byte) []string {
 	}
 	return ids
 }
+
+func TestRewriteModelsBodyAppliesRawModelNameReplace(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash","object":"model","owned_by":"copilot"}]}`)
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "{{model}}",
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "#re:.*quectel-github-copilot/(.*):$1"),
+	}
+
+	rewritten := rewriteModelsBodyForRoute(body, provider, false)
+	ids := decodeModelIDsFromBody(t, rewritten)
+	if len(ids) != 1 || ids[0] != "QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected replaced display id, got %#v", ids)
+	}
+}
+
+func TestRewriteModelsBodyAppliesRawModelNameReplaceAfterTemplate(t *testing.T) {
+	body := []byte(`{"object":"list","data":[{"id":"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash","object":"model","owned_by":"copilot"}]}`)
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "packy-{{model}}",
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "quectel-github-copilot/:relay/"),
+	}
+
+	rewritten := rewriteModelsBodyForRoute(body, provider, false)
+	ids := decodeModelIDsFromBody(t, rewritten)
+	if len(ids) != 1 || ids[0] != "packy-relay/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected template then literal replace display id, got %#v", ids)
+	}
+}
+
+func TestConfiguredModelsFallbackBodyAppliesRawModelNameReplace(t *testing.T) {
+	provider := config.ProviderConfig{
+		ModelIDTemplate:          "{{model}}",
+		ManualModels:             []string{"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash"},
+		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "#re:.*quectel-github-copilot/(.*):$1"),
+	}
+
+	body, ok := configuredModelsFallbackBody(provider)
+	if !ok {
+		t.Fatalf("expected fallback body")
+	}
+	ids := decodeModelIDsFromBody(t, body)
+	if len(ids) != 1 || ids[0] != "QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected replaced fallback display id, got %#v", ids)
+	}
+}
