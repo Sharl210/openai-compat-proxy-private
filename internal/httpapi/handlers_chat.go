@@ -118,6 +118,10 @@ func handleChat() http.HandlerFunc {
 			}
 			applyProviderOpenAIServiceTierOverride(&canon, provider, providerCfg)
 			applyAutoReasoningModelSuffix(&canon, intent)
+			if err := applyAdaptiveModelSuffix(&canon, intent, providerCfg); err != nil {
+				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+				return
+			}
 			applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
 			if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
 				errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
