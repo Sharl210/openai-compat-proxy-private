@@ -1830,7 +1830,7 @@ button { cursor: pointer; }
 }
 .model-map-header {
   display: grid;
-  grid-template-columns: 40px minmax(max-content, 1fr) 24px minmax(max-content, 1fr);
+  grid-template-columns: 40px minmax(120px, 1fr) 24px minmax(120px, 1fr);
   gap: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -1841,16 +1841,14 @@ button { cursor: pointer; }
   top: 0;
   z-index: 2;
   background: var(--bg-color, #fff);
-  min-width: max-content;
 }
 .model-map-row {
   display: grid;
-  grid-template-columns: 40px minmax(max-content, 1fr) 24px minmax(max-content, 1fr);
+  grid-template-columns: 40px minmax(120px, 1fr) 24px minmax(120px, 1fr);
   gap: 8px;
   align-items: center;
   padding: 4px 6px;
   border-radius: 4px;
-  min-width: max-content;
 }
 .model-map-row:hover {
   background: var(--hover-bg, rgba(0, 0, 0, 0.04));
@@ -1863,12 +1861,20 @@ button { cursor: pointer; }
   border-right: 1px solid var(--border-color, #e0e0e0);
   padding-right: 8px;
   user-select: none;
+  white-space: nowrap;
 }
+/* 原始名/伪原始名两列：列宽固定一致（grid 1fr 分栏），列内内容独立横向滚动，
+   不影响其它列，也不破坏列对齐。 */
 .model-map-raw,
 .model-map-pseudo {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding: 1px 0;
+  min-width: 0;
 }
 .model-map-arrow {
   text-align: center;
