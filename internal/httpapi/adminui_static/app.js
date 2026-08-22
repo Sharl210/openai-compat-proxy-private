@@ -1934,7 +1934,7 @@ function renderMappedModelsTable(rows) {
       </div>`
     )
     .join('');
-  return `<div class="model-map-table"><div class="model-map-header"><span class="model-map-seq">#</span><span>原始名(上游视角)</span><span></span><span>伪原始名(代理视角)</span></div>${body}</div>`;
+  return `<div class="model-map-table"><div class="model-map-header"><span class="model-map-seq">#</span><span>上游视角</span><span></span><span>代理视角</span></div>${body}</div>`;
 }
 
 function renderRawModelsList(rows) {
