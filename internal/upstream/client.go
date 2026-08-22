@@ -533,7 +533,6 @@ func (c *Client) Stream(ctx context.Context, req model.CanonicalRequest, authori
 }
 
 func (c *Client) StreamInto(ctx context.Context, req model.CanonicalRequest, authorization string, onEvent func(Event) error) error {
-	req = c.applyRawModelNameReplace(req)
 	if req.SessionID != "" {
 		ctx = WithSessionID(ctx, req.SessionID)
 	}
@@ -652,7 +651,6 @@ func (c *Client) OpenEventStreamLazy(ctx context.Context, req model.CanonicalReq
 }
 
 func (c *Client) openPreparedEventStream(ctx context.Context, req model.CanonicalRequest, authorization string, primeFirstEvent bool) (*EventStream, error) {
-	req = c.applyRawModelNameReplace(req)
 	if req.SessionID != "" {
 		ctx = WithSessionID(ctx, req.SessionID)
 	}
@@ -704,7 +702,6 @@ func (c *Client) Compact(ctx context.Context, req model.CanonicalRequest, author
 }
 
 func (c *Client) response(ctx context.Context, req model.CanonicalRequest, authorization string, compact bool) (map[string]any, error) {
-	req = c.applyRawModelNameReplace(req)
 	if req.SessionID != "" {
 		ctx = WithSessionID(ctx, req.SessionID)
 	}

@@ -1216,6 +1216,51 @@ func (p ProviderConfig) ApplyRawModelNameReplace(model string) string {
 	return ApplyModelNameReplaceRules(model, p.RawModelNameReplaceRules)
 }
 
+// ReverseRawModelNameReplace 是 ApplyRawModelNameReplace 的请求方向逆操作：
+// 客户端用替换后的伪原始名请求时，把它还原成发上游的原始名。
+// 对"剥离固定前缀"型的正则规则（如 #re:.*quectel-github-copilot/(.*):$1），
+// 反向 = 固定前缀 + 伪原始名；对无法可靠反向的规则保持原样。
+func (p ProviderConfig) ReverseRawModelNameReplace(model string) string {
+	if model == "" || len(p.RawModelNameReplaceRules) == 0 {
+		return model
+	}
+	result := model
+	for _, rule := range p.RawModelNameReplaceRules {
+		if !rule.IsRegex || rule.Re == nil {
+			continue
+		}
+		// 仅支持 replacement 形如 $1（单一捕获组直接替换）的规则反向。
+		if strings.TrimSpace(rule.Replacement) != "$1" {
+			continue
+		}
+		prefix := regexpFixedPrefix(rule.Re)
+		if prefix == "" {
+			continue
+		}
+		result = prefix + result
+		break
+	}
+	return result
+}
+
+// regexpFixedPrefix 提取正则中匹配固定字符串部分的最长前缀（不含贪婪 .* 等）。
+// 例如 #re:.*quectel-github-copilot/(.*) 的固定前缀是 "quectel-github-copilot/"。
+func regexpFixedPrefix(re *regexp.Regexp) string {
+	source := re.String()
+	// 去掉首尾锚点后，尝试逐步剥离模式片段，找纯字面前缀。
+	// 简单实现：从原始模式里找第一个非元字符字面片段。
+	trimmed := strings.Trim(source, "^$")
+	// 常见形态：.*PREFIX/(capture) —— 取第一个 "/" 之前的字面部分（去掉 .* 前缀）。
+	// 通用做法：匹配开头（跳过 .*）直到第一个捕获组。
+	if idx := strings.Index(trimmed, "("); idx > 0 {
+		head := trimmed[:idx]
+		head = strings.TrimPrefix(head, ".*")
+		head = strings.TrimPrefix(head, ".+")
+		return head
+	}
+	return ""
+}
+
 func splitModelMapQualifiedModel(value string) (string, string, bool, error) {
 	value = strings.TrimSpace(value)
 	if !strings.HasPrefix(value, "<<") {
