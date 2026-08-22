@@ -723,6 +723,18 @@ func configuredDefaultProviderSelection(snapshot *config.RuntimeSnapshot, modelN
 	if snapshot == nil {
 		return "", modelName, model.ProxyModelIntent{}, false
 	}
+	// 客户端请求名可能已经是 RAW_MODEL_NAME_REPLACE 替换后的展示名（与 /models 展示一致）。
+	// 先把各 provider 的原始候选正向应用替换，与请求名比较，命中即可路由回该 provider。
+	for index := len(snapshot.DefaultProviderIDs) - 1; index >= 0; index-- {
+		providerID := snapshot.DefaultProviderIDs[index]
+		provider, err := snapshot.Config.ProviderByID(providerID)
+		if err != nil || !provider.Enabled {
+			continue
+		}
+		if rawModelID, ok := providerMatchesReplacedModelName(provider, modelName, true); ok {
+			return providerID, rawModelID, model.ProxyModelIntent{BaseModel: rawModelID, IsExactLiteral: true}, true
+		}
+	}
 	for index := len(snapshot.DefaultProviderIDs) - 1; index >= 0; index-- {
 		providerID := snapshot.DefaultProviderIDs[index]
 		provider, err := snapshot.Config.ProviderByID(providerID)
@@ -762,6 +774,30 @@ func configuredDefaultProviderSelection(snapshot *config.RuntimeSnapshot, modelN
 		}
 	}
 	return "", modelName, model.ProxyModelIntent{}, false
+}
+
+// providerMatchesReplacedModelName reports whether modelName equals one of the
+// provider's routing candidates after the model ID template is applied. The
+// routing candidates (MANUAL_MODELS 等) are already pseudo-original names
+// (i.e. RAW_MODEL_NAME_REPLACE applied), so only the template is wrapped here.
+// When it matches, it returns the candidate (pseudo-original name) so the
+// downstream request chain keeps using it consistently.
+func providerMatchesReplacedModelName(provider config.ProviderConfig, modelName string, rootRoute bool) (string, bool) {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return "", false
+	}
+	for _, candidate := range provider.RoutingModelCandidates() {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		displayName := provider.ExternalModelID(candidate, rootRoute)
+		if displayName == modelName {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func providerRoutingModelIsExactLiteral(provider config.ProviderConfig, modelName string) bool {
@@ -835,7 +871,7 @@ func defaultFallbackAllowsUnconfiguredProxyTail(provider config.ProviderConfig, 
 }
 
 func parseProviderProxyModelIntentForRouting(provider config.ProviderConfig, modelName string, rootNoPrompt bool, rootReasoningMode bool) (model.ProxyModelIntent, bool) {
-	if intent, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(modelName, rootNoPrompt, rootReasoningMode, provider.VisibleModelIDs()); parsed && (intent.ReasoningMode != "" || intent.HasAuto || intent.HasNoPrompt || intent.HasUltra) {
+	if intent, parsed := provider.ParseProxyModelIntentWithReasoningModeCandidates(modelName, rootNoPrompt, rootReasoningMode, provider.VisibleModelIDs()); parsed && (intent.ReasoningMode != "" || intent.HasAuto || intent.HasAdaptive || intent.HasNoPrompt || intent.HasUltra) {
 		return intent, true
 	}
 	return provider.ParseProxyModelIntentWithReasoningMode(modelName, rootNoPrompt, rootReasoningMode)
@@ -962,7 +998,8 @@ func fetchLatestDefaultOverlay(snapshot *config.RuntimeSnapshot) ([]string, map[
 		visibleByProvider[id] = visible
 		externalByProvider[id] = make(map[string]string, len(visible))
 		for _, modelID := range visible {
-			externalID := provider.ExternalModelID(provider.ApplyRawModelNameReplace(modelID), true)
+			// VisibleModelIDs 已返回伪原始名（MANUAL_MODELS 配置值），直接套模板，不再替换。
+			externalID := provider.ExternalModelID(modelID, true)
 			externalByProvider[id][modelID] = externalID
 			modelCount[externalID]++
 			taggedID := taggedModelID(id, externalID)

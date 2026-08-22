@@ -1026,8 +1026,9 @@ func TestRewriteModelsBodyAppliesRawModelNameReplaceAfterTemplate(t *testing.T) 
 
 func TestConfiguredModelsFallbackBodyAppliesRawModelNameReplace(t *testing.T) {
 	provider := config.ProviderConfig{
-		ModelIDTemplate:          "{{model}}",
-		ManualModels:             []string{"quectel-github-copilot/QDeepseekV4/deepseek-v4-flash"},
+		ModelIDTemplate: "{{model}}",
+		// MANUAL_MODELS 配置伪原始名（替换后的名），fallback 直接展示。
+		ManualModels:             []string{"QDeepseekV4/deepseek-v4-flash"},
 		RawModelNameReplaceRules: mustRawModelNameReplaceRules(t, "#re:.*quectel-github-copilot/(.*):$1"),
 	}
 
@@ -1037,7 +1038,7 @@ func TestConfiguredModelsFallbackBodyAppliesRawModelNameReplace(t *testing.T) {
 	}
 	ids := decodeModelIDsFromBody(t, body)
 	if len(ids) != 1 || ids[0] != "QDeepseekV4/deepseek-v4-flash" {
-		t.Fatalf("expected replaced fallback display id, got %#v", ids)
+		t.Fatalf("expected pseudo-name fallback display id, got %#v", ids)
 	}
 }
 

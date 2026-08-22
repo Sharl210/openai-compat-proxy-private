@@ -233,7 +233,8 @@ func buildDefaultOverlayModelIndex(cfg Config) ([]string, map[string]string, []s
 		visibleByProvider[id] = visible
 		externalByProvider[id] = make(map[string]string, len(visible))
 		for _, modelID := range visible {
-			externalID := provider.ExternalModelID(provider.ApplyRawModelNameReplace(modelID), true)
+			// VisibleModelIDs 已返回伪原始名（MANUAL_MODELS 配置值），直接套模板，不再替换。
+			externalID := provider.ExternalModelID(modelID, true)
 			externalByProvider[id][modelID] = externalID
 			modelCount[externalID]++
 			taggedID := formatTaggedModelID(id, externalID)
