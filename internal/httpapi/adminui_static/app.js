@@ -30,6 +30,8 @@ const state = {
   statusRefreshInFlight: false,
   editorCloseConfirm: false,
   validationFailureModal: null,
+  modelList: null,
+  modelListLoading: false,
 };
 
 const fileSearchHistoryLimit = 12;
@@ -565,6 +567,27 @@ async function api(path, options = {}) {
 
 function hasRecoverableRestartJob() {
   return isRecoveryWindowActive() || !!(state.activeJob && state.activeJob.status === 'running' && ['restart', 'deploy'].includes(state.activeJob.action));
+}
+
+// 拉取指定 provider 的模型列表与映射关系（用户点击“展示模型列表”时调用）。
+async function fetchModelList(providerID) {
+  try {
+    const payload = await api(`/_admin/api/model-list?provider=${encodeURIComponent(providerID)}`);
+    if (!state.modelList || state.modelList.providerId !== providerID) {
+      return;
+    }
+    state.modelList.rawModels = payload.raw_models || [];
+    state.modelList.mappedModels = payload.mapped_models || [];
+    state.modelList.error = payload.error || '';
+    state.modelListLoading = false;
+  } catch (err) {
+    if (!state.modelList || state.modelList.providerId !== providerID) {
+      return;
+    }
+    state.modelList.error = String(err?.message || err || '加载失败');
+    state.modelListLoading = false;
+  }
+  render();
 }
 
 function startRecoveryWindow(action) {
@@ -1323,6 +1346,39 @@ function bindEvents() {
         updateDirtyBadge();
       });
     }
+    const modelListToggle = document.getElementById('model-list-toggle');
+    if (modelListToggle) {
+      modelListToggle.addEventListener('click', () => {
+        const providerID = modelListToggle.dataset.provider;
+        const list = state.modelList;
+        if (list && list.providerId === providerID) {
+          state.modelList = null;
+          render();
+          return;
+        }
+        state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'mapped', filter: '' };
+        state.modelListLoading = true;
+        render();
+        fetchModelList(providerID);
+      });
+    }
+    const modelListFilter = document.getElementById('model-list-filter');
+    if (modelListFilter) {
+      modelListFilter.addEventListener('input', (event) => {
+        if (state.modelList) {
+          state.modelList.filter = event.target.value;
+          render();
+        }
+      });
+    }
+    document.querySelectorAll('[data-model-list-tab]').forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        if (state.modelList) {
+          state.modelList.tab = tabBtn.dataset.modelListTab;
+          render();
+        }
+      });
+    });
     const envSourceEditor = document.getElementById('env-source-editor');
     if (envSourceEditor) {
       autoSizeTextarea(envSourceEditor);
@@ -1685,8 +1741,100 @@ function renderEnvEditor() {
 		  ${renderCodeEditorShell('env-source-editor', 'env-source-editor', state.currentFile.source_content || renderEnvRawPreview(), 'text-area auto-resize env-source-editor source-mode no-wrap-editor code-editor-textarea')}
         </div>
       </section>` : ''}
+      ${renderModelListSection()}
     </div>
   `;
+}
+
+// 判断当前编辑的 env 文件对应哪个 provider（根 .env → 根提供商占位；providers/xxx.env → xxx）。
+function currentEnvProviderID() {
+  const path = state.currentFile?.path || '';
+  const base = pathBaseName(path);
+  if (base === '.env') {
+    return '__root__';
+  }
+  if (base.endsWith('.env')) {
+    return base.slice(0, -'.env'.length);
+  }
+  return '';
+}
+
+// 模型列表区：仅 env 编辑视图且当前文件是 provider/根 env 时显示。
+function renderModelListSection() {
+  if (!state.currentFile || state.currentFile.mode !== 'env') {
+    return '';
+  }
+  const providerID = currentEnvProviderID();
+  if (!providerID) {
+    return '';
+  }
+  const list = state.modelList;
+  const showing = list && list.providerId === providerID;
+  const buttonLabel = showing ? '收起模型列表' : '展示模型列表';
+  const title = providerID === '__root__' ? '根提供商模型列表' : `${escapeHtml(providerID)} 模型列表`;
+  return `
+    <section class="env-card model-list-card">
+      <div class="env-body">
+        <div class="model-list-toolbar">
+          <button id="model-list-toggle" class="secondary-btn material-tonal-button" type="button" data-provider="${escapeAttr(providerID)}">${buttonLabel}</button>
+          ${showing ? `<span class="model-list-title">${title}</span>` : ''}
+          ${showing && state.modelListLoading ? '<span class="model-list-status">加载中…</span>' : ''}
+        </div>
+        ${showing && !state.modelListLoading ? renderModelListBody(list, providerID) : ''}
+      </div>
+    </section>
+  `;
+}
+
+function renderModelListBody(list, providerID) {
+  if (!list || list.error) {
+    return `<div class="model-list-status">${escapeHtml(list?.error || '模型列表不可用')}</div>`;
+  }
+  const tab = list.tab || 'mapped';
+  const filter = (list.filter || '').toLowerCase();
+  const rawModels = (list.rawModels || []).filter((m) => !filter || String(m).toLowerCase().includes(filter));
+  const mapped = (list.mappedModels || []).filter(
+    (m) => !filter || String(m.raw).toLowerCase().includes(filter) || String(m.pseudo).toLowerCase().includes(filter)
+  );
+  return `
+    <div class="model-list-body">
+      <div class="model-list-filter-row">
+        <input id="model-list-filter" type="text" class="text-input model-list-filter" placeholder="过滤模型…" value="${escapeAttr(list.filter || '')}">
+        <div class="pane-switch" data-pane="${tab}">
+          <button type="button" class="model-list-tab material-outlined-button ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部列表（映射表）</button>
+          <button type="button" class="model-list-tab material-outlined-button ${tab === 'raw' ? 'active' : ''}" data-model-list-tab="raw">上游列表</button>
+        </div>
+      </div>
+      ${tab === 'mapped' ? renderMappedModelsTable(mapped) : renderRawModelsList(rawModels)}
+    </div>
+  `;
+}
+
+function renderMappedModelsTable(entries) {
+  if (!entries.length) {
+    return '<div class="empty-state model-list-empty">没有匹配的模型。</div>';
+  }
+  const rows = entries
+    .map(
+      (entry) => `
+      <div class="model-map-row">
+        <span class="model-map-raw" title="${escapeAttr(entry.raw)}">${escapeHtml(entry.raw)}</span>
+        <span class="model-map-arrow">→</span>
+        <span class="model-map-pseudo" title="${escapeAttr(entry.pseudo)}">${escapeHtml(entry.pseudo)}</span>
+      </div>`
+    )
+    .join('');
+  return `<div class="model-map-table"><div class="model-map-header"><span>原始名</span><span></span><span>伪原始名（展示名）</span></div>${rows}</div>`;
+}
+
+function renderRawModelsList(models) {
+  if (!models.length) {
+    return '<div class="empty-state model-list-empty">没有匹配的模型。</div>';
+  }
+  const rows = models
+    .map((m) => `<div class="model-raw-row"><span class="model-map-raw" title="${escapeAttr(m)}">${escapeHtml(m)}</span></div>`)
+    .join('');
+  return `<div class="model-raw-list">${rows}</div>`;
 }
 
 function renderEnvEntry(entry, index, sourceIndex = index) {
