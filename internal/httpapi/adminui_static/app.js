@@ -579,12 +579,14 @@ async function fetchModelList(providerID) {
     state.modelList.rawModels = payload.raw_models || [];
     state.modelList.mappedModels = payload.mapped_models || [];
     state.modelList.error = payload.error || '';
+    state.modelList.loaded = true;
     state.modelListLoading = false;
   } catch (err) {
     if (!state.modelList || state.modelList.providerId !== providerID) {
       return;
     }
     state.modelList.error = String(err?.message || err || '加载失败');
+    state.modelList.loaded = true;
     state.modelListLoading = false;
   }
   render();
@@ -997,6 +999,25 @@ function bindEvents() {
     button.addEventListener('click', () => runAction(button.dataset.actionRun));
   });
 
+  // 模型列表：搜索框与板块切换（文件浏览页与编辑器页共用，全局绑定）。
+  const modelListFilter = document.getElementById('model-list-filter');
+  if (modelListFilter) {
+    modelListFilter.addEventListener('input', (event) => {
+      if (state.modelList) {
+        state.modelList.filter = event.target.value;
+        render();
+      }
+    });
+  }
+  document.querySelectorAll('[data-model-list-tab]').forEach((tabBtn) => {
+    tabBtn.addEventListener('click', () => {
+      if (state.modelList) {
+        state.modelList.tab = tabBtn.dataset.modelListTab;
+        render();
+      }
+    });
+  });
+
   document.querySelectorAll('[data-tree-open]').forEach((button) => {
     let pressTimer = 0;
     button.addEventListener('pointerdown', () => {
@@ -1026,6 +1047,23 @@ function bindEvents() {
       } else {
         openFile(button.dataset.treeOpen);
       }
+    });
+  });
+
+  document.querySelectorAll('[data-model-list-mini]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const providerID = button.dataset.modelListMini;
+      const current = state.modelList;
+      if (current && current.providerId === providerID && current.loaded) {
+        state.modelList = null;
+        render();
+        return;
+      }
+      state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'mapped', filter: '', loaded: false };
+      state.modelListLoading = true;
+      render();
+      fetchModelList(providerID);
     });
   });
 
@@ -1351,34 +1389,17 @@ function bindEvents() {
       modelListToggle.addEventListener('click', () => {
         const providerID = modelListToggle.dataset.provider;
         const list = state.modelList;
-        if (list && list.providerId === providerID) {
+        if (list && list.providerId === providerID && list.loaded) {
           state.modelList = null;
           render();
           return;
         }
-        state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'mapped', filter: '' };
+        state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'mapped', filter: '', loaded: false };
         state.modelListLoading = true;
         render();
         fetchModelList(providerID);
       });
     }
-    const modelListFilter = document.getElementById('model-list-filter');
-    if (modelListFilter) {
-      modelListFilter.addEventListener('input', (event) => {
-        if (state.modelList) {
-          state.modelList.filter = event.target.value;
-          render();
-        }
-      });
-    }
-    document.querySelectorAll('[data-model-list-tab]').forEach((tabBtn) => {
-      tabBtn.addEventListener('click', () => {
-        if (state.modelList) {
-          state.modelList.tab = tabBtn.dataset.modelListTab;
-          render();
-        }
-      });
-    });
     const envSourceEditor = document.getElementById('env-source-editor');
     if (envSourceEditor) {
       autoSizeTextarea(envSourceEditor);
@@ -1554,8 +1575,29 @@ function renderBrowserPage() {
           <div class="tree-list">
             ${renderTreeItems(items)}
           </div>
+          ${renderBrowserModelListExpanded()}
         </div>
       </section>
+    </div>
+  `;
+}
+
+// 文件浏览页：点击某个提供商的“模型列表”按钮后，在列表下方展开该提供商的模型列表。
+function renderBrowserModelListExpanded() {
+  const list = state.modelList;
+  if (!list || !list.loaded) {
+    return '';
+  }
+  const title = list.providerId === '__root__' ? '根提供商模型列表' : `${escapeHtml(list.providerId)} 模型列表`;
+  return `
+    <div class="model-list-card browser-model-list-card">
+      <div class="env-body">
+        <div class="model-list-toolbar">
+          <span class="model-list-title">${title}</span>
+          ${list.error ? `<span class="model-list-status">${escapeHtml(list.error)}</span>` : ''}
+        </div>
+        ${renderModelListBody(list, list.providerId)}
+      </div>
     </div>
   `;
 }
@@ -1609,21 +1651,54 @@ function renderTreeItems(items) {
   if (!items || items.length === 0) {
     return `<div class="empty-state">${state.fileSearchResult ? '没有匹配的文件。' : '当前目录没有可显示的文件。'}</div>`;
   }
-  return items.map((item) => `
-    <button class="tree-item ${state.currentFile?.path === item.path ? 'active' : ''}" type="button" data-tree-open="${escapeAttr(item.path)}" data-type="${item.is_dir ? 'dir' : 'file'}">
-      <div class="tree-item-leading">
-        <span class="tree-item-icon ${item.is_dir ? 'folder' : 'file'}"></span>
+  return items.map((item) => {
+    // providers 目录里的 .env 文件（以及根目录的 .env）= 提供商配置，
+    // 每行末尾附加“模型列表”三态按钮（灰=未点击/绿=已加载/红=报错）。
+    const isProviderEnv = !item.is_dir && isEnvFileName(item.name) && (state.currentDir === state.providersDir || state.currentDir === '');
+    const providerID = isProviderEnv ? providerIDForEnvPath(item.name) : '';
+    const modelList = isProviderEnv && state.modelList && state.modelList.providerId === providerID ? state.modelList : null;
+    const modelListState = isProviderEnv ? (modelList ? (modelList.error && !(modelList.rawModels || []).length ? 'error' : 'ok') : 'idle') : '';
+    const modelListBtn = isProviderEnv ? `
+      <span class="tree-item-model-list">
+        <button class="model-list-mini-btn model-list-${modelListState}" type="button" data-model-list-mini="${escapeAttr(providerID)}" title="展示模型列表" aria-label="展示模型列表">模型列表</button>
+        ${modelList && modelList.error && !(modelList.rawModels || []).length ? `<span class="model-list-mini-error">${escapeHtml(modelList.error)}</span>` : ''}
+      </span>` : '';
+    return `
+      <div class="tree-item-row ${isProviderEnv ? 'provider-env-row' : ''}">
+        <button class="tree-item ${state.currentFile?.path === item.path ? 'active' : ''}" type="button" data-tree-open="${escapeAttr(item.path)}" data-type="${item.is_dir ? 'dir' : 'file'}">
+          <div class="tree-item-leading">
+            <span class="tree-item-icon ${item.is_dir ? 'folder' : 'file'}"></span>
+          </div>
+          <div class="tree-item-body">
+            <div class="tree-item-title">
+              <span>${escapeHtml(item.name)}</span>
+              <span class="badge ${item.is_dir ? 'info' : item.editable ? 'ok' : 'warn'}">${item.is_dir ? '目录' : item.editable ? '可编辑' : '只读'}</span>
+            </div>
+            <div class="tree-meta">${escapeHtml(formatTreeMeta(item))}</div>
+          </div>
+          <div class="tree-item-trailing">›</div>
+        </button>
+        ${modelListBtn}
       </div>
-      <div class="tree-item-body">
-        <div class="tree-item-title">
-          <span>${escapeHtml(item.name)}</span>
-          <span class="badge ${item.is_dir ? 'info' : item.editable ? 'ok' : 'warn'}">${item.is_dir ? '目录' : item.editable ? '可编辑' : '只读'}</span>
-        </div>
-        <div class="tree-meta">${escapeHtml(formatTreeMeta(item))}</div>
-      </div>
-      <div class="tree-item-trailing">›</div>
-    </button>
-  `).join('');
+    `;
+  }).join('');
+}
+
+// 判断文件名是否是 .env（含 providers/xxx.env 与根 .env）。
+function isEnvFileName(name) {
+  return name === '.env' || String(name || '').endsWith('.env');
+}
+
+// 由 .env 文件名推导 provider ID（根 .env → __root__，providers/xxx.env → xxx）。
+function providerIDForEnvPath(name) {
+  const base = String(name || '');
+  if (base === '.env') {
+    return '__root__';
+  }
+  if (base.endsWith('.env')) {
+    return base.slice(0, -'.env'.length);
+  }
+  return '';
 }
 
 function renderStatusSection() {
