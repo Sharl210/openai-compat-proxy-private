@@ -20,12 +20,21 @@ type adminModelListEntry struct {
 // mapped_models 是原始名↔伪原始名映射表（内部列表板块）。
 // provider 为 __root__ 时聚合所有默认 provider。
 type adminModelListResponse struct {
-	ProviderID   string                `json:"provider_id"`
-	ProviderName string                `json:"provider_name"`
-	RawModels    []string              `json:"raw_models"`
-	MappedModels []adminModelListEntry `json:"mapped_models"`
-	Providers    []string              `json:"providers,omitempty"`
-	Error        string                `json:"error,omitempty"`
+	ProviderID     string                 `json:"provider_id"`
+	ProviderName   string                 `json:"provider_name"`
+	RawModels      []string               `json:"raw_models"`
+	MappedModels   []adminModelListEntry  `json:"mapped_models"`
+	Providers      []string               `json:"providers,omitempty"`
+	ProviderErrors []adminProviderError   `json:"provider_errors,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+}
+
+// adminProviderError 是某个 provider 拉取模型列表失败时的错误：
+// 标明配置文件（providers/<pid>.env 或 .env）与具体报错，便于定位。
+type adminProviderError struct {
+	ProviderID string `json:"provider_id"`
+	File       string `json:"file"`
+	Error      string `json:"error"`
 }
 
 const rootProviderID = "__root__"
@@ -59,7 +68,7 @@ func (a *adminUI) handleModelList() http.HandlerFunc {
 		}
 		rawModels, mapped, fetchErr := fetchProviderModelListForAdmin(r, snapshot, provider, providerID)
 		if fetchErr != "" {
-			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", fetchErr)
+			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", providerConfigFileName(providerID)+": "+fetchErr)
 			return
 		}
 		writeAdminJSON(w, http.StatusOK, adminModelListResponse{
@@ -82,7 +91,7 @@ func (a *adminUI) writeRootModelList(w http.ResponseWriter, r *http.Request, sna
 	allMapped := make([]adminModelListEntry, 0)
 	seenRaw := make(map[string]struct{})
 	seenPseudo := make(map[string]struct{})
-	var firstErr string
+	providerErrors := make([]adminProviderError, 0)
 	for _, pid := range providerIDs {
 		provider, err := snapshot.Config.ProviderByID(pid)
 		if err != nil || !provider.Enabled {
@@ -90,9 +99,11 @@ func (a *adminUI) writeRootModelList(w http.ResponseWriter, r *http.Request, sna
 		}
 		rawModels, mapped, fetchErr := fetchProviderModelListForAdmin(r, snapshot, provider, pid)
 		if fetchErr != "" {
-			if firstErr == "" {
-				firstErr = fetchErr
-			}
+			providerErrors = append(providerErrors, adminProviderError{
+				ProviderID: pid,
+				File:       providerConfigFileName(pid),
+				Error:      fetchErr,
+			})
 			continue
 		}
 		for _, raw := range rawModels {
@@ -112,13 +123,21 @@ func (a *adminUI) writeRootModelList(w http.ResponseWriter, r *http.Request, sna
 	}
 	sort.Strings(allRaw)
 	writeAdminJSON(w, http.StatusOK, adminModelListResponse{
-		ProviderID:   rootProviderID,
-		ProviderName: "根提供商（全部默认 provider）",
-		RawModels:    allRaw,
-		MappedModels: allMapped,
-		Providers:    providerIDs,
-		Error:        firstErr,
+		ProviderID:     rootProviderID,
+		ProviderName:   "根提供商（全部默认 provider）",
+		RawModels:      allRaw,
+		MappedModels:   allMapped,
+		Providers:      providerIDs,
+		ProviderErrors: providerErrors,
 	})
+}
+
+// providerConfigFileName 返回 provider 对应的配置文件路径（providers/<pid>.env）。
+func providerConfigFileName(providerID string) string {
+	if providerID == "" {
+		return ".env"
+	}
+	return "providers/" + providerID + ".env"
 }
 
 // fetchProviderModelListForAdmin 拉取单个 provider 的上游模型并产出映射表。
