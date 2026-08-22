@@ -369,7 +369,7 @@ func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWr
 	} else {
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
-	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
+	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(providerCfg.ApplyRawModelNameReplace(preview.UpstreamModel)))
 	estimate := estimatorEstimateForContext(r.Context(), *canon)
 	w.Header().Set(headerProxyEstimatedInputTokens, formatEstimatedInputTokensHeader(r.Context(), *canon, estimate))
 	setProxyModelLimitContextHeader(w, provider, *canon)

@@ -48,6 +48,8 @@ type Config struct {
 	SupportsParallelToolCallsControl      bool
 	EnableLegacyV1Routes                  bool
 	DownstreamNonStreamStrategy           string
+	RawModelNameReplace                   string
+	RawModelNameReplaceRules              []ModelNameReplaceRule
 	Providers                             []ProviderConfig
 	LogEnable                             bool
 	ConnectTimeout                        time.Duration
@@ -787,6 +789,13 @@ func ResolveProvidersDir(rootEnvPath string, providersDir string) string {
 
 func (c Config) ResolveV1Model(model string) string {
 	return c.ResolveV1ModelForRequest(model, "")
+}
+
+// ApplyRawModelNameReplace applies the root-level RAW_MODEL_NAME_REPLACE rules
+// (mirroring the provider-level field) to model. It is only used for the root
+// view; per-provider requests use the provider's own rules.
+func (c Config) ApplyRawModelNameReplace(model string) string {
+	return ApplyModelNameReplaceRules(model, c.RawModelNameReplaceRules)
 }
 
 func (c Config) ResolveV1ModelForRequest(model string, requestEffort string) string {

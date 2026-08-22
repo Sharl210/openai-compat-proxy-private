@@ -58,7 +58,7 @@ func handleImagesPassthrough(routePath string, upstreamPath string) http.Handler
 			return
 		}
 
-		body, contentType, err := rewriteImagesRequestBody(prepared.body, prepared.contentType, prepared.resolvedModel)
+		body, contentType, err := rewriteImagesRequestBody(prepared.body, prepared.contentType, prepared.providerCfg.ApplyRawModelNameReplace(prepared.resolvedModel))
 		if err != nil {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -108,7 +108,7 @@ func handleJSONPassthrough(routePath string, upstreamPath string) http.HandlerFu
 			return
 		}
 
-		body, err := rewriteJSONModelRequestBody(prepared.body, prepared.resolvedModel)
+		body, err := rewriteJSONModelRequestBody(prepared.body, prepared.providerCfg.ApplyRawModelNameReplace(prepared.resolvedModel))
 		if err != nil {
 			clearTransparencyHeaders(w)
 			errorsx.WriteJSON(w, http.StatusBadRequest, "invalid_request", err.Error())

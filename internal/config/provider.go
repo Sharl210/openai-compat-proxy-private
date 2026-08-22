@@ -53,6 +53,8 @@ type ProviderConfig struct {
 	SupportsAnthropicMessages              bool
 	ModelIDTemplate                        string
 	ModelIDTemplateRootOnly                bool
+	RawModelNameReplace                    string
+	RawModelNameReplaceRules               []ModelNameReplaceRule
 	ModelMap                               []ModelMapEntry
 	ManualModels                           []string
 	HiddenModels                           []string
@@ -104,6 +106,13 @@ type ModelMapEntry struct {
 	Pattern           *regexp.Regexp
 	IsStaticKey       bool
 	TargetHasCaptures bool
+}
+
+type ModelNameReplaceRule struct {
+	IsRegex     bool
+	Old         string
+	Re          *regexp.Regexp
+	Replacement string
 }
 
 type ScopedIntRule struct {
@@ -333,6 +342,12 @@ func loadProviderFile(path string) (ProviderConfig, error) {
 			provider.ModelIDTemplate = normalized
 		case "MODEL_ID_TEMPLATE_ROOT_ONLY":
 			provider.ModelIDTemplateRootOnly, err = parseProviderStrictBool(value, key, path)
+			if err != nil {
+				return ProviderConfig{}, err
+			}
+		case "RAW_MODEL_NAME_REPLACE":
+			provider.RawModelNameReplace = value
+			provider.RawModelNameReplaceRules, err = ParseModelNameReplaceRules(value, key, path)
 			if err != nil {
 				return ProviderConfig{}, err
 			}
@@ -1121,6 +1136,82 @@ func splitModelMapEntry(part string) (string, string, bool) {
 		return part[:i], part[i+1:], true
 	}
 	return part, "", false
+}
+
+// parseModelNameReplaceRules parses RAW_MODEL_NAME_REPLACE: a comma-separated
+// list of "old:new" literal rules and/or "#re:pattern:replacement" regexp rules.
+// Rules are applied in order, each rule operating on the previous rule's result.
+// An empty value means the replacement is disabled.
+func ParseModelNameReplaceRules(raw string, key string, path string) ([]ModelNameReplaceRule, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if strings.Contains(trimmed, "<<") || strings.Contains(trimmed, ">>") {
+		return nil, ErrInvalidConfig(fmt.Sprintf("reserved %s delimiter in %s: %q", key, path, raw))
+	}
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool { return r == ',' })
+	rules := make([]ModelNameReplaceRule, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		oldPart, replPart, ok := splitModelMapEntry(part)
+		if !ok {
+			return nil, ErrInvalidConfig(fmt.Sprintf("invalid %s entry in %s: %q (expected old:new or #re:pattern:replacement)", key, path, part))
+		}
+		oldPart = strings.TrimSpace(oldPart)
+		replPart = strings.TrimSpace(replPart)
+		if oldPart == "" {
+			return nil, ErrInvalidConfig(fmt.Sprintf("invalid %s entry in %s: %q (empty source)", key, path, part))
+		}
+		rule := ModelNameReplaceRule{Replacement: unescapeString(replPart)}
+		if strings.HasPrefix(oldPart, "#re:") {
+			re, err := regexp.Compile(strings.TrimPrefix(oldPart, "#re:"))
+			if err != nil {
+				return nil, ErrInvalidConfig(fmt.Sprintf("invalid %s regexp in %s: %q (%v)", key, path, oldPart, err))
+			}
+			rule.IsRegex = true
+			rule.Re = re
+		} else {
+			rule.Old = oldPart
+		}
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+// ApplyModelNameReplaceRules applies the replacement rules in order to model.
+// Literal rules replace every occurrence of Old; regexp rules replace all
+// matches and support $0-$9 capture placeholders plus \$ literal dollar in the
+// replacement (consistent with MODEL_MAP target semantics).
+func ApplyModelNameReplaceRules(model string, rules []ModelNameReplaceRule) string {
+	if model == "" || len(rules) == 0 {
+		return model
+	}
+	result := model
+	for _, rule := range rules {
+		if rule.IsRegex {
+			if rule.Re == nil {
+				continue
+			}
+			result = rule.Re.ReplaceAllStringFunc(result, func(match string) string {
+				matches := rule.Re.FindStringSubmatch(match)
+				return replaceSingleDigitCaptures(rule.Replacement, matches)
+			})
+			continue
+		}
+		result = strings.ReplaceAll(result, rule.Old, rule.Replacement)
+	}
+	return result
+}
+
+// ApplyRawModelNameReplace applies the provider's RAW_MODEL_NAME_REPLACE rules
+// to model. It is the final string-level replacement gate before the model name
+// is sent to upstream; components before this gate keep using the original name.
+func (p ProviderConfig) ApplyRawModelNameReplace(model string) string {
+	return ApplyModelNameReplaceRules(model, p.RawModelNameReplaceRules)
 }
 
 func splitModelMapQualifiedModel(value string) (string, string, bool, error) {

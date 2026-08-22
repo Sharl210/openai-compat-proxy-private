@@ -2260,3 +2260,102 @@ func TestLoadProviderFileRejectsInvalidUpstreamXMLToolCallStyle(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+func TestLoadProviderFileParsesRawModelNameReplace(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := strings.Join([]string{
+		"PROVIDER_ID=openai",
+		"RAW_MODEL_NAME_REPLACE=old:new,#re:x+(\\d+):$1",
+		"",
+	}, "\n")
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if provider.RawModelNameReplace != "old:new,#re:x+(\\d+):$1" {
+		t.Fatalf("expected raw value preserved, got %q", provider.RawModelNameReplace)
+	}
+	if len(provider.RawModelNameReplaceRules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(provider.RawModelNameReplaceRules))
+	}
+	if provider.RawModelNameReplaceRules[0].IsRegex || provider.RawModelNameReplaceRules[0].Old != "old" {
+		t.Fatalf("unexpected literal rule: %+v", provider.RawModelNameReplaceRules[0])
+	}
+	if !provider.RawModelNameReplaceRules[1].IsRegex || provider.RawModelNameReplaceRules[1].Re == nil {
+		t.Fatalf("unexpected regexp rule: %+v", provider.RawModelNameReplaceRules[1])
+	}
+	if got := provider.ApplyRawModelNameReplace("xxxxxxx123"); got != "123" {
+		t.Fatalf("expected literal old->new and x+ digits collapsed, got %q", got)
+	}
+	if got := provider.ApplyRawModelNameReplace("old-model"); got != "new-model" {
+		t.Fatalf("expected literal replacement, got %q", got)
+	}
+}
+
+func TestLoadProviderFileEmptyRawModelNameReplaceDisabled(t *testing.T) {
+	rootDir := t.TempDir()
+	providerEnvPath := filepath.Join(rootDir, "openai.env")
+	providerBody := "PROVIDER_ID=openai\nRAW_MODEL_NAME_REPLACE=\n"
+	if err := os.WriteFile(providerEnvPath, []byte(providerBody), 0o644); err != nil {
+		t.Fatalf("write provider env: %v", err)
+	}
+	provider, err := loadProviderFile(providerEnvPath)
+	if err != nil {
+		t.Fatalf("loadProviderFile returned error: %v", err)
+	}
+	if len(provider.RawModelNameReplaceRules) != 0 {
+		t.Fatalf("expected empty rules, got %d", len(provider.RawModelNameReplaceRules))
+	}
+	if got := provider.ApplyRawModelNameReplace("gpt-5.5"); got != "gpt-5.5" {
+		t.Fatalf("expected identity when disabled, got %q", got)
+	}
+}
+
+func TestLoadProviderFileRejectsInvalidRawModelNameReplace(t *testing.T) {
+	cases := []string{
+		"RAW_MODEL_NAME_REPLACE=#re:[a-",      // invalid regexp
+		"RAW_MODEL_NAME_REPLACE=:new",         // empty source
+		"RAW_MODEL_NAME_REPLACE=<<openai>>:x", // reserved marker
+		"RAW_MODEL_NAME_REPLACE=justword",     // missing colon
+	}
+	for _, body := range cases {
+		rootDir := t.TempDir()
+		providerEnvPath := filepath.Join(rootDir, "openai.env")
+		if err := os.WriteFile(providerEnvPath, []byte("PROVIDER_ID=openai\n"+body+"\n"), 0o644); err != nil {
+			t.Fatalf("write provider env: %v", err)
+		}
+		if _, err := loadProviderFile(providerEnvPath); err == nil {
+			t.Fatalf("expected %q to fail validation", body)
+		}
+	}
+}
+
+func TestApplyModelNameReplaceRulesCaptureAndEscape(t *testing.T) {
+	rules := []ModelNameReplaceRule{
+		{IsRegex: true, Re: regexp.MustCompile(`([a-z]+)-(\d+)`), Replacement: `$2-$1`},
+	}
+	if got := ApplyModelNameReplaceRules("abc-42-def-7", rules); got != "42-abc-7-def" {
+		t.Fatalf("expected capture reorder across matches, got %q", got)
+	}
+	rules = []ModelNameReplaceRule{
+		{IsRegex: true, Re: regexp.MustCompile(`(\d+)`), Replacement: `\$x$1`},
+	}
+	if got := ApplyModelNameReplaceRules("n-1", rules); got != "n-$x1" {
+		t.Fatalf("expected escaped dollar plus capture, got %q", got)
+	}
+	rules = []ModelNameReplaceRule{
+		{Old: "a", Replacement: "b"},
+		{Old: "b", Replacement: "c"},
+	}
+	if got := ApplyModelNameReplaceRules("a-a", rules); got != "c-c" {
+		t.Fatalf("expected chained literal rules, got %q", got)
+	}
+	if got := ApplyModelNameReplaceRules("gpt-5.5", nil); got != "gpt-5.5" {
+		t.Fatalf("expected nil rules identity, got %q", got)
+	}
+}
