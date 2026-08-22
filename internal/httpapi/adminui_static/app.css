@@ -1819,7 +1819,8 @@ button { cursor: pointer; }
   gap: 2px;
   max-height: 380px;
   overflow-y: auto;
-  overflow-x: auto;
+  /* 禁止整表横向滑动：横向滚动只发生在列内（.model-map-raw/.model-map-pseudo）。 */
+  overflow-x: hidden;
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 6px;
   padding: 6px;
@@ -1827,10 +1828,11 @@ button { cursor: pointer; }
 }
 .model-map-table {
   min-width: 100%;
+  width: 100%;
 }
 .model-map-header {
   display: grid;
-  grid-template-columns: 40px minmax(120px, 1fr) 24px minmax(120px, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) 24px minmax(0, 1fr);
   gap: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -1844,7 +1846,7 @@ button { cursor: pointer; }
 }
 .model-map-row {
   display: grid;
-  grid-template-columns: 40px minmax(120px, 1fr) 24px minmax(120px, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) 24px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   padding: 4px 6px;
@@ -1863,7 +1865,7 @@ button { cursor: pointer; }
   user-select: none;
   white-space: nowrap;
 }
-/* 原始名/伪原始名两列：列宽固定一致（grid 1fr 分栏），列内内容独立横向滚动，
+/* 原始名/伪原始名两列：列宽固定一致（grid 1fr 分栏，不随内容撑开），列内内容独立横向滚动，
    不影响其它列，也不破坏列对齐。 */
 .model-map-raw,
 .model-map-pseudo {
@@ -1875,17 +1877,36 @@ button { cursor: pointer; }
   scrollbar-width: thin;
   padding: 1px 0;
   min-width: 0;
+  max-width: 100%;
 }
 .model-map-arrow {
   text-align: center;
   color: var(--text-secondary, #888);
   font-size: 12px;
 }
-.model-raw-row {
-  padding: 4px 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.model-raw-list {
+  width: 100%;
+}
+.model-raw-header {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
   font-size: 12px;
-  word-break: break-all;
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-color, #fff);
+}
+.model-raw-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
   border-radius: 4px;
 }
 .model-raw-row:hover {

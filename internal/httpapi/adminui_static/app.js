@@ -1876,12 +1876,16 @@ function renderModelListBody(list, providerID) {
   const allRawModels = list.rawModels || [];
   const allMappedModels = list.mappedModels || [];
   const allExternalModels = list.externalModels || [];
-  const rawModels = allRawModels.filter((m) => !filter || String(m).toLowerCase().includes(filter));
+  const rawModels = allRawModels
+    .map((m, idx) => ({ model: m, seq: idx + 1 }))
+    .filter(({ model }) => !filter || String(model).toLowerCase().includes(filter));
   // 映射表行：序号按未过滤的完整顺序固定编号（seq），过滤只影响显示，不影响序号。
   const mapped = allMappedModels
     .map((entry, idx) => ({ entry, seq: idx + 1 }))
     .filter(({ entry }) => !filter || String(entry.raw).toLowerCase().includes(filter) || String(entry.pseudo).toLowerCase().includes(filter));
-  const externalModels = allExternalModels.filter((m) => !filter || String(m).toLowerCase().includes(filter));
+  const externalModels = allExternalModels
+    .map((m, idx) => ({ model: m, seq: idx + 1 }))
+    .filter(({ model }) => !filter || String(model).toLowerCase().includes(filter));
   const providerErrors = (list.providerErrors || []).map(
     (pe) => `<div class="model-list-provider-error"><span class="model-list-provider-file">${escapeHtml(pe.file || pe.provider_id)}</span><span class="model-list-provider-colon">:</span><span class="model-list-provider-msg">${escapeHtml(pe.error || '')}</span></div>`
   ).join('');
@@ -1933,14 +1937,19 @@ function renderMappedModelsTable(rows) {
   return `<div class="model-map-table"><div class="model-map-header"><span class="model-map-seq">#</span><span>原始名(上游视角)</span><span></span><span>伪原始名(代理视角)</span></div>${body}</div>`;
 }
 
-function renderRawModelsList(models) {
-  if (!models.length) {
+function renderRawModelsList(rows) {
+  if (!rows.length) {
     return '<div class="empty-state model-list-empty">没有匹配的模型。</div>';
   }
-  const rows = models
-    .map((m) => `<div class="model-raw-row"><span class="model-map-raw" title="${escapeAttr(m)}">${escapeHtml(m)}</span></div>`)
+  const body = rows
+    .map(
+      ({ model, seq }) => `<div class="model-raw-row">
+        <span class="model-map-seq" title="序号 ${seq}">${circledNumber(seq)}</span>
+        <span class="model-map-raw" title="${escapeAttr(model)}">${escapeHtml(model)}</span>
+      </div>`
+    )
     .join('');
-  return `<div class="model-raw-list">${rows}</div>`;
+  return `<div class="model-raw-list"><div class="model-raw-header"><span class="model-map-seq">#</span><span>模型名</span></div>${body}</div>`;
 }
 
 function renderEnvEntry(entry, index, sourceIndex = index) {
