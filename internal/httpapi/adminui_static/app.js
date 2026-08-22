@@ -1873,11 +1873,14 @@ function renderModelListBody(list, providerID) {
   }
   const tab = list.tab || 'mapped';
   const filter = (list.filter || '').toLowerCase();
-  const rawModels = (list.rawModels || []).filter((m) => !filter || String(m).toLowerCase().includes(filter));
-  const mapped = (list.mappedModels || []).filter(
+  const allRawModels = list.rawModels || [];
+  const allMappedModels = list.mappedModels || [];
+  const allExternalModels = list.externalModels || [];
+  const rawModels = allRawModels.filter((m) => !filter || String(m).toLowerCase().includes(filter));
+  const mapped = allMappedModels.filter(
     (m) => !filter || String(m.raw).toLowerCase().includes(filter) || String(m.pseudo).toLowerCase().includes(filter)
   );
-  const externalModels = (list.externalModels || []).filter((m) => !filter || String(m).toLowerCase().includes(filter));
+  const externalModels = allExternalModels.filter((m) => !filter || String(m).toLowerCase().includes(filter));
   const providerErrors = (list.providerErrors || []).map(
     (pe) => `<div class="model-list-provider-error"><span class="model-list-provider-file">${escapeHtml(pe.file || pe.provider_id)}</span><span class="model-list-provider-colon">:</span><span class="model-list-provider-msg">${escapeHtml(pe.error || '')}</span></div>`
   ).join('');
@@ -1896,9 +1899,9 @@ function renderModelListBody(list, providerID) {
       <div class="model-list-filter-row">
         <input id="model-list-filter" type="text" class="text-input model-list-filter" placeholder="过滤模型…" value="${escapeAttr(list.filter || '')}">
         <div class="model-list-tabs">
-          <button type="button" class="model-list-tab ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部映射表</button>
-          <button type="button" class="model-list-tab ${tab === 'external' ? 'active' : ''}" data-model-list-tab="external">对外展示列表</button>
-          <button type="button" class="model-list-tab ${tab === 'raw' ? 'active' : ''}" data-model-list-tab="raw">上游列表</button>
+          <button type="button" class="model-list-tab ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部映射表 (${allMappedModels.length})</button>
+          <button type="button" class="model-list-tab ${tab === 'external' ? 'active' : ''}" data-model-list-tab="external">对外展示列表 (${allExternalModels.length})</button>
+          <button type="button" class="model-list-tab ${tab === 'raw' ? 'active' : ''}" data-model-list-tab="raw">上游列表 (${allRawModels.length})</button>
         </div>
       </div>
       ${bodyContent}
