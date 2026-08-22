@@ -1780,12 +1780,30 @@ button { cursor: pointer; }
   flex: 1 1 200px;
   min-width: 160px;
 }
+.model-list-tabs {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .model-list-tab {
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, #d0d0d0);
+  background: transparent;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.model-list-tab:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 .model-list-tab.active {
   font-weight: 600;
+  background: var(--md-sys-color-secondary-container, #dce8f5);
+  color: var(--md-sys-color-on-secondary-container, #1a3a5c);
+  border-color: var(--md-sys-color-outline-variant, #c5d3e0);
 }
 .model-map-table,
 .model-raw-list {
@@ -1913,4 +1931,38 @@ button { cursor: pointer; }
 }
 .browser-model-list-card {
   margin-top: 12px;
+}
+
+/* ===== 模型列表 per-provider 错误（配置文件: 报错） ===== */
+.model-list-errors {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e57373;
+  border-radius: 6px;
+  background: #fdecea;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.model-list-provider-error {
+  font-size: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  word-break: break-all;
+}
+.model-list-provider-file {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #b71c1c;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.model-list-provider-colon {
+  color: #b71c1c;
+  font-weight: 600;
+}
+.model-list-provider-msg {
+  color: #c62828;
 }
