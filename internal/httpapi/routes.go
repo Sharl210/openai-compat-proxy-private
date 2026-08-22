@@ -754,13 +754,72 @@ func resolveDefaultOverlayDiscoveryForModel(r *http.Request, snapshot *config.Ru
 		}
 	}
 	discovery, err, resolved := resolveDefaultProviderSelectionFromRealtimeModels(r, snapshot, modelName)
-	if err != nil {
-		return false, err
+	if !resolved || err != nil {
+		// 实时拉取上游 /models 失败或未命中时，回退用快照缓存的模型索引反查
+		// （DefaultModelRawIDs / DefaultTaggedModelRawIDs 是展示名→原始名映射），
+		// 避免把伪原始名裸名直接发上游导致 400。
+		if cached, ok := resolveDefaultOverlayDiscoveryFromCachedIndex(snapshot, modelName, taggedProviderID, tagged, externalModel); ok {
+			*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), cached))
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return false, nil
 	}
 	if resolved {
 		*r = *r.Clone(withDefaultOverlayDiscovery(r.Context(), discovery))
 	}
 	return resolved, nil
+}
+
+// resolveDefaultOverlayDiscoveryFromCachedIndex 用快照缓存的模型索引反查展示名→原始名映射，
+// 作为实时 /models 拉取失败时的兜底，避免把伪原始名直接发上游导致 400。
+func resolveDefaultOverlayDiscoveryFromCachedIndex(snapshot *config.RuntimeSnapshot, modelName string, taggedProviderID string, tagged bool, externalModel string) (defaultOverlayDiscovery, bool) {
+	if snapshot == nil {
+		return defaultOverlayDiscovery{}, false
+	}
+	// 候选 key：原始请求名、拆模板后的外部名、V1_MODEL_MAP target、tagged 形式。
+	candidates := []string{modelName}
+	if externalModel != "" && externalModel != modelName {
+		candidates = append(candidates, externalModel)
+	}
+	if len(snapshot.Config.V1ModelMap) > 0 {
+		provider := config.ProviderConfig{ModelMap: snapshot.Config.V1ModelMap}
+		if target := provider.ResolveModel(modelName, false); target != "" && target != modelName {
+			candidates = append(candidates, target)
+		}
+	}
+	if taggedProviderID != "" {
+		candidates = append(candidates, "["+taggedProviderID+"]"+externalModel)
+	}
+	for _, candidate := range candidates {
+		if rawModelID, ok := snapshot.DefaultModelRawIDs[candidate]; ok {
+			ownerID := snapshot.DefaultModelOwners[candidate]
+			if ownerID == "" && taggedProviderID != "" {
+				ownerID = taggedProviderID
+			}
+			return defaultOverlayDiscovery{
+				ProviderID:       ownerID,
+				RequestedModelID: modelName,
+				RawModelID:       rawModelID,
+				ExactLiteral:     true,
+			}, true
+		}
+		if rawModelID, ok := snapshot.DefaultTaggedModelRawIDs[candidate]; ok {
+			ownerID := snapshot.DefaultTaggedModelOwners[candidate]
+			if ownerID == "" && taggedProviderID != "" {
+				ownerID = taggedProviderID
+			}
+			return defaultOverlayDiscovery{
+				ProviderID:       ownerID,
+				RequestedModelID: modelName,
+				RawModelID:       rawModelID,
+				ExactLiteral:     true,
+			}, true
+		}
+	}
+	return defaultOverlayDiscovery{}, false
 }
 
 func v1ModelMapMatchesForRouting(snapshot *config.RuntimeSnapshot, r *http.Request, modelName string) bool {
