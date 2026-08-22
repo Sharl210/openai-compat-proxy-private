@@ -208,8 +208,11 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 		entry, _ := item.(map[string]any)
 		id, _ := entry["id"].(string)
 		if id != "" {
-			manualMatch := manualModelMatches(provider, id)
-			if provider.HidesModel(id) && !manualMatch {
+			// 检测模型命中按伪原始名（替换后的名）：HIDDEN_MODELS / MANUAL_MODELS
+			// 里配置的模式以伪原始名为准，与架构一致。
+			pseudoID := provider.ApplyRawModelNameReplace(id)
+			manualMatch := manualModelMatches(provider, pseudoID)
+			if provider.HidesModel(pseudoID) && !manualMatch {
 				continue
 			}
 			upstreamBaseIDs = append(upstreamBaseIDs, id)
@@ -247,18 +250,15 @@ func rewriteModelsBodyForRoute(body []byte, provider config.ProviderConfig, root
 		expanded = reasoning.ExpandModelIDs(baseIDs, nil, true)
 	}
 	expanded = expandReasoningModeModelIDs(expanded, provider)
-	filteredExpanded := make([]string, 0, len(expanded))
-	for _, id := range expanded {
-		if provider.HidesModel(id) && !manualModelMatches(provider, id) {
-			continue
-		}
-		filteredExpanded = append(filteredExpanded, id)
-	}
-	expanded = filteredExpanded
 	entries := make([]map[string]any, 0, len(expanded))
 	seenExternalIDs := make(map[string]struct{}, len(expanded))
 	for _, id := range expanded {
-		externalID := provider.ExternalModelID(provider.ApplyRawModelNameReplace(id), rootRoute)
+		// 先替换成伪原始名，再做检测命中与模板包装（架构：替换 → 检测命中 → 模板）。
+		pseudoID := provider.ApplyRawModelNameReplace(id)
+		if provider.HidesModel(pseudoID) && !manualModelMatches(provider, pseudoID) {
+			continue
+		}
+		externalID := provider.ExternalModelID(pseudoID, rootRoute)
 		if externalID == "" {
 			continue
 		}
@@ -325,8 +325,9 @@ func configuredModelsFallbackBodyForRoute(provider config.ProviderConfig, rootRo
 		if provider.HidesModel(id) {
 			continue
 		}
+		// VisibleModelIDs 返回 MANUAL_MODELS 配置值（伪原始名），直接套模板，不再替换。
 		entries = append(entries, map[string]any{
-			"id":     provider.ExternalModelID(provider.ApplyRawModelNameReplace(id), rootRoute),
+			"id":     provider.ExternalModelID(id, rootRoute),
 			"object": "model",
 		})
 	}

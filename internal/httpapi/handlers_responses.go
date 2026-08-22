@@ -619,6 +619,10 @@ func finalizePreparedResponsesRequest(w http.ResponseWriter, r *http.Request, in
 		return nil, false
 	}
 	applyAutoReasoningModelSuffix(&canon, intent)
+	if err := applyAdaptiveModelSuffix(&canon, intent, providerCfg); err != nil {
+		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", err.Error())
+		return nil, false
+	}
 	applyResponsesPromptCacheHintDrop(&canon, provider, providerCfg)
 	if message := unsupportedResponsesNativeFeature(canon, provider, providerCfg); message != "" {
 		errorsx.WriteJSON(w, http.StatusBadRequest, "unsupported_upstream_feature", message)
