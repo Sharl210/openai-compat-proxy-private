@@ -1382,7 +1382,22 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 	synthesizedRequestEffort := explicitRequestEffort != "" && requestedEffort == explicitRequestEffort
 	if requestedEffort != "" {
 		effectiveModel := requestedModel + "-" + requestedEffort
-		if mapped, entry := p.resolveModelEntryWithOrder(effectiveModel, true); mapped != "" {
+		// 输入自带推理强度后缀（clientModelEffort）时，回拼的 effectiveModel 若被无后缀的
+		// 正则 source（如 #re:quectel(.*)）匹配，捕获组会把后缀也吃掉产生双倍后缀。
+		// 此时优先用字面量 source 精确匹配；无字面量命中则走下方剥离后缀后的匹配。
+		if clientModelEffort {
+			if mapped, entry := p.resolveLiteralModelEntryWithOrder(effectiveModel, true); mapped != "" {
+				resolvedEffort := requestedEffort
+				if _, mappedEffort, ok := splitReasoningSuffix(entry.UnescapedTarget); ok {
+					resolvedEffort = mappedEffort
+				} else if explicitRequestEffort != "" {
+					resolvedEffort = explicitRequestEffort
+				} else {
+					resolvedEffort = ""
+				}
+				return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
+			}
+		} else if mapped, entry := p.resolveModelEntryWithOrder(effectiveModel, true); mapped != "" {
 			resolvedEffort := requestedEffort
 			if _, mappedEffort, ok := splitReasoningSuffix(entry.UnescapedTarget); ok {
 				resolvedEffort = mappedEffort
@@ -1394,16 +1409,30 @@ func (p ProviderConfig) ResolveModelAndEffortWithRequestEffort(model string, req
 			return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
 		}
 	}
-	if mapped, entry := p.resolveModelEntryWithOrder(model, true); mapped != "" {
-		resolvedEffort := sourceEffortForMatchedModel(entry, synthesizedRequestEffort, requestedEffort)
-		if _, mappedEffort, ok := splitReasoningSuffix(entry.UnescapedTarget); ok {
+	var modelEntryMatched string
+	var modelEntry ModelMapEntry
+	if clientModelEffort {
+		// 输入自带推理强度后缀时，用原始名匹配正则 source 会把后缀捕获进组，只用字面量 source。
+		modelEntryMatched, modelEntry = p.resolveLiteralModelEntryWithOrder(model, true)
+	} else {
+		modelEntryMatched, modelEntry = p.resolveModelEntryWithOrder(model, true)
+	}
+	if modelEntryMatched != "" {
+		resolvedEffort := sourceEffortForMatchedModel(modelEntry, synthesizedRequestEffort, requestedEffort)
+		if _, mappedEffort, ok := splitReasoningSuffix(modelEntry.UnescapedTarget); ok {
 			resolvedEffort = mappedEffort
 		}
-		return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
+		return finalizeResolvedModelAndEffort(modelEntryMatched, resolvedEffort, configSuffixEnabled)
 	}
 	if enableClientSuffix && requestedModel != model {
-		if mapped, _ := p.resolveModelEntryWithOrder(requestedModel, true); mapped != "" {
-			return finalizeResolvedModelAndEffort(mapped, requestedEffort, configSuffixEnabled)
+		// 客户端后缀已剥离（requestedModel != model）：用剥离后的名匹配，避免正则 source
+		// 的捕获组把 -max/-high 等后缀也吃掉产生双倍后缀。
+		if mapped, entry := p.resolveModelEntryWithOrder(requestedModel, true); mapped != "" {
+			resolvedEffort := requestedEffort
+			if _, mappedEffort, ok := splitReasoningSuffix(entry.UnescapedTarget); ok {
+				resolvedEffort = mappedEffort
+			}
+			return finalizeResolvedModelAndEffort(mapped, resolvedEffort, configSuffixEnabled)
 		}
 	}
 	if clientModelEffort {
@@ -1743,6 +1772,45 @@ func (p ProviderConfig) resolveModelEntryWithOrder(model string, reverse bool) (
 		}
 	}
 	return "", ModelMapEntry{}
+}
+
+// resolveLiteralModelEntryWithOrder 只匹配字面量 source 的 MODEL_MAP 条目。
+// 用于带推理强度后缀的候选匹配：字面量 source（如 client-gpt-high）可精确命中，
+// 但正则 source（如 #re:quectel(.*)）的捕获组会把客户端后缀也吃掉，应留给剥离后缀后的匹配。
+func (p ProviderConfig) resolveLiteralModelEntryWithOrder(model string, reverse bool) (string, ModelMapEntry) {
+	if p.ModelMap == nil {
+		return "", ModelMapEntry{}
+	}
+	iterate := func(apply func(i int) bool) {
+		if reverse {
+			for i := len(p.ModelMap) - 1; i >= 0; i-- {
+				if apply(i) {
+					return
+				}
+			}
+			return
+		}
+		for i := range p.ModelMap {
+			if apply(i) {
+				return
+			}
+		}
+	}
+	var matched string
+	var entry ModelMapEntry
+	iterate(func(i int) bool {
+		e := p.ModelMap[i]
+		if !p.ModelMapEntryAppliesToProvider(e) || !e.IsStaticKey {
+			return false
+		}
+		if matchModelPattern(model, e) {
+			matched = applyCaptureReplacement(model, e)
+			entry = e
+			return true
+		}
+		return false
+	})
+	return matched, entry
 }
 
 func (p ProviderConfig) HidesModel(model string) bool {

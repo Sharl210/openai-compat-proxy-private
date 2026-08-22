@@ -2405,3 +2405,12 @@ func TestApplyModelNameReplaceRulesCaptureAndEscape(t *testing.T) {
 		t.Fatalf("expected nil rules identity, got %q", got)
 	}
 }
+
+func TestResolveModelAndEffortWithRequestEffortRegexSourceDoesNotEatClientSuffix(t *testing.T) {
+	p := ProviderConfig{ModelMap: []ModelMapEntry{NewModelMapEntry("#re:quectel(.*)", "quectel$1-max")}}
+	// 客户端请求 quectel-xyz-max（带 -max 推理强度后缀），正则 source 不应把 -max 也捕获进组
+	model, effort := p.ResolveModelAndEffortWithRequestEffort("quectel-xyz-max", "", true)
+	if model != "quectel-xyz" || effort != "max" {
+		t.Fatalf("expected regex source to strip client suffix, got model=%q effort=%q", model, effort)
+	}
+}
