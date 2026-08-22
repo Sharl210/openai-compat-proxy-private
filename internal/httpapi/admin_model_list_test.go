@@ -92,6 +92,20 @@ func injectAdminSession(t *testing.T, a *adminUI, mux *http.ServeMux, providerID
 	if !found {
 		t.Fatalf("expected GLM mapping raw->pseudo, got %+v", resp.MappedModels)
 	}
+	// 校验对外展示列表：与 /v1/models 同源（实时聚合或索引回退），伪原始名应出现在其中。
+	if len(resp.ExternalModels) == 0 {
+		t.Fatalf("expected non-empty external_models (downstream /v1/models view)")
+	}
+	extFound := false
+	for _, id := range resp.ExternalModels {
+		if id == "glm-5.2" || id == "deepseek-v4-flash" {
+			extFound = true
+			break
+		}
+	}
+	if !extFound {
+		t.Fatalf("expected pseudo names in external_models, got %v", resp.ExternalModels)
+	}
 }
 
 type noopAdminActionRunner struct{}
