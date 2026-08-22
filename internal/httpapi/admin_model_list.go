@@ -17,16 +17,18 @@ type adminModelListEntry struct {
 
 // adminModelListResponse 是 /_admin/api/model-list 的响应：
 // raw_models 是上游未改动的原始模型列表（上游列表板块），
-// mapped_models 是原始名↔伪原始名映射表（内部列表板块）。
+// mapped_models 是原始名↔伪原始名映射表（内部映射表板块），
+// external_models 是对外 /v1/models 展示的模型 id 列表（对外展示板块）。
 // provider 为 __root__ 时聚合所有默认 provider。
 type adminModelListResponse struct {
-	ProviderID     string                 `json:"provider_id"`
-	ProviderName   string                 `json:"provider_name"`
-	RawModels      []string               `json:"raw_models"`
-	MappedModels   []adminModelListEntry  `json:"mapped_models"`
-	Providers      []string               `json:"providers,omitempty"`
-	ProviderErrors []adminProviderError   `json:"provider_errors,omitempty"`
-	Error          string                 `json:"error,omitempty"`
+	ProviderID     string                `json:"provider_id"`
+	ProviderName   string                `json:"provider_name"`
+	RawModels      []string              `json:"raw_models"`
+	MappedModels   []adminModelListEntry `json:"mapped_models"`
+	ExternalModels []string              `json:"external_models"`
+	Providers      []string              `json:"providers,omitempty"`
+	ProviderErrors []adminProviderError  `json:"provider_errors,omitempty"`
+	Error          string                `json:"error,omitempty"`
 }
 
 // adminProviderError 是某个 provider 拉取模型列表失败时的错误：
@@ -71,11 +73,17 @@ func (a *adminUI) handleModelList() http.HandlerFunc {
 			errorsx.WriteJSON(w, http.StatusBadGateway, "upstream_error", providerConfigFileName(providerID)+": "+fetchErr)
 			return
 		}
+		// 单 provider 的对外展示 = RAW 替换后的伪原始名（去重，与 /v1/models 一致）。
+		externalModels := make([]string, 0, len(mapped))
+		for _, m := range mapped {
+			externalModels = append(externalModels, m.Pseudo)
+		}
 		writeAdminJSON(w, http.StatusOK, adminModelListResponse{
-			ProviderID:   providerID,
-			ProviderName: providerID,
-			RawModels:    rawModels,
-			MappedModels: mapped,
+			ProviderID:     providerID,
+			ProviderName:   providerID,
+			RawModels:      rawModels,
+			MappedModels:   mapped,
+			ExternalModels: externalModels,
 		})
 	}
 }
@@ -122,11 +130,20 @@ func (a *adminUI) writeRootModelList(w http.ResponseWriter, r *http.Request, sna
 		}
 	}
 	sort.Strings(allRaw)
+	externalModels := make([]string, 0)
+	if entries, ok := buildDefaultOverlayModelEntriesFromProviders(r.Context(), r, snapshot); ok {
+		for _, entry := range entries {
+			if id, _ := entry["id"].(string); strings.TrimSpace(id) != "" {
+				externalModels = append(externalModels, id)
+			}
+		}
+	}
 	writeAdminJSON(w, http.StatusOK, adminModelListResponse{
 		ProviderID:     rootProviderID,
 		ProviderName:   "根提供商（全部默认 provider）",
 		RawModels:      allRaw,
 		MappedModels:   allMapped,
+		ExternalModels: externalModels,
 		Providers:      providerIDs,
 		ProviderErrors: providerErrors,
 	})
