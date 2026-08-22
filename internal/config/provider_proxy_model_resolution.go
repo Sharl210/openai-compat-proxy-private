@@ -29,6 +29,12 @@ func (p ProviderConfig) ResolveExternalProxyModelIntentWithCandidates(externalMo
 			intent := model.ProxyModelIntent{BaseModel: internalModel}
 			return ProviderProxyModelResolution{SourceIntent: intent, ResolvedIntent: intent}, true
 		}
+		// 正则 MANUAL_MODELS 匹配的展示模型（如 RAW_MODEL_NAME_REPLACE 替换后的伪原始名）
+		// 也应视为合法路由候选；这类模型无 suffix、不是 MODEL_MAP 字面量 target。
+		if p.manualModelMatches(internalModel) {
+			intent := model.ProxyModelIntent{BaseModel: internalModel}
+			return ProviderProxyModelResolution{SourceIntent: intent, ResolvedIntent: intent}, true
+		}
 		return ProviderProxyModelResolution{}, false
 	}
 	if p.HidesModel(sourceIntent.CanonicalModel()) {

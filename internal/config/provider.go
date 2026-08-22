@@ -2106,3 +2106,23 @@ func splitReasoningSuffix(modelName string) (string, string, bool) {
 	}
 	return modelName, "", false
 }
+
+
+// manualModelMatches 报告 modelID 是否命中任一 MANUAL_MODELS 模式（字面量或正则）。
+// 供路由/展示反查判断模型是否属于当前 provider 的可见候选。
+func (p ProviderConfig) manualModelMatches(modelID string) bool {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return false
+	}
+	for _, pattern := range p.ManualModels {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if ManualReasonSuffixBasePatternMatches(pattern, modelID) || modelPatternMatches(pattern, modelID) {
+			return true
+		}
+	}
+	return false
+}

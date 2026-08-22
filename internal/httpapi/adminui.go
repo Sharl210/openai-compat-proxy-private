@@ -182,6 +182,7 @@ func (a *adminUI) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/_admin/api/jobs", allowMethods(a.handleJob(), http.MethodGet))
 	mux.HandleFunc("/_admin/api/status", allowMethods(a.handleStatus(), http.MethodGet))
 	mux.HandleFunc("/_admin/api/diagnostics/memory", allowMethods(a.handleMemoryDiagnostics(), http.MethodGet))
+	mux.HandleFunc("/_admin/api/model-list", allowMethods(a.handleModelList(), http.MethodGet))
 }
 
 func (a *adminUI) matchesPath(path string) bool {
