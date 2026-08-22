@@ -130,12 +130,12 @@ func (a *adminUI) writeRootModelList(w http.ResponseWriter, r *http.Request, sna
 		}
 	}
 	sort.Strings(allRaw)
+	// 对外展示列表 = /v1/models 返回的模型 id 列表（与客户端看到的一致）：
+	// 与 writeDefaultOverlayModels 同一构造（优先实时聚合，失败回退 DefaultVisibleModels 索引）。
 	externalModels := make([]string, 0)
-	if entries, ok := buildDefaultOverlayModelEntriesFromProviders(r.Context(), r, snapshot); ok {
-		for _, entry := range entries {
-			if id, _ := entry["id"].(string); strings.TrimSpace(id) != "" {
-				externalModels = append(externalModels, id)
-			}
+	for _, entry := range buildDefaultOverlayModelEntries(r.Context(), r, snapshot) {
+		if id, _ := entry["id"].(string); strings.TrimSpace(id) != "" {
+			externalModels = append(externalModels, id)
 		}
 	}
 	writeAdminJSON(w, http.StatusOK, adminModelListResponse{
