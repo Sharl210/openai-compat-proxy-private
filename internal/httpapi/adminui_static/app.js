@@ -1910,17 +1910,8 @@ function renderModelListBody(list, providerID) {
   `;
 }
 
-// 生成带圈序号：1-20 → ①-⑳，21-35 → ㉑-㉟，36-50 → ㊱-㊿，超过用 (n)。
+// 生成序号：统一使用括号样式 (1)(2)(3)…，稳定跟随未过滤全量顺序。
 function circledNumber(n) {
-  if (n >= 1 && n <= 20) {
-    return String.fromCodePoint(0x2460 + n - 1);
-  }
-  if (n >= 21 && n <= 35) {
-    return String.fromCodePoint(0x3251 + n - 21);
-  }
-  if (n >= 36 && n <= 50) {
-    return String.fromCodePoint(0x32b1 + n - 36);
-  }
   return `(${n})`;
 }
 
