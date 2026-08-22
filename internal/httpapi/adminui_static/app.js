@@ -1877,9 +1877,10 @@ function renderModelListBody(list, providerID) {
   const allMappedModels = list.mappedModels || [];
   const allExternalModels = list.externalModels || [];
   const rawModels = allRawModels.filter((m) => !filter || String(m).toLowerCase().includes(filter));
-  const mapped = allMappedModels.filter(
-    (m) => !filter || String(m.raw).toLowerCase().includes(filter) || String(m.pseudo).toLowerCase().includes(filter)
-  );
+  // 映射表行：序号按未过滤的完整顺序固定编号（seq），过滤只影响显示，不影响序号。
+  const mapped = allMappedModels
+    .map((entry, idx) => ({ entry, seq: idx + 1 }))
+    .filter(({ entry }) => !filter || String(entry.raw).toLowerCase().includes(filter) || String(entry.pseudo).toLowerCase().includes(filter));
   const externalModels = allExternalModels.filter((m) => !filter || String(m).toLowerCase().includes(filter));
   const providerErrors = (list.providerErrors || []).map(
     (pe) => `<div class="model-list-provider-error"><span class="model-list-provider-file">${escapeHtml(pe.file || pe.provider_id)}</span><span class="model-list-provider-colon">:</span><span class="model-list-provider-msg">${escapeHtml(pe.error || '')}</span></div>`
@@ -1900,7 +1901,7 @@ function renderModelListBody(list, providerID) {
         <input id="model-list-filter" type="text" class="text-input model-list-filter" placeholder="过滤模型…" value="${escapeAttr(list.filter || '')}">
         <div class="model-list-tabs">
           <button type="button" class="model-list-tab ${tab === 'external' ? 'active' : ''}" data-model-list-tab="external">下游展示 (${allExternalModels.length})</button>
-          <button type="button" class="model-list-tab ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部名替换 (${allMappedModels.length})</button>
+          <button type="button" class="model-list-tab ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部替换名 (${allMappedModels.length})</button>
           <button type="button" class="model-list-tab ${tab === 'raw' ? 'active' : ''}" data-model-list-tab="raw">原始上游 (${allRawModels.length})</button>
         </div>
       </div>
@@ -1909,21 +1910,36 @@ function renderModelListBody(list, providerID) {
   `;
 }
 
-function renderMappedModelsTable(entries) {
-  if (!entries.length) {
+// 生成带圈序号：1-20 → ①-⑳，21-35 → ㉑-㉟，36-50 → ㊱-㊿，超过用 (n)。
+function circledNumber(n) {
+  if (n >= 1 && n <= 20) {
+    return String.fromCodePoint(0x2460 + n - 1);
+  }
+  if (n >= 21 && n <= 35) {
+    return String.fromCodePoint(0x3251 + n - 21);
+  }
+  if (n >= 36 && n <= 50) {
+    return String.fromCodePoint(0x32b1 + n - 36);
+  }
+  return `(${n})`;
+}
+
+function renderMappedModelsTable(rows) {
+  if (!rows.length) {
     return '<div class="empty-state model-list-empty">没有匹配的模型。</div>';
   }
-  const rows = entries
+  const body = rows
     .map(
-      (entry) => `
+      ({ entry, seq }) => `
       <div class="model-map-row">
+        <span class="model-map-seq" title="序号 ${seq}">${circledNumber(seq)}</span>
         <span class="model-map-raw" title="${escapeAttr(entry.raw)}">${escapeHtml(entry.raw)}</span>
         <span class="model-map-arrow">→</span>
         <span class="model-map-pseudo" title="${escapeAttr(entry.pseudo)}">${escapeHtml(entry.pseudo)}</span>
       </div>`
     )
     .join('');
-  return `<div class="model-map-table"><div class="model-map-header"><span>原始名(上游视角)</span><span></span><span>伪原始名(代理视角)</span></div>${rows}</div>`;
+  return `<div class="model-map-table"><div class="model-map-header"><span class="model-map-seq">#</span><span>原始名(上游视角)</span><span></span><span>伪原始名(代理视角)</span></div>${body}</div>`;
 }
 
 function renderRawModelsList(models) {
