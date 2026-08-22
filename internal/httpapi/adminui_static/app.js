@@ -1062,7 +1062,7 @@ function bindEvents() {
         render();
         return;
       }
-      state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'mapped', filter: '', loaded: false };
+      state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'external', filter: '', loaded: false };
       state.modelListLoading = true;
       render();
       fetchModelList(providerID);
@@ -1396,7 +1396,7 @@ function bindEvents() {
           render();
           return;
         }
-        state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'mapped', filter: '', loaded: false };
+        state.modelList = { providerId: providerID, rawModels: [], mappedModels: [], tab: 'external', filter: '', loaded: false };
         state.modelListLoading = true;
         render();
         fetchModelList(providerID);
@@ -1871,7 +1871,7 @@ function renderModelListBody(list, providerID) {
   if (list.error && !hasData) {
     return `<div class="model-list-status">${escapeHtml(list.error)}</div>`;
   }
-  const tab = list.tab || 'mapped';
+  const tab = list.tab || 'external';
   const filter = (list.filter || '').toLowerCase();
   const allRawModels = list.rawModels || [];
   const allMappedModels = list.mappedModels || [];
@@ -1899,9 +1899,9 @@ function renderModelListBody(list, providerID) {
       <div class="model-list-filter-row">
         <input id="model-list-filter" type="text" class="text-input model-list-filter" placeholder="过滤模型…" value="${escapeAttr(list.filter || '')}">
         <div class="model-list-tabs">
-          <button type="button" class="model-list-tab ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部映射表 (${allMappedModels.length})</button>
-          <button type="button" class="model-list-tab ${tab === 'external' ? 'active' : ''}" data-model-list-tab="external">对外展示列表 (${allExternalModels.length})</button>
-          <button type="button" class="model-list-tab ${tab === 'raw' ? 'active' : ''}" data-model-list-tab="raw">上游列表 (${allRawModels.length})</button>
+          <button type="button" class="model-list-tab ${tab === 'external' ? 'active' : ''}" data-model-list-tab="external">下游展示 (${allExternalModels.length})</button>
+          <button type="button" class="model-list-tab ${tab === 'mapped' ? 'active' : ''}" data-model-list-tab="mapped">内部名替换 (${allMappedModels.length})</button>
+          <button type="button" class="model-list-tab ${tab === 'raw' ? 'active' : ''}" data-model-list-tab="raw">原始上游 (${allRawModels.length})</button>
         </div>
       </div>
       ${bodyContent}
@@ -1923,7 +1923,7 @@ function renderMappedModelsTable(entries) {
       </div>`
     )
     .join('');
-  return `<div class="model-map-table"><div class="model-map-header"><span>原始名</span><span></span><span>伪原始名（展示名）</span></div>${rows}</div>`;
+  return `<div class="model-map-table"><div class="model-map-header"><span>原始名(上游视角)</span><span></span><span>伪原始名(代理视角)</span></div>${rows}</div>`;
 }
 
 function renderRawModelsList(models) {
