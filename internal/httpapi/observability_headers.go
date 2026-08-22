@@ -369,7 +369,9 @@ func setDirectionalObservabilityHeadersWithClientReasoningMode(w http.ResponseWr
 	} else {
 		w.Header().Set(headerClientToProxyNoPrompt, "false")
 	}
-	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(providerCfg.ApplyRawModelNameReplace(preview.UpstreamModel)))
+	// 透明度头显示实际发往上游的模型名（请求方向不再应用 RAW_MODEL_NAME_REPLACE；
+	// 该替换只在响应/展示方向应用：原始名 → 伪原始名）。
+	w.Header().Set(headerProxyToUpstreamModel, strings.TrimSpace(preview.UpstreamModel))
 	estimate := estimatorEstimateForContext(r.Context(), *canon)
 	w.Header().Set(headerProxyEstimatedInputTokens, formatEstimatedInputTokensHeader(r.Context(), *canon, estimate))
 	setProxyModelLimitContextHeader(w, provider, *canon)

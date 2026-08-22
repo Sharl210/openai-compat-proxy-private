@@ -95,11 +95,11 @@ func TestRawModelNameReplaceEndToEndChatRequest(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "QDeepseekV4/deepseek-v4-flash" {
-		t.Fatalf("expected replaced upstream model in header, got %q", got)
+	if got := rec.Header().Get(headerProxyToUpstreamModel); got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected reversed upstream model in header, got %q", got)
 	}
-	if got := upstreamPayload["model"]; got != "QDeepseekV4/deepseek-v4-flash" {
-		t.Fatalf("expected replaced model sent upstream, got %#v", upstreamPayload["model"])
+	if got := upstreamPayload["model"]; got != "quectel-github-copilot/QDeepseekV4/deepseek-v4-flash" {
+		t.Fatalf("expected reversed model sent upstream, got %#v", upstreamPayload["model"])
 	}
 }
 

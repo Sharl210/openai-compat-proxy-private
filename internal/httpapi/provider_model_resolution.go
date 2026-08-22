@@ -251,7 +251,10 @@ func routableRawModelIDs(provider config.ProviderConfig, rawEntries []map[string
 
 func exactVisibleRawModelID(provider config.ProviderConfig, rawModelIDs []string, externalModel string) (string, bool) {
 	for _, rawModelID := range rawModelIDs {
-		if provider.ExternalModelID(rawModelID, true) == externalModel {
+		// 展示名 = 模板(RAW替换(原始名))，与 /models 展示一致；客户端用展示名请求时，
+		// 用同一链路反查，命中返回原始名（发上游前不再应用替换）。
+		displayName := provider.ExternalModelID(provider.ApplyRawModelNameReplace(rawModelID), true)
+		if displayName == externalModel {
 			return rawModelID, true
 		}
 	}
